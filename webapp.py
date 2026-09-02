@@ -251,9 +251,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION
-# ============================================================
-def generate_approval_pdf(request_data):
+# def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, "Install fpdf2: pip install fpdf2", None
     try:
@@ -282,6 +280,67 @@ def generate_approval_pdf(request_data):
         safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
         filename = f"{safe_emp} - {safe_cat} - {amount} - {safe_date}.pdf"
         full_pdf_path = os.path.join(PDF_DIR, filename)
+
+        # ─── 🆕 CREATE PDF AND ADD CONTENT ─────────────────────────────
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 16)
+
+        # Header
+        pdf.cell(0, 12, "ACOOLE ELECTRICAL LTD — APPROVAL REQUEST", ln=True, align="C")
+        pdf.ln(8)
+
+        # Request Details
+        pdf.set_font("Arial", size=12)
+        details = [
+            ("Request ID:", str(req_id)),
+            ("Employee Name:", emp_name_safe),
+            ("Department:", dept_safe),
+            ("Category:", category_safe),
+            ("Amount:", amount),
+            ("Line Manager:", manager_safe),
+            ("Request Date:", req_date),
+            ("Description:", desc_safe),
+            ("Decision By:", decision_by_safe),
+            ("Decision Date:", decision_date),
+            ("Director Comments:", comment_safe),
+        ]
+
+        for label, value in details:
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(55, 8, label)
+            pdf.set_font("Arial", size=11)
+            pdf.multi_cell(0, 8, str(value), ln=True)
+            pdf.ln(2)
+
+        pdf.ln(15)
+
+        # ─── 🆕 AUTO-ADD APPROVED/REJECTED STAMP ────────────────────────
+        decision_text = str(fresh_data.get("decision", "")).strip().lower()
+
+        # Choose stamp based on decision
+        if "approved" in decision_text:
+            stamp_file = "approved_stamp.png"
+        elif "rejected" in decision_text:
+            stamp_file = "rejected_stamp.png"
+        else:
+            stamp_file = None  # Pending → no stamp
+
+        # Place stamp if file exists
+        if stamp_file and os.path.exists(stamp_file):
+            # Position: X=80, Y=current position, Width=50mm
+            pdf.image(stamp_file, x=80, y=pdf.get_y() - 5, w=50)
+            pdf.ln(55)  # Leave space for stamp
+        else:
+            pdf.set_font("Arial", "I", 12)
+            pdf.cell(0, 15, "⏳ Pending Decision", ln=True)
+
+        # ─── SAVE PDF TO FILE ────────────────────────────────────────────
+        pdf.output(full_pdf_path)
+        return True, "PDF generated successfully!", full_pdf_path
+
+    except Exception as e:
+        return False, f"PDF Error: {str(e)}", None
         
         # ✅ DELETE ANY OLD PDF WITH SIMILAR NAME FIRST
         for f in os.listdir(PDF_DIR):
