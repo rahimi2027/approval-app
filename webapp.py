@@ -27,6 +27,99 @@ def display_attachments(req):
                 st.warning(f"⚠️ File not found: {name}")
     except Exception as e:
         st.info(f"📎 Attachments: {att}")
+        # ─── PDF BUTTON HELPER ──────────────────────────────────────────────
+def display_pdf_button(req, can_generate=False):
+    import streamlit as st
+    import os
+    req_id = req["id"]
+    pdf_path = req.get("pdf_path", "")
+    
+    if pdf_path and os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                f"📥 Download PDF",
+                f.read(),
+                file_name=os.path.basename(pdf_path),
+                key=f"pdf_{req_id}"
+            )
+        return True
+    
+    elif can_generate and PDF_AVAILABLE:
+        if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
+            ok, path, name = generate_approval_pdf(req)
+            if ok:
+                st.success(f"✅ Generated: {name}")
+                st.rerun()
+            else:
+                st.error(f"❌ Error: {path}")
+    return False
+
+
+# ─── GET NEXT REQUEST ID ────────────────────────────────────────────
+def get_next_id(all_records):
+    if not all_records:
+        return 1
+    return max(int(r.get("id", 0)) for r in all_records) + 1
+
+
+# ─── UPDATE RECORD STATUS ──────────────────────────────────────────
+def update_record_status_in_excel(req_id, new_status, comments, approved_by):
+    from datetime import datetime
+    records = load_records_from_excel()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    for r in records:
+        if int(r["id"]) == int(req_id):
+            r["status"] = new_status
+            r["decision_date"] = today_str
+            r["decision_by"] = approved_by
+            if comments.strip():
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                r["director_comments"] = f"[{ts}] {comments.strip()}"
+            r["pdf_path"] = ""  # Clear old PDF — regenerate after approval
+            break
+    save_all_records(records)
+
+
+# ─── DELETE RECORD BY ID ────────────────────────────────────────────
+def delete_record_by_id(req_id):
+    records = load_records_from_excel()
+    records = [r for r in records if int(r["id"]) != int(req_id)]
+    save_all_records(records)
+
+
+# ─── SHOW OLD/NEW COMPARISON ────────────────────────────────────────
+def show_old_new_comparison(old_json, new_rec):
+    import json
+    try:
+        old = json.loads(old_json) if old_json and old_json != "{}" else {}
+    except:
+        old = {}
+    
+    if not old:
+        st.info("📋 New request — no previous version.")
+        return
+    
+    st.markdown("#### 🔄 Changes (Previous → New)")
+    fields = [
+        ("emp_name", "Employee Name"),
+        ("dept", "Department"),
+        ("type", "Transaction Type"),
+        ("category", "Category"),
+        ("date", "Date"),
+        ("amount", "Amount (£)"),
+        ("manager", "Line Manager"),
+        ("desc", "Description")
+    ]
+    changed = False
+    for key, label in fields:
+        o = str(old.get(key, "")).strip()
+        n = str(new_rec.get(key, "")).strip()
+        if o != n:
+            changed = True
+            st.markdown(f"**{label}**: ~~`{o}`~~ → **`{n}`**")
+    if not changed:
+        st.info("✅ No changes detected.")
+        
 import streamlit as st
 import os
 import pandas as pd
@@ -55,9 +148,14 @@ st.set_page_config(
 )
 
 # ============================================================
-# FILE PATHS
+# FILE PATHS — Works LOCALLY (Windows) + STREAMLIT CLOUD
 # ============================================================
-BASE_DIR = r"D:\Acoole_portal"
+import sys
+if "win32" in sys.platform:
+    BASE_DIR = r"D:\Acoole_portal"
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # ✅ Auto-detects on Cloud
+
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
