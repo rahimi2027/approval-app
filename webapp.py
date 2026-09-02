@@ -253,9 +253,9 @@ def save_record_to_excel(new_record):
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
-        return False, "Install fpdf2: pip install fpdf2", None
+        return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        # ✅ READ FRESH DATA DIRECTLY FROM EXCEL
+        # ✅ READ FRESH DATA FROM EXCEL
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
@@ -278,7 +278,9 @@ def generate_approval_pdf(request_data):
         safe_cat = "".join(c for c in category_safe if c.isalnum() or c in (" ", "-", "_")).strip()
         safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
         filename = f"{safe_emp} - {safe_cat} - {amount} - {safe_date}.pdf"
-        full_pdf_path = os.path.join(PDF_DIR, filename)
+        
+        # ✅ SAVE IN ROOT FOLDER — NO PDF_DIR NEEDED!
+        full_pdf_path = filename
 
         # ─── CREATE PDF ──────────────────────────────────────
         pdf = FPDF()
@@ -311,7 +313,7 @@ def generate_approval_pdf(request_data):
 
         pdf.ln(15)
 
-        # ─── AUTO-ADD STAMP ───────────────────────────────────
+        # ─── AUTO-ADD APPROVED/REJECTED STAMP ─────────────────
         decision_text = str(fresh_data.get("decision", "")).strip().lower()
         if "approved" in decision_text:
             stamp_file = "approved_stamp.png"
@@ -327,12 +329,12 @@ def generate_approval_pdf(request_data):
             pdf.set_font("Arial", "I", 12)
             pdf.cell(0, 15, "⏳ Pending Decision", ln=True)
 
-        # ─── SAVE & RETURN ✅ CORRECT ORDER ───────────────────
+        # ─── SAVE PDF AND RETURN ✅ CORRECT ORDER ─────────────
         pdf.output(full_pdf_path)
-        return True, full_pdf_path, filename
+        return True, full_pdf_path, filename  # ✅ (ok, path, name)
 
     except Exception as e:
-        return False, None, f"PDF Error: {str(e)}"
+        return False, None, f"PDF Error: {str(e)}"  # ✅ Same order
         
         # ✅ DELETE ANY OLD PDF WITH SIMILAR NAME FIRST
         for f in os.listdir(PDF_DIR):
