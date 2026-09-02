@@ -412,7 +412,7 @@ def display_company_header():
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, width=300)
+            st.image("logo.png", width=150)
         else:
             st.title("⚡ ACOOLE ELECTRICAL LTD")
         st.caption("Addition & Deduction Approval Platform")
