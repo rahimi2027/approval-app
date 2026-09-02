@@ -251,11 +251,11 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# def generate_approval_pdf(request_data):
+def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, "Install fpdf2: pip install fpdf2", None
     try:
-        # ✅ READ FRESH DATA DIRECTLY FROM EXCEL — BYPASS OLD CACHED DATA!
+        # ✅ READ FRESH DATA DIRECTLY FROM EXCEL
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
@@ -263,10 +263,9 @@ def save_record_to_excel(new_record):
         def clean_text(t):
             return str(t).replace("—", "-").replace("–", "-")
         
-        # ✅ USE FRESH DATA FROM EXCEL — NOT OLD CACHED DATA!
         emp_name_safe = clean_text(fresh_data.get("emp_name", "Unknown"))
         category_safe = clean_text(fresh_data.get("category", "Approval"))
-        amount = f"£{float(fresh_data.get('amount', 0)):.2f}"  # ✅ FRESH AMOUNT!
+        amount = f"£{float(fresh_data.get('amount', 0)):.2f}"
         req_date = clean_text(str(fresh_data.get("date", "Unknown")))
         decision_date = clean_text(str(fresh_data.get("decision_date", "Not Approved Yet")))
         comment_safe = clean_text(fresh_data.get("director_comments", ""))
@@ -281,16 +280,13 @@ def save_record_to_excel(new_record):
         filename = f"{safe_emp} - {safe_cat} - {amount} - {safe_date}.pdf"
         full_pdf_path = os.path.join(PDF_DIR, filename)
 
-        # ─── 🆕 CREATE PDF AND ADD CONTENT ─────────────────────────────
+        # ─── CREATE PDF ──────────────────────────────────────
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", "B", 16)
-
-        # Header
         pdf.cell(0, 12, "ACOOLE ELECTRICAL LTD — APPROVAL REQUEST", ln=True, align="C")
         pdf.ln(8)
 
-        # Request Details
         pdf.set_font("Arial", size=12)
         details = [
             ("Request ID:", str(req_id)),
@@ -315,33 +311,27 @@ def save_record_to_excel(new_record):
 
         pdf.ln(15)
 
-        # ─── 🆕 AUTO-ADD APPROVED/REJECTED STAMP ────────────────────────
+        # ─── AUTO-ADD STAMP ───────────────────────────────────
         decision_text = str(fresh_data.get("decision", "")).strip().lower()
-
-        # Choose stamp based on decision
         if "approved" in decision_text:
             stamp_file = "approved_stamp.png"
         elif "rejected" in decision_text:
             stamp_file = "rejected_stamp.png"
         else:
-            stamp_file = None  # Pending → no stamp
+            stamp_file = None
 
-        # Place stamp if file exists
         if stamp_file and os.path.exists(stamp_file):
-            # Position: X=80, Y=current position, Width=50mm
             pdf.image(stamp_file, x=80, y=pdf.get_y() - 5, w=50)
-            pdf.ln(55)  # Leave space for stamp
+            pdf.ln(55)
         else:
             pdf.set_font("Arial", "I", 12)
             pdf.cell(0, 15, "⏳ Pending Decision", ln=True)
 
-        # ─── SAVE PDF TO FILE ────────────────────────────────────────────
+        # ─── SAVE & RETURN ✅ CORRECT ORDER ───────────────────
         pdf.output(full_pdf_path)
-        # ✅ CORRECT ORDER: (ok, path, name)
         return True, full_pdf_path, filename
 
     except Exception as e:
-        # ✅ CORRECT ORDER: (ok, path, name)
         return False, None, f"PDF Error: {str(e)}"
         
         # ✅ DELETE ANY OLD PDF WITH SIMILAR NAME FIRST
