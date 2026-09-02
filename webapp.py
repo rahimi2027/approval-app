@@ -337,10 +337,12 @@ def save_record_to_excel(new_record):
 
         # ─── SAVE PDF TO FILE ────────────────────────────────────────────
         pdf.output(full_pdf_path)
-        return True, "PDF generated successfully!", full_pdf_path
+        # ✅ CORRECT ORDER: (ok, path, name)
+        return True, full_pdf_path, filename
 
     except Exception as e:
-        return False, f"PDF Error: {str(e)}", None
+        # ✅ CORRECT ORDER: (ok, path, name)
+        return False, None, f"PDF Error: {str(e)}"
         
         # ✅ DELETE ANY OLD PDF WITH SIMILAR NAME FIRST
         for f in os.listdir(PDF_DIR):
