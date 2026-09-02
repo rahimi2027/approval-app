@@ -119,7 +119,7 @@ def show_old_new_comparison(old_json, new_rec):
             st.markdown(f"**{label}**: ~~`{o}`~~ → **`{n}`**")
     if not changed:
         st.info("✅ No changes detected.")
-        
+
 import streamlit as st
 import os
 import pandas as pd
@@ -453,16 +453,20 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
 
         # ─── AUTO-ADD STAMP ✅ ──────────────────────────────────
-        decision_text = str(fresh_data.get("decision", "")).strip().lower()
-        if "approved" in decision_text:
+        # ─── AUTO-ADD STAMP ✅ FIXED: Use status field ───────────────────
+        status = str(fresh_data.get("status", "pending")).strip().lower()
+        decision_by_safe = clean_text(fresh_data.get("decision_by", "Director"))
+        decision_date_safe = clean_text(str(fresh_data.get("decision_date", "")))
+        
+        if status == "approved":
             stamp_file = "approved_stamp.png"
-            pdf_row("Decision", "APPROVED")
-        elif "rejected" in decision_text:
+            pdf_row("Decision", f"APPROVED — by {decision_by_safe} on {decision_date_safe}")
+        elif status == "rejected":
             stamp_file = "rejected_stamp.png"
-            pdf_row("Decision", "REJECTED")
+            pdf_row("Decision", f"REJECTED — by {decision_by_safe} on {decision_date_safe}")
         else:
             stamp_file = None
-            pdf_row("Decision", "PENDING")
+            pdf_row("Decision", "PENDING — Awaiting Approval")
 
         pdf_row("Approved By", decision_by_safe)
         pdf_row("Approval Date / Time", decision_date)
