@@ -4,6 +4,29 @@ def format_date(d):
     if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
         return "—"
     return str(d).strip()[:10]
+def display_attachments(req):
+    import streamlit as st
+    import os
+    att = req.get("attachment_name", "None")
+    if not att or str(att).strip() == "" or str(att).strip().lower() == "none":
+        st.info("📎 No attachments.")
+        return
+    try:
+        attached_files = [n.strip() for n in str(att).split(",")]
+        for idx, name in enumerate(attached_files):
+            path = os.path.join(UPLOAD_DIR, name)
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    st.download_button(
+                        f"⬇️ Download {name}",
+                        f.read(),
+                        file_name=name,
+                        key=f"att_{req.get('id', idx)}_{idx}"
+                    )
+            else:
+                st.warning(f"⚠️ File not found: {name}")
+    except Exception as e:
+        st.info(f"📎 Attachments: {att}")
 import streamlit as st
 import os
 import pandas as pd
