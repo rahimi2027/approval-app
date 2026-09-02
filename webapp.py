@@ -411,12 +411,16 @@ def get_next_id(records):
 def display_company_header():
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        if os.path.exists(LOGO_PATH):
-            st.image("logo.png", width=150)
-        else:
-            st.title("⚡ ACOOLE ELECTRICAL LTD")
-        st.caption("Addition & Deduction Approval Platform")
-        st.divider()
+def display_company_header():
+    LOGO_PATH = "logo.png"  # ✅ Define it HERE — simple filename only!
+    
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, width=150)
+    else:
+        st.title("⚡ ACOOLE ELECTRICAL LTD")
+    
+    st.caption("Addition & Deduction Approval Platform")
+    st.divider()
 
 def display_attachments(req):
     att = req.get("attachment_name", "None")
