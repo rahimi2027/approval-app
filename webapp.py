@@ -250,7 +250,6 @@ def save_record_to_excel(new_record):
     current.append(new_record)
     save_all_records(current)
 
-# ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
@@ -278,78 +277,18 @@ def generate_approval_pdf(request_data):
         safe_cat = "".join(c for c in category_safe if c.isalnum() or c in (" ", "-", "_")).strip()
         safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
         filename = f"{safe_emp} - {safe_cat} - {amount} - {safe_date}.pdf"
-        
-        # ✅ SAVE IN ROOT FOLDER — NO PDF_DIR NEEDED!
         full_pdf_path = filename
 
-        # ─── CREATE PDF ──────────────────────────────────────
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 12, "ACOOLE ELECTRICAL LTD — APPROVAL REQUEST", ln=True, align="C")
-        pdf.ln(8)
-
-        pdf.set_font("Arial", size=12)
-        details = [
-            ("Request ID:", str(req_id)),
-            ("Employee Name:", emp_name_safe),
-            ("Department:", dept_safe),
-            ("Category:", category_safe),
-            ("Amount:", amount),
-            ("Line Manager:", manager_safe),
-            ("Request Date:", req_date),
-            ("Description:", desc_safe),
-            ("Decision By:", decision_by_safe),
-            ("Decision Date:", decision_date),
-            ("Director Comments:", comment_safe),
-        ]
-
-        for label, value in details:
-            pdf.set_font("Arial", "B", 11)
-            pdf.cell(55, 8, label)
-            pdf.set_font("Arial", size=11)
-            pdf.multi_cell(0, 8, str(value), ln=True)
-            pdf.ln(2)
-
-        pdf.ln(15)
-
-        # ─── AUTO-ADD APPROVED/REJECTED STAMP ─────────────────
-        decision_text = str(fresh_data.get("decision", "")).strip().lower()
-        if "approved" in decision_text:
-            stamp_file = "approved_stamp.png"
-        elif "rejected" in decision_text:
-            stamp_file = "rejected_stamp.png"
-        else:
-            stamp_file = None
-
-        if stamp_file and os.path.exists(stamp_file):
-            pdf.image(stamp_file, x=80, y=pdf.get_y() - 5, w=50)
-            pdf.ln(55)
-        else:
-            pdf.set_font("Arial", "I", 12)
-            pdf.cell(0, 15, "⏳ Pending Decision", ln=True)
-
-        # ─── SAVE PDF AND RETURN ✅ CORRECT ORDER ─────────────
-        pdf.output(full_pdf_path)
-        return True, full_pdf_path, filename  # ✅ (ok, path, name)
-
-    except Exception as e:
-        return False, None, f"PDF Error: {str(e)}"  # ✅ Same order
-        
-        # ✅ DELETE ANY OLD PDF WITH SIMILAR NAME FIRST
-        for f in os.listdir(PDF_DIR):
-            if f.startswith(f"ID_{req_id}_") or f.startswith(f"{safe_emp} - {safe_cat}"):
-                try:
-                    os.remove(os.path.join(PDF_DIR, f))
-                except:
-                    pass
-        
+        # ─── CREATE PDF — YOUR ORIGINAL LAYOUT ─────────────────
         pdf = FPDF("P", "mm", "A4")
         pdf.add_page()
         pdf.set_font("Courier", "", 12)
-        if os.path.exists(LOGO_PATH):
-            try: pdf.image(LOGO_PATH, x=10, y=8, w=40)
+        
+        # Logo
+        if os.path.exists("logo.png"):
+            try: pdf.image("logo.png", x=10, y=8, w=40)
             except: pass
+        
         pdf.set_xy(60, 10)
         pdf.set_font("Courier", "B", 18)
         pdf.cell(0, 10, "ACOOLE ELECTRICAL LTD", ln=True)
@@ -358,12 +297,14 @@ def generate_approval_pdf(request_data):
         pdf.ln(5)
         pdf.cell(0, 0, "_" * 85, ln=True)
         pdf.ln(8)
+
         def pdf_row(label, value):
             pdf.set_font("Courier", "B", 11)
             pdf.cell(60, 8, label + ":")
             pdf.set_font("Courier", "", 11)
             pdf.multi_cell(0, 8, clean_text(str(value)))
             pdf.ln(1)
+
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, "REQUEST DETAILS", ln=True)
         pdf.ln(3)
@@ -373,7 +314,7 @@ def generate_approval_pdf(request_data):
         pdf_row("Transaction Type", clean_text(fresh_data.get("type", "")))
         pdf_row("Category / Reason", category_safe)
         pdf_row("Request Date", req_date)
-        pdf_row("Amount Approved", amount)  # ✅ FRESH AMOUNT IN PDF!
+        pdf_row("Amount Approved", amount)
         pdf_row("Line Manager", manager_safe)
         pdf.ln(5)
         pdf.set_font("Courier", "B", 12)
@@ -383,15 +324,33 @@ def generate_approval_pdf(request_data):
         pdf.ln(8)
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
-        pdf_row("Decision", "APPROVED")
+
+        # ─── AUTO-ADD STAMP ✅ ──────────────────────────────────
+        decision_text = str(fresh_data.get("decision", "")).strip().lower()
+        if "approved" in decision_text:
+            stamp_file = "approved_stamp.png"
+            pdf_row("Decision", "APPROVED")
+        elif "rejected" in decision_text:
+            stamp_file = "rejected_stamp.png"
+            pdf_row("Decision", "REJECTED")
+        else:
+            stamp_file = None
+            pdf_row("Decision", "PENDING")
+
         pdf_row("Approved By", decision_by_safe)
         pdf_row("Approval Date / Time", decision_date)
         if comment_safe:
             pdf_row("Director Comments", comment_safe)
+        
         pdf.ln(15)
         pdf.cell(0, 6, "-" * 50, ln=True)
         pdf.cell(0, 6, "Authorized Signature / Director", ln=True)
-        
+
+        # Place stamp
+        if stamp_file and os.path.exists(stamp_file):
+            pdf.image(stamp_file, x=80, y=pdf.get_y() - 5, w=50)
+
+        # Attachments
         att_names = fresh_data.get("attachment_name", "None")
         if att_names and att_names != "None":
             attached_files = [n.strip() for n in att_names.split(",")]
@@ -408,116 +367,16 @@ def generate_approval_pdf(request_data):
                     pdf.cell(0, 0, "_" * 60, ln=True)
                     pdf.ln(5)
                     try:
-                        page_w = 190
-                        pdf.image(file_path, x=10, y=pdf.get_y(), w=page_w)
+                        pdf.image(file_path, x=10, y=pdf.get_y(), w=190)
                     except Exception:
-                        pdf.set_font("Courier", "", 11)
-                        pdf.multi_cell(0, 8, f"File saved at:\n{file_path}")
-                else:
-                    pdf.add_page()
-                    pdf.set_font("Courier", "", 11)
-                    pdf.cell(0, 10, f"Attachment not found: {file_name}", ln=True)
-        
+                        pdf.multi_cell(0, 8, f"File: {file_path}")
+
+        # ✅ SAVE AND RETURN IN CORRECT ORDER: (ok, path, name)
         pdf.output(full_pdf_path)
         return True, full_pdf_path, filename
+
     except Exception as e:
-        return False, str(e), None
-
-def save_pdf_path_to_request(req_id, pdf_path):
-    records = load_records_from_excel()
-    for rec in records:
-        if int(rec["id"]) == int(req_id):
-            rec["pdf_path"] = pdf_path
-            save_all_records(records)
-            return True
-    return False
-
-def update_record_status_in_excel(req_id, new_status, director_comments, decision_by):
-    records = load_records_from_excel()
-    for record in records:
-        if int(record["id"]) == int(req_id):
-            record["status"] = str(new_status).lower()
-            old_comments = record["director_comments"].strip()
-            new_comment_text = str(director_comments).strip()
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-            if new_comment_text:
-                record["director_comments"] = f"{old_comments}\n---\n[{ts}] {decision_by}: {new_comment_text}" if old_comments else f"[{ts}] {decision_by}: {new_comment_text}"
-            record["decision_date"] = ts
-            record["decision_by"] = str(decision_by)
-            save_all_records(records)
-            return True
-    return False
-
-def delete_record_by_id(req_id):
-    records = load_records_from_excel()
-    new_records = [r for r in records if int(r["id"]) != int(req_id)]
-    if len(new_records) < len(records):
-        save_all_records(new_records)
-        return True
-    return False
-
-def get_next_id(records):
-    if not records: return 1
-    ids = [int(r["id"]) for r in records if str(r.get("id", "")).isdigit()]
-    return max(ids) + 1 if ids else 1
-
-def display_company_header():
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        LOGO_PATH = "logo.png"
-        if os.path.exists(LOGO_PATH):  
-          st.image(LOGO_PATH, width=150)
-        else:
-         st.title("⚡ ACOOLE ELECTRICAL LTD")
-        st.caption("Addition & Deduction Approval Platform")
-        st.divider()
-
-def display_attachments(req):
-    att = req.get("attachment_name", "None")
-    if not att or att == "None":
-        st.info("📎 No attachments.")
-        return
-    for idx, name in enumerate([n.strip() for n in att.split(",")]):
-        path = os.path.join(UPLOAD_DIR, name)
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                st.download_button(f"⬇️ Download {name}", f.read(), file_name=name, key=f"att_{req['id']}_{idx}")
-        else:
-            st.warning(f"⚠️ Not found: {name}")
-
-def display_pdf_button(req, can_generate=False):
-    req_id = req["id"]
-    pdf_path = req.get("pdf_path", "")
-    if pdf_path and os.path.exists(pdf_path):
-        with open(pdf_path, "rb") as f:
-            st.download_button(f"📥 Download PDF", f.read(), file_name=os.path.basename(pdf_path), key=f"pdf_{req_id}")
-        return True
-    elif can_generate:
-        if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
-            ok, path, name = generate_approval_pdf(req)
-            if ok:
-                save_pdf_path_to_request(req_id, path)
-                st.success(f"✅ Generated: {name}")
-                st.rerun()
-            else:
-                st.error(f"❌ Error: {path}")
-    return False
-
-def show_old_new_comparison(old_data, new_data):
-    if not old_data or old_data == "{}": return
-    try:
-        old = eval(old_data) if isinstance(old_data, str) else old_data
-        st.warning("🔄 EDITED — Changes:")
-        fields = [("Employee Name", "emp_name"), ("Dept", "dept"), ("Type", "type"), ("Category", "category"), ("Date", "date"), ("Amount", "amount"), ("Manager", "manager"), ("Desc", "desc")]
-        for label, key in fields:
-            o, n = str(old.get(key, "")), str(new_data.get(key, ""))
-            if o != n:
-                st.markdown(f"**{label}:** ~~{o}~~ → **{n}**")
-        st.divider()
-    except: pass
-
-def format_date(d):
-    return str(d).strip()[:10] if d and str(d).strip() else "—"
+        return False, None, f"PDF Error: {str(e)}"
 
 # ============================================================
 # SESSION STATE
