@@ -608,26 +608,42 @@ def user_management_panel():
 # ============================================================
 # 🔐 LOGIN PAGE
 # ============================================================
+# ✅ DEFINE FUNCTION FIRST — AT THE TOP, OUTSIDE ANY IF BLOCK
+def display_company_header():
+    import streamlit as st
+    import os
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        LOGO_PATH = "logo.png"
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=150)
+        else:
+            st.title("⚡ ACOOLE ELECTRICAL LTD")
+        st.caption("Addition & Deduction Approval Platform")
+        st.divider()
+
+
+# ✅ THEN THE IF BLOCK — SEPARATELY!
 if not st.session_state.logged_in:
-    display_company_header()
-    _, c, _ = st.columns([1, 2, 1])
-    with c:
-        with st.form("login_form", border=True):
-            st.markdown("### 🔒 Secure Gateway Login")
-            st.caption("Enter your credentials to access the system")
-            st.divider()
-            username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
-            password = st.text_input("🔑 Password", type="password", placeholder="Enter your password here")
-            st.markdown("<br>", unsafe_allow_html=True)
-            login_btn = st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True)
-            if login_btn:
-                USERS = load_users()
-                if username in USERS and USERS[username]["password"] == password:
-                    st.session_state.logged_in = True
-                    st.session_state.user_info = {**USERS[username], "username": username}
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid Username or Password. Please try again.")
+    display_company_header()  # ✅ Call the function — NOT define it!
+    
+    with st.form("login_form", border=True):
+        st.markdown("### 🔒 Secure Gateway Login")
+        st.caption("Enter your credentials to access the system")
+        st.divider()
+        username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
+        password = st.text_input("🔑 Password", type="password", placeholder="Enter your password here")
+        st.markdown("<br>", unsafe_allow_html=True)
+        login_btn = st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True)
+        
+        if login_btn:
+            USERS = load_users()
+            if username in USERS and USERS[username]["password"] == password:
+                st.session_state.logged_in = True
+                st.session_state.user_info = {**USERS[username], "username": username}
+                st.rerun()
+            else:
+                st.error("❌ Invalid Username or Password. Please try again.")
 
 # ============================================================
 # ✅ MAIN APPLICATION — ALL ROLES
