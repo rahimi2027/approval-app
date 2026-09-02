@@ -1,3 +1,9 @@
+# ─── DATE FORMATTING HELPER ──────────────────────────────────────
+def format_date(d):
+    """Format dates safely — returns first 10 chars or placeholder"""
+    if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
+        return "—"
+    return str(d).strip()[:10]
 import streamlit as st
 import os
 import pandas as pd
