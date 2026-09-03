@@ -416,15 +416,14 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — RESTORED VERSION
-# Original font settings restored + reads FRESH status from Excel
-# + auto approval stamp/signature when Approved
+# PDF GENERATION — FIXED FONT ERROR + ORIGINAL LAYOUT
 # ============================================================
 def generate_approval_pdf(request_data):
+    PDF_AVAILABLE = True
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        # ✅ READ FRESH DATA DIRECTLY FROM EXCEL — ALWAYS UP-TO-DATE
+        # ✅ READ FRESH DATA FROM EXCEL
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next(
@@ -432,8 +431,22 @@ def generate_approval_pdf(request_data):
             request_data
         )
 
+        # ✅ COMPLETE DASH CLEANER — REMOVES ALL UNSUPPORTED DASHES
         def clean_text(t):
-            return str(t).replace("—", "-").replace("–", "-")
+            t = str(t)
+            t = t.replace("\u2013", "-")  # en-dash
+            t = t.replace("\u2014", "-")  # em-dash
+            t = t.replace("\u2015", "-")  # horizontal bar
+            t = t.replace("\u2212", "-")  # minus sign
+            t = t.replace("—", "-")
+            t = t.replace("–", "-")
+            return t.strip()
+
+        # ✅ SAFE DATE FORMATTER — NEVER RETURNS LONG DASH!
+        def format_date(d):
+            if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
+                return "-"  # ✅ USE NORMAL DASH INSTEAD OF "—"
+            return str(d).strip()[:10]
 
         # ─── EXTRACT FIELDS ──────────────────────────────
         emp_name     = clean_text(fresh_data.get("emp_name", "Unknown"))
@@ -452,7 +465,7 @@ def generate_approval_pdf(request_data):
         pdf = FPDF()
         pdf.add_page()
 
-        # ⚠️ ORIGINAL FONT SETTINGS RESTORED — NOT CHANGED!
+        # ✅ ORIGINAL FONT SETTINGS — NOT CHANGED
         pdf.set_font("Helvetica", "B", 16)
         pdf.cell(0, 10, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
         pdf.set_font("Helvetica", "", 12)
@@ -498,16 +511,11 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Helvetica", "", 12)
         pdf.cell(0, 8, date_submit, ln=True)
 
-        # ✅ STATUS — SHOWS CORRECT VALUE FROM EXCEL
+        # ✅ STATUS — CORRECT VALUE FROM EXCEL
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, "Current Status:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
-        if status.lower() == "approved":
-            pdf.cell(0, 8, status, ln=True)
-        elif status.lower() == "rejected":
-            pdf.cell(0, 8, status, ln=True)
-        else:
-            pdf.cell(0, 8, "Pending", ln=True)
+        pdf.cell(0, 8, status, ln=True)
 
         pdf.ln(8)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
@@ -519,7 +527,10 @@ def generate_approval_pdf(request_data):
         pdf.ln(4)
 
         # ✅ APPROVAL STAMP & SIGNATURE — ONLY WHEN APPROVED
-        if status.lower() == "approved" and dir_approve != "—":
+        APPROVED_STAMP_PATH = "approved_stamp.png"
+        SIGNATURE_DIRECTOR_PATH = "director_sign.png"
+        
+        if status.lower() == "approved" and dir_approve != "-":
             pdf.cell(50, 8, "Approved Date:", 0, 0)
             pdf.cell(0, 8, dir_approve, ln=True)
             pdf.cell(50, 8, "Approved By:", 0, 0)
@@ -543,7 +554,6 @@ def generate_approval_pdf(request_data):
 
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
-
 
 # ============================================================
 # DIRECTOR STATUS SWITCH — DEBUG VERSION
