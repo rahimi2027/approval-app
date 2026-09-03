@@ -1287,8 +1287,7 @@ else:
             settings_management_panel()
         with tab_users:
             user_management_panel()
- 
-    # ========================================================
+     # ========================================================
     # 📥 DOWNLOAD BACKUPS — SUPER ADMIN ONLY
     # ========================================================
     if user["role"] == "Super Admin":
