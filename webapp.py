@@ -84,7 +84,7 @@ def display_pdf_button(req, can_generate=False):
     
     # ✅ GENERATE FRESH PDF WHEN BUTTON CLICKED
     if can_generate and PDF_AVAILABLE:
-if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
+    if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
             ok, pdf_bytes, name = generate_approval_pdf(req)
             if ok:
                 st.success(f"✅ Generated! Ready to download ↓")
