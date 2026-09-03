@@ -1050,11 +1050,11 @@ else:
                         st.warning("⏳ Waiting for Director Approval")
                         display_attachments(req)
 
-    # ========================================================
+       # ========================================================
     # MANAGER PORTAL
     # ========================================================
     elif user["role"] == "Manager":
-            if st.session_state.editing_request_id:
+        if st.session_state.editing_request_id:
             eid = st.session_state.editing_request_id
             rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
             if rec:
@@ -1094,14 +1094,12 @@ else:
                                 r["status"] = "pending"
                                 r["old_data"] = old
                                 
-                                # ✅ SAVE PREVIOUS REJECTION COMMENT — KEEP & LABEL IT
                                 old_comments = r.get("director_comments", "").strip()
                                 if old_comments and old_comments != "":
                                     if "📌 PREVIOUS REJECTION REASON:" not in old_comments:
                                         r["director_comments"] = f"📌 PREVIOUS REJECTION REASON:\n{old_comments}\n\n--- NEW REQUEST ---"
-                                    # else: keep existing note as-is
                                 else:
-                                    r["director_comments"] = ""  # Only clear if truly empty
+                                    r["director_comments"] = ""
                                 
                                 r["decision_date"] = ""
                                 r["decision_by"] = ""
