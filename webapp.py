@@ -1430,7 +1430,7 @@ else:
     # ========================================================
     # 🛡️ SUPER ADMIN PORTAL
     # ========================================================
-          elif user["role"] == "Super Admin":
+    elif user["role"] == "Super Admin":
         st.subheader("🛡️ Super Admin Control Panel")
         tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
         with tab_settings:
