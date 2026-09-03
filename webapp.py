@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ FINAL VERSION: No errors + correct filename
+# PDF GENERATION — ✅ FIXED FILENAME (No # symbol)
 # ============================================================
 def generate_approval_pdf(request_data):
     import os
@@ -429,7 +429,7 @@ def generate_approval_pdf(request_data):
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
         
         def clean_text(t):
-            return str(t).replace("—", "-").replace("–", "-").replace(":", "-").replace("/", "-").replace("\\", "-").strip()
+            return str(t).replace("—", "-").replace("–", "-").replace(":", "-").replace("/", "-").replace("\\", "-").replace("#", "No.").strip()
         
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
@@ -535,16 +535,15 @@ def generate_approval_pdf(request_data):
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt="Waiting for Director approval", ln=True, align="C")
         
-        # ─── SAVE WITH CORRECT FILENAME ──────────────────────────
+        # ─── SAVE — ✅ NO # IN FILENAME ──────────────────────────
         save_dir = "approved_pdfs"
         os.makedirs(save_dir, exist_ok=True)
         
-        # ✅ FILENAME FORMAT: ID#1 - Employee Name - Category.pdf
-        filename = f"ID#{req_id} - {emp_name} - {category}.pdf"
+        # ✅ FILENAME: ID No.1 - Wais Rahimi - GYM Membership.pdf
+        filename = f"ID No.{req_id} - {emp_name} - {category}.pdf"
         full_pdf_path = os.path.join(save_dir, filename)
         
-        # ✅ SAVE — fpdf2 does NOT use .close()!
-        pdf.output(full_pdf_path)  # ✅ That's it! No .close() needed
+        pdf.output(full_pdf_path)
         
         return True, full_pdf_path, filename
     
