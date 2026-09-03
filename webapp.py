@@ -5,49 +5,51 @@ import streamlit as st
 import os
 import subprocess
 from datetime import datetime
+
 def github_auto_save():
-"""Push changed Excel files to GitHub automatically"""
-if not os.path.exists("/mount/src/"):
-return
-try:
-GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
-GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
-GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
-if not GITHUB_TOKEN or not GITHUB_REPO:
-print("⚠️ GitHub secrets not set — skipping auto-save")
-return
-repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
-os.system("git config --global user.name 'Streamlit Auto-Save'")
-os.system("git config --global user.email 'rahimi2027@users.noreply.github.com'")
-data_files = ["requests.xlsx", "user_database.xlsx", "settings.xlsx"]
-for f in data_files:
-if os.path.exists(f):
-os.system(f"git add {f}")
-status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
-if status.stdout.strip():
-timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-commit_msg = f"🔄 Auto-save: data updated {timestamp}"
-os.system(f'git commit -m "{commit_msg}"')
-os.system(f"git push {repo_url} {GITHUB_BRANCH}")
-st.toast("✅ Data saved & synced to GitHub!", icon="✅")
-except Exception as e:
-print(f"⚠️ GitHub save error: {e}")
-============================================================
-✅ AUTO-INSTALL FPDF2 — FIXES "No module named 'fpdf2'" ERROR
-============================================================
+    """Push changed Excel files to GitHub automatically"""
+    if not os.path.exists("/mount/src/"):
+        return
+    try:
+        GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+        GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
+        GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
+        if not GITHUB_TOKEN or not GITHUB_REPO:
+            print("⚠️ GitHub secrets not set — skipping auto-save")
+            return
+        repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+        os.system("git config --global user.name 'Streamlit Auto-Save'")
+        os.system("git config --global user.email 'rahimi2027@users.noreply.github.com'")
+        data_files = ["requests.xlsx", "user_database.xlsx", "settings.xlsx"]
+        for f in data_files:
+            if os.path.exists(f):
+                os.system(f"git add {f}")
+        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+        if status.stdout.strip():
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            commit_msg = f"🔄 Auto-save: data updated {timestamp}"
+            os.system(f'git commit -m "{commit_msg}"')
+            os.system(f"git push {repo_url} {GITHUB_BRANCH}")
+            st.toast("✅ Data saved & synced to GitHub!", icon="✅")
+    except Exception as e:
+        print(f"⚠️ GitHub save error: {e}")
+
+# ============================================================
+# ✅ AUTO-INSTALL FPDF2 — FIXES "No module named 'fpdf2'" ERROR
+# ============================================================
 import subprocess, sys
 try:
-from fpdf2 import FPDF
+    from fpdf2 import FPDF
 except ImportError:
-try:
-import subprocess
-subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
-from fpdf2 import FPDF
-except:
-try:
-from fpdf import FPDF
-except ImportError:
-FPDF = None
+    try:
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
+        from fpdf2 import FPDF
+    except:
+        try:
+            from fpdf import FPDF
+        except ImportError:
+            FPDF = None
 PDF_AVAILABLE = FPDF is not None
 ─── DATE FORMATTING HELPER ──────────────────────────────────────
 def format_date(d):
