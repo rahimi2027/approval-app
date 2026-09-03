@@ -545,16 +545,17 @@ def generate_approval_pdf(request_data):
 
 
 # ============================================================
-# DIRECTOR STATUS SWITCH — APPROVED ↔ REJECTED
+# DIRECTOR STATUS SWITCH — APPROVED ↔ REJECTED ↔ PENDING
 # ============================================================
 def director_switch_status(request_data):
-    """Only Director/Super Admin can change status"""
+    """Only Director/Super Admin can change status — MATCHES YOUR EXCEL lowercase"""
+    # ✅ Check permission
     user_role = st.session_state.get("role", "")
     if user_role not in ["Director", "Super Admin"]:
-        return False, "Not authorized"
+        return
 
     req_id = request_data.get("id")
-    current_status = str(request_data.get("status", "Pending")).strip()
+    current_status = str(request_data.get("status", "pending")).strip().lower()  # ✅ FORCE LOWERCASE
 
     st.markdown("---")
     st.warning("🔧 Director Tools — Change Approval Status")
@@ -563,41 +564,49 @@ def director_switch_status(request_data):
     with col1:
         new_status = st.selectbox(
             "Change Status To:",
-            ["Pending", "Approved", "Rejected"],
-            index=["Pending", "Approved", "Rejected"].index(current_status) if current_status in ["Pending", "Approved", "Rejected"] else 0,
+            ["pending", "approved", "rejected"],  # ✅ LOWERCASE — MATCHES YOUR EXCEL
+            index=["pending", "approved", "rejected"].index(current_status) if current_status in ["pending", "approved", "rejected"] else 0,
             key=f"switch_status_{req_id}"
         )
     with col2:
-        confirm = st.checkbox("✅ Confirm Change", key=f"confirm_switch_{req_id}")
+        confirm = st.checkbox("✅ I confirm this change", key=f"confirm_switch_{req_id}")
 
-    if st.button("🔄 Update Status", type="primary", disabled=not confirm, key=f"btn_switch_{req_id}"):
+    if st.button("🔄 UPDATE STATUS", type="primary", disabled=not confirm, key=f"btn_switch_{req_id}"):
         if new_status == current_status:
-            return False, "No change needed"   # ✅ THIS LINE IS NOW INSIDE THE FUNCTION ✅
+            st.info("ℹ️ Status is already set to that — no change made.")
+            return
 
         try:
+            import pandas as pd
+            from datetime import datetime
+
             excel_path = "requests_data.xlsx"
             df = pd.read_excel(excel_path)
+
+            # ✅ Match by ID — works with string or number
             mask = df["id"].astype(str) == str(req_id)
-            if mask.any():
-                from datetime import datetime
-                df.loc[mask, "status"] = new_status
-                df.loc[mask, "approved_by"] = st.session_state.username
-                df.loc[mask, "approved_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                df.to_excel(excel_path, index=False)
+            if not mask.any():
+                st.error(f"❌ Request ID #{req_id} NOT FOUND in Excel!")
+                return
 
-                request_data["status"] = new_status
-                request_data["approved_by"] = st.session_state.username
-                request_data["approved_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # ✅ UPDATE EXCEL — ALL COLUMNS MATCH YOURS
+            df.loc[mask, "status"] = new_status
+            df.loc[mask, "decision_by"] = st.session_state.username
+            df.loc[mask, "decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                st.success(f"✅ Status changed to: {new_status}")
-                st.info("📄 PDF will now show updated status & stamp")
-                st.rerun()
-                return True, f"Updated to {new_status}"
-            else:
-                return False, "❌ Request not found in Excel"
+            df.to_excel(excel_path, index=False)
+
+            # ✅ UPDATE LOCAL DATA INSTANTLY
+            request_data["status"] = new_status
+            request_data["decision_by"] = st.session_state.username
+            request_data["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            st.success(f"✅ ✅ Status CHANGED: **{current_status.upper()} → {new_status.upper()}**")
+            st.info("📄 PDF will now show updated status & stamp image")
+            st.rerun()  # ✅ REFRESH PAGE AUTOMATICALLY
+
         except Exception as e:
-            return False, f"❌ Error: {str(e)}"
-    return False, "Awaiting confirmation"
+            st.error(f"❌ Error updating Excel: {str(e)}")
 
 # ============================================================
 # SESSION STATE
