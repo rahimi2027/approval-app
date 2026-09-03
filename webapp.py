@@ -426,11 +426,14 @@ def save_record_to_excel(new_record):
     current.append(new_record)
     save_all_records(current)
 
+# ============================================================
+# PDF GENERATION — FULLY FIXED VERSION
+# ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        # ✅ READ FRESH DATA FROM EXCEL
+        # ✅ READ FRESH DATA DIRECTLY FROM EXCEL — ALWAYS UP-TO-DATE!
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
@@ -438,31 +441,35 @@ def generate_approval_pdf(request_data):
         def clean_text(t):
             return str(t).replace("—", "-").replace("–", "-")
         
+        # ✅ GET LATEST STATUS — THIS WAS THE MAIN BUG!
+        status = str(fresh_data.get("status", "pending")).strip().lower()
+        decision_by_safe = clean_text(fresh_data.get("decision_by", "Director"))
+        decision_date_safe = clean_text(str(fresh_data.get("decision_date", "Not Approved Yet")))
+        
         emp_name_safe = clean_text(fresh_data.get("emp_name", "Unknown"))
         category_safe = clean_text(fresh_data.get("category", "Approval"))
         amount = f"£{float(fresh_data.get('amount', 0)):.2f}"
         req_date = clean_text(str(fresh_data.get("date", "Unknown")))
-        decision_date = clean_text(str(fresh_data.get("decision_date", "Not Approved Yet")))
         comment_safe = clean_text(fresh_data.get("director_comments", ""))
         desc_safe = clean_text(fresh_data.get("desc", ""))
         dept_safe = clean_text(fresh_data.get("dept", ""))
         manager_safe = clean_text(fresh_data.get("manager", ""))
-        decision_by_safe = clean_text(fresh_data.get("decision_by", ""))
         
+        # ✅ SAFE FILENAME & SAVE TO PDF_DIR
         safe_emp = "".join(c for c in emp_name_safe if c.isalnum() or c in (" ", "-", "_")).strip()
         safe_cat = "".join(c for c in category_safe if c.isalnum() or c in (" ", "-", "_")).strip()
         safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
         filename = f"{safe_emp} - {safe_cat} - {amount} - {safe_date}.pdf"
-        full_pdf_path = filename
-
-        # ─── CREATE PDF — YOUR ORIGINAL LAYOUT ─────────────────
+        full_pdf_path = os.path.join(PDF_DIR, filename)  # ✅ Saves to approved_pdfs folder
+        
+        # ─── CREATE PDF ────────────────────────────────────────
         pdf = FPDF("P", "mm", "A4")
         pdf.add_page()
         pdf.set_font("Courier", "", 12)
         
         # Logo
-        if os.path.exists("logo.png"):
-            try: pdf.image("logo.png", x=10, y=8, w=40)
+        if os.path.exists(LOGO_PATH):
+            try: pdf.image(LOGO_PATH, x=10, y=8, w=40)
             except: pass
         
         pdf.set_xy(60, 10)
@@ -473,17 +480,18 @@ def generate_approval_pdf(request_data):
         pdf.ln(5)
         pdf.cell(0, 0, "_" * 85, ln=True)
         pdf.ln(8)
-
+        
         def pdf_row(label, value):
             pdf.set_font("Courier", "B", 11)
             pdf.cell(60, 8, label + ":")
             pdf.set_font("Courier", "", 11)
             pdf.multi_cell(0, 8, clean_text(str(value)))
             pdf.ln(1)
-
+        
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, "REQUEST DETAILS", ln=True)
         pdf.ln(3)
+        
         pdf_row("Request ID", f"#{req_id}")
         pdf_row("Employee Name", emp_name_safe)
         pdf_row("Department", dept_safe)
@@ -493,50 +501,58 @@ def generate_approval_pdf(request_data):
         pdf_row("Amount Approved", amount)
         pdf_row("Line Manager", manager_safe)
         pdf.ln(5)
+        
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.set_font("Courier", "", 11)
         pdf.multi_cell(0, 7, desc_safe)
         pdf.ln(8)
+        
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
-
-        # ─── AUTO-ADD STAMP ✅ ──────────────────────────────────
-        # ─── AUTO-ADD STAMP ✅ FIXED: Use status field ───────────────────
-        status = str(fresh_data.get("status", "pending")).strip().lower()
-        decision_by_safe = clean_text(fresh_data.get("decision_by", "Director"))
-        decision_date_safe = clean_text(str(fresh_data.get("decision_date", "")))
+        pdf.ln(2)
         
+        # ✅ STATUS DISPLAY — CLEAR & BOLD
+        pdf.set_font("Courier", "B", 14)
         if status == "approved":
-            stamp_file = "approved_stamp.png"
-            pdf_row("Decision", f"APPROVED — by {decision_by_safe} on {decision_date_safe}")
+            pdf.cell(0, 8, f"✅ APPROVED", ln=True)
+            pdf.set_font("Courier", "", 11)
+            pdf.cell(0, 6, f"Approved by: {decision_by_safe}", ln=True)
+            pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
         elif status == "rejected":
-            stamp_file = "rejected_stamp.png"
-            pdf_row("Decision", f"REJECTED — by {decision_by_safe} on {decision_date_safe}")
+            pdf.cell(0, 8, f"❌ REJECTED", ln=True)
+            pdf.set_font("Courier", "", 11)
+            pdf.cell(0, 6, f"Rejected by: {decision_by_safe}", ln=True)
+            pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
         else:
-            stamp_file = None
-        if status == "approved":
-            pdf_row("Decision", f"✅ APPROVED — by {decision_by_safe} on {decision_date_safe}")
-        elif status == "rejected":
-            pdf_row("Decision", f"❌ REJECTED — by {decision_by_safe} on {decision_date_safe}")
-        else:
-            pdf_row("Decision", "⏳ PENDING — Awaiting Approval")
+            pdf.set_font("Courier", "", 11)
+            pdf.cell(0, 8, "⏳ PENDING — Awaiting Director Approval", ln=True)
         
-        if status != "pending":
-            pdf_row("Approved By", decision_by_safe)
-            pdf_row("Approval Date / Time", decision_date_safe)
+        pdf.ln(3)
         if comment_safe:
             pdf_row("Director Comments", comment_safe)
         
-        pdf.ln(15)
+        # ─── SIGNATURE LINE + STAMP IMAGE ───────────────────────
+        pdf.ln(20)
         pdf.cell(0, 6, "-" * 50, ln=True)
         pdf.cell(0, 6, "Authorized Signature / Director", ln=True)
-
-        # Place stamp
-        if stamp_file and os.path.exists(stamp_file):
-            pdf.image(stamp_file, x=80, y=pdf.get_y() - 5, w=50)
-
-        # Attachments
+        
+        # ✅ APPROVAL STAMP IMAGE — NOW WITH CORRECT PATH!
+        stamp_file_path = os.path.join(BASE_DIR, "approved_stamp.png")
+        stamp_rejected_path = os.path.join(BASE_DIR, "rejected_stamp.png")
+        
+        if status == "approved" and os.path.exists(stamp_file_path):
+            try:
+                pdf.image(stamp_file_path, x=110, y=pdf.get_y() - 8, w=55)
+            except Exception as e:
+                pass  # Skip stamp if image error
+        elif status == "rejected" and os.path.exists(stamp_rejected_path):
+            try:
+                pdf.image(stamp_rejected_path, x=110, y=pdf.get_y() - 8, w=55)
+            except Exception as e:
+                pass
+        
+        # ─── ATTACHMENTS ────────────────────────────────────────
         att_names = fresh_data.get("attachment_name", "None")
         if att_names and att_names != "None":
             attached_files = [n.strip() for n in att_names.split(",")]
@@ -555,13 +571,23 @@ def generate_approval_pdf(request_data):
                     try:
                         pdf.image(file_path, x=10, y=pdf.get_y(), w=190)
                     except Exception:
-                        pdf.multi_cell(0, 8, f"File: {file_path}")
-
-        # ✅ SAVE AND RETURN IN CORRECT ORDER: (ok, path, name)
+                        pdf.multi_cell(0, 8, f"File: {file_name}")
+        
+        # ✅ SAVE PDF
         pdf.output(full_pdf_path)
+        
+        # ✅ SAVE PDF PATH BACK TO EXCEL
+        records = load_records_from_excel()
+        for r in records:
+            if int(r["id"]) == int(req_id):
+                r["pdf_path"] = full_pdf_path
+                break
+        save_all_records(records)
+        
         return True, full_pdf_path, filename
-
+    
     except Exception as e:
+        import traceback
         return False, None, f"PDF Error: {str(e)}"
 
 # ============================================================
