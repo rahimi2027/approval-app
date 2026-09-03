@@ -1063,158 +1063,124 @@ else:
                         st.warning("⏳ Waiting for Director Approval")
                         display_attachments(req)
 
+      # ========================================================
+    # 👔 MANAGER PORTAL
     # ========================================================
-    # 🛡️ SUPER ADMIN PORTAL
-    # ========================================================
-    elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin Control Centre")
-        tab_users, tab_settings, tab_requests = st.tabs(["👤 User Management", "⚙️ System Settings", "📋 All Requests"])
-        with tab_users:
-            user_management_panel()
-        with tab_settings:
-            settings_management_panel()
-        with tab_requests:
-            # ===== SUPER ADMIN EDIT FORM =====
-            if st.session_state.editing_request_id:
-                eid = st.session_state.editing_request_id
-                rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
-                if rec:
-                    st.subheader(f"✏️ Edit Request #{eid} — Super Admin")
-                    show_old_new_comparison("{}", rec)
-                    with st.form("sa_edit_form"):
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            en = st.text_input("👤 Employee Name", rec["emp_name"])
-                            rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec["type"]))
-                            ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=CATEGORIES.index(rec["category"]) if rec["category"] in CATEGORIES else 0)
-                            amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec["amount"]))
-                        with c2:
-                            from datetime import datetime as dt
-                            try:
-                                d = dt.strptime(rec["date"][:10], "%Y-%m-%d")
-                            except:
-                                d = dt.today()
-                            dt_val = st.date_input("📅 Date", d)
-                            mgr = st.text_input("👔 Line Manager", rec["manager"])
-                            dept_list = load_departments()
-                            dept_sel = st.selectbox("🏢 Department", dept_list, index=dept_list.index(rec["dept"]) if rec["dept"] in dept_list else 0)
-                            desc = st.text_area("📝 Description / Justification", rec["desc"])
-                            files = st.file_uploader("📎 Add Supporting Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-                        
-                        st.divider()
-                        new_status = st.selectbox("🔄 Change Status", ["pending", "approved", "rejected"], 
-                            index=["pending", "approved", "rejected"].index(rec["status"]) if rec["status"] in ["pending", "approved", "rejected"] else 0)
-                        admin_comments = st.text_area("💬 Comments / Notes")
-                        
-                        if st.form_submit_button("💾 Save All Changes", type="primary"):
-                            # ✅ GET ALL NEW VALUES FROM FORM — CLEAR & DIRECT
-                            new_emp_name = str(en.strip())
-                            new_dept = str(dept_sel)
-                            new_type = str(rt)
-                            new_category = str(ct)
-                            new_amount = round(float(amt), 2)  # ✅ FORCE 2 DECIMALS
-                            new_date = str(dt_val)
-                            new_manager = str(mgr.strip())
-                            new_desc = str(desc.strip())
-                            new_status_val = str(new_status)
-                            
-                            old = str({
-                                "emp_name": rec["emp_name"], "dept": rec["dept"], 
-                                "type": rec["type"], "category": rec["category"], 
-                                "date": rec["date"], "amount": rec["amount"], 
-                                "manager": rec["manager"], "desc": rec["desc"]
-                            })
-                            
-                            # ✅ LOAD, UPDATE, AND SAVE — VERY CLEAR
+    elif user["role"] == "Manager":
+        if st.session_state.editing_request_id:
+            eid = st.session_state.editing_request_id
+            rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
+            if rec:
+                st.subheader(f"✏️ Edit Request #{eid}")
+                show_old_new_comparison("{}", rec)
+                with st.form("edit_form"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        en = st.text_input("👤 Employee Name", rec["emp_name"])
+                        rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec["type"]))
+                        ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=CATEGORIES.index(rec["category"]) if rec["category"] in CATEGORIES else 0)
+                        amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec["amount"])))
+                    with c2:
+                        from datetime import datetime as dt
+                        try: d = dt.strptime(rec["date"][:10], "%Y-%m-%d")
+                        except: d = dt.today()
+                        dt_val = st.date_input("📅 Date", d)
+                        mgr = st.text_input("👔 Line Manager", rec["manager"])
+                        desc = st.text_area("📝 Description / Justification", rec["desc"])
+                        files = st.file_uploader("📎 Add Supporting Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+                        if st.form_submit_button("✅ Submit Edit"):
+                            old = str({"emp_name": rec["emp_name"], "dept": rec["dept"], "type": rec["type"], "category": rec["category"], "date": rec["date"], "amount": rec["amount"], "manager": rec["manager"], "desc": rec["desc"]})
                             records = load_records_from_excel()
-                            updated = False
                             for r in records:
                                 if int(r["id"]) == int(eid):
-                                    # ✅ WRITE EVERY VALUE EXPLICITLY
-                                    r["emp_name"] = new_emp_name
-                                    r["dept"] = new_dept
-                                    r["type"] = new_type
-                                    r["category"] = new_category
-                                    r["amount"] = new_amount  # ✅ DIRECT ASSIGNMENT
-                                    r["date"] = new_date
-                                    r["manager"] = new_manager
-                                    r["desc"] = new_desc
-                                    r["status"] = new_status_val
+                                    r["emp_name"] = en.strip()
+                                    r["type"] = rt
+                                    r["category"] = ct
+                                    r["amount"] = amt
+                                    r["date"] = str(dt_val)
+                                    r["manager"] = mgr.strip()
+                                    r["desc"] = desc.strip()
+                                    r["status"] = "pending"
                                     r["old_data"] = old
-                                    
-                                    # ✅ DELETE OLD PDF & CLEAR PATH
-                                    old_pdf_path = r.get("pdf_path", "")
-                                    if old_pdf_path and os.path.exists(old_pdf_path):
-                                        try:
-                                            os.remove(old_pdf_path)
-                                        except:
-                                            pass
-                                    r["pdf_path"] = ""
-                                    
-                                    if admin_comments.strip():
-                                        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-                                        r["director_comments"] = f"[{ts}] Super Admin Edit: {admin_comments.strip()}"
-                                    
-                                    # ✅ SAVE NEW ATTACHMENTS
+                                    r["director_comments"] = ""
+                                    r["decision_date"] = ""
+                                    r["decision_by"] = ""
                                     if files:
                                         att_list = []
                                         if r["attachment_name"] and r["attachment_name"] != "None":
                                             att_list.extend([n.strip() for n in r["attachment_name"].split(",")])
                                         for i, f in enumerate(files):
-                                            fn = f"SA_ID_{eid}_EDIT_F{len(att_list)+1}_{f.name}"
+                                            fn = f"ID_{eid}_EDIT_F{len(att_list)+1}_{f.name}"
                                             with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
                                                 out.write(f.getbuffer())
                                             att_list.append(fn)
                                         r["attachment_name"] = ", ".join(att_list) if att_list else "None"
-                                    
-                                    updated = True
-                                    break
-                            
-                            if updated:
-                                save_all_records(records)
-                                
-                                # ✅ READ BACK AND SHOW EXACTLY WHAT IS IN EXCEL
-                                verify = load_records_from_excel()
-                                check = next((x for x in verify if int(x["id"]) == int(eid)), None)
-                                if check:
-                                    st.info(f"📊 **Excel ACTUAL Values:** Amount = **£{check['amount']:.2f}**, Name = **{check['emp_name']}**, Date = **{check['date']}**")
-                                
-                                st.success(f"✅ UPDATED! Now click **📄 Generate PDF** → it will use £{new_amount:.2f}")
-                                st.session_state.editing_request_id = None
-                                st.rerun()
-                            else:
-                                st.error("❌ Could not find request to update!")
-                    
-
-            # ===== SHOW ALL REQUESTS LIST =====
-            if not all_live_requests:
-                st.info("📋 No requests yet.")
-            else:
-                for req in reversed(all_live_requests):
-                    icon = "🟡" if req["status"] == "pending" else ("🟢" if req["status"] == "approved" else "🔴")
-                    title = f"{icon} ID #{req['id']} | {req['status'].upper()} | {req['emp_name']} | £{req['amount']:.2f} | {req['dept']}"
-                    with st.expander(title):
-                        if req.get("old_data"):
-                            show_old_new_comparison(req["old_data"], req)
-                        st.write(f"🏢 Dept: {req['dept']} | 🔄 Type: {req['type']} | 🏷️ Cat: {req['category']}")
-                        st.write(f"📅 Date: {req['date']} | 👔 Manager: {req['manager']}")
-                        st.info(f"📝 Desc: {req['desc']}")
-                        display_attachments(req)
-                        if req["status"] == "approved":
-                            display_pdf_button(req, can_generate=True)
-                        
-                        col_edit, col_del = st.columns(2)
-                        with col_edit:
-                            if st.button(f"✏️ Edit #{req['id']}", key=f"e{req['id']}"):
-                                st.session_state.editing_request_id = req["id"]
-                                st.rerun()
-                        with col_del:
-                            if st.button(f"🗑️ Delete #{req['id']}", key=f"d{req['id']}", type="secondary"):
-                                delete_record_by_id(req["id"])
-                                st.success("✅ Deleted")
-                                st.rerun()
-
-
+                            save_all_records(records)
+                            st.success(f"✅ Updated & sent for approval!")
+                            st.session_state.editing_request_id = None
+                            st.rerun()
+                if st.button("❌ Cancel"):
+                    st.session_state.editing_request_id = None
+                    st.rerun()
+        st.subheader(f"➕ New Request — {user['dept']}")
+        nid = get_next_id(all_live_requests)
+        st.markdown(f"**🆔 Request ID:** `#{nid}`")
+        with st.form("new_req", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                en = st.text_input("👤 Employee Name")
+                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
+                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
+                amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
+            with c2:
+                from datetime import datetime as dt
+                dt_val = st.date_input("📅 Date", value=dt.today())
+                mgr = st.text_input("👔 Line Manager")
+                files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+                desc = st.text_area("📝 Description / Justification")
+                if st.form_submit_button("📤 Send to Director", type="primary"):
+                    if en.strip() and mgr.strip() and desc.strip():
+                        att_list = []
+                        if files:
+                            for i, f in enumerate(files):
+                                fn = f"ID_{nid}_F{i+1}_{f.name}"
+                                with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
+                                    out.write(f.getbuffer())
+                                att_list.append(fn)
+                        payload = {
+                            "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+                            "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
+                            "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
+                            "status": "pending", "director_comments": "", "decision_date": "",
+                            "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
+                        }
+                        save_record_to_excel(payload)
+                        st.success(f"✅ Request #{nid} sent for approval!")
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+        st.divider()
+        st.subheader(f"📋 My Department Requests")
+        my_reqs = [r for r in all_live_requests if r["dept"] == user["dept"]]
+        if not my_reqs:
+            st.info("📋 No requests yet.")
+        else:
+            for req in reversed(my_reqs):
+                icon = "🟡" if req["status"] == "pending" else ("🟢" if req["status"] == "approved" else "🔴")
+                title = f"{icon} ID #{req['id']} | {req['status'].upper()} | £{req['amount']:.2f} | 📅 {format_date(req['date'])}"
+                with st.expander(title):
+                    st.write(f"👤 Employee: {req['emp_name']} | 👔 Manager: {req['manager']}")
+                    st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
+                    st.info(f"📝 Description: {req['desc']}")
+                    display_attachments(req)
+                    if req["director_comments"]:
+                        st.info(f"💬 Director Comments: {req['director_comments']}")
+                    if req["status"] == "approved":
+                        display_pdf_button(req, can_generate=False)
+                    if req["status"] in ["pending", "rejected"]:
+                        if st.button(f"✏️ Edit Request #{req['id']}", key=f"edit_{req['id']}"):
+                            st.session_state.editing_request_id = req["id"]
+                            st.rerun()
     # ============================================================
 # 📥 BACKUP DOWNLOAD BUTTON — Add this in Super Admin section
 # ============================================================
