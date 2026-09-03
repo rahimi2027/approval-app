@@ -235,7 +235,6 @@ def init_settings():
 # ============================================================
 # DEPARTMENTS FUNCTIONS — Add / Edit / Delete Departments
 # ============================================================
-DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
 
 def load_departments():
     """Load departments from settings or return defaults"""
@@ -840,7 +839,7 @@ def user_management_panel():
             new_username = st.text_input("🔐 Username (Login ID)", placeholder="e.g. john_smith").lower().strip()
             new_password = st.text_input("🔑 Password", type="password")
             new_role = st.selectbox("🎖️ Role / Permission Level", ROLES)
-            new_dept = st.selectbox("🏢 Department", DEPARTMENTS)
+            new_dept = st.selectbox("🏢 Department", load_departments())
             st.markdown("#### 📋 Role Permissions:")
             st.info("""
             - **Manager** → Submit & edit requests for their department only
@@ -875,7 +874,8 @@ def user_management_panel():
                 upd_username_new = st.text_input("🔐 Change Username (Login ID)", value=edit_user_sel).lower().strip()
                 upd_password = st.text_input("🔑 New Password (leave blank to keep current)", type="password")
                 upd_role = st.selectbox("🎖️ Change Role / Permission Level", ROLES, index=ROLES.index(curr["role"]) if curr["role"] in ROLES else 0)
-                upd_dept = st.selectbox("🏢 Change Department", DEPARTMENTS, index=DEPARTMENTS.index(curr["dept"]))
+                dept_list = load_departments()
+                upd_dept = st.selectbox("🏢 Change Department", dept_list, index=dept_list.index(curr["dept"]) if curr["dept"] in dept_list else 0)
                 if st.form_submit_button("🔄 Update All Details", type="primary"):
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
@@ -1067,7 +1067,8 @@ else:
                                 d = dt.today()
                             dt_val = st.date_input("📅 Date", d)
                             mgr = st.text_input("👔 Line Manager", rec["manager"])
-                            dept_sel = st.selectbox("🏢 Department", DEPARTMENTS, index=DEPARTMENTS.index(rec["dept"]) if rec["dept"] in DEPARTMENTS else 0)
+                            dept_list = load_departments()
+                            dept_sel = st.selectbox("🏢 Department", dept_list, index=dept_list.index(rec["dept"]) if rec["dept"] in dept_list else 0)
                             desc = st.text_area("📝 Description / Justification", rec["desc"])
                             files = st.file_uploader("📎 Add Supporting Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
                         
