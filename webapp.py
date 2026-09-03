@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ SYNTAX FIXED + LOGO ONLY + DASHED LINE + STAMP
+# PDF GENERATION — ✅ COURIER FONT + DOUBLE LINE + LOGO + STAMP
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -430,7 +430,7 @@ def generate_approval_pdf(request_data):
             request_data
         )
 
-        # ✅ CLEANER — REMOVES ALL UNSUPPORTED CHARACTERS
+        # ✅ CLEAN TEXT — REMOVE UNSUPPORTED CHARACTERS
         def clean_text(t):
             t = str(t)
             t = t.replace("\u2013", "-")
@@ -442,7 +442,7 @@ def generate_approval_pdf(request_data):
                 t = t.replace(char, " ")
             return t.strip()
 
-        # ✅ SAFE DATE
+        # ✅ SAFE DATE FORMAT
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
                 return "-"
@@ -472,21 +472,23 @@ def generate_approval_pdf(request_data):
         # ✅ MOVE DOWN AFTER LOGO
         pdf.ln(22)
 
-        # ✅ FORM TITLE ONLY — NO COMPANY NAME
-        pdf.set_font("Helvetica", "", 11)
+        # ✅ FORM TITLE — Courier font
+        pdf.set_font("Courier", "", 11)
         pdf.cell(0, 5, txt="Addition & Deduction Approval Form", ln=True, align="C")
-        pdf.ln(4)
+        pdf.ln(3)
 
-        # ✅ TOP HORIZONTAL LINE
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(10)
+        # ✅ DOUBLE HORIZONTAL LINE — matches your screenshot
+        line_y = pdf.get_y()
+        pdf.line(10, line_y, 200, line_y)
+        pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
+        pdf.ln(12)
 
         # ─── REQUEST DETAILS ─────────────────────────────
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True)
         pdf.ln(2)
 
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font("Courier", "", 9)
 
         pdf.cell(52, 5, "Request ID:", 0, 0)
         pdf.cell(0, 5, str(fresh_data.get("id", "")), ln=True)
@@ -515,29 +517,29 @@ def generate_approval_pdf(request_data):
         pdf.ln(6)
 
         # ─── DESCRIPTION / JUSTIFICATION ──────────────────
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.ln(2)
 
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font("Courier", "", 9)
         pdf.multi_cell(0, 5, desc)
         pdf.ln(8)
 
         # ─── DIRECTOR APPROVAL ────────────────────────────
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
 
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font("Courier", "", 9)
 
-        # ✅ === FIXED IF/ELSE BLOCK ===
+        # ✅ CLEAN IF/ELSE — NO SYNTAX ERRORS
         if status.lower() == "approved" and dir_approve != "-":
             pdf.cell(52, 5, "Decision:", 0, 0)
-            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_font("Courier", "B", 9)
             pdf.set_text_color(0, 128, 0)
             pdf.cell(0, 5, "APPROVED", ln=True)
             pdf.set_text_color(0, 0, 0)
-            pdf.set_font("Helvetica", "", 9)
+            pdf.set_font("Courier", "", 9)
             pdf.cell(52, 5, "Approved By:", 0, 0)
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
@@ -548,30 +550,30 @@ def generate_approval_pdf(request_data):
 
         pdf.ln(10)
 
-        # ✅ DASHED / BROKEN LINE above signature text
+        # ✅ DASHED / BROKEN LINE above signature
         dash_y = pdf.get_y()
         for x in range(10, 200, 4):
             pdf.line(x, dash_y, x + 2, dash_y)
 
-        # ✅ GREEN APPROVED STAMP — centered on the dashed line
+        # ✅ APPROVED STAMP — centered on dashed line
         APPROVED_STAMP_PATH = "approved_stamp.png"
         if status.lower() == "approved" and os.path.exists(APPROVED_STAMP_PATH):
             pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
 
         pdf.ln(8)
 
-        # ✅ BOTTOM SIGNATURE TEXT
-        pdf.set_font("Helvetica", "", 8)
+        # ✅ SIGNATURE TEXT
+        pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
 
-        # ─── ✅ FILENAME ───
+        # ─── FILENAME ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
         safe_date = datetime.now().strftime("%Y-%m-%d")
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
 
-        # ─── ✅ BYTES FIX — Works on ALL fpdf2 versions ───
+        # ─── BYTES FIX — Works on ALL fpdf2 versions ───
         pdf_output = pdf.output()
         if isinstance(pdf_output, (bytes, bytearray)):
             pdf_bytes = bytes(pdf_output)
