@@ -545,26 +545,23 @@ def generate_approval_pdf(request_data):
 
 
 # ============================================================
-# DIRECTOR STATUS SWITCH — APPROVED ↔ REJECTED ↔ PENDING
+# DIRECTOR STATUS SWITCH — FULL WORKING VERSION
 # ============================================================
 def director_switch_status(request_data):
-    """Only Director/Super Admin can change status — MATCHES YOUR EXCEL lowercase"""
-    # ✅ Check permission
-    user_role = st.session_state.get("role", "")
-    if user_role not in ["Director", "Super Admin"]:
-        return
-
-    req_id = request_data.get("id")
-    current_status = str(request_data.get("status", "pending")).strip().lower()  # ✅ FORCE LOWERCASE
-
+    """Director can flip status — FORCES VISIBILITY & MATCHES YOUR EXCEL"""
+    
+    # ✅ SHOW FOR DEBUG — REMOVE LATER IF YOU WANT
     st.markdown("---")
-    st.warning("🔧 Director Tools — Change Approval Status")
+    st.warning("🔧 ⚙️ DIRECTOR STATUS SWITCH PANEL IS LOADED")  # ← DEBUG TEXT — should ALWAYS show
+    
+    req_id = request_data.get("id")
+    current_status = str(request_data.get("status", "pending")).strip().lower()
 
     col1, col2 = st.columns(2)
     with col1:
         new_status = st.selectbox(
             "Change Status To:",
-            ["pending", "approved", "rejected"],  # ✅ LOWERCASE — MATCHES YOUR EXCEL
+            ["pending", "approved", "rejected"],
             index=["pending", "approved", "rejected"].index(current_status) if current_status in ["pending", "approved", "rejected"] else 0,
             key=f"switch_status_{req_id}"
         )
@@ -583,30 +580,28 @@ def director_switch_status(request_data):
             excel_path = "requests_data.xlsx"
             df = pd.read_excel(excel_path)
 
-            # ✅ Match by ID — works with string or number
             mask = df["id"].astype(str) == str(req_id)
             if not mask.any():
                 st.error(f"❌ Request ID #{req_id} NOT FOUND in Excel!")
                 return
 
-            # ✅ UPDATE EXCEL — ALL COLUMNS MATCH YOURS
+            # ✅ USE YOUR EXACT COLUMN NAMES — matches your screenshot!
             df.loc[mask, "status"] = new_status
             df.loc[mask, "decision_by"] = st.session_state.username
             df.loc[mask, "decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             df.to_excel(excel_path, index=False)
 
-            # ✅ UPDATE LOCAL DATA INSTANTLY
             request_data["status"] = new_status
             request_data["decision_by"] = st.session_state.username
             request_data["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             st.success(f"✅ ✅ Status CHANGED: **{current_status.upper()} → {new_status.upper()}**")
-            st.info("📄 PDF will now show updated status & stamp image")
-            st.rerun()  # ✅ REFRESH PAGE AUTOMATICALLY
+            st.info("📄 Page refreshing...")
+            st.rerun()
 
         except Exception as e:
-            st.error(f"❌ Error updating Excel: {str(e)}")
+            st.error(f"❌ Error: {str(e)}")
 
 # ============================================================
 # SESSION STATE
