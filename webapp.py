@@ -1,6 +1,6 @@
-============================================================
-🔄 GITHUB AUTO-SAVE — KEEPS DATA PERMANENT & SYNCED
-============================================================
+# ============================================================
+# 🔄 GITHUB AUTO-SAVE — KEEPS DATA PERMANENT & SYNCED
+# ============================================================
 import streamlit as st
 import os
 import subprocess
