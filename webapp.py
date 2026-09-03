@@ -84,7 +84,17 @@ def display_pdf_button(req, can_generate=False):
     
     # ✅ GENERATE FRESH PDF WHEN BUTTON CLICKED
     if can_generate and PDF_AVAILABLE:
-        if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
+        def display_pdf_button(req, can_generate=False, key_suffix=""):
+    req_id = req.get("id")
+    unique_key = f"genpdf_{req_id}_{key_suffix}"  # ✅ UNIQUE per tab!
+    if can_generate:
+        if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=unique_key):
+            ok, path, name = generate_approval_pdf(req)
+            if ok and path:
+                with open(path, "rb") as f:
+                    st.download_button("📥 Download PDF", f.read(), file_name=name, type="primary", key=f"dl_{unique_key}")
+            else:
+                st.error(f"❌ {name}")
             ok, pdf_bytes, name = generate_approval_pdf(req)
             if ok:
                 st.success(f"✅ Generated! Ready to download ↓")
