@@ -428,14 +428,15 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — CLOUD-COMPATIBLE VERSION (NO PERMISSION ISSUES)
+# ============================================================
+# PDF GENERATION — FINAL CLOUD-COMPATIBLE VERSION
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     
     try:
-        import tempfile
+        import io
         
         # ✅ READ FRESH DATA FROM EXCEL
         req_id = request_data.get("id")
@@ -460,17 +461,13 @@ def generate_approval_pdf(request_data):
         dept_safe = clean_text(fresh_data.get("dept", ""))
         manager_safe = clean_text(fresh_data.get("manager", ""))
         
-        # ✅ SAFE FILENAME (NO SPECIAL CHARS)
+        # ✅ SAFE FILENAME
         safe_emp = "".join(c for c in emp_name_safe if c.isalnum() or c in (" ", "-", "_")).strip() or "Request"
         safe_cat = "".join(c for c in category_safe if c.isalnum() or c in (" ", "-", "_")).strip() or "Approval"
         safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
         filename = f"{safe_emp}_{safe_cat}_{safe_date}.pdf"
         
-        # ✅ USE GUARANTEED-WRITABLE TEMP FOLDER
-        temp_dir = tempfile.gettempdir()
-        full_pdf_path = os.path.join(temp_dir, filename)
-        
-        # ✅ CREATE PDF
+        # ✅ CREATE PDF IN MEMORY (NO FOLDER NEEDED!)
         pdf = FPDF("P", "mm", "A4")
         pdf.add_page()
         pdf.set_font("Courier", "", 12)
@@ -478,8 +475,7 @@ def generate_approval_pdf(request_data):
         # Logo
         if os.path.exists(LOGO_PATH):
             try: pdf.image(LOGO_PATH, x=10, y=8, w=40)
-            except Exception as e:
-                pass
+            except: pass
         
         pdf.set_xy(60, 10)
         pdf.set_font("Courier", "B", 18)
@@ -521,7 +517,7 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
         
-        # ✅ STATUS DISPLAY
+        # ✅ STATUS DISPLAY — Shows APPROVED + Stamp
         pdf.set_font("Courier", "B", 14)
         if status == "approved":
             pdf.cell(0, 8, "✅ APPROVED", ln=True)
@@ -575,31 +571,18 @@ def generate_approval_pdf(request_data):
                     try: pdf.image(file_path, x=10, y=pdf.get_y(), w=190)
                     except Exception: pdf.multi_cell(0, 8, f"File: {file_name}")
         
-        # ✅ SAVE PDF TO TEMP PATH
-        pdf.output(full_pdf_path)
+        # ✅ OUTPUT PDF TO MEMORY — NO SAVE TO FOLDER NEEDED!
+        pdf_bytes = io.BytesIO()
+        pdf.output(pdf_bytes)
+        pdf_bytes.seek(0)
         
-        # ✅ VERIFY FILE WAS CREATED
-        if not os.path.exists(full_pdf_path):
-            return False, None, f"FAILED: PDF not written to {full_pdf_path}"
-        
-        if os.path.getsize(full_pdf_path) < 100:
-            return False, None, f"FAILED: PDF file is empty/corrupted"
-        
-        # ✅ SAVE PATH TO EXCEL
-        records = load_records_from_excel()
-        for r in records:
-            if int(r["id"]) == int(req_id):
-                r["pdf_path"] = full_pdf_path
-                break
-        save_all_records(records)
-        
-        return True, full_pdf_path, filename
+        # ✅ RETURN SUCCESS + BYTES
+        return True, pdf_bytes, filename
     
     except Exception as e:
         import traceback
-        error_detail = traceback.format_exc()
         print("=== FULL PDF ERROR ===")
-        print(error_detail)
+        print(traceback.format_exc())
         return False, None, f"Error: {str(e)}"
 
 # ============================================================
