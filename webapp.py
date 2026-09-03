@@ -961,7 +961,9 @@ else:
     user = st.session_state.user_info
     CAN_GEN_PDF = user["role"] in ["Payroll", "Super Admin"]
     FULL_NAME = user.get("full_name", user["username"])
-    CATEGORIES = load_categories()
+    CATEGORIES = load_categories()   # ✅ PASTE IT HERE
+    refresh_data_button()
+    ...
 
     refresh_data_button()
     all_live_requests = load_records_from_excel()
