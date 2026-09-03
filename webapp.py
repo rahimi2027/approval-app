@@ -915,63 +915,89 @@ else:
             st.rerun()
     st.divider()
 
+       # ========================================================
+    # 🧾 PAYROLL PORTAL
     # ========================================================
-    # PAYROLL PORTAL
-    # ========================================================
-    if user["role"] == "Payroll":
-        st.subheader("💰 Payroll Department Portal")
-        st.info("✅ View approved & pending requests, review details, generate/download PDFs.")
+    elif user["role"] == "Payroll":
+        st.subheader("🧾 Payroll Portal")
+        st.info("✅ View all requests, Download PDFs, and Reject requests when needed.")
         st.divider()
-        tab_approved, tab_pending = st.tabs(["✅ Approved Requests", "🟡 Pending Requests"])
-
+        tab_pending, tab_approved, tab_rejected = st.tabs([
+            "⏳ Pending Requests",
+            "✅ Approved Requests",
+            "❌ Rejected Requests"
+        ])
+        
+        with tab_pending:
+            pending = [r for r in all_live_requests if r["status"] == "pending"]
+            if not pending:
+                st.success("✅ No pending requests!")
+            else:
+                st.metric("⏳ Pending", len(pending))
+                st.divider()
+                for req in reversed(pending):
+                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Type:** {req['type']}")
+                        st.write(f"🏷️ **Category:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Date:** {req['date']}")
+                        st.info(f"📝 **Description:** {req['desc']}")
+                        display_attachments(req)
+                        st.divider()
+                        
+                        # ✅ PAYROLL CAN REJECT
+                        with st.form(f"payroll_reject_pending_{req['id']}"):
+                            comments = st.text_area("💬 Reason for Rejection")
+                            reject_btn = st.form_submit_button("❌ REJECT", type="secondary")
+                            if reject_btn:
+                                update_record_status_in_excel(req["id"], "rejected", "[Payroll] " + comments, FULL_NAME)
+                                st.warning(f"❌ Request #{req['id']} REJECTED by Payroll!")
+                                st.rerun()
+                        
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+        
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
             if not approved:
                 st.info("📋 No approved requests yet.")
             else:
-                st.metric("✅ Total Approved", len(approved))
+                st.metric("✅ Approved", len(approved))
                 st.divider()
                 for req in reversed(approved):
-                    approved_by_display = req.get("decision_by", "Director")
-                    approved_date_display = format_date(req.get("decision_date", ""))
-                    if approved_date_display and approved_date_display != "—":
-                        approved_by_line = f"✅ Approved by {approved_by_display} on {approved_date_display}"
-                    else:
-                        approved_by_line = f"✅ Approved by {approved_by_display}"
-                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {approved_by_line}"
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"
                     with st.expander(title):
-                        st.write(f"👤 Employee: {req['emp_name']}")
-                        st.write(f"🏢 Department: {req['dept']}")
-                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                        st.write(f"💷 Amount: £{req['amount']:.2f}")
-                        st.write(f"👔 Line Manager: {req['manager']}")
-                        st.write(f"📅 Request Date: {req['date']}")
-                        st.info(f"📝 Description: {req['desc']}")
-                        if req["director_comments"]:
-                            st.success(f"💬 Director Comments: {req['director_comments']}")
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"📅 **Date:** {req['date']}")
+                        st.success(f"💬 **Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider()
-                        display_pdf_button(req, can_generate=True, key_suffix="pay_approved")
-
-        with tab_pending:
-            pending = [r for r in all_live_requests if r["status"] == "pending"]
-            if not pending:
-                st.info("✅ No pending requests.")
+                        display_pdf_button(req, can_generate=True)
+        
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+            if not rejected:
+                st.info("📋 No rejected requests yet.")
             else:
-                st.metric("🟡 Pending Requests", len(pending))
+                st.metric("❌ Rejected", len(rejected))
                 st.divider()
-                for req in reversed(pending):
-                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | ⏳ Pending"
+                for req in reversed(rejected):
+                    title = f"🔴 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"
                     with st.expander(title):
-                        st.write(f"👤 Employee: {req['emp_name']}")
-                        st.write(f"🏢 Department: {req['dept']}")
-                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                        st.write(f"💷 Amount: £{req['amount']:.2f}")
-                        st.write(f"👔 Line Manager: {req['manager']}")
-                        st.write(f"📅 Request Date: {req['date']}")
-                        st.info(f"📝 Description: {req['desc']}")
-                        st.warning("⏳ Waiting for Director Approval")
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"📅 **Date:** {req['date']}")
+                        st.error(f"💬 **Reason:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
 
     # ========================================================
     # MANAGER PORTAL
