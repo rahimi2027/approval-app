@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ MATCHES YOUR DESIGN EXACTLY + STAMP ON SIGNATURE LINE
+# PDF GENERATION — ✅ MATCHES FIRST IMAGE FONT + DASHED SIGNATURE LINE + CENTER STAMP
 # ============================================================
 def generate_approval_pdf(request_data):
     import os
@@ -430,7 +430,7 @@ def generate_approval_pdf(request_data):
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
         
         def clean_text(t):
-            return str(t).replace("—", "-").replace("–", "-").strip()
+            return str(t).replace("—", "-").replace("–", "-").replace(":", "-").replace("/", "-").replace("\\", "-").strip()
         
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
@@ -449,131 +449,143 @@ def generate_approval_pdf(request_data):
         date_submitted = format_date(fresh_data.get("date", fresh_data.get("submitted_date", "")))
         transaction_type = clean_text(fresh_data.get("type", "-"))
         line_manager = clean_text(fresh_data.get("manager", "-"))
-        
-        # ✅ CREATE PDF — A4, Matching Your Design
+
+        # ✅ CREATE PDF
         from fpdf import FPDF
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
-        
+
+        # ─── USE COURIER / TYPEWRITER FONT LIKE FIRST IMAGE ───────
+        pdf.set_font("Courier", "", 11)
+
         # ─── HEADER: LOGO + COMPANY NAME ──────────────────────────
         LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
         if os.path.exists(LOGO_PATH):
-            pdf.image(LOGO_PATH, x=15, y=12, w=50)  # Logo top-left like your design
-        pdf.ln(5)
-        pdf.set_font("Helvetica", "B", 16)
+            pdf.image(LOGO_PATH, x=15, y=12, w=50)
+
+        pdf.ln(6)
+        pdf.set_font("Courier", "B", 16)
         pdf.cell(0, 10, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
-        pdf.set_font("Helvetica", "", 12)
+
+        pdf.set_font("Courier", "", 11)
         pdf.cell(0, 8, txt="Addition & Deduction - APPROVAL FORM", ln=True, align="C")
-        pdf.ln(5)
-        pdf.line(20, pdf.get_y(), 190, pdf.get_y())  # Horizontal line
-        pdf.ln(12)
-        
-        # ─── SECTION: REQUEST DETAILS ──────────────────────────────
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, txt="REQUEST DETAILS", ln=True)
         pdf.ln(4)
-        
-        pdf.set_font("Helvetica", "", 12)
-        label_w = 55  # Label column width
-        
-        pdf.cell(label_w, 8, txt="Request ID:", border=0)
-        pdf.cell(0, 8, txt=f"#{req_id}", ln=True)
-        
-        pdf.cell(label_w, 8, txt="Employee Name:", border=0)
-        pdf.cell(0, 8, txt=emp_name, ln=True)
-        
-        pdf.cell(label_w, 8, txt="Department:", border=0)
-        pdf.cell(0, 8, txt=dept, ln=True)
-        
-        pdf.cell(label_w, 8, txt="Transaction Type:", border=0)
-        pdf.cell(0, 8, txt=transaction_type, ln=True)
-        
-        pdf.cell(label_w, 8, txt="Category / Reason:", border=0)
-        pdf.cell(0, 8, txt=category, ln=True)
-        
-        pdf.cell(label_w, 8, txt="Request Date:", border=0)
-        pdf.cell(0, 8, txt=date_submitted, ln=True)
-        
-        pdf.cell(label_w, 8, txt="Amount Approved:", border=0)
-        pdf.cell(0, 8, txt=f"£{amount}", ln=True)
-        
-        pdf.cell(label_w, 8, txt="Line Manager:", border=0)
-        pdf.cell(0, 8, txt=line_manager, ln=True)
-        
+
+        # ─── THIN DOUBLE LINE LIKE FIRST IMAGE ─────────────────────
+        pdf.set_draw_color(0, 0, 0)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(1)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(12)
+
+        # ─── SECTION: REQUEST DETAILS ──────────────────────────────
+        pdf.set_font("Courier", "B", 11)
+        pdf.cell(0, 8, txt="REQUEST DETAILS", ln=True)
+        pdf.ln(5)
+
+        pdf.set_font("Courier", "", 11)
+        label_w = 55
+
+        pdf.cell(label_w, 7, txt="Request ID:", border=0)
+        pdf.cell(0, 7, txt=f"#{req_id}", ln=True)
+
+        pdf.cell(label_w, 7, txt="Employee Name:", border=0)
+        pdf.cell(0, 7, txt=emp_name, ln=True)
+
+        pdf.cell(label_w, 7, txt="Department:", border=0)
+        pdf.cell(0, 7, txt=dept, ln=True)
+
+        pdf.cell(label_w, 7, txt="Transaction Type:", border=0)
+        pdf.cell(0, 7, txt=transaction_type, ln=True)
+
+        pdf.cell(label_w, 7, txt="Category / Reason:", border=0)
+        pdf.cell(0, 7, txt=category, ln=True)
+
+        pdf.cell(label_w, 7, txt="Request Date:", border=0)
+        pdf.cell(0, 7, txt=date_submitted, ln=True)
+
+        pdf.cell(label_w, 7, txt="Amount Approved:", border=0)
+        pdf.cell(0, 7, txt=f"£{amount}", ln=True)
+
+        pdf.cell(label_w, 7, txt="Line Manager:", border=0)
+        pdf.cell(0, 7, txt=line_manager, ln=True)
+
         pdf.ln(10)
-        
+
         # ─── SECTION: DESCRIPTION / JUSTIFICATION ──────────────────
-        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_font("Courier", "B", 11)
         pdf.cell(0, 8, txt="DESCRIPTION / JUSTIFICATION", ln=True)
-        pdf.set_font("Helvetica", "", 12)
+        pdf.set_font("Courier", "", 11)
         pdf.multi_cell(0, 7, txt=reason)
         pdf.ln(10)
-        
+
         # ─── SECTION: DIRECTOR APPROVAL ────────────────────────────
-        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_font("Courier", "B", 11)
         pdf.cell(0, 8, txt="DIRECTOR APPROVAL", ln=True)
-        pdf.ln(4)
-        
-        pdf.set_font("Helvetica", "", 12)
-        
-        # Decision: PENDING / APPROVED / REJECTED
+        pdf.ln(5)
+
+        pdf.set_font("Courier", "", 11)
+
         if fresh_status == "approved":
             decision_text = "APPROVED"
-            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_font("Courier", "B", 11)
             pdf.set_text_color(0, 100, 0)
         elif fresh_status == "rejected":
             decision_text = "REJECTED"
-            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_font("Courier", "B", 11)
             pdf.set_text_color(180, 0, 0)
         else:
             decision_text = "PENDING"
-            pdf.set_font("Helvetica", "", 12)
+            pdf.set_font("Courier", "", 11)
             pdf.set_text_color(100, 100, 100)
-        
-        pdf.cell(label_w, 8, txt="Decision:", border=0)
-        pdf.cell(0, 8, txt=decision_text, ln=True)
+
+        pdf.cell(label_w, 7, txt="Decision:", border=0)
+        pdf.cell(0, 7, txt=decision_text, ln=True)
         pdf.set_text_color(0, 0, 0)
-        
-        # Approved By
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(label_w, 8, txt="Approved By:", border=0)
+
+        pdf.set_font("Courier", "", 11)
+        pdf.cell(label_w, 7, txt="Approved By:", border=0)
         display_name = approved_by if approved_by and approved_by != "" else "—"
-        pdf.cell(0, 8, txt=display_name, ln=True)
-        
-        # Approval Date / Time
-        pdf.cell(label_w, 8, txt="Approval Date / Time:", border=0)
+        pdf.cell(0, 7, txt=display_name, ln=True)
+
+        pdf.cell(label_w, 7, txt="Approval Date / Time:", border=0)
         display_date = approved_date if approved_date and approved_date != "—" else "—"
-        pdf.cell(0, 8, txt=display_date, ln=True)
-        
-        pdf.ln(20)  # Space to signature line
-        
-        # ─── SIGNATURE LINE + STAMP PLACED HERE ────────────────────
+        pdf.cell(0, 7, txt=display_date, ln=True)
+
+        pdf.ln(22)
+
+        # ─── DASHED / BROKEN SIGNATURE LINE ────────────────────────
         signature_y = pdf.get_y()
-        pdf.set_font("Helvetica", "", 11)
+        pdf.set_font("Courier", "", 10)
         pdf.set_text_color(80, 80, 80)
-        pdf.cell(0, 7, txt="___________________________________________________________________________", ln=True)
+
+        # Dashed line: [x1, y1, x2, y2, dash_length, gap_length]
+        pdf.dashed_line(20, signature_y, 190, signature_y, 2, 2)
+        pdf.ln(5)
+
         pdf.cell(0, 7, txt="Authorized Signature / Director", ln=True)
-        
-        # ✅ PLACE APPROVED STAMP ON THE SIGNATURE LINE
+
+        # ─── ✅ CENTER STAMP ON THE SIGNATURE LINE ──────────────────
         if fresh_status == "approved":
             stamp_path = os.path.join(BASE_DIR, "approved_stamp.png")
             if os.path.exists(stamp_path):
-                # Place stamp on right side, OVER the signature line
-                pdf.image(stamp_path, x=130, y=signature_y - 15, w=55, h=55)
-        
+                stamp_width = 55
+                page_width = 210
+                stamp_x = (page_width - stamp_width) / 2  # Center horizontally
+                pdf.image(stamp_path, x=stamp_x, y=signature_y - 18, w=stamp_width, h=55)
+
         pdf.set_text_color(0, 0, 0)
-        
+
         # ─── FILENAME & OUTPUT ─────────────────────────────────────
         filename = f"ID No.{req_id} - {emp_name} - {category}.pdf"
-        
-        # ✅ Output to binary memory
+
         pdf_bytes = io.BytesIO()
         pdf.output(pdf_bytes)
         pdf_bytes.seek(0)
-        
+
         return True, pdf_bytes.read(), filename
-    
+
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
 # ============================================================
