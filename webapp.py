@@ -1221,7 +1221,7 @@ st.divider()
     # ========================================================
     # 👔 MANAGER PORTAL
     # ========================================================
-    elif user["role"] == "Manager":
+        elif user["role"] == "Manager":
         if st.session_state.editing_request_id:
             eid = st.session_state.editing_request_id
             rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
