@@ -1050,10 +1050,10 @@ else:
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         
-                        # ✅ SHOW PREVIOUS REJECTION TO DIRECTOR — THE FIX!
+                        # ✅ PREVIOUS REJECTION COMMENT — NOW VISIBLE TO DIRECTOR!
                         prev_comments = req.get("director_comments", "").strip()
                         if prev_comments:
-                            st.warning(f"📌 PREVIOUS COMMENT / REJECTION REASON:\n\n{prev_comments}")
+                            st.warning(f"📌 PREVIOUS REJECTION REASON:\n\n{prev_comments}")
                         
                         st.divider()
                         with st.form(f"decision_form_{req['id']}"):
