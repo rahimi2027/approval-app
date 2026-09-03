@@ -552,9 +552,7 @@ def director_switch_status(request_data):
     user_role = st.session_state.get("role", "")
     if user_role not in ["Director", "Super Admin"]:
         return False, "Not authorized"
-# ✅ Add this line under your request details
-if st.session_state.role in ["Director", "Super Admin"]:
-    director_switch_status(request_data)
+
     req_id = request_data.get("id")
     current_status = str(request_data.get("status", "Pending")).strip()
 
@@ -574,7 +572,7 @@ if st.session_state.role in ["Director", "Super Admin"]:
 
     if st.button("🔄 Update Status", type="primary", disabled=not confirm, key=f"btn_switch_{req_id}"):
         if new_status == current_status:
-            return False, "No change needed"
+            return False, "No change needed"   # ✅ THIS LINE IS NOW INSIDE THE FUNCTION ✅
 
         try:
             excel_path = "requests_data.xlsx"
