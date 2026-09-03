@@ -1055,10 +1055,10 @@ else:
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         
-                        # ✅ SHOW PREVIOUS REJECTION COMMENT TO DIRECTOR
+                        # ✅ SHOW PREVIOUS REJECTION COMMENT TO DIRECTOR — ADDED!
                         prev_comments = req.get("director_comments", "").strip()
-                        if prev_comments:
-                            st.warning(f"📌 PREVIOUS REJECTION REASON:\n\n{prev_comments}")
+                        if prev_comments and prev_comments.lower() not in ["none", ""]:
+                            st.warning(f"📌 **PREVIOUS REJECTION REASON:**\n\n{prev_comments}")
                         
                         st.divider()
                         with st.form(f"decision_form_{req['id']}"):
@@ -1076,6 +1076,9 @@ else:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
                                 st.warning(f"❌ Request #{req['id']} REJECTED!")
                                 st.rerun()
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+                        director_switch_status(req)
 
        # ========================================================
     # MANAGER PORTAL
