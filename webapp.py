@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — FIXED FONT ERROR + ORIGINAL LAYOUT
+# PDF GENERATION — FIXED: No Corruption + Correct Filename
 # ============================================================
 def generate_approval_pdf(request_data):
     PDF_AVAILABLE = True
@@ -431,24 +431,27 @@ def generate_approval_pdf(request_data):
             request_data
         )
 
-        # ✅ COMPLETE DASH CLEANER — REMOVES ALL UNSUPPORTED DASHES
+        # ✅ CLEANER — REMOVES ALL UNSUPPORTED CHARACTERS
         def clean_text(t):
             t = str(t)
-            t = t.replace("\u2013", "-")  # en-dash
-            t = t.replace("\u2014", "-")  # em-dash
-            t = t.replace("\u2015", "-")  # horizontal bar
-            t = t.replace("\u2212", "-")  # minus sign
+            t = t.replace("\u2013", "-")
+            t = t.replace("\u2014", "-")
+            t = t.replace("\u2212", "-")
             t = t.replace("—", "-")
             t = t.replace("–", "-")
+            # ✅ REMOVE ILLEGAL FILE NAME CHARACTERS
+            t = t.replace("/", " ").replace("\\", " ").replace(":", " ").replace("*", " ")
+            t = t.replace("?", " ").replace('"', " ").replace("<", " ").replace(">", " ")
+            t = t.replace("|", " ")
             return t.strip()
 
-        # ✅ SAFE DATE FORMATTER — NEVER RETURNS LONG DASH!
+        # ✅ SAFE DATE — RETURNS NORMAL DASH
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
-                return "-"  # ✅ USE NORMAL DASH INSTEAD OF "—"
+                return "-"
             return str(d).strip()[:10]
 
-        # ─── EXTRACT FIELDS ──────────────────────────────
+        # ─── EXTRACT ALL FIELDS ──────────────────────────────
         emp_name     = clean_text(fresh_data.get("emp_name", "Unknown"))
         emp_id       = clean_text(fresh_data.get("emp_id", ""))
         category     = clean_text(fresh_data.get("category", ""))
@@ -456,12 +459,11 @@ def generate_approval_pdf(request_data):
         reason       = clean_text(fresh_data.get("reason", ""))
         date_submit  = format_date(fresh_data.get("date_submitted", ""))
         
-        # ✅ READ STATUS LIVE FROM EXCEL
         status       = clean_text(fresh_data.get("status", "Pending")).strip().capitalize()
         dir_approve  = format_date(fresh_data.get("director_approved_date", ""))
         dir_name     = clean_text(fresh_data.get("director_name", "Director"))
 
-        # ─── CREATE PDF ───────────────────────────────────
+        # ─── CREATE PDF ───────────────────────────────────────
         pdf = FPDF()
         pdf.add_page()
 
@@ -474,7 +476,7 @@ def generate_approval_pdf(request_data):
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(8)
 
-        # ─── REQUEST DETAILS ─────────────────────────────
+        # ─── REQUEST DETAILS ─────────────────────────────────
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, "Request ID:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
@@ -511,7 +513,6 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Helvetica", "", 12)
         pdf.cell(0, 8, date_submit, ln=True)
 
-        # ✅ STATUS — CORRECT VALUE FROM EXCEL
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, "Current Status:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
@@ -521,12 +522,11 @@ def generate_approval_pdf(request_data):
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(6)
 
-        # ─── DIRECTOR APPROVAL ────────────────────────────
+        # ─── DIRECTOR APPROVAL ────────────────────────────────
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(0, 8, "Director Approval", ln=True)
         pdf.ln(4)
 
-        # ✅ APPROVAL STAMP & SIGNATURE — ONLY WHEN APPROVED
         APPROVED_STAMP_PATH = "approved_stamp.png"
         SIGNATURE_DIRECTOR_PATH = "director_sign.png"
         
@@ -545,101 +545,23 @@ def generate_approval_pdf(request_data):
         else:
             pdf.cell(0, 8, "Pending Director Approval", ln=True)
 
-        # ─── SAVE PDF ─────────────────────────────────────
+        # ─── ✅ NEW FILE NAME FORMAT: ID# EmployeeName - Category - Date.pdf ───
+        safe_id = clean_text(str(req_id))
+        safe_name = emp_name
+        safe_category = category
+        safe_date = datetime.now().strftime("%Y-%m-%d")
+        
+        filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
+        
         os.makedirs("generated_pdfs", exist_ok=True)
-        filename = f"approval_{req_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         full_pdf_path = os.path.join("generated_pdfs", filename)
+        
+        # ✅ SAVE PDF — CORRECT ORDER, NO CORRUPTION
         pdf.output(full_pdf_path)
         return True, full_pdf_path, filename
 
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
-
-# ============================================================
-# DIRECTOR STATUS SWITCH — DEBUG VERSION
-# ============================================================
-def director_switch_status(request_data):
-    """Director can flip status — shows Excel columns to fix 'id' error"""
-    
-    st.markdown("---")
-    st.warning("🔧 ⚙️ DIRECTOR STATUS SWITCH PANEL")
-    
-    # ✅ Show what keys are in the request data
-    st.info(f"📋 Request data keys: {list(request_data.keys())}")
-    
-    # ✅ Try ALL possible id column names
-    req_id = None
-    for key in ["id", "ID", "request_id", "Id", "RequestID"]:
-        if key in request_data and request_data[key]:
-            req_id = request_data[key]
-            break
-    
-    if not req_id:
-        st.error("❌ Cannot find ID in request data!")
-        return
-
-    current_status = str(request_data.get("status", request_data.get("Status", "pending"))).strip().lower()
-
-    col1, col2 = st.columns(2)
-    with col1:
-        new_status = st.selectbox(
-            "Change Status To:",
-            ["pending", "approved", "rejected"],
-            index=["pending", "approved", "rejected"].index(current_status) if current_status in ["pending", "approved", "rejected"] else 0,
-            key=f"switch_status_{req_id}"
-        )
-    with col2:
-        confirm = st.checkbox("✅ I confirm this change", key=f"confirm_switch_{req_id}")
-
-    if st.button("🔄 UPDATE STATUS", type="primary", disabled=not confirm, key=f"btn_switch_{req_id}"):
-        if new_status == current_status:
-            st.info("ℹ️ Status is already set to that — no change made.")
-            return
-
-        try:
-            import pandas as pd
-            from datetime import datetime
-
-            excel_path = "requests.xlsx"
-            df = pd.read_excel(excel_path)
-
-            # ✅ Show Excel column names for debugging
-            st.info(f"📊 Excel columns: {list(df.columns)}")
-
-            # ✅ Try matching with ANY id column name
-            id_col = None
-            for possible_id in ["id", "ID", "request_id", "Id", "RequestID"]:
-                if possible_id in df.columns:
-                    id_col = possible_id
-                    break
-
-            if not id_col:
-                st.error("❌ No 'id' column found in Excel!")
-                return
-
-            mask = df[id_col].astype(str) == str(req_id)
-            if not mask.any():
-                st.error(f"❌ Request #{req_id} NOT FOUND in Excel!")
-                return
-
-            # ✅ Update status
-            status_col = "status" if "status" in df.columns else "Status"
-            df.loc[mask, status_col] = new_status
-
-            # ✅ Update decision fields
-            if "decision_by" in df.columns:
-                df.loc[mask, "decision_by"] = st.session_state.username
-            if "decision_date" in df.columns:
-                df.loc[mask, "decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            df.to_excel(excel_path, index=False)
-
-            st.success(f"✅ ✅ Status CHANGED: **{current_status.upper()} → {new_status.upper()}**")
-            st.info(f"📄 Saved to: {excel_path}")
-            st.rerun()
-
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
 
 # ============================================================
 # SESSION STATE
