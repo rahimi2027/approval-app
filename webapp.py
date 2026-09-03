@@ -1214,6 +1214,44 @@ else:
                                 st.success("✅ Deleted")
                                 st.rerun()
 
+
+    # ============================================================
+# 📥 BACKUP DOWNLOAD BUTTON — Add this in Super Admin section
+# ============================================================
+st.subheader("📥 Download Data Backups")
+backup_col1, backup_col2, backup_col3 = st.columns(3)
+
+with backup_col1:
+    if os.path.exists(EXCEL_PATH):
+        with open(EXCEL_PATH, "rb") as f:
+            st.download_button(
+                "📥 Download Requests",
+                f.read(),
+                file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                type="primary"
+            )
+with backup_col2:
+    if os.path.exists(USER_DB_PATH):
+        with open(USER_DB_PATH, "rb") as f:
+            st.download_button(
+                "📥 Download Users",
+                f.read(),
+                file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                type="primary"
+            )
+with backup_col3:
+    if os.path.exists(SETTINGS_PATH):
+        with open(SETTINGS_PATH, "rb") as f:
+            st.download_button(
+                "📥 Download Settings",
+                f.read(),
+                file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                type="primary"
+            )
+
+st.caption("💾 Save these files to your computer for backup")
+st.divider()
+
     # ========================================================
     # 👔 MANAGER PORTAL
     # ========================================================
