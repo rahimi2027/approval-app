@@ -416,10 +416,9 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — FIXED: No Corruption + Correct Filename
+# PDF GENERATION — ✅ FIXED: Returns Bytes + Correct Filename + No Corruption
 # ============================================================
 def generate_approval_pdf(request_data):
-    PDF_AVAILABLE = True
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
@@ -431,7 +430,7 @@ def generate_approval_pdf(request_data):
             request_data
         )
 
-        # ✅ CLEANER — REMOVES ALL UNSUPPORTED CHARACTERS
+        # ✅ CLEANER — REMOVES ALL UNSUPPORTED CHARACTERS & ILLEGAL FILENAME CHARS
         def clean_text(t):
             t = str(t)
             t = t.replace("\u2013", "-")
@@ -439,31 +438,27 @@ def generate_approval_pdf(request_data):
             t = t.replace("\u2212", "-")
             t = t.replace("—", "-")
             t = t.replace("–", "-")
-            # ✅ REMOVE ILLEGAL FILE NAME CHARACTERS
-            t = t.replace("/", " ").replace("\\", " ").replace(":", " ").replace("*", " ")
-            t = t.replace("?", " ").replace('"', " ").replace("<", " ").replace(">", " ")
-            t = t.replace("|", " ")
+            # ✅ Remove characters not allowed in filenames
+            for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+                t = t.replace(char, " ")
             return t.strip()
 
-        # ✅ SAFE DATE — RETURNS NORMAL DASH
+        # ✅ SAFE DATE — returns normal dash
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
                 return "-"
             return str(d).strip()[:10]
 
-        # ─── EXTRACT ALL FIELDS ──────────────────────────────
+        # ─── EXTRACT FIELDS ──────────────────────────────
         emp_name     = clean_text(fresh_data.get("emp_name", "Unknown"))
-        emp_id       = clean_text(fresh_data.get("emp_id", ""))
         category     = clean_text(fresh_data.get("category", ""))
         amount       = clean_text(fresh_data.get("amount", "0"))
-        reason       = clean_text(fresh_data.get("reason", ""))
-        date_submit  = format_date(fresh_data.get("date_submitted", ""))
-        
+        date_submit  = format_date(fresh_data.get("date", ""))
         status       = clean_text(fresh_data.get("status", "Pending")).strip().capitalize()
-        dir_approve  = format_date(fresh_data.get("director_approved_date", ""))
-        dir_name     = clean_text(fresh_data.get("director_name", "Director"))
+        dir_approve  = format_date(fresh_data.get("decision_date", ""))
+        dir_name     = clean_text(fresh_data.get("decision_by", "Director"))
 
-        # ─── CREATE PDF ───────────────────────────────────────
+        # ─── CREATE PDF ───────────────────────────────────
         pdf = FPDF()
         pdf.add_page()
 
@@ -476,7 +471,7 @@ def generate_approval_pdf(request_data):
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(8)
 
-        # ─── REQUEST DETAILS ─────────────────────────────────
+        # ─── REQUEST DETAILS ─────────────────────────────
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, "Request ID:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
@@ -488,9 +483,14 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 8, emp_name, ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Employee ID:", 0, 0)
+        pdf.cell(50, 8, "Department:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, emp_id, ln=True)
+        pdf.cell(0, 8, clean_text(fresh_data.get("dept", "")), ln=True)
+
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(50, 8, "Transaction Type:", 0, 0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, clean_text(fresh_data.get("type", "")), ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, "Category:", 0, 0)
@@ -501,12 +501,6 @@ def generate_approval_pdf(request_data):
         pdf.cell(50, 8, "Amount (£):", 0, 0)
         pdf.set_font("Helvetica", "", 12)
         pdf.cell(0, 8, amount, ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Reason / Description:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 8, reason)
-        pdf.ln(5)
 
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, "Date Submitted:", 0, 0)
@@ -522,7 +516,7 @@ def generate_approval_pdf(request_data):
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(6)
 
-        # ─── DIRECTOR APPROVAL ────────────────────────────────
+        # ─── DIRECTOR APPROVAL ────────────────────────────
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(0, 8, "Director Approval", ln=True)
         pdf.ln(4)
@@ -545,20 +539,26 @@ def generate_approval_pdf(request_data):
         else:
             pdf.cell(0, 8, "Pending Director Approval", ln=True)
 
-        # ─── ✅ NEW FILE NAME FORMAT: ID# EmployeeName - Category - Date.pdf ───
+        # ─── ✅ CORRECT FILENAME: ID# EmployeeName - Category - Date.pdf ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
         safe_date = datetime.now().strftime("%Y-%m-%d")
-        
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
+
+        # ─── ✅ SAVE TO FILE + CAPTURE BYTES FOR DOWNLOAD ───
+        os.makedirs(PDF_DIR, exist_ok=True)
+        full_pdf_path = os.path.join(PDF_DIR, filename)
         
-        os.makedirs("generated_pdfs", exist_ok=True)
-        full_pdf_path = os.path.join("generated_pdfs", filename)
+        # ✅ OUTPUT TO BYTES FIRST — THIS FIXES THE CORRUPTION!
+        pdf_bytes = pdf.output()
         
-        # ✅ SAVE PDF — CORRECT ORDER, NO CORRUPTION
-        pdf.output(full_pdf_path)
-        return True, full_pdf_path, filename
+        # ✅ THEN SAVE TO DISK
+        with open(full_pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+
+        # ✅ RETURN CORRECT FORMAT: (success, bytes_for_download, filename)
+        return True, pdf_bytes, filename
 
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
