@@ -630,7 +630,7 @@ if "editing_request_id" not in st.session_state:
 # REFRESH BUTTON
 # ============================================================
 def refresh_data_button():
-    if st.button("🔄 Refresh Data", type="secondary"):
+    if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 
@@ -992,8 +992,6 @@ else:
     FULL_NAME = user.get("full_name", user["username"])
     # ✅ PASTE THE LINE RIGHT HERE ↓
     CATEGORIES = load_categories()
-    refresh_data_button()
-
     refresh_data_button()
     all_live_requests = load_records_from_excel()
     display_company_header()
