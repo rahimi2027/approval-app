@@ -33,7 +33,23 @@ def github_auto_save():
             st.toast("✅ Data saved & synced to GitHub!", icon="✅")
     except Exception as e:
         print(f"⚠️ GitHub save error: {e}")
-
+# ============================================================
+# ✅ AUTO-INSTALL FPDF2 — FIXES "No module named 'fpdf2'" ERROR
+# ============================================================
+import subprocess, sys
+try:
+    from fpdf2 import FPDF
+except ImportError:
+    try:
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
+        from fpdf2 import FPDF
+    except:
+        try:
+            from fpdf import FPDF
+        except ImportError:
+            FPDF = None
+PDF_AVAILABLE = FPDF is not None
 # ─── DATE FORMATTING HELPER ──────────────────────────────────────
 def format_date(d):
     """Format dates safely — returns first 10 chars or placeholder"""
@@ -993,14 +1009,14 @@ else:
     st.divider()
 
     # ========================================================
-    # PAYROLL PORTAL
+    # PAYROLL PORTAL — ✅ FIXED: No Approve/Reject Buttons
     # ========================================================
     if user["role"] == "Payroll":
         st.subheader("💰 Payroll Department Portal")
         st.info("✅ View approved & pending requests, review details, generate/download PDFs.")
         st.divider()
         tab_approved, tab_pending = st.tabs(["✅ Approved Requests", "🟡 Pending Requests"])
-
+        
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
             if not approved:
@@ -1027,31 +1043,43 @@ else:
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         
-                        # ✅ SHOW PREVIOUS REJECTION — THE MISSING CODE!
+                        # ✅ SHOW PREVIOUS REJECTION REASON
                         comment_text = req.get("director_comments", "").strip()
                         if comment_text and comment_text.lower() not in ["none", ""]:
                             st.warning(f"📌 **PREVIOUS REJECTION REASON:**\n\n{comment_text}")
                         
                         st.divider()
-                        with st.form(f"decision_form_{req['id']}"):
-                            comments = st.text_area("💬 Director Comments (Optional)")
-                            col_approve, col_reject = st.columns(2)
-                            with col_approve:
-                                approve_btn = st.form_submit_button("✅ APPROVE", type="primary")
-                            with col_reject:
-                                reject_btn = st.form_submit_button("❌ REJECT", type="secondary")
-                            if approve_btn:
-                                update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
-                                st.success(f"✅ Request #{req['id']} APPROVED!")
-                                st.rerun()
-                            if reject_btn:
-                                update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
-                                st.warning(f"❌ Request #{req['id']} REJECTED!")
-                                st.rerun()
-                        st.divider()
+                        # ✅ PAYROLL: Can ONLY Generate PDF — NO Approve/Reject!
                         display_pdf_button(req, can_generate=True)
-                        director_switch_status(req)
-
+        
+        with tab_pending:
+            pending = [r for r in all_live_requests if r["status"] == "pending"]
+            if not pending:
+                st.success("✅ No pending requests — all reviewed!")
+            else:
+                st.metric("⏳ Pending Approval", len(pending))
+                st.divider()
+                for req in reversed(pending):
+                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | 📅 {format_date(req['date'])} | £{req['amount']:.2f} | {req['dept']}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Transaction Type:** {req['type']}")
+                        st.write(f"🏷️ **Category / Reason:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.info(f"📝 **Description:** {req['desc']}")
+                        display_attachments(req)
+                        
+                        # ✅ SHOW PREVIOUS REJECTION REASON
+                        comment_text = req.get("director_comments", "").strip()
+                        if comment_text and comment_text.lower() not in ["none", ""]:
+                            st.warning(f"📌 **PREVIOUS REJECTION REASON:**\n\n{comment_text}")
+                        
+                        st.divider()
+                        # 🔒 PAYROLL: View ONLY — Waiting for Director Decision
+                        st.info("⏳ Waiting for Director Approval...")
        # ========================================================
     # MANAGER PORTAL
     # ========================================================
