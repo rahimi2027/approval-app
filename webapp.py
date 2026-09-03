@@ -8,34 +8,22 @@ from datetime import datetime
 
 def github_auto_save():
     """Push changed Excel files to GitHub automatically"""
-    
-    # Only run on Cloud — skip when running locally
     if not os.path.exists("/mount/src/"):
         return
-    
     try:
-        # Load secrets from Streamlit
         GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
         GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
         GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
-        
         if not GITHUB_TOKEN or not GITHUB_REPO:
             print("⚠️ GitHub secrets not set — skipping auto-save")
             return
-        
-        # Configure Git
         repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
         os.system("git config --global user.name 'Streamlit Auto-Save'")
         os.system("git config --global user.email 'rahimi2027@users.noreply.github.com'")
-        
-        # List of data files to save
         data_files = ["requests.xlsx", "user_database.xlsx", "settings.xlsx"]
-        
         for f in data_files:
             if os.path.exists(f):
                 os.system(f"git add {f}")
-        
-        # Check if anything changed
         status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
         if status.stdout.strip():
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -43,15 +31,16 @@ def github_auto_save():
             os.system(f'git commit -m "{commit_msg}"')
             os.system(f"git push {repo_url} {GITHUB_BRANCH}")
             st.toast("✅ Data saved & synced to GitHub!", icon="✅")
-    
     except Exception as e:
         print(f"⚠️ GitHub save error: {e}")
+
 # ─── DATE FORMATTING HELPER ──────────────────────────────────────
 def format_date(d):
     """Format dates safely — returns first 10 chars or placeholder"""
     if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
         return "—"
     return str(d).strip()[:10]
+
 def display_attachments(req):
     import streamlit as st
     import os
@@ -75,16 +64,14 @@ def display_attachments(req):
                 st.warning(f"⚠️ File not found: {name}")
     except Exception as e:
         st.info(f"📎 Attachments: {att}")
-        # ─── PDF BUTTON HELPER ──────────────────────────────────────────────
-# ✅ NEW VERSION — PASTE THIS IN PLACE OF THE OLD ONE
-def display_pdf_button(req, can_generate=False):
+
+# ─── PDF BUTTON HELPER ✅ FIXED WITH UNIQUE KEYS ──────────────────
+def display_pdf_button(req, can_generate=False, key_suffix=""):
     import streamlit as st
-    import os
     req_id = req["id"]
-    
-    # ✅ GENERATE FRESH PDF WHEN BUTTON CLICKED
+    unique_key = f"genpdf_{req_id}_{key_suffix}"
     if can_generate and PDF_AVAILABLE:
-    if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
+        if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=unique_key):
             ok, pdf_bytes, name = generate_approval_pdf(req)
             if ok:
                 st.success(f"✅ Generated! Ready to download ↓")
@@ -93,11 +80,12 @@ def display_pdf_button(req, can_generate=False):
                     data=pdf_bytes,
                     file_name=name,
                     mime="application/pdf",
-                    type="primary"
+                    type="primary",
+                    key=f"dl_{unique_key}"
                 )
             else:
                 st.error(f"❌ {name}")
-    return False  # ✅ ONLY return ONCE at the END
+    return False
 
 # ─── GET NEXT REQUEST ID ────────────────────────────────────────────
 def get_next_id(all_records):
@@ -105,32 +93,28 @@ def get_next_id(all_records):
         return 1
     return max(int(r.get("id", 0)) for r in all_records) + 1
 
-
 # ─── UPDATE RECORD STATUS ──────────────────────────────────────────
 def update_record_status_in_excel(req_id, new_status, comments, approved_by):
     from datetime import datetime
     records = load_records_from_excel()
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    decision_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # ✅ DATE + TIME
+    decision_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for r in records:
         if int(r["id"]) == int(req_id):
             r["status"] = new_status
-            r["decision_date"] = decision_datetime  # ✅ SAVE DATE + TIME
+            r["decision_date"] = decision_datetime
             r["decision_by"] = approved_by
             if comments.strip():
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M")
                 r["director_comments"] = f"[{ts}] {comments.strip()}"
-            r["pdf_path"] = ""  # Clear old PDF — regenerate after approval
+            r["pdf_path"] = ""
             break
     save_all_records(records)
-
 
 # ─── DELETE RECORD BY ID ────────────────────────────────────────────
 def delete_record_by_id(req_id):
     records = load_records_from_excel()
     records = [r for r in records if int(r["id"]) != int(req_id)]
     save_all_records(records)
-
 
 # ─── SHOW OLD/NEW COMPARISON ────────────────────────────────────────
 def show_old_new_comparison(old_json, new_rec):
@@ -139,21 +123,15 @@ def show_old_new_comparison(old_json, new_rec):
         old = json.loads(old_json) if old_json and old_json != "{}" else {}
     except:
         old = {}
-    
     if not old:
         st.info("📋 New request — no previous version.")
         return
-    
     st.markdown("#### 🔄 Changes (Previous → New)")
     fields = [
-        ("emp_name", "Employee Name"),
-        ("dept", "Department"),
-        ("type", "Transaction Type"),
-        ("category", "Category"),
-        ("date", "Date"),
-        ("amount", "Amount (£)"),
-        ("manager", "Line Manager"),
-        ("desc", "Description")
+        ("emp_name", "Employee Name"), ("dept", "Department"),
+        ("type", "Transaction Type"), ("category", "Category"),
+        ("date", "Date"), ("amount", "Amount (£)"),
+        ("manager", "Line Manager"), ("desc", "Description")
     ]
     changed = False
     for key, label in fields:
@@ -165,6 +143,9 @@ def show_old_new_comparison(old_json, new_rec):
     if not changed:
         st.info("✅ No changes detected.")
 
+# ============================================================
+# IMPORTS & SETUP
+# ============================================================
 import streamlit as st
 import os
 import pandas as pd
@@ -193,21 +174,19 @@ st.set_page_config(
 )
 
 # ============================================================
-# FILE PATHS — Works LOCALLY (Windows) + STREAMLIT CLOUD
+# FILE PATHS
 # ============================================================
 import sys
 if "win32" in sys.platform:
     BASE_DIR = r"D:\Acoole_portal"
 else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # ✅ Auto-detects on Cloud
-
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
 EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
 USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
-
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
@@ -217,26 +196,20 @@ os.makedirs(PDF_DIR, exist_ok=True)
 # ============================================================
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
 DEFAULT_ROLES = ["Manager", "Director", "Payroll", "Super Admin"]
-DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
+DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
 
 # ============================================================
-# SETTINGS FUNCTIONS — Categories & Roles
+# SETTINGS FUNCTIONS
 # ============================================================
 def init_settings():
     if not os.path.exists(SETTINGS_PATH):
-        pd.DataFrame([{
-            "setting": "categories",
-            "value": "|".join(DEFAULT_CATEGORIES)
-        }, {
-            "setting": "roles",
-            "value": "|".join(DEFAULT_ROLES)
-        }]).to_excel(SETTINGS_PATH, index=False)
+        pd.DataFrame([
+            {"setting": "categories", "value": "|".join(DEFAULT_CATEGORIES)},
+            {"setting": "roles", "value": "|".join(DEFAULT_ROLES)},
+            {"setting": "departments", "value": "|".join(DEFAULT_DEPARTMENTS)}
+        ]).to_excel(SETTINGS_PATH, index=False)
 
-# ============================================================
-# DEPARTMENTS FUNCTIONS — Add / Edit / Delete Departments
-# ============================================================
 def load_departments():
-    """Load departments from settings or return defaults"""
     init_settings()
     try:
         df = pd.read_excel(SETTINGS_PATH).fillna("")
@@ -250,7 +223,6 @@ def load_departments():
         return DEFAULT_DEPARTMENTS.copy()
 
 def save_departments(dept_list):
-    """Save departments list to Excel settings"""
     init_settings()
     df = pd.read_excel(SETTINGS_PATH).fillna("")
     found = False
@@ -262,9 +234,6 @@ def save_departments(dept_list):
         df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False)
 
-# ============================================================
-# CATEGORIES FUNCTIONS — ✅ ADDED
-# ============================================================
 def load_categories():
     init_settings()
     try:
@@ -289,9 +258,6 @@ def save_categories(cat_list):
         df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(cat_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False)
 
-# ============================================================
-# ROLES FUNCTIONS
-# ============================================================
 def load_roles():
     init_settings()
     try:
@@ -329,9 +295,6 @@ DEFAULT_USERS = [
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department"}
 ]
 
-# ============================================================
-# USER DATABASE FUNCTIONS
-# ============================================================
 def init_user_db():
     if not os.path.exists(USER_DB_PATH):
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False)
@@ -366,7 +329,7 @@ def save_users(users_dict):
     pd.DataFrame(export).to_excel(USER_DB_PATH, index=False)
 
 # ============================================================
-# REQUESTS EXCEL COLUMNS
+# REQUESTS EXCEL
 # ============================================================
 EXCEL_COLUMNS = [
     "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
@@ -375,9 +338,6 @@ EXCEL_COLUMNS = [
     "PDF File Path", "Edited From ID", "Old Data"
 ]
 
-# ============================================================
-# INITIALISE REQUESTS EXCEL
-# ============================================================
 def initialise_excel():
     if not os.path.exists(EXCEL_PATH):
         pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False)
@@ -390,9 +350,6 @@ def initialise_excel():
 
 initialise_excel()
 
-# ============================================================
-# LOAD / SAVE REQUESTS
-# ============================================================
 def load_records_from_excel():
     try:
         if not os.path.exists(EXCEL_PATH): return []
@@ -459,30 +416,23 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# ============================================================
-# ============================================================
-# PDF GENERATION — ✅ EMOJI-FREE VERSION (Works on Streamlit Cloud)
+# PDF GENERATION
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
-    
     try:
         import io
-        
-        # ✅ READ FRESH DATA FROM EXCEL
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
-        
+
         def clean_text(t):
             return str(t).replace("—", "-").replace("–", "-")
-        
-        # ✅ GET STATUS & DATA
+
         status = str(fresh_data.get("status", "pending")).strip().lower()
         decision_by_safe = clean_text(fresh_data.get("decision_by", "Director"))
         decision_date_safe = clean_text(str(fresh_data.get("decision_date", "Not Approved Yet")))
-        
         emp_name_safe = clean_text(fresh_data.get("emp_name", "Unknown"))
         category_safe = clean_text(fresh_data.get("category", "Approval"))
         amount_val = float(fresh_data.get('amount', 0))
@@ -492,23 +442,20 @@ def generate_approval_pdf(request_data):
         desc_safe = clean_text(fresh_data.get("desc", ""))
         dept_safe = clean_text(fresh_data.get("dept", ""))
         manager_safe = clean_text(fresh_data.get("manager", ""))
-        
-        # ✅ SAFE FILENAME
+
         safe_emp = "".join(c for c in emp_name_safe if c.isalnum() or c in (" ", "-", "_")).strip() or "Request"
         safe_cat = "".join(c for c in category_safe if c.isalnum() or c in (" ", "-", "_")).strip() or "Approval"
         safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
         filename = f"{safe_emp}_{safe_cat}_{safe_date}.pdf"
-        
-        # ✅ CREATE PDF IN MEMORY
+
         pdf = FPDF("P", "mm", "A4")
         pdf.add_page()
         pdf.set_font("Courier", "", 12)
-        
-        # Logo
+
         if os.path.exists(LOGO_PATH):
             try: pdf.image(LOGO_PATH, x=10, y=8, w=40)
             except: pass
-        
+
         pdf.set_xy(60, 10)
         pdf.set_font("Courier", "B", 18)
         pdf.cell(0, 10, "ACOOLE ELECTRICAL LTD", ln=True)
@@ -517,18 +464,18 @@ def generate_approval_pdf(request_data):
         pdf.ln(5)
         pdf.cell(0, 0, "_" * 85, ln=True)
         pdf.ln(8)
-        
+
         def pdf_row(label, value):
             pdf.set_font("Courier", "B", 11)
             pdf.cell(60, 8, label + ":")
             pdf.set_font("Courier", "", 11)
             pdf.multi_cell(0, 8, clean_text(str(value)))
             pdf.ln(1)
-        
+
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, "REQUEST DETAILS", ln=True)
         pdf.ln(3)
-        
+
         pdf_row("Request ID", f"#{req_id}")
         pdf_row("Employee Name", emp_name_safe)
         pdf_row("Department", dept_safe)
@@ -538,53 +485,50 @@ def generate_approval_pdf(request_data):
         pdf_row("Amount Approved", amount)
         pdf_row("Line Manager", manager_safe)
         pdf.ln(5)
-        
+
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.set_font("Courier", "", 11)
         pdf.multi_cell(0, 7, desc_safe)
         pdf.ln(8)
-        
+
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
-        
-        # ✅ STATUS — NO EMOJIS! Plain text only ✅
+
         pdf.set_font("Courier", "B", 14)
         if status == "approved":
-            pdf.cell(0, 8, "APPROVED", ln=True)  # ✅ NO EMOJI
+            pdf.cell(0, 8, "APPROVED", ln=True)
             pdf.set_font("Courier", "", 11)
             pdf.cell(0, 6, f"Approved by: {decision_by_safe}", ln=True)
             pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
         elif status == "rejected":
-            pdf.cell(0, 8, "REJECTED", ln=True)  # ✅ NO EMOJI
+            pdf.cell(0, 8, "REJECTED", ln=True)
             pdf.set_font("Courier", "", 11)
             pdf.cell(0, 6, f"Rejected by: {decision_by_safe}", ln=True)
             pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
         else:
             pdf.set_font("Courier", "", 11)
-            pdf.cell(0, 8, "PENDING - Awaiting Director Approval", ln=True)  # ✅ NO EMOJI
-        
+            pdf.cell(0, 8, "PENDING - Awaiting Director Approval", ln=True)
+
         pdf.ln(3)
         if comment_safe:
             pdf_row("Director Comments", comment_safe)
-        
-        # ✅ SIGNATURE LINE + STAMP IMAGE
+
         pdf.ln(20)
         pdf.cell(0, 6, "-" * 50, ln=True)
         pdf.cell(0, 6, "Authorized Signature / Director", ln=True)
-        
+
         stamp_file_path = os.path.join(BASE_DIR, "approved_stamp.png")
         stamp_rejected_path = os.path.join(BASE_DIR, "rejected_stamp.png")
-        
+
         if status == "approved" and os.path.exists(stamp_file_path):
             try: pdf.image(stamp_file_path, x=110, y=pdf.get_y() - 8, w=55)
             except: pass
         elif status == "rejected" and os.path.exists(stamp_rejected_path):
             try: pdf.image(stamp_rejected_path, x=110, y=pdf.get_y() - 8, w=55)
             except: pass
-        
-        # ✅ ATTACHMENTS
+
         att_names = fresh_data.get("attachment_name", "None")
         if att_names and att_names != "None":
             attached_files = [n.strip() for n in att_names.split(",")]
@@ -602,14 +546,12 @@ def generate_approval_pdf(request_data):
                     pdf.ln(5)
                     try: pdf.image(file_path, x=10, y=pdf.get_y(), w=190)
                     except Exception: pdf.multi_cell(0, 8, f"File: {file_name}")
-        
-        # ✅ OUTPUT PDF TO MEMORY
+
         pdf_bytes = io.BytesIO()
         pdf.output(pdf_bytes)
         pdf_bytes.seek(0)
-        
         return True, pdf_bytes, filename
-    
+
     except Exception as e:
         import traceback
         print("=== FULL PDF ERROR ===")
@@ -644,13 +586,11 @@ if st.session_state.logged_in and st.session_state.user_info:
                 all_live_requests = load_records_from_excel()
                 count = 0
                 for rec in all_live_requests:
-                    if rec["status"] == "approved" and not rec.get("pdf_path"):
-                        ok, path, _ = generate_approval_pdf(rec)
+                    if rec["status"] == "approved":
+                        ok, pdf_bytes, name = generate_approval_pdf(rec)
                         if ok:
-                            rec["pdf_path"] = path
                             count += 1
                 if count > 0:
-                    save_all_records(all_live_requests)
                     st.sidebar.success(f"✅ Generated {count} PDFs!")
                     st.rerun()
                 else:
@@ -659,56 +599,17 @@ if st.session_state.logged_in and st.session_state.user_info:
                 st.sidebar.error("⚠️ Install fpdf2: pip install fpdf2")
 
 # ============================================================
-# ✅ COMPLETE SETTINGS PANEL — Categories + Departments + Roles
+# SETTINGS PANEL
 # ============================================================
-
-# ⚠️ FIRST: Add these TWO FUNCTIONS near load_categories() / save_categories()
-# Copy this block ABOVE the settings_management_panel() function:
-
-DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
-
-def load_departments():
-    """Load departments from settings or return defaults"""
-    init_settings()
-    try:
-        df = pd.read_excel(SETTINGS_PATH).fillna("")
-        for _, r in df.iterrows():
-            if r["setting"] == "departments":
-                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
-                return vals if vals else DEFAULT_DEPARTMENTS.copy()
-        return DEFAULT_DEPARTMENTS.copy()
-    except Exception as e:
-        print(f"Load depts error: {e}")
-        return DEFAULT_DEPARTMENTS.copy()
-
-def save_departments(dept_list):
-    """Save departments list to Excel settings"""
-    init_settings()
-    df = pd.read_excel(SETTINGS_PATH).fillna("")
-    found = False
-    for idx, r in df.iterrows():
-        if r["setting"] == "departments":
-            df.at[idx, "value"] = "|".join(dept_list)
-            found = True
-    if not found:
-        df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
-    df.to_excel(SETTINGS_PATH, index=False)
-
-# ─────────────────────────────────────────────────────────────
-
 def settings_management_panel():
     st.subheader("⚙️ System Settings — Categories, Departments & Roles")
     st.info("🛡️ Super Admin Only — Add, Edit, Delete Categories, Departments and Permission Roles.")
     st.divider()
-    
-    # ✅ THREE TABS: Categories | Departments | Roles
+
     cats_tab, dept_tab, roles_tab = st.tabs([
-        "🏷️ Manage Categories", 
-        "🏢 Manage Departments", 
-        "🎖️ Manage Roles / Permissions"
+        "🏷️ Manage Categories", "🏢 Manage Departments", "🎖️ Manage Roles / Permissions"
     ])
-    
-    # ─── CATEGORIES TAB ──────────────────────────────────────
+
     with cats_tab:
         st.markdown("### 🏷️ Request Categories")
         st.info("These options appear in the request form dropdown.")
@@ -727,8 +628,7 @@ def settings_management_panel():
         st.markdown("#### Current Categories")
         for i, cat in enumerate(current_cats):
             c1, c2, c3 = st.columns([4, 1, 1])
-            with c1:
-                st.markdown(f"• **{cat}**")
+            with c1: st.markdown(f"• **{cat}**")
             with c2:
                 if st.button(f"✏️ Edit", key=f"edit_cat_{i}"):
                     st.session_state[f"editing_cat_{i}"] = True
@@ -753,16 +653,14 @@ def settings_management_panel():
                         if st.form_submit_button("❌ Cancel"):
                             st.session_state[f"editing_cat_{i}"] = False
                             st.rerun()
-    
-    # ─── DEPARTMENTS TAB ✅ NEW! ─────────────────────────────
+
     with dept_tab:
         st.markdown("### 🏢 Manage Departments")
         st.info("Create new departments, rename or remove existing ones.")
         st.divider()
         current_depts = load_departments()
-        
         with st.form("add_dept_form", clear_on_submit=True):
-            new_dept = st.text_input("➕ Add New Department", placeholder="e.g. Maintenance, HR, Warehouse")
+            new_dept = st.text_input("➕ Add New Department", placeholder="e.g. Maintenance, HR")
             if st.form_submit_button("✅ Add Department"):
                 if new_dept.strip() and new_dept.strip() not in current_depts:
                     current_depts.append(new_dept.strip())
@@ -771,14 +669,11 @@ def settings_management_panel():
                     st.rerun()
                 elif new_dept.strip() in current_depts:
                     st.warning("⚠️ Department already exists!")
-        
         st.divider()
         st.markdown("#### Current Departments")
-        
         for i, dept_name in enumerate(current_depts):
             c1, c2, c3 = st.columns([4, 1, 1])
-            with c1:
-                st.markdown(f"• **{dept_name}**")
+            with c1: st.markdown(f"• **{dept_name}**")
             with c2:
                 if st.button(f"✏️ Edit", key=f"edit_dept_{i}"):
                     st.session_state[f"editing_dept_{i}"] = True
@@ -788,7 +683,6 @@ def settings_management_panel():
                     save_departments(current_depts)
                     st.success(f"✅ Deleted: {dept_name}")
                     st.rerun()
-            
             if st.session_state.get(f"editing_dept_{i}", False):
                 with st.form(f"save_dept_form_{i}", clear_on_submit=True):
                     renamed = st.text_input("Rename Department", value=dept_name)
@@ -804,8 +698,7 @@ def settings_management_panel():
                         if st.form_submit_button("❌ Cancel"):
                             st.session_state[f"editing_dept_{i}"] = False
                             st.rerun()
-    
-    # ─── ROLES TAB ──────────────────────────────────────────
+
     with roles_tab:
         st.markdown("### 🎖️ User Roles / Permission Levels")
         st.info("⚠️ 'Super Admin' cannot be deleted to keep system access.")
@@ -824,8 +717,7 @@ def settings_management_panel():
         st.markdown("#### Current Roles")
         for i, role in enumerate(current_roles):
             c1, c2, c3 = st.columns([4, 1, 1])
-            with c1:
-                st.markdown(f"• **{role}**")
+            with c1: st.markdown(f"• **{role}**")
             with c2:
                 if st.button(f"✏️ Edit", key=f"edit_role_{i}"):
                     st.session_state[f"editing_role_{i}"] = True
@@ -852,34 +744,28 @@ def settings_management_panel():
                             st.rerun()
 
 # ============================================================
-# 👤 USER MANAGEMENT PANEL
+# USER MANAGEMENT PANEL
 # ============================================================
 def user_management_panel():
     st.subheader("👤 User Management — Create & Manage System Users")
-    st.info("🛡️ Super Admin Only — Create, edit (Username & Full Name), or delete user accounts.")
+    st.info("🛡️ Super Admin Only — Create, edit, or delete user accounts.")
     st.divider()
     USERS = load_users()
     ROLES = load_roles()
     tab1, tab2, tab3 = st.tabs(["➕ Create New User", "✏️ Edit User", "🗑️ Delete User"])
+
     with tab1:
         st.markdown("### ➕ Create New System User")
         with st.form("create_user_form", border=True, clear_on_submit=True):
             new_full_name = st.text_input("👤 Full Name", placeholder="e.g. John Smith")
-            new_username = st.text_input("🔐 Username (Login ID)", placeholder="e.g. john_smith").lower().strip()
+            new_username = st.text_input("🔐 Username", placeholder="e.g. john_smith").lower().strip()
             new_password = st.text_input("🔑 Password", type="password")
             new_role = st.selectbox("🎖️ Role / Permission Level", ROLES)
             new_dept = st.selectbox("🏢 Department", load_departments())
-            st.markdown("#### 📋 Role Permissions:")
-            st.info("""
-            - **Manager** → Submit & edit requests for their department only
-            - **Director** → Approve / reject ALL requests, change status anytime
-            - **Payroll** → View approved requests, generate PDFs
-            - **Super Admin** → Full system access + Create/edit/delete users & settings
-            """)
             create_btn = st.form_submit_button("✅ Create User Account", type="primary")
             if create_btn:
                 if not new_full_name.strip() or not new_username or not new_password:
-                    st.error("❌ All fields required! (Full Name, Username, Password)")
+                    st.error("❌ All fields required!")
                 elif new_username in USERS:
                     st.error(f"❌ Username '{new_username}' already exists!")
                 else:
@@ -890,22 +776,23 @@ def user_management_panel():
                         "dept": new_dept
                     }
                     save_users(USERS)
-                    st.success(f"✅ User **'{new_full_name}'** created!\n🔐 Username: **{new_username}** | Role: **{new_role}** | Dept: **{new_dept}**")
+                    st.success(f"✅ User **'{new_full_name}'** created!")
                     st.balloons()
+
     with tab2:
-        st.markdown("### ✏️ Edit User — Change Everything")
+        st.markdown("### ✏️ Edit User")
         edit_user_sel = st.selectbox("Select User to Edit", list(USERS.keys()), key="edit_user_selector")
         if edit_user_sel:
             curr = USERS[edit_user_sel]
-            st.info(f"Current: **{curr.get('full_name', edit_user_sel)}** | Login: `{edit_user_sel}` | {curr['role']} | {curr['dept']}")
+            st.info(f"Current: **{curr.get('full_name', edit_user_sel)}** | {curr['role']} | {curr['dept']}")
             with st.form(f"edit_user_form_{edit_user_sel}", border=True, clear_on_submit=True):
                 upd_full_name = st.text_input("👤 Full Name", value=curr.get("full_name", edit_user_sel))
-                upd_username_new = st.text_input("🔐 Change Username (Login ID)", value=edit_user_sel).lower().strip()
-                upd_password = st.text_input("🔑 New Password (leave blank to keep current)", type="password")
-                upd_role = st.selectbox("🎖️ Change Role / Permission Level", ROLES, index=ROLES.index(curr["role"]) if curr["role"] in ROLES else 0)
+                upd_username_new = st.text_input("🔐 Change Username", value=edit_user_sel).lower().strip()
+                upd_password = st.text_input("🔑 New Password (leave blank to keep)", type="password")
+                upd_role = st.selectbox("🎖️ Role", ROLES, index=ROLES.index(curr["role"]) if curr["role"] in ROLES else 0)
                 dept_list = load_departments()
-                upd_dept = st.selectbox("🏢 Change Department", dept_list, index=dept_list.index(curr["dept"]) if curr["dept"] in dept_list else 0)
-                if st.form_submit_button("🔄 Update All Details", type="primary"):
+                upd_dept = st.selectbox("🏢 Department", dept_list, index=dept_list.index(curr["dept"]) if curr["dept"] in dept_list else 0)
+                if st.form_submit_button("🔄 Update User", type="primary"):
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS:
@@ -918,7 +805,6 @@ def user_management_panel():
                             "dept": upd_dept
                         }
                         del USERS[edit_user_sel]
-                        st.success(f"✅ Username changed from **'{edit_user_sel}'** → **'{upd_username_new}'**")
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
                         if upd_password:
@@ -926,8 +812,9 @@ def user_management_panel():
                         USERS[edit_user_sel]["role"] = upd_role
                         USERS[edit_user_sel]["dept"] = upd_dept
                     save_users(USERS)
-                    st.success(f"✅ User updated: **{upd_full_name}** | Role: **{upd_role}** | Dept: **{upd_dept}**")
+                    st.success(f"✅ User updated: **{upd_full_name}**")
                     st.rerun()
+
     with tab3:
         st.markdown("### ⚠️ Delete User Account")
         st.warning("Existing requests remain safe.")
@@ -941,9 +828,8 @@ def user_management_panel():
                 st.rerun()
 
 # ============================================================
-# 🔐 LOGIN PAGE
+# LOGIN PAGE
 # ============================================================
-# ✅ DEFINE FUNCTION FIRST — AT THE TOP, OUTSIDE ANY IF BLOCK
 def display_company_header():
     import streamlit as st
     import os
@@ -951,29 +837,21 @@ def display_company_header():
     with c2:
         LOGO_PATH = "logo.png"
         if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, width=300)  # ✅ BIGGER LOGO (was 150 → now 300)
+            st.image(LOGO_PATH, width=300)
         else:
-            st.title("⚡ ACOOLE ELECTRICAL LTD")  # ✅ Falls back to title
+            st.title("⚡ ACOOLE ELECTRICAL LTD")
         st.caption("Addition & Deduction Approval Platform")
         st.divider()
 
-
-# ✅ THEN THE IF BLOCK — SEPARATELY!
 if not st.session_state.logged_in:
-    display_company_header()  # ✅ Bigger logo + compact header
-    
+    display_company_header()
     with st.form("login_form", border=True):
         st.markdown("### 🔒 Secure Gateway Login")
         st.caption("Enter your credentials to access the system")
         st.divider()
-        
         username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
         password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
-        
-        # ✅ REMOVE the big gap: st.markdown("<br>", unsafe_allow_html=True)
-        
         login_btn = st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True)
-        
         if login_btn:
             USERS = load_users()
             if username in USERS and USERS[username]["password"] == password:
@@ -984,17 +862,16 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
 # ============================================================
-# ✅ MAIN APPLICATION — PERFECT STRUCTURE
+# MAIN APPLICATION
 # ============================================================
 else:
     user = st.session_state.user_info
-    CAN_GEN_PDF = user["role"] in ["Payroll", "Super Admin"]
     FULL_NAME = user.get("full_name", user["username"])
     CATEGORIES = load_categories()
     refresh_data_button()
     all_live_requests = load_records_from_excel()
     display_company_header()
-    
+
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(f"🟢 **Welcome:** {FULL_NAME} | {user['dept']} | **{user['role']}**")
@@ -1006,14 +883,14 @@ else:
     st.divider()
 
     # ========================================================
-    # 💰 PAYROLL PORTAL
+    # PAYROLL PORTAL
     # ========================================================
     if user["role"] == "Payroll":
         st.subheader("💰 Payroll Department Portal")
         st.info("✅ View approved & pending requests, review details, generate/download PDFs.")
         st.divider()
         tab_approved, tab_pending = st.tabs(["✅ Approved Requests", "🟡 Pending Requests"])
-        
+
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
             if not approved:
@@ -1028,22 +905,21 @@ else:
                         approved_by_line = f"✅ Approved by {approved_by_display} on {approved_date_display}"
                     else:
                         approved_by_line = f"✅ Approved by {approved_by_display}"
-                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | 📅 {format_date(req['date'])} | £{req['amount']:.2f} | {approved_by_line}"
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {approved_by_line}"
                     with st.expander(title):
-                        st.write(f"👤 **Employee:** {req['emp_name']}")
-                        st.write(f"🏢 **Department:** {req['dept']}")
-                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
-                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
-                        st.write(f"👔 **Line Manager:** {req['manager']}")
-                        st.write(f"📅 **Request Date:** {req['date']}")
-                        st.write(f"🕒 **Decision:** {approved_by_line}")
-                        st.info(f"📝 **Description:** {req['desc']}")
+                        st.write(f"👤 Employee: {req['emp_name']}")
+                        st.write(f"🏢 Department: {req['dept']}")
+                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
+                        st.write(f"💷 Amount: £{req['amount']:.2f}")
+                        st.write(f"👔 Line Manager: {req['manager']}")
+                        st.write(f"📅 Request Date: {req['date']}")
+                        st.info(f"📝 Description: {req['desc']}")
                         if req["director_comments"]:
-                            st.success(f"💬 **Director Comments:** {req['director_comments']}")
+                            st.success(f"💬 Director Comments: {req['director_comments']}")
                         display_attachments(req)
                         st.divider()
-                        display_pdf_button(req, can_generate=True)
-        
+                        display_pdf_button(req, can_generate=True, key_suffix="pay_approved")
+
         with tab_pending:
             pending = [r for r in all_live_requests if r["status"] == "pending"]
             if not pending:
@@ -1052,20 +928,20 @@ else:
                 st.metric("🟡 Pending Requests", len(pending))
                 st.divider()
                 for req in reversed(pending):
-                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | 📅 {format_date(req['date'])} | £{req['amount']:.2f} | ⏳ Pending"
+                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | ⏳ Pending"
                     with st.expander(title):
-                        st.write(f"👤 **Employee:** {req['emp_name']}")
-                        st.write(f"🏢 **Department:** {req['dept']}")
-                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
-                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
-                        st.write(f"👔 **Line Manager:** {req['manager']}")
-                        st.write(f"📅 **Request Date:** {req['date']}")
-                        st.info(f"📝 **Description:** {req['desc']}")
+                        st.write(f"👤 Employee: {req['emp_name']}")
+                        st.write(f"🏢 Department: {req['dept']}")
+                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
+                        st.write(f"💷 Amount: £{req['amount']:.2f}")
+                        st.write(f"👔 Line Manager: {req['manager']}")
+                        st.write(f"📅 Request Date: {req['date']}")
+                        st.info(f"📝 Description: {req['desc']}")
                         st.warning("⏳ Waiting for Director Approval")
                         display_attachments(req)
 
     # ========================================================
-    # 👔 MANAGER PORTAL
+    # MANAGER PORTAL
     # ========================================================
     elif user["role"] == "Manager":
         if st.session_state.editing_request_id:
@@ -1088,8 +964,8 @@ else:
                         dt_val = st.date_input("📅 Date", d)
                         mgr = st.text_input("👔 Line Manager", rec["manager"])
                         desc = st.text_area("📝 Description / Justification", rec["desc"])
-                        files = st.file_uploader("📎 Add Supporting Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-                        
+                        files = st.file_uploader("📎 Add Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+
                         if st.form_submit_button("✅ Submit Edit"):
                             old = str({"emp_name": rec["emp_name"], "dept": rec["dept"], "type": rec["type"], "category": rec["category"], "date": rec["date"], "amount": rec["amount"], "manager": rec["manager"], "desc": rec["desc"]})
                             records = load_records_from_excel()
