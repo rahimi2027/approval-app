@@ -1017,16 +1017,21 @@ else:
                         approved_by_line = f"✅ Approved by {approved_by_display}"
                     title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {approved_by_line}"
                     with st.expander(title):
-                        st.write(f"👤 Employee: {req['emp_name']}")
-                        st.write(f"🏢 Department: {req['dept']}")
-                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                        st.write(f"💷 Amount: £{req['amount']:.2f}")
-                        st.write(f"👔 Line Manager: {req['manager']}")
-                        st.write(f"📅 Request Date: {req['date']}")
-                        st.info(f"📝 Description: {req['desc']}")
-                        if req["director_comments"]:
-                            st.success(f"💬 Director Comments: {req['director_comments']}")
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Transaction Type:** {req['type']}")
+                        st.write(f"🏷️ **Category / Reason:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
+                        
+                        # ✅ PREVIOUS REJECTION COMMENT — NOW VISIBLE
+                        prev_comments = req.get("director_comments", "").strip()
+                        if prev_comments:
+                            st.warning(f"📌 PREVIOUS REJECTION REASON:\n\n{prev_comments}")
+                        
                         st.divider()
                         display_pdf_button(req, can_generate=True, key_suffix="pay_approved")
 
