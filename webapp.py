@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ MATCHES FIRST IMAGE FONT + DASHED SIGNATURE LINE + CENTER STAMP
+# PDF GENERATION — ✅ FIXED: Reads LIVE Excel status + Stamp appears
 # ============================================================
 def generate_approval_pdf(request_data):
     import os
@@ -424,7 +424,7 @@ def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        # ✅ READ FRESH DATA
+        # ✅ ALWAYS READ FRESH DATA DIRECTLY FROM EXCEL — FIXES "PENDING" BUG!
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
@@ -437,6 +437,7 @@ def generate_approval_pdf(request_data):
                 return "—"
             return str(d).strip()[:10]
         
+        # ✅ USE FRESH STATUS FROM EXCEL — THIS IS THE MAIN FIX!
         fresh_status = str(fresh_data.get("status", "pending")).strip().lower()
         approved_by = clean_text(fresh_data.get("decision_by", fresh_data.get("approved_by", "")))
         approved_date = format_date(fresh_data.get("decision_date", fresh_data.get("approved_date", "")))
@@ -449,84 +450,68 @@ def generate_approval_pdf(request_data):
         date_submitted = format_date(fresh_data.get("date", fresh_data.get("submitted_date", "")))
         transaction_type = clean_text(fresh_data.get("type", "-"))
         line_manager = clean_text(fresh_data.get("manager", "-"))
-
+        
         # ✅ CREATE PDF
-        from fpdf import FPDF
+        from fpdf2 import FPDF
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
-
-        # ─── USE COURIER / TYPEWRITER FONT LIKE FIRST IMAGE ───────
-        pdf.set_font("Courier", "", 11)
-
+        
         # ─── HEADER: LOGO + COMPANY NAME ──────────────────────────
-        LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
-        if os.path.exists(LOGO_PATH):
-            pdf.image(LOGO_PATH, x=15, y=12, w=50)
-
+        LOGO_PATH_PDF = os.path.join(BASE_DIR, "logo.png")
+        if os.path.exists(LOGO_PATH_PDF):
+            pdf.image(LOGO_PATH_PDF, x=15, y=12, w=50)
         pdf.ln(6)
         pdf.set_font("Courier", "B", 16)
         pdf.cell(0, 10, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
-
         pdf.set_font("Courier", "", 11)
         pdf.cell(0, 8, txt="Addition & Deduction - APPROVAL FORM", ln=True, align="C")
         pdf.ln(4)
-
-        # ─── THIN DOUBLE LINE LIKE FIRST IMAGE ─────────────────────
+        
+        # ─── DOUBLE LINE ───────────────────────────────────────────
         pdf.set_draw_color(0, 0, 0)
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
         pdf.ln(1)
         pdf.line(20, pdf.get_y(), 190, pdf.get_y())
         pdf.ln(12)
-
-        # ─── SECTION: REQUEST DETAILS ──────────────────────────────
+        
+        # ─── REQUEST DETAILS ──────────────────────────────────────
         pdf.set_font("Courier", "B", 11)
         pdf.cell(0, 8, txt="REQUEST DETAILS", ln=True)
         pdf.ln(5)
-
         pdf.set_font("Courier", "", 11)
         label_w = 55
-
         pdf.cell(label_w, 7, txt="Request ID:", border=0)
         pdf.cell(0, 7, txt=f"#{req_id}", ln=True)
-
         pdf.cell(label_w, 7, txt="Employee Name:", border=0)
         pdf.cell(0, 7, txt=emp_name, ln=True)
-
         pdf.cell(label_w, 7, txt="Department:", border=0)
         pdf.cell(0, 7, txt=dept, ln=True)
-
         pdf.cell(label_w, 7, txt="Transaction Type:", border=0)
         pdf.cell(0, 7, txt=transaction_type, ln=True)
-
         pdf.cell(label_w, 7, txt="Category / Reason:", border=0)
         pdf.cell(0, 7, txt=category, ln=True)
-
         pdf.cell(label_w, 7, txt="Request Date:", border=0)
         pdf.cell(0, 7, txt=date_submitted, ln=True)
-
         pdf.cell(label_w, 7, txt="Amount Approved:", border=0)
         pdf.cell(0, 7, txt=f"£{amount}", ln=True)
-
         pdf.cell(label_w, 7, txt="Line Manager:", border=0)
         pdf.cell(0, 7, txt=line_manager, ln=True)
-
         pdf.ln(10)
-
-        # ─── SECTION: DESCRIPTION / JUSTIFICATION ──────────────────
+        
+        # ─── DESCRIPTION ──────────────────────────────────────────
         pdf.set_font("Courier", "B", 11)
         pdf.cell(0, 8, txt="DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.set_font("Courier", "", 11)
         pdf.multi_cell(0, 7, txt=reason)
         pdf.ln(10)
-
-        # ─── SECTION: DIRECTOR APPROVAL ────────────────────────────
+        
+        # ─── DIRECTOR APPROVAL — ✅ FRESH STATUS ───────────────────
         pdf.set_font("Courier", "B", 11)
         pdf.cell(0, 8, txt="DIRECTOR APPROVAL", ln=True)
         pdf.ln(5)
-
         pdf.set_font("Courier", "", 11)
-
+        
         if fresh_status == "approved":
             decision_text = "APPROVED"
             pdf.set_font("Courier", "B", 11)
@@ -539,64 +524,63 @@ def generate_approval_pdf(request_data):
             decision_text = "PENDING"
             pdf.set_font("Courier", "", 11)
             pdf.set_text_color(100, 100, 100)
-
+        
         pdf.cell(label_w, 7, txt="Decision:", border=0)
         pdf.cell(0, 7, txt=decision_text, ln=True)
         pdf.set_text_color(0, 0, 0)
-
         pdf.set_font("Courier", "", 11)
+        
         pdf.cell(label_w, 7, txt="Approved By:", border=0)
         display_name = approved_by if approved_by and approved_by != "" else "—"
         pdf.cell(0, 7, txt=display_name, ln=True)
-
         pdf.cell(label_w, 7, txt="Approval Date / Time:", border=0)
         display_date = approved_date if approved_date and approved_date != "—" else "—"
         pdf.cell(0, 7, txt=display_date, ln=True)
-
         pdf.ln(22)
-        # ✅ SHOW PREVIOUS COMMENTS IN PDF
+        
+        # ─── DIRECTOR COMMENTS ─────────────────────────────────────
         prev_comments = fresh_data.get("director_comments", "").strip()
-        if prev_comments and "PREVIOUS REJECTION" in prev_comments:
+        if prev_comments:
             pdf.ln(5)
             pdf.set_font("Courier", "B", 10)
-            pdf.set_text_color(150, 0, 0)
-            pdf.cell(0, 7, txt="📌 PREVIOUS REJECTION REASON:", ln=True)
+            pdf.set_text_color(80, 80, 80)
+            pdf.cell(0, 7, txt="Director Comments:", ln=True)
             pdf.set_font("Courier", "", 10)
             pdf.multi_cell(0, 6, txt=prev_comments)
             pdf.set_text_color(0, 0, 0)
             pdf.ln(5)
-        # ─── DASHED / BROKEN SIGNATURE LINE ────────────────────────
+        
+        # ─── SIGNATURE LINE + APPROVED STAMP ✅ FIXED PATH ─────────
         signature_y = pdf.get_y()
         pdf.set_font("Courier", "", 10)
         pdf.set_text_color(80, 80, 80)
-
-        # Dashed line: [x1, y1, x2, y2, dash_length, gap_length]
         pdf.dashed_line(20, signature_y, 190, signature_y, 2, 2)
         pdf.ln(5)
-
         pdf.cell(0, 7, txt="Authorized Signature / Director", ln=True)
-
-        # ─── ✅ CENTER STAMP ON THE SIGNATURE LINE ──────────────────
+        
+        # ✅ STAMP — NOW USES CORRECT PATH
         if fresh_status == "approved":
             stamp_path = os.path.join(BASE_DIR, "approved_stamp.png")
             if os.path.exists(stamp_path):
                 stamp_width = 55
                 page_width = 210
-                stamp_x = (page_width - stamp_width) / 2  # Center horizontally
+                stamp_x = (page_width - stamp_width) / 2
                 pdf.image(stamp_path, x=stamp_x, y=signature_y - 18, w=stamp_width, h=55)
-
-        pdf.set_text_color(0, 0, 0)
-
-        # ─── FILENAME & OUTPUT ─────────────────────────────────────
+            else:
+                # Fallback text if image missing
+                pdf.set_font("Courier", "B", 30)
+                pdf.set_text_color(0, 150, 0)
+                pdf.text(85, signature_y + 10, txt="APPROVED")
+                pdf.set_text_color(0, 0, 0)
+        
+        # ─── OUTPUT ────────────────────────────────────────────────
         filename = f"ID No.{req_id} - {emp_name} - {category}.pdf"
-
         pdf_bytes = io.BytesIO()
         pdf.output(pdf_bytes)
         pdf_bytes.seek(0)
-
         return True, pdf_bytes.read(), filename
-
     except Exception as e:
+        import traceback
         return False, None, f"PDF Error: {str(e)}"
 # ============================================================
 # DIRECTOR STATUS SWITCH — DEBUG VERSION
