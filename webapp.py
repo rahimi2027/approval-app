@@ -14,19 +14,19 @@ def github_auto_save():
         return
     
     try:
-        # ✅ YOUR EXACT VALUES — HARDCODED (no Secrets needed!)
-        GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"
-        GITHUB_REPO = "rahimi2027/approval-app"
-        GITHUB_BRANCH = "main"
+        # Load secrets from Streamlit
+        GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+        GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
+        GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
         
-        if not GITHUB_TOKEN:
-            print("⚠️ Add your GitHub token in the code!")
+        if not GITHUB_TOKEN or not GITHUB_REPO:
+            print("⚠️ GitHub secrets not set — skipping auto-save")
             return
         
         # Configure Git
         repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
         os.system("git config --global user.name 'Streamlit Auto-Save'")
-        os.system("git config --global user.email 'rahimi2027@gmail.com'")  # ← Use your email
+        os.system("git config --global user.email 'rahimi2027@users.noreply.github.com'")
         
         # List of data files to save
         data_files = ["requests.xlsx", "user_database.xlsx", "settings.xlsx"]
@@ -35,11 +35,14 @@ def github_auto_save():
             if os.path.exists(f):
                 os.system(f"git add {f}")
         
-        # Commit & Push
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        os.system(f'git commit -m "🔄 Auto-save: {timestamp}"')
-        os.system(f"git push {repo_url} {GITHUB_BRANCH}")
-        st.toast("✅ Data saved & synced to GitHub!", icon="✅")
+        # Check if anything changed
+        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+        if status.stdout.strip():
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            commit_msg = f"🔄 Auto-save: data updated {timestamp}"
+            os.system(f'git commit -m "{commit_msg}"')
+            os.system(f"git push {repo_url} {GITHUB_BRANCH}")
+            st.toast("✅ Data saved & synced to GitHub!", icon="✅")
     
     except Exception as e:
         print(f"⚠️ GitHub save error: {e}")
