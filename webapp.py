@@ -545,10 +545,10 @@ def generate_approval_pdf(request_data):
 
 
 # ============================================================
-# DIRECTOR STATUS SWITCH — AUTO-FINDS YOUR EXCEL FILE
+# DIRECTOR STATUS SWITCH — CORRECT FILENAME: requests.xlsx
 # ============================================================
 def director_switch_status(request_data):
-    """Director can flip status — AUTO-DETECTS YOUR EXCEL PATH"""
+    """Director can flip status — uses YOUR actual file: requests.xlsx"""
     
     st.markdown("---")
     st.warning("🔧 ⚙️ DIRECTOR STATUS SWITCH PANEL")
@@ -575,29 +575,9 @@ def director_switch_status(request_data):
         try:
             import pandas as pd
             from datetime import datetime
-            import os
 
-            # ✅ AUTO-FIND YOUR EXCEL FILE — SAME FOLDER AS YOUR CODE
-            possible_files = [
-                "requests_data.xlsx",
-                "request_data.xlsx",
-                "requests_data.xls",
-                "request_data.xls",
-                "data.xlsx",
-                "Requests.xlsx"
-            ]
-            
-            excel_path = None
-            for f in possible_files:
-                if os.path.exists(f):
-                    excel_path = f
-                    st.info(f"✅ Found Excel file: **{f}**")
-                    break
-            
-            if not excel_path:
-                st.error("❌ Could not find Excel file!")
-                st.info("📂 Files in folder: " + ", ".join(os.listdir("."))[:200])
-                return
+            # ✅ YOUR ACTUAL FILENAME FROM THE LIST!
+            excel_path = "requests.xlsx"
 
             df = pd.read_excel(excel_path)
 
