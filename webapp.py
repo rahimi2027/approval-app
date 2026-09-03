@@ -1,3 +1,48 @@
+# ============================================================
+# 🔄 GITHUB AUTO-SAVE — KEEPS DATA PERMANENT & SYNCED
+# ============================================================
+import streamlit as st
+import os
+import subprocess
+from datetime import datetime
+
+def github_auto_save():
+    """Push changed Excel files to GitHub automatically"""
+    
+    # Only run on Cloud — skip when running locally
+    if not os.path.exists("/mount/src/"):
+        return
+    
+    try:
+        # ✅ YOUR EXACT VALUES — HARDCODED (no Secrets needed!)
+        GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"
+        GITHUB_REPO = "rahimi2027/approval-app"
+        GITHUB_BRANCH = "main"
+        
+        if not GITHUB_TOKEN:
+            print("⚠️ Add your GitHub token in the code!")
+            return
+        
+        # Configure Git
+        repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+        os.system("git config --global user.name 'Streamlit Auto-Save'")
+        os.system("git config --global user.email 'rahimi2027@gmail.com'")  # ← Use your email
+        
+        # List of data files to save
+        data_files = ["requests.xlsx", "user_database.xlsx", "settings.xlsx"]
+        
+        for f in data_files:
+            if os.path.exists(f):
+                os.system(f"git add {f}")
+        
+        # Commit & Push
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        os.system(f'git commit -m "🔄 Auto-save: {timestamp}"')
+        os.system(f"git push {repo_url} {GITHUB_BRANCH}")
+        st.toast("✅ Data saved & synced to GitHub!", icon="✅")
+    
+    except Exception as e:
+        print(f"⚠️ GitHub save error: {e}")
 # ─── DATE FORMATTING HELPER ──────────────────────────────────────
 def format_date(d):
     """Format dates safely — returns first 10 chars or placeholder"""
