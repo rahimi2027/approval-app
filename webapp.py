@@ -424,7 +424,8 @@ def save_record_to_excel(new_record):
 
 # ============================================================
 # ============================================================
-# PDF GENERATION — FINAL CLOUD-COMPATIBLE VERSION
+# ============================================================
+# PDF GENERATION — ✅ EMOJI-FREE VERSION (Works on Streamlit Cloud)
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -462,7 +463,7 @@ def generate_approval_pdf(request_data):
         safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
         filename = f"{safe_emp}_{safe_cat}_{safe_date}.pdf"
         
-        # ✅ CREATE PDF IN MEMORY (NO FOLDER NEEDED!)
+        # ✅ CREATE PDF IN MEMORY
         pdf = FPDF("P", "mm", "A4")
         pdf.add_page()
         pdf.set_font("Courier", "", 12)
@@ -512,21 +513,21 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
         
-        # ✅ STATUS DISPLAY — Shows APPROVED + Stamp
+        # ✅ STATUS — NO EMOJIS! Plain text only ✅
         pdf.set_font("Courier", "B", 14)
         if status == "approved":
-            pdf.cell(0, 8, "✅ APPROVED", ln=True)
+            pdf.cell(0, 8, "APPROVED", ln=True)  # ✅ NO EMOJI
             pdf.set_font("Courier", "", 11)
             pdf.cell(0, 6, f"Approved by: {decision_by_safe}", ln=True)
             pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
         elif status == "rejected":
-            pdf.cell(0, 8, "❌ REJECTED", ln=True)
+            pdf.cell(0, 8, "REJECTED", ln=True)  # ✅ NO EMOJI
             pdf.set_font("Courier", "", 11)
             pdf.cell(0, 6, f"Rejected by: {decision_by_safe}", ln=True)
             pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
         else:
             pdf.set_font("Courier", "", 11)
-            pdf.cell(0, 8, "⏳ PENDING — Awaiting Director Approval", ln=True)
+            pdf.cell(0, 8, "PENDING - Awaiting Director Approval", ln=True)  # ✅ NO EMOJI
         
         pdf.ln(3)
         if comment_safe:
@@ -566,12 +567,11 @@ def generate_approval_pdf(request_data):
                     try: pdf.image(file_path, x=10, y=pdf.get_y(), w=190)
                     except Exception: pdf.multi_cell(0, 8, f"File: {file_name}")
         
-        # ✅ OUTPUT PDF TO MEMORY — NO SAVE TO FOLDER NEEDED!
+        # ✅ OUTPUT PDF TO MEMORY
         pdf_bytes = io.BytesIO()
         pdf.output(pdf_bytes)
         pdf_bytes.seek(0)
         
-        # ✅ RETURN SUCCESS + BYTES
         return True, pdf_bytes, filename
     
     except Exception as e:
