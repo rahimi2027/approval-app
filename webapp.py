@@ -115,10 +115,11 @@ def update_record_status_in_excel(req_id, new_status, comments, approved_by):
     from datetime import datetime
     records = load_records_from_excel()
     today_str = datetime.now().strftime("%Y-%m-%d")
+    decision_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # ✅ DATE + TIME
     for r in records:
         if int(r["id"]) == int(req_id):
             r["status"] = new_status
-            r["decision_date"] = today_str
+            r["decision_date"] = decision_datetime  # ✅ SAVE DATE + TIME
             r["decision_by"] = approved_by
             if comments.strip():
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M")
