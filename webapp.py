@@ -984,10 +984,7 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
 # ============================================================
-# ✅ MAIN APPLICATION — ALL ROLES
-# ============================================================
-# ============================================================
-# ✅ MAIN APPLICATION — ALL ROLES (CORRECTED STRUCTURE)
+# ✅ MAIN APPLICATION — PERFECT STRUCTURE
 # ============================================================
 else:
     user = st.session_state.user_info
@@ -1292,7 +1289,7 @@ else:
             user_management_panel()
 
     # ========================================================
-    # 📥 DOWNLOAD BACKUPS (Appears for ALL roles)
+    # 📥 DOWNLOAD BACKUPS (AT THE END — SAFE!)
     # ========================================================
     st.divider()
     st.subheader("📥 Download Data Backups")
@@ -1327,7 +1324,7 @@ else:
     st.caption("💾 Save these files to your computer for backup")
 
 # ============================================================
-# END OF APPLICATION
+# ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
     # ========================================================
     # 👔 MANAGER PORTAL
