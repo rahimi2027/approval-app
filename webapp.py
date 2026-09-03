@@ -1427,30 +1427,16 @@ else:
                         st.divider()
                         display_pdf_button(req, can_generate=True)
     
- # ========================================================
-    # 🛡️ SUPER ADMIN PORTAL
-    # ========================================================
     elif user["role"] == "Super Admin":
         st.subheader("🛡️ Super Admin Control Panel")
         tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+        
         with tab_settings:
-            settings_management_panel()
+            settings_management_panel()   # ✅ CALLS YOUR SETTINGS FUNCTION
+        
         with tab_users:
-            user_management_panel()
-    # ========================================================
-    # 🛡️ SUPER ADMIN PORTAL
-    # ========================================================
-    elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin Control Panel")
-        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
-        with tab_settings:
-            settings_management_panel()
-        with tab_users:
-            user_management_panel()
-     # ========================================================
-    # 📥 DOWNLOAD BACKUPS — SUPER ADMIN ONLY
-    # ========================================================
-    if user["role"] == "Super Admin":
+            user_management_panel()       # ✅ CALLS YOUR USER MANAGEMENT FUNCTION
+
         st.divider()
         st.subheader("📥 Download Data Backups")
         backup_col1, backup_col2, backup_col3 = st.columns(3)
