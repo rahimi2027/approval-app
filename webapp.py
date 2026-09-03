@@ -1311,7 +1311,6 @@ st.divider()
                 if st.button("❌ Cancel"):
                     st.session_state.editing_request_id = None
                     st.rerun()
-
         st.subheader(f"➕ New Request — {user['dept']}")
         nid = get_next_id(all_live_requests)
         st.markdown(f"**🆔 Request ID:** `#{nid}`")
