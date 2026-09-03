@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ RETURNS PURE BYTES + CORRECT FILENAME + NO CORRUPTION
+# PDF GENERATION — ✅ BYTEARRAY FIX + Correct Filename
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -430,7 +430,7 @@ def generate_approval_pdf(request_data):
             request_data
         )
 
-        # ✅ CLEANER — REMOVES ALL UNSUPPORTED CHARACTERS & ILLEGAL FILENAME CHARS
+        # ✅ CLEANER — REMOVES ALL UNSUPPORTED CHARACTERS
         def clean_text(t):
             t = str(t)
             t = t.replace("\u2013", "-")
@@ -438,12 +438,11 @@ def generate_approval_pdf(request_data):
             t = t.replace("\u2212", "-")
             t = t.replace("—", "-")
             t = t.replace("–", "-")
-            # ✅ Remove characters not allowed in filenames
             for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
                 t = t.replace(char, " ")
             return t.strip()
 
-        # ✅ SAFE DATE — returns normal dash
+        # ✅ SAFE DATE
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
                 return "-"
@@ -539,24 +538,28 @@ def generate_approval_pdf(request_data):
         else:
             pdf.cell(0, 8, "Pending Director Approval", ln=True)
 
-        # ─── ✅ CORRECT FILENAME: ID# EmployeeName - Category - Date.pdf ───
+        # ─── ✅ CORRECT FILENAME ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
         safe_date = datetime.now().strftime("%Y-%m-%d")
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
 
-        # ─── ✅ CORRECT METHOD: OUTPUT TO BYTES → SAVE → RETURN ───
-        # ✅ Get PDF as BYTES (Streamlit needs bytes, NOT string!)
-        pdf_bytes = pdf.output(dest='S').encode('latin-1')
-        
+        # ─── ✅ THE MAGIC FIX — Works on ALL fpdf2 versions ───
+        pdf_output = pdf.output()
+        # Convert to bytes safely — whether string or bytearray
+        if isinstance(pdf_output, (bytes, bytearray)):
+            pdf_bytes = bytes(pdf_output)
+        else:
+            pdf_bytes = pdf_output.encode("latin-1")
+
         # ✅ Save to disk
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f:
             f.write(pdf_bytes)
 
-        # ✅ RETURN: (success, bytes_for_download, filename)
+        # ✅ Return to Streamlit — pure bytes
         return True, pdf_bytes, filename
 
     except Exception as e:
