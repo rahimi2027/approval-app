@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ RETURNS BINARY DATA (Fixes Damaged PDF Error)
+# PDF GENERATION — ✅ MATCHES YOUR DESIGN EXACTLY + STAMP ON SIGNATURE LINE
 # ============================================================
 def generate_approval_pdf(request_data):
     import os
@@ -430,7 +430,7 @@ def generate_approval_pdf(request_data):
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
         
         def clean_text(t):
-            return str(t).replace("—", "-").replace("–", "-").replace(":", "-").replace("/", "-").replace("\\", "-").strip()
+            return str(t).replace("—", "-").replace("–", "-").strip()
         
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
@@ -447,105 +447,131 @@ def generate_approval_pdf(request_data):
         reason = clean_text(fresh_data.get("desc", fresh_data.get("reason", "-")))
         dept = clean_text(fresh_data.get("dept", fresh_data.get("department", "-")))
         date_submitted = format_date(fresh_data.get("date", fresh_data.get("submitted_date", "")))
+        transaction_type = clean_text(fresh_data.get("type", "-"))
+        line_manager = clean_text(fresh_data.get("manager", "-"))
         
-        # ✅ CREATE PDF
+        # ✅ CREATE PDF — A4, Matching Your Design
         from fpdf import FPDF
         pdf = FPDF()
         pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)
         
-        # ─── HEADER ──────────────────────────────────────────────
+        # ─── HEADER: LOGO + COMPANY NAME ──────────────────────────
         LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
         if os.path.exists(LOGO_PATH):
-            pdf.image(LOGO_PATH, x=80, y=10, w=50)
-        pdf.ln(45)
-        pdf.set_font("Helvetica", "B", 18)
-        pdf.cell(0, 12, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 10, txt="Addition & Deduction Approval Request", ln=True, align="C")
+            pdf.image(LOGO_PATH, x=15, y=12, w=50)  # Logo top-left like your design
         pdf.ln(5)
-        pdf.set_draw_color(0, 0, 0)
-        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, txt="Addition & Deduction - APPROVAL FORM", ln=True, align="C")
+        pdf.ln(5)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())  # Horizontal line
+        pdf.ln(12)
+        
+        # ─── SECTION: REQUEST DETAILS ──────────────────────────────
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, txt="REQUEST DETAILS", ln=True)
+        pdf.ln(4)
+        
+        pdf.set_font("Helvetica", "", 12)
+        label_w = 55  # Label column width
+        
+        pdf.cell(label_w, 8, txt="Request ID:", border=0)
+        pdf.cell(0, 8, txt=f"#{req_id}", ln=True)
+        
+        pdf.cell(label_w, 8, txt="Employee Name:", border=0)
+        pdf.cell(0, 8, txt=emp_name, ln=True)
+        
+        pdf.cell(label_w, 8, txt="Department:", border=0)
+        pdf.cell(0, 8, txt=dept, ln=True)
+        
+        pdf.cell(label_w, 8, txt="Transaction Type:", border=0)
+        pdf.cell(0, 8, txt=transaction_type, ln=True)
+        
+        pdf.cell(label_w, 8, txt="Category / Reason:", border=0)
+        pdf.cell(0, 8, txt=category, ln=True)
+        
+        pdf.cell(label_w, 8, txt="Request Date:", border=0)
+        pdf.cell(0, 8, txt=date_submitted, ln=True)
+        
+        pdf.cell(label_w, 8, txt="Amount Approved:", border=0)
+        pdf.cell(0, 8, txt=f"£{amount}", ln=True)
+        
+        pdf.cell(label_w, 8, txt="Line Manager:", border=0)
+        pdf.cell(0, 8, txt=line_manager, ln=True)
+        
         pdf.ln(10)
         
-        # ─── REQUEST DETAILS ─────────────────────────────────────
+        # ─── SECTION: DESCRIPTION / JUSTIFICATION ──────────────────
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, txt="Request ID:", border=0)
+        pdf.cell(0, 8, txt="DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=str(req_id), border=0, ln=True)
+        pdf.multi_cell(0, 7, txt=reason)
+        pdf.ln(10)
         
+        # ─── SECTION: DIRECTOR APPROVAL ────────────────────────────
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, txt="Employee Name:", border=0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=emp_name, border=0, ln=True)
+        pdf.cell(0, 8, txt="DIRECTOR APPROVAL", ln=True)
+        pdf.ln(4)
         
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, txt="Department:", border=0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=dept, border=0, ln=True)
         
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, txt="Category / Type:", border=0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=category, border=0, ln=True)
-        
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, txt="Amount:", border=0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=f"£{amount}", border=0, ln=True)
-        
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, txt="Reason / Details:", border=0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 8, txt=reason)
-        
-        pdf.ln(5)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, txt="Submitted Date:", border=0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=date_submitted, border=0, ln=True)
-        pdf.ln(15)
-        
-        # ─── STATUS + STAMP ──────────────────────────────────────
+        # Decision: PENDING / APPROVED / REJECTED
         if fresh_status == "approved":
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.set_text_color(0, 128, 0)
-            pdf.cell(0, 10, txt="APPROVED", ln=True, align="C")
-            pdf.set_font("Helvetica", "", 11)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(0, 8, txt=f"Approved by: {approved_by}  |  Date: {approved_date}", ln=True, align="C")
+            decision_text = "APPROVED"
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_text_color(0, 100, 0)
+        elif fresh_status == "rejected":
+            decision_text = "REJECTED"
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_text_color(180, 0, 0)
+        else:
+            decision_text = "PENDING"
+            pdf.set_font("Helvetica", "", 12)
+            pdf.set_text_color(100, 100, 100)
+        
+        pdf.cell(label_w, 8, txt="Decision:", border=0)
+        pdf.cell(0, 8, txt=decision_text, ln=True)
+        pdf.set_text_color(0, 0, 0)
+        
+        # Approved By
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(label_w, 8, txt="Approved By:", border=0)
+        display_name = approved_by if approved_by and approved_by != "" else "—"
+        pdf.cell(0, 8, txt=display_name, ln=True)
+        
+        # Approval Date / Time
+        pdf.cell(label_w, 8, txt="Approval Date / Time:", border=0)
+        display_date = approved_date if approved_date and approved_date != "—" else "—"
+        pdf.cell(0, 8, txt=display_date, ln=True)
+        
+        pdf.ln(20)  # Space to signature line
+        
+        # ─── SIGNATURE LINE + STAMP PLACED HERE ────────────────────
+        signature_y = pdf.get_y()
+        pdf.set_font("Helvetica", "", 11)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 7, txt="___________________________________________________________________________", ln=True)
+        pdf.cell(0, 7, txt="Authorized Signature / Director", ln=True)
+        
+        # ✅ PLACE APPROVED STAMP ON THE SIGNATURE LINE
+        if fresh_status == "approved":
             stamp_path = os.path.join(BASE_DIR, "approved_stamp.png")
             if os.path.exists(stamp_path):
-                pdf.image(stamp_path, x=140, y=210, w=50)
+                # Place stamp on right side, OVER the signature line
+                pdf.image(stamp_path, x=130, y=signature_y - 15, w=55, h=55)
         
-        elif fresh_status == "rejected":
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.set_text_color(200, 0, 0)
-            pdf.cell(0, 10, txt="REJECTED", ln=True, align="C")
-            pdf.set_font("Helvetica", "", 11)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(0, 8, txt=f"Rejected by: {approved_by}  |  Date: {approved_date}", ln=True, align="C")
-            stamp_path = os.path.join(BASE_DIR, "rejected_stamp.png")
-            if os.path.exists(stamp_path):
-                pdf.image(stamp_path, x=140, y=210, w=50)
+        pdf.set_text_color(0, 0, 0)
         
-        else:
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.set_text_color(150, 150, 0)
-            pdf.cell(0, 10, txt="PENDING APPROVAL", ln=True, align="C")
-            pdf.set_font("Helvetica", "", 11)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(0, 8, txt="Waiting for Director approval", ln=True, align="C")
-        
-        # ─── ✅ OUTPUT TO BINARY MEMORY (NOT FILE PATH) ──────────
-        # Filename format: ID No.1 - Employee Name - Category.pdf
+        # ─── FILENAME & OUTPUT ─────────────────────────────────────
         filename = f"ID No.{req_id} - {emp_name} - {category}.pdf"
         
-        # ✅ WRITE PDF TO MEMORY → RETURNS BINARY DATA
+        # ✅ Output to binary memory
         pdf_bytes = io.BytesIO()
         pdf.output(pdf_bytes)
-        pdf_bytes.seek(0)  # Go to start of binary data
+        pdf_bytes.seek(0)
         
-        # ✅ RETURN: (success, BINARY_DATA, filename)
         return True, pdf_bytes.read(), filename
     
     except Exception as e:
