@@ -232,28 +232,36 @@ def init_settings():
             "value": "|".join(DEFAULT_ROLES)
         }]).to_excel(SETTINGS_PATH, index=False)
 
-def load_categories():
+# ============================================================
+# DEPARTMENTS FUNCTIONS — Add / Edit / Delete Departments
+# ============================================================
+DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
+
+def load_departments():
+    """Load departments from settings or return defaults"""
     init_settings()
     try:
         df = pd.read_excel(SETTINGS_PATH).fillna("")
         for _, r in df.iterrows():
-            if r["setting"] == "categories":
+            if r["setting"] == "departments":
                 vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
-                return vals if vals else DEFAULT_CATEGORIES
-        return DEFAULT_CATEGORIES
-    except:
-        return DEFAULT_CATEGORIES
+                return vals if vals else DEFAULT_DEPARTMENTS.copy()
+        return DEFAULT_DEPARTMENTS.copy()
+    except Exception as e:
+        print(f"Load depts error: {e}")
+        return DEFAULT_DEPARTMENTS.copy()
 
-def save_categories(categories_list):
+def save_departments(dept_list):
+    """Save departments list to Excel settings"""
     init_settings()
     df = pd.read_excel(SETTINGS_PATH).fillna("")
     found = False
     for idx, r in df.iterrows():
-        if r["setting"] == "categories":
-            df.at[idx, "value"] = "|".join(categories_list)
+        if r["setting"] == "departments":
+            df.at[idx, "value"] = "|".join(dept_list)
             found = True
     if not found:
-        df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(categories_list)}])], ignore_index=True)
+        df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False)
 
 def load_roles():
@@ -623,13 +631,56 @@ if st.session_state.logged_in and st.session_state.user_info:
                 st.sidebar.error("⚠️ Install fpdf2: pip install fpdf2")
 
 # ============================================================
-# ⚙️ SUPER ADMIN SETTINGS PANEL
+# ✅ COMPLETE SETTINGS PANEL — Categories + Departments + Roles
 # ============================================================
+
+# ⚠️ FIRST: Add these TWO FUNCTIONS near load_categories() / save_categories()
+# Copy this block ABOVE the settings_management_panel() function:
+
+DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
+
+def load_departments():
+    """Load departments from settings or return defaults"""
+    init_settings()
+    try:
+        df = pd.read_excel(SETTINGS_PATH).fillna("")
+        for _, r in df.iterrows():
+            if r["setting"] == "departments":
+                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
+                return vals if vals else DEFAULT_DEPARTMENTS.copy()
+        return DEFAULT_DEPARTMENTS.copy()
+    except Exception as e:
+        print(f"Load depts error: {e}")
+        return DEFAULT_DEPARTMENTS.copy()
+
+def save_departments(dept_list):
+    """Save departments list to Excel settings"""
+    init_settings()
+    df = pd.read_excel(SETTINGS_PATH).fillna("")
+    found = False
+    for idx, r in df.iterrows():
+        if r["setting"] == "departments":
+            df.at[idx, "value"] = "|".join(dept_list)
+            found = True
+    if not found:
+        df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
+    df.to_excel(SETTINGS_PATH, index=False)
+
+# ─────────────────────────────────────────────────────────────
+
 def settings_management_panel():
-    st.subheader("⚙️ System Settings — Categories & Roles")
-    st.info("🛡️ Super Admin Only — Add, Edit, Delete Categories and Permission Roles.")
+    st.subheader("⚙️ System Settings — Categories, Departments & Roles")
+    st.info("🛡️ Super Admin Only — Add, Edit, Delete Categories, Departments and Permission Roles.")
     st.divider()
-    cats_tab, roles_tab = st.tabs(["🏷️ Manage Categories", "🎖️ Manage Roles / Permissions"])
+    
+    # ✅ THREE TABS: Categories | Departments | Roles
+    cats_tab, dept_tab, roles_tab = st.tabs([
+        "🏷️ Manage Categories", 
+        "🏢 Manage Departments", 
+        "🎖️ Manage Roles / Permissions"
+    ])
+    
+    # ─── CATEGORIES TAB ──────────────────────────────────────
     with cats_tab:
         st.markdown("### 🏷️ Request Categories")
         st.info("These options appear in the request form dropdown.")
@@ -674,6 +725,59 @@ def settings_management_panel():
                         if st.form_submit_button("❌ Cancel"):
                             st.session_state[f"editing_cat_{i}"] = False
                             st.rerun()
+    
+    # ─── DEPARTMENTS TAB ✅ NEW! ─────────────────────────────
+    with dept_tab:
+        st.markdown("### 🏢 Manage Departments")
+        st.info("Create new departments, rename or remove existing ones.")
+        st.divider()
+        current_depts = load_departments()
+        
+        with st.form("add_dept_form", clear_on_submit=True):
+            new_dept = st.text_input("➕ Add New Department", placeholder="e.g. Maintenance, HR, Warehouse")
+            if st.form_submit_button("✅ Add Department"):
+                if new_dept.strip() and new_dept.strip() not in current_depts:
+                    current_depts.append(new_dept.strip())
+                    save_departments(current_depts)
+                    st.success(f"✅ Added: {new_dept}")
+                    st.rerun()
+                elif new_dept.strip() in current_depts:
+                    st.warning("⚠️ Department already exists!")
+        
+        st.divider()
+        st.markdown("#### Current Departments")
+        
+        for i, dept_name in enumerate(current_depts):
+            c1, c2, c3 = st.columns([4, 1, 1])
+            with c1:
+                st.markdown(f"• **{dept_name}**")
+            with c2:
+                if st.button(f"✏️ Edit", key=f"edit_dept_{i}"):
+                    st.session_state[f"editing_dept_{i}"] = True
+            with c3:
+                if len(current_depts) > 1 and st.button(f"🗑️ Delete", key=f"del_dept_{i}"):
+                    current_depts.pop(i)
+                    save_departments(current_depts)
+                    st.success(f"✅ Deleted: {dept_name}")
+                    st.rerun()
+            
+            if st.session_state.get(f"editing_dept_{i}", False):
+                with st.form(f"save_dept_form_{i}", clear_on_submit=True):
+                    renamed = st.text_input("Rename Department", value=dept_name)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.form_submit_button("💾 Save"):
+                            current_depts[i] = renamed.strip()
+                            save_departments(current_depts)
+                            st.session_state[f"editing_dept_{i}"] = False
+                            st.success(f"✅ Renamed to: {renamed}")
+                            st.rerun()
+                    with col2:
+                        if st.form_submit_button("❌ Cancel"):
+                            st.session_state[f"editing_dept_{i}"] = False
+                            st.rerun()
+    
+    # ─── ROLES TAB ──────────────────────────────────────────
     with roles_tab:
         st.markdown("### 🎖️ User Roles / Permission Levels")
         st.info("⚠️ 'Super Admin' cannot be deleted to keep system access.")
