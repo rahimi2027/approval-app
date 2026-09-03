@@ -1151,6 +1151,12 @@ else:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
                                 st.warning(f"❌ Request #{req['id']} REJECTED!")
                                 st.rerun()
+                        display_attachments(req)
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+
+                        # ⭐ PASTE THE 2 LINES HERE (Approved Tab) ⭐
+                        director_switch_status(req)
         
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
@@ -1170,9 +1176,12 @@ else:
                         st.write(f"👔 **Line Manager:** {req['manager']}")
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
+                        st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
+                        
+                        director_switch_status(req)  # ✅ ADDED
         
         with tab_rejected:
             rejected = [r for r in all_live_requests if r["status"] == "rejected"]
