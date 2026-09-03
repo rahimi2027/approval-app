@@ -1095,7 +1095,7 @@ else:
                             st.session_state.editing_request_id = req["id"]
                             st.rerun()
 
-      # ========================================================
+    # ========================================================
     # 🎛️ DIRECTOR PORTAL
     # ========================================================
     elif user["role"] == "Director":
@@ -1145,7 +1145,6 @@ else:
                                 st.rerun()
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-                        director_switch_status(req)
         
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
@@ -1168,7 +1167,6 @@ else:
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-                        director_switch_status(req)
         
         with tab_rejected:
             rejected = [r for r in all_live_requests if r["status"] == "rejected"]
@@ -1191,7 +1189,6 @@ else:
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-                        director_switch_status(req)
     
     # ========================================================
     # 🛡️ SUPER ADMIN PORTAL
