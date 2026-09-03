@@ -945,11 +945,6 @@ else:
     # 🔐 ROLE-BASED PORTALS
     # ========================================================
     
-    if user["role"] == "Super Admin":
-        # ─── SUPER ADMIN PORTAL ───────────────────────────
-        st.subheader("🔧 Super Admin Portal")
-        st.info("Full system access — manage everything.")
-        # ... keep your existing Super Admin code here ...
 
     elif user["role"] == "Director":
         # ========================================================
@@ -1427,48 +1422,47 @@ else:
                         st.divider()
                         display_pdf_button(req, can_generate=True)
     
-    elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin Control Panel")
-        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+elif user["role"] == "Super Admin":
+    st.subheader("🛡️ Super Admin Control Panel")
+    tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+    
+    with tab_settings:
+        settings_management_panel()   # ✅ Calls your Settings panel
         
-        with tab_settings:
-            settings_management_panel()   # ✅ CALLS YOUR SETTINGS FUNCTION
-        
-        with tab_users:
-            user_management_panel()       # ✅ CALLS YOUR USER MANAGEMENT FUNCTION
-
-        st.divider()
-        st.subheader("📥 Download Data Backups")
-        backup_col1, backup_col2, backup_col3 = st.columns(3)
-        with backup_col1:
-            if os.path.exists(EXCEL_PATH):
-                with open(EXCEL_PATH, "rb") as f:
-                    st.download_button(
-                        "📥 Download Requests",
-                        f.read(),
-                        file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                        type="primary"
-                    )
-        with backup_col2:
-            if os.path.exists(USER_DB_PATH):
-                with open(USER_DB_PATH, "rb") as f:
-                    st.download_button(
-                        "📥 Download Users",
-                        f.read(),
-                        file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                        type="primary"
-                    )
-        with backup_col3:
-            if os.path.exists(SETTINGS_PATH):
-                with open(SETTINGS_PATH, "rb") as f:
-                    st.download_button(
-                        "📥 Download Settings",
-                        f.read(),
-                        file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                        type="primary"
-                    )
-        st.caption("💾 Save these files to your computer for backup")
-
+    with tab_users:
+        user_management_panel()       # ✅ Calls your User Management panel
+    
+    st.divider()
+    st.subheader("📥 Download Data Backups")
+    backup_col1, backup_col2, backup_col3 = st.columns(3)
+    with backup_col1:
+        if os.path.exists(EXCEL_PATH):
+            with open(EXCEL_PATH, "rb") as f:
+                st.download_button(
+                    "📥 Download Requests",
+                    f.read(),
+                    file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    type="primary"
+                )
+    with backup_col2:
+        if os.path.exists(USER_DB_PATH):
+            with open(USER_DB_PATH, "rb") as f:
+                st.download_button(
+                    "📥 Download Users",
+                    f.read(),
+                    file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    type="primary"
+                )
+    with backup_col3:
+        if os.path.exists(SETTINGS_PATH):
+            with open(SETTINGS_PATH, "rb") as f:
+                st.download_button(
+                    "📥 Download Settings",
+                    f.read(),
+                    file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    type="primary"
+                )
+    st.caption("💾 Save these files to your computer for backup")
 # ============================================================
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
