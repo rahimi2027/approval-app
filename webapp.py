@@ -1421,18 +1421,14 @@ else:
                         
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-    
-elif user["role"] == "Super Admin":
+    elif user["role"] == "Super Admin":
     st.subheader("🛡️ Super Admin Control Panel")
     tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
-    
-    with tab_settings:
+        with tab_settings:
         settings_management_panel()   # ✅ Calls your Settings panel
-        
-    with tab_users:
+        with tab_users:
         user_management_panel()       # ✅ Calls your User Management panel
-    
-    st.divider()
+        st.divider()
     st.subheader("📥 Download Data Backups")
     backup_col1, backup_col2, backup_col3 = st.columns(3)
     with backup_col1:
