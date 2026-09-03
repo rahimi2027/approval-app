@@ -235,7 +235,6 @@ def init_settings():
 # ============================================================
 # DEPARTMENTS FUNCTIONS — Add / Edit / Delete Departments
 # ============================================================
-
 def load_departments():
     """Load departments from settings or return defaults"""
     init_settings()
@@ -263,6 +262,36 @@ def save_departments(dept_list):
         df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False)
 
+# ============================================================
+# CATEGORIES FUNCTIONS — ✅ ADDED
+# ============================================================
+def load_categories():
+    init_settings()
+    try:
+        df = pd.read_excel(SETTINGS_PATH).fillna("")
+        for _, r in df.iterrows():
+            if r["setting"] == "categories":
+                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
+                return vals if vals else DEFAULT_CATEGORIES
+        return DEFAULT_CATEGORIES
+    except:
+        return DEFAULT_CATEGORIES
+
+def save_categories(cat_list):
+    init_settings()
+    df = pd.read_excel(SETTINGS_PATH).fillna("")
+    found = False
+    for idx, r in df.iterrows():
+        if r["setting"] == "categories":
+            df.at[idx, "value"] = "|".join(cat_list)
+            found = True
+    if not found:
+        df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(cat_list)}])], ignore_index=True)
+    df.to_excel(SETTINGS_PATH, index=False)
+
+# ============================================================
+# ROLES FUNCTIONS
+# ============================================================
 def load_roles():
     init_settings()
     try:
