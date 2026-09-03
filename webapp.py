@@ -1217,7 +1217,6 @@ with backup_col3:
 
 st.caption("💾 Save these files to your computer for backup")
 st.divider()
-
     # ========================================================
     # 👔 MANAGER PORTAL
     # ========================================================
