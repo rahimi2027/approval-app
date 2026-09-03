@@ -1280,14 +1280,176 @@ else:
     # ========================================================
     # 🛡️ SUPER ADMIN PORTAL
     # ========================================================
+   # elif user["role"] == "Super Admin":
+   #     st.subheader("🛡️ Super Admin Control Panel")
+    #    tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+    #    with tab_settings:
+            settings_management_panel()
+    #    with tab_users:
+    #        user_management_panel()
+    # ========================================================
+    # 🛡️ SUPER ADMIN PORTAL — ALL FORMS + SETTINGS + USERS
+    # ========================================================
     elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin Control Panel")
-        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+        st.subheader("🛡️ Super Admin Control Panel — Full System Access")
+
+        # ─── ALL 6 TABS TOGETHER ────────────────────────────────────
+        tab_all, tab_pending, tab_approved, tab_rejected, tab_settings, tab_users = st.tabs([
+            "📋 ALL Forms",
+            "⏳ Pending",
+            "✅ Approved",
+            "❌ Rejected",
+            "⚙️ System Settings",
+            "👤 User Management"
+        ])
+
+        # ─── HELPER: DISPLAY FORM WITH EDIT & DELETE ─────────────────
+        def render_form_with_actions(req):
+            icon = "🟡" if req["status"] == "pending" else ("🟢" if req["status"] == "approved" else "🔴")
+            title = f"{icon} ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f} | {req['status'].upper()}"
+            with st.expander(title):
+                st.write(f"👤 Employee: {req['emp_name']}")
+                st.write(f"🏢 Department: {req['dept']}")
+                st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
+                st.write(f"💷 Amount: £{req['amount']:.2f}")
+                st.write(f"👔 Line Manager: {req['manager']}")
+                st.write(f"📅 Date: {format_date(req['date'])}")
+                st.info(f"📝 Description: {req['desc']}")
+                if req.get("director_comments"):
+                    st.info(f"💬 Comments: {req['director_comments']}")
+                display_attachments(req)
+                if req["status"] == "approved":
+                    display_pdf_button(req, can_generate=True)
+
+                st.divider()
+                col_edit, col_del = st.columns(2)
+                with col_edit:
+                    if st.button(f"✏️ Edit Form #{req['id']}", key=f"sa_edit_{req['id']}"):
+                        st.session_state.editing_request_id = req["id"]
+                        st.rerun()
+                with col_del:
+                    if st.button(f"🗑️ DELETE Form #{req['id']}", key=f"sa_del_{req['id']}", type="secondary"):
+                        all_recs = load_records_from_excel()
+                        records = [r for r in all_recs if int(r["id"]) != int(req["id"])]
+                        save_all_records(records)
+                        st.success(f"✅ Form #{req['id']} DELETED!")
+                        st.rerun()
+
+        # ─── TAB 1: ALL FORMS ────────────────────────────────────────
+        with tab_all:
+            st.metric("📋 Total Forms", len(all_live_requests))
+            st.divider()
+            if not all_live_requests:
+                st.info("📋 No forms in the system.")
+            else:
+                for req in reversed(all_live_requests):
+                    render_form_with_actions(req)
+
+        # ─── TAB 2: PENDING ──────────────────────────────────────────
+        with tab_pending:
+            pending = [r for r in all_live_requests if r["status"] == "pending"]
+            st.metric("⏳ Pending Forms", len(pending))
+            st.divider()
+            if not pending:
+                st.success("✅ No pending forms.")
+            else:
+                for req in reversed(pending):
+                    render_form_with_actions(req)
+
+        # ─── TAB 3: APPROVED ─────────────────────────────────────────
+        with tab_approved:
+            approved = [r for r in all_live_requests if r["status"] == "approved"]
+            st.metric("✅ Approved Forms", len(approved))
+            st.divider()
+            if not approved:
+                st.info("📋 No approved forms yet.")
+            else:
+                for req in reversed(approved):
+                    render_form_with_actions(req)
+
+        # ─── TAB 4: REJECTED ─────────────────────────────────────────
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+            st.metric("❌ Rejected Forms", len(rejected))
+            st.divider()
+            if not rejected:
+                st.info("📋 No rejected forms.")
+            else:
+                for req in reversed(rejected):
+                    render_form_with_actions(req)
+
+        # ─── TAB 5: SYSTEM SETTINGS (KEEP YOUR EXISTING ONE) ────────
         with tab_settings:
             settings_management_panel()
+
+        # ─── TAB 6: USER MANAGEMENT (KEEP YOUR EXISTING ONE) ────────
         with tab_users:
             user_management_panel()
 
+        # ─── EDIT MODE — SUPER ADMIN CAN EDIT ANY FORM ───────────────
+        if st.session_state.editing_request_id:
+            eid = st.session_state.editing_request_id
+            rec = next((r for r in load_records_from_excel() if int(r["id"]) == int(eid)), None)
+            if rec:
+                st.subheader(f"✏️ Edit Form #{eid} — Super Admin")
+                show_old_new_comparison("{}", rec)
+                with st.form("sa_edit_form"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        en = st.text_input("👤 Employee Name", rec["emp_name"])
+                        dept = st.text_input("🏢 Department", rec["dept"])
+                        rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec["type"]))
+                        CATEGORIES = load_categories()
+                        ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=CATEGORIES.index(rec["category"]) if rec["category"] in CATEGORIES else 0)
+                        amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec["amount"]))
+                    with c2:
+                        from datetime import datetime as dt
+                        try: d = dt.strptime(rec["date"][:10], "%Y-%m-%d")
+                        except: d = dt.today()
+                        dt_val = st.date_input("📅 Date", d)
+                        mgr = st.text_input("👔 Line Manager", rec["manager"])
+                        desc = st.text_area("📝 Description / Justification", rec["desc"])
+                        new_status = st.selectbox("🔄 Status", ["pending", "approved", "rejected"], index=["pending", "approved", "rejected"].index(rec["status"]))
+                        comments = st.text_area("💬 Director Comments", rec.get("director_comments", ""))
+                        files = st.file_uploader("📎 Add Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+
+                    if st.form_submit_button("✅ Save Changes"):
+                        all_recs = load_records_from_excel()
+                        for r in all_recs:
+                            if int(r["id"]) == int(eid):
+                                r["emp_name"] = en.strip()
+                                r["dept"] = dept.strip()
+                                r["type"] = rt
+                                r["category"] = ct
+                                r["amount"] = amt
+                                r["date"] = str(dt_val)
+                                r["manager"] = mgr.strip()
+                                r["desc"] = desc.strip()
+                                r["status"] = new_status
+                                r["director_comments"] = comments.strip()
+                                if new_status == "approved":
+                                    r["decision_by"] = user["full_name"]
+                                    r["decision_date"] = str(dt.today())[:10]
+                                elif new_status == "pending":
+                                    r["decision_by"] = ""
+                                    r["decision_date"] = ""
+                                if files:
+                                    att_list = []
+                                    if r.get("attachment_name") and r["attachment_name"] != "None":
+                                        att_list.extend([n.strip() for n in r["attachment_name"].split(",")])
+                                    for i, f in enumerate(files):
+                                        fn = f"ID_{eid}_EDIT_F{len(att_list)+1}_{f.name}"
+                                        with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
+                                            out.write(f.getbuffer())
+                                        att_list.append(fn)
+                                    r["attachment_name"] = ", ".join(att_list) if att_list else "None"
+                        save_all_records(all_recs)
+                        st.success(f"✅ Form #{eid} updated successfully!")
+                        st.session_state.editing_request_id = None
+                        st.rerun()
+                if st.button("❌ Cancel"):
+                    st.session_state.editing_request_id = None
+                    st.rerun()
     # ========================================================
     # 📥 DOWNLOAD BACKUPS — SUPER ADMIN ONLY
     # ========================================================
