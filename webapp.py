@@ -1407,7 +1407,7 @@ else:
                         display_pdf_button(req, can_generate=True)
     elif user["role"] == "Super Admin":
          st.subheader("🛡️ Super Admin Control Panel")
-    tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+       tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
         with tab_settings:
         settings_management_panel()   # ✅ Calls your Settings panel
         with tab_users:
