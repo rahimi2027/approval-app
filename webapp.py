@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ BYTEARRAY FIX + Correct Filename
+# PDF GENERATION — ✅ MATCHES YOUR PDF DESIGN + ALL FIXES
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -450,9 +450,13 @@ def generate_approval_pdf(request_data):
 
         # ─── EXTRACT FIELDS ──────────────────────────────
         emp_name     = clean_text(fresh_data.get("emp_name", "Unknown"))
+        emp_id       = clean_text(fresh_data.get("emp_id", ""))
+        dept         = clean_text(fresh_data.get("dept", ""))
         category     = clean_text(fresh_data.get("category", ""))
         amount       = clean_text(fresh_data.get("amount", "0"))
-        date_submit  = format_date(fresh_data.get("date", ""))
+        req_date     = format_date(fresh_data.get("date", ""))
+        desc         = clean_text(fresh_data.get("desc", ""))
+        manager      = clean_text(fresh_data.get("manager", ""))
         status       = clean_text(fresh_data.get("status", "Pending")).strip().capitalize()
         dir_approve  = format_date(fresh_data.get("decision_date", ""))
         dir_name     = clean_text(fresh_data.get("decision_by", "Director"))
@@ -461,61 +465,72 @@ def generate_approval_pdf(request_data):
         pdf = FPDF()
         pdf.add_page()
 
-        # ✅ ORIGINAL FONT SETTINGS — NOT CHANGED
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 10, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
-        pdf.set_font("Helvetica", "", 12)
+        # ✅ COMPANY HEADER — Centered, Bold, Large
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.cell(0, 12, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
+        pdf.set_font("Helvetica", "", 13)
         pdf.cell(0, 8, txt="Addition & Deduction Approval Request", ln=True, align="C")
-        pdf.ln(5)
+        pdf.ln(6)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(8)
+        pdf.ln(10)
 
-        # ─── REQUEST DETAILS ─────────────────────────────
+        # ─── REQUEST DETAILS — TWO-COLUMN LAYOUT ──────────
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Request ID:", 0, 0)
+        pdf.cell(55, 8, "Request ID:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
         pdf.cell(0, 8, str(fresh_data.get("id", "")), ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Employee Name:", 0, 0)
+        pdf.cell(55, 8, "Employee Name:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
         pdf.cell(0, 8, emp_name, ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Department:", 0, 0)
+        pdf.cell(55, 8, "Employee ID:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, clean_text(fresh_data.get("dept", "")), ln=True)
+        pdf.cell(0, 8, emp_id, ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Transaction Type:", 0, 0)
+        pdf.cell(55, 8, "Department:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, clean_text(fresh_data.get("type", "")), ln=True)
+        pdf.cell(0, 8, dept, ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Category:", 0, 0)
+        pdf.cell(55, 8, "Category / Reason:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
         pdf.cell(0, 8, category, ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Amount (£):", 0, 0)
+        pdf.cell(55, 8, "Amount (£):", 0, 0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, amount, ln=True)
+        pdf.cell(0, 8, f"£{amount}", ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Date Submitted:", 0, 0)
+        pdf.cell(55, 8, "Date of Request:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, date_submit, ln=True)
+        pdf.cell(0, 8, req_date, ln=True)
 
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, "Current Status:", 0, 0)
+        pdf.cell(55, 8, "Line Manager:", 0, 0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, manager, ln=True)
+
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(55, 8, "Description:", 0, 0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.multi_cell(0, 7, desc)
+        pdf.ln(4)
+
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(55, 8, "Current Status:", 0, 0)
         pdf.set_font("Helvetica", "", 12)
         pdf.cell(0, 8, status, ln=True)
 
-        pdf.ln(8)
+        pdf.ln(10)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(6)
+        pdf.ln(8)
 
-        # ─── DIRECTOR APPROVAL ────────────────────────────
+        # ─── DIRECTOR APPROVAL SECTION ────────────────────
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(0, 8, "Director Approval", ln=True)
         pdf.ln(4)
@@ -524,30 +539,36 @@ def generate_approval_pdf(request_data):
         SIGNATURE_DIRECTOR_PATH = "director_sign.png"
         
         if status.lower() == "approved" and dir_approve != "-":
-            pdf.cell(50, 8, "Approved Date:", 0, 0)
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.cell(55, 8, "Approved Date:", 0, 0)
+            pdf.set_font("Helvetica", "", 12)
             pdf.cell(0, 8, dir_approve, ln=True)
-            pdf.cell(50, 8, "Approved By:", 0, 0)
-            pdf.cell(0, 8, dir_name, ln=True)
-            pdf.ln(15)
 
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.cell(55, 8, "Approved By:", 0, 0)
+            pdf.set_font("Helvetica", "", 12)
+            pdf.cell(0, 8, dir_name, ln=True)
+            pdf.ln(20)
+
+            # ✅ SIGNATURE on LEFT — STAMP on RIGHT
             stamp_y = pdf.get_y()
             if os.path.exists(SIGNATURE_DIRECTOR_PATH):
                 pdf.image(SIGNATURE_DIRECTOR_PATH, x=20, y=stamp_y, w=60)
             if os.path.exists(APPROVED_STAMP_PATH):
-                pdf.image(APPROVED_STAMP_PATH, x=130, y=stamp_y - 8, w=55)
+                pdf.image(APPROVED_STAMP_PATH, x=130, y=stamp_y - 10, w=55)
         else:
+            pdf.set_font("Helvetica", "", 12)
             pdf.cell(0, 8, "Pending Director Approval", ln=True)
 
-        # ─── ✅ CORRECT FILENAME ───
+        # ─── ✅ FILENAME: ID# EmployeeName - Category - Date ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
         safe_date = datetime.now().strftime("%Y-%m-%d")
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
 
-        # ─── ✅ THE MAGIC FIX — Works on ALL fpdf2 versions ───
+        # ─── ✅ BYTES FIX — Works on ALL fpdf2 versions ───
         pdf_output = pdf.output()
-        # Convert to bytes safely — whether string or bytearray
         if isinstance(pdf_output, (bytes, bytearray)):
             pdf_bytes = bytes(pdf_output)
         else:
@@ -559,7 +580,6 @@ def generate_approval_pdf(request_data):
         with open(full_pdf_path, "wb") as f:
             f.write(pdf_bytes)
 
-        # ✅ Return to Streamlit — pure bytes
         return True, pdf_bytes, filename
 
     except Exception as e:
