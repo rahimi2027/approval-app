@@ -1033,22 +1033,47 @@ else:
         with tab_pending:
             pending = [r for r in all_live_requests if r["status"] == "pending"]
             if not pending:
-                st.info("✅ No pending requests.")
+                st.success("✅ No pending requests — all reviewed!")
             else:
-                st.metric("🟡 Pending Requests", len(pending))
+                st.metric("⏳ Pending Approval", len(pending))
                 st.divider()
                 for req in reversed(pending):
-                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | ⏳ Pending"
+                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | 📅 {format_date(req['date'])} | £{req['amount']:.2f} | {req['dept']}"
                     with st.expander(title):
-                        st.write(f"👤 Employee: {req['emp_name']}")
-                        st.write(f"🏢 Department: {req['dept']}")
-                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                        st.write(f"💷 Amount: £{req['amount']:.2f}")
-                        st.write(f"👔 Line Manager: {req['manager']}")
-                        st.write(f"📅 Request Date: {req['date']}")
-                        st.info(f"📝 Description: {req['desc']}")
-                        st.warning("⏳ Waiting for Director Approval")
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Transaction Type:** {req['type']}")
+                        st.write(f"🏷️ **Category / Reason:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
+                        
+                        # ✅ SHOW PREVIOUS REJECTION TO DIRECTOR — THE FIX!
+                        prev_comments = req.get("director_comments", "").strip()
+                        if prev_comments:
+                            st.warning(f"📌 PREVIOUS COMMENT / REJECTION REASON:\n\n{prev_comments}")
+                        
+                        st.divider()
+                        with st.form(f"decision_form_{req['id']}"):
+                            comments = st.text_area("💬 Director Comments (Optional)")
+                            col_approve, col_reject = st.columns(2)
+                            with col_approve:
+                                approve_btn = st.form_submit_button("✅ APPROVE", type="primary")
+                            with col_reject:
+                                reject_btn = st.form_submit_button("❌ REJECT", type="secondary")
+                            if approve_btn:
+                                update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
+                                st.success(f"✅ Request #{req['id']} APPROVED!")
+                                st.rerun()
+                            if reject_btn:
+                                update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
+                                st.warning(f"❌ Request #{req['id']} REJECTED!")
+                                st.rerun()
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+                        director_switch_status(req)
 
        # ========================================================
     # MANAGER PORTAL
