@@ -915,10 +915,159 @@ else:
             st.rerun()
     st.divider()
 
-       # ========================================================
-    # 🧾 PAYROLL PORTAL
     # ========================================================
+    # 🔐 ROLE-BASED PORTALS
+    # ========================================================
+    
+    if user["role"] == "Super Admin":
+        # ─── SUPER ADMIN PORTAL ───────────────────────────
+        st.subheader("🔧 Super Admin Portal")
+        st.info("Full system access — manage everything.")
+        # ... keep your existing Super Admin code here ...
+
+    elif user["role"] == "Director":
+        # ========================================================
+        # 🎛️ DIRECTOR PORTAL — WITH FULL STATUS CONTROL
+        # ========================================================
+        st.subheader("🎛️ Director Approval Portal — Andy Acoole")
+        st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
+        st.divider()
+        tab_pending, tab_approved, tab_rejected = st.tabs([
+            "⏳ Pending Requests",
+            "✅ Approved Requests",
+            "❌ Rejected Requests"
+        ])
+        
+        with tab_pending:
+            pending = [r for r in all_live_requests if r["status"] == "pending"]
+            if not pending:
+                st.success("✅ No pending requests — all reviewed!")
+            else:
+                st.metric("⏳ Pending Approval", len(pending))
+                st.divider()
+                for req in reversed(pending):
+                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | 📅 {format_date(req['date'])} | £{req['amount']:.2f} | {req['dept']}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Transaction Type:** {req['type']}")
+                        st.write(f"🏷️ **Category / Reason:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.info(f"📝 **Description:** {req['desc']}")
+                        display_attachments(req)
+                        st.divider()
+                        
+                        with st.form(f"change_status_pending_{req['id']}"):
+                            st.subheader("🔧 Change Status")
+                            comments = st.text_area("💬 Director Comments (Optional)")
+                            col_approve, col_reject = st.columns(2)
+                            with col_approve:
+                                approve_btn = st.form_submit_button("✅ APPROVE", type="primary")
+                            with col_reject:
+                                reject_btn = st.form_submit_button("❌ REJECT", type="secondary")
+                            
+                            if approve_btn:
+                                update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
+                                st.success(f"✅ Request #{req['id']} APPROVED! Status updated.")
+                                st.rerun()
+                            if reject_btn:
+                                update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
+                                st.warning(f"❌ Request #{req['id']} REJECTED! Status updated.")
+                                st.rerun()
+                        
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+        
+        with tab_approved:
+            approved = [r for r in all_live_requests if r["status"] == "approved"]
+            if not approved:
+                st.info("📋 No approved requests yet.")
+            else:
+                st.metric("✅ Total Approved", len(approved))
+                st.divider()
+                for req in reversed(approved):
+                    approved_by_line = f"✅ Approved by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {approved_by_line}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider()
+                        
+                        with st.form(f"change_status_approved_{req['id']}"):
+                            st.subheader("🔧 Change Status")
+                            comments = st.text_area("💬 Updated Comments (Optional)")
+                            col_pending, col_reject = st.columns(2)
+                            with col_pending:
+                                pending_btn = st.form_submit_button("⏳ Move to Pending")
+                            with col_reject:
+                                reject_btn = st.form_submit_button("❌ Change to REJECTED", type="secondary")
+                            
+                            if pending_btn:
+                                update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
+                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
+                                st.rerun()
+                            if reject_btn:
+                                update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
+                                st.warning(f"❌ Request #{req['id']} changed to REJECTED!")
+                                st.rerun()
+                        
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+        
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+            if not rejected:
+                st.info("📋 No rejected requests yet.")
+            else:
+                st.metric("❌ Total Rejected", len(rejected))
+                st.divider()
+                for req in reversed(rejected):
+                    rejected_by_line = f"❌ Rejected by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
+                    title = f"🔴 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {rejected_by_line}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.error(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider()
+                        
+                        with st.form(f"change_status_rejected_{req['id']}"):
+                            st.subheader("🔧 Change Status")
+                            comments = st.text_area("💬 Updated Comments (Optional)")
+                            col_pending, col_approve = st.columns(2)
+                            with col_pending:
+                                pending_btn = st.form_submit_button("⏳ Move to Pending")
+                            with col_approve:
+                                approve_btn = st.form_submit_button("✅ Change to APPROVED", type="primary")
+                            
+                            if pending_btn:
+                                update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
+                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
+                                st.rerun()
+                            if approve_btn:
+                                update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
+                                st.success(f"✅ Request #{req['id']} changed to APPROVED!")
+                                st.rerun()
+                        
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+
     elif user["role"] == "Payroll":
+        # ========================================================
+        # 🧾 PAYROLL PORTAL — CAN VIEW & REJECT
+        # ========================================================
         st.subheader("🧾 Payroll Portal")
         st.info("✅ View all requests, Download PDFs, and Reject requests when needed.")
         st.divider()
@@ -949,7 +1098,6 @@ else:
                         display_attachments(req)
                         st.divider()
                         
-                        # ✅ PAYROLL CAN REJECT
                         with st.form(f"payroll_reject_pending_{req['id']}"):
                             comments = st.text_area("💬 Reason for Rejection")
                             reject_btn = st.form_submit_button("❌ REJECT", type="secondary")
