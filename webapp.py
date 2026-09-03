@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ FIXED: Returns Bytes + Correct Filename + No Corruption
+# PDF GENERATION — ✅ RETURNS PURE BYTES + CORRECT FILENAME + NO CORRUPTION
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -546,18 +546,17 @@ def generate_approval_pdf(request_data):
         safe_date = datetime.now().strftime("%Y-%m-%d")
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
 
-        # ─── ✅ SAVE TO FILE + CAPTURE BYTES FOR DOWNLOAD ───
+        # ─── ✅ CORRECT METHOD: OUTPUT TO BYTES → SAVE → RETURN ───
+        # ✅ Get PDF as BYTES (Streamlit needs bytes, NOT string!)
+        pdf_bytes = pdf.output(dest='S').encode('latin-1')
+        
+        # ✅ Save to disk
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
-        
-        # ✅ OUTPUT TO BYTES FIRST — THIS FIXES THE CORRUPTION!
-        pdf_bytes = pdf.output()
-        
-        # ✅ THEN SAVE TO DISK
         with open(full_pdf_path, "wb") as f:
             f.write(pdf_bytes)
 
-        # ✅ RETURN CORRECT FORMAT: (success, bytes_for_download, filename)
+        # ✅ RETURN: (success, bytes_for_download, filename)
         return True, pdf_bytes, filename
 
     except Exception as e:
