@@ -554,7 +554,17 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 7, txt=display_date, ln=True)
 
         pdf.ln(22)
-
+        # ✅ SHOW PREVIOUS COMMENTS IN PDF
+        prev_comments = fresh_data.get("director_comments", "").strip()
+        if prev_comments and "PREVIOUS REJECTION" in prev_comments:
+            pdf.ln(5)
+            pdf.set_font("Courier", "B", 10)
+            pdf.set_text_color(150, 0, 0)
+            pdf.cell(0, 7, txt="📌 PREVIOUS REJECTION REASON:", ln=True)
+            pdf.set_font("Courier", "", 10)
+            pdf.multi_cell(0, 6, txt=prev_comments)
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(5)
         # ─── DASHED / BROKEN SIGNATURE LINE ────────────────────────
         signature_y = pdf.get_y()
         pdf.set_font("Courier", "", 10)
@@ -1096,7 +1106,21 @@ else:
                                     r["desc"] = desc.strip()
                                     r["status"] = "pending"
                                     r["old_data"] = old
-                                    r["director_comments"] = ""
+                                    r["status"] = "pending"
+r["old_data"] = old
+
+# ✅ SAVE PREVIOUS REJECTION COMMENT FOR DIRECTOR TO SEE
+old_comments = r.get("director_comments", "").strip()
+if old_comments and "rejected" in str(r.get("status", "")).lower() or old_comments:
+    if "📌 PREVIOUS REJECTION REASON:" not in old_comments:
+        r["director_comments"] = f"📌 PREVIOUS REJECTION REASON:\n{old_comments}\n\n--- NEW REQUEST ---"
+    else:
+        r["director_comments"] = old_comments  # Keep existing note
+else:
+    r["director_comments"] = ""  # Only clear if no old comment
+
+r["decision_date"] = ""
+r["decision_by"] = ""
                                     r["decision_date"] = ""
                                     r["decision_by"] = ""
                                     if files:
@@ -1169,8 +1193,8 @@ else:
                     st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
                     st.info(f"📝 Description: {req['desc']}")
                     display_attachments(req)
-                    if req["director_comments"]:
-                        st.info(f"💬 Director Comments: {req['director_comments']}")
+                    if req.get("director_comments", "").strip():
+                    st.warning(f"📌 **PREVIOUS COMMENT / REJECTION REASON:**\n\n{req['director_comments']}")
                     if req["status"] == "approved":
                         display_pdf_button(req, can_generate=False)
                     if req["status"] in ["pending", "rejected"]:
