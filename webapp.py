@@ -487,40 +487,29 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True)
         pdf.ln(2)
-
         pdf.set_font("Courier", "", 9)
-
         pdf.cell(52, 5, "Request ID:", 0, 0)
         pdf.cell(0, 5, str(fresh_data.get("id", "")), ln=True)
-
         pdf.cell(52, 5, "Employee Name:", 0, 0)
         pdf.cell(0, 5, emp_name, ln=True)
-
         pdf.cell(52, 5, "Department:", 0, 0)
         pdf.cell(0, 5, dept, ln=True)
-
         pdf.cell(52, 5, "Transaction Type:", 0, 0)
         pdf.cell(0, 5, clean_text(fresh_data.get("type", "")), ln=True)
-
         pdf.cell(52, 5, "Category / Reason:", 0, 0)
         pdf.cell(0, 5, category, ln=True)
-
         pdf.cell(52, 5, "Request Date:", 0, 0)
         pdf.cell(0, 5, req_date, ln=True)
-
         pdf.cell(52, 5, "Amount Approved:", 0, 0)
         pdf.cell(0, 5, f"£{amount}", ln=True)
-
         pdf.cell(52, 5, "Line Manager:", 0, 0)
         pdf.cell(0, 5, manager, ln=True)
-
         pdf.ln(6)
 
         # ─── DESCRIPTION / JUSTIFICATION ──────────────────
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.ln(2)
-
         pdf.set_font("Courier", "", 9)
         pdf.multi_cell(0, 5, desc)
         pdf.ln(8)
@@ -529,14 +518,13 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
-
         pdf.set_font("Courier", "", 9)
 
-        # ✅ CLEAN IF/ELSE — NO SYNTAX ERRORS
+        # ✅ APPROVED — Green text + Approved By + Date + Stamp
         if status.lower() == "approved" and dir_approve != "-":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9)
-            pdf.set_text_color(0, 128, 0)
+            pdf.set_text_color(0, 128, 0)  # Green
             pdf.cell(0, 5, "APPROVED", ln=True)
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Courier", "", 9)
@@ -544,6 +532,21 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
             pdf.cell(0, 5, dir_approve, ln=True)
+
+        # ✅ REJECTED — Red text + Rejected By + Date + Stamp
+        elif status.lower() == "rejected" and dir_approve != "-":
+            pdf.cell(52, 5, "Decision:", 0, 0)
+            pdf.set_font("Courier", "B", 9)
+            pdf.set_text_color(200, 0, 0)  # Red
+            pdf.cell(0, 5, "REJECTED", ln=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font("Courier", "", 9)
+            pdf.cell(52, 5, "Rejected By:", 0, 0)
+            pdf.cell(0, 5, dir_name, ln=True)
+            pdf.cell(52, 5, "Rejection Date / Time:", 0, 0)
+            pdf.cell(0, 5, dir_approve, ln=True)
+
+        # ⏳ PENDING — Default
         else:
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.cell(0, 5, "Pending", ln=True)
@@ -555,10 +558,13 @@ def generate_approval_pdf(request_data):
         for x in range(10, 200, 4):
             pdf.line(x, dash_y, x + 2, dash_y)
 
-        # ✅ APPROVED STAMP — centered on dashed line
+        # ✅ APPROVED or REJECTED STAMP — centered on dashed line
         APPROVED_STAMP_PATH = "approved_stamp.png"
+        REJECTED_STAMP_PATH = "rejected_stamp.png"
         if status.lower() == "approved" and os.path.exists(APPROVED_STAMP_PATH):
             pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
+        elif status.lower() == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
+            pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
 
         pdf.ln(8)
 
@@ -1066,10 +1072,10 @@ else:
 
     elif user["role"] == "Payroll":
         # ========================================================
-        # 🧾 PAYROLL PORTAL — CAN VIEW & REJECT
+        # 🧾 PAYROLL PORTAL — VIEW & DOWNLOAD ONLY (NO REJECT)
         # ========================================================
         st.subheader("🧾 Payroll Portal")
-        st.info("✅ View all requests, Download PDFs, and Reject requests when needed.")
+        st.info("✅ View all requests and Download PDFs.")
         st.divider()
         tab_pending, tab_approved, tab_rejected = st.tabs([
             "⏳ Pending Requests",
@@ -1096,16 +1102,6 @@ else:
                         st.write(f"📅 **Date:** {req['date']}")
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
-                        st.divider()
-                        
-                        with st.form(f"payroll_reject_pending_{req['id']}"):
-                            comments = st.text_area("💬 Reason for Rejection")
-                            reject_btn = st.form_submit_button("❌ REJECT", type="secondary")
-                            if reject_btn:
-                                update_record_status_in_excel(req["id"], "rejected", "[Payroll] " + comments, FULL_NAME)
-                                st.warning(f"❌ Request #{req['id']} REJECTED by Payroll!")
-                                st.rerun()
-                        
                         st.divider()
                         display_pdf_button(req, can_generate=True)
         
