@@ -81,17 +81,23 @@ def display_pdf_button(req, can_generate=False):
     import streamlit as st
     import os
     req_id = req["id"]
-    pdf_path = req.get("pdf_path", "")
     
-    if pdf_path and os.path.exists(pdf_path):
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                f"📥 Download PDF",
-                f.read(),
-                file_name=os.path.basename(pdf_path),
-                key=f"pdf_{req_id}"
-            )
-        return True
+    # ✅ GENERATE FRESH PDF WHEN BUTTON CLICKED
+    if can_generate and PDF_AVAILABLE:
+        if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
+            ok, pdf_bytes, name = generate_approval_pdf(req)
+            if ok:
+                st.success(f"✅ Generated! Ready to download ↓")
+                st.download_button(
+                    f"📥 Download: {name}",
+                    data=pdf_bytes,
+                    file_name=name,
+                    mime="application/pdf",
+                    type="primary"
+                )
+            else:
+                st.error(f"❌ {name}")
+    return False
     
     elif can_generate and PDF_AVAILABLE:
         if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
