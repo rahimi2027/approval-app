@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ FIXED: No Damage + Correct Filename Format
+# PDF GENERATION — ✅ FINAL VERSION: No errors + correct filename
 # ============================================================
 def generate_approval_pdf(request_data):
     import os
@@ -429,7 +429,6 @@ def generate_approval_pdf(request_data):
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
         
         def clean_text(t):
-            # ✅ Remove special characters that break filenames
             return str(t).replace("—", "-").replace("–", "-").replace(":", "-").replace("/", "-").replace("\\", "-").strip()
         
         def format_date(d):
@@ -536,17 +535,16 @@ def generate_approval_pdf(request_data):
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt="Waiting for Director approval", ln=True, align="C")
         
-        # ─── SAVE WITH CORRECT FILENAME FORMAT ───────────────────
+        # ─── SAVE WITH CORRECT FILENAME ──────────────────────────
         save_dir = "approved_pdfs"
         os.makedirs(save_dir, exist_ok=True)
         
-        # ✅ NEW FILENAME FORMAT: ID#1 - Employee Name - Category.pdf
+        # ✅ FILENAME FORMAT: ID#1 - Employee Name - Category.pdf
         filename = f"ID#{req_id} - {emp_name} - {category}.pdf"
         full_pdf_path = os.path.join(save_dir, filename)
         
-        # ✅ SAVE AND CLOSE PROPERLY — prevents "damaged file" error
-        pdf.output(full_pdf_path)
-        pdf.close()  # ✅ ENSURE PDF IS PROPERLY CLOSED
+        # ✅ SAVE — fpdf2 does NOT use .close()!
+        pdf.output(full_pdf_path)  # ✅ That's it! No .close() needed
         
         return True, full_pdf_path, filename
     
