@@ -545,16 +545,29 @@ def generate_approval_pdf(request_data):
 
 
 # ============================================================
-# DIRECTOR STATUS SWITCH — CORRECT FILENAME: requests.xlsx
+# DIRECTOR STATUS SWITCH — DEBUG VERSION
 # ============================================================
 def director_switch_status(request_data):
-    """Director can flip status — uses YOUR actual file: requests.xlsx"""
+    """Director can flip status — shows Excel columns to fix 'id' error"""
     
     st.markdown("---")
     st.warning("🔧 ⚙️ DIRECTOR STATUS SWITCH PANEL")
     
-    req_id = request_data.get("id")
-    current_status = str(request_data.get("status", "pending")).strip().lower()
+    # ✅ Show what keys are in the request data
+    st.info(f"📋 Request data keys: {list(request_data.keys())}")
+    
+    # ✅ Try ALL possible id column names
+    req_id = None
+    for key in ["id", "ID", "request_id", "Id", "RequestID"]:
+        if key in request_data and request_data[key]:
+            req_id = request_data[key]
+            break
+    
+    if not req_id:
+        st.error("❌ Cannot find ID in request data!")
+        return
+
+    current_status = str(request_data.get("status", request_data.get("Status", "pending"))).strip().lower()
 
     col1, col2 = st.columns(2)
     with col1:
@@ -576,26 +589,39 @@ def director_switch_status(request_data):
             import pandas as pd
             from datetime import datetime
 
-            # ✅ YOUR ACTUAL FILENAME FROM THE LIST!
             excel_path = "requests.xlsx"
-
             df = pd.read_excel(excel_path)
 
-            mask = df["id"].astype(str) == str(req_id)
-            if not mask.any():
-                st.error(f"❌ Request ID #{req_id} NOT FOUND in Excel!")
+            # ✅ Show Excel column names for debugging
+            st.info(f"📊 Excel columns: {list(df.columns)}")
+
+            # ✅ Try matching with ANY id column name
+            id_col = None
+            for possible_id in ["id", "ID", "request_id", "Id", "RequestID"]:
+                if possible_id in df.columns:
+                    id_col = possible_id
+                    break
+
+            if not id_col:
+                st.error("❌ No 'id' column found in Excel!")
                 return
 
-            # ✅ UPDATE THE RECORD
-            df.loc[mask, "status"] = new_status
-            df.loc[mask, "decision_by"] = st.session_state.username
-            df.loc[mask, "decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            mask = df[id_col].astype(str) == str(req_id)
+            if not mask.any():
+                st.error(f"❌ Request #{req_id} NOT FOUND in Excel!")
+                return
+
+            # ✅ Update status
+            status_col = "status" if "status" in df.columns else "Status"
+            df.loc[mask, status_col] = new_status
+
+            # ✅ Update decision fields
+            if "decision_by" in df.columns:
+                df.loc[mask, "decision_by"] = st.session_state.username
+            if "decision_date" in df.columns:
+                df.loc[mask, "decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             df.to_excel(excel_path, index=False)
-
-            request_data["status"] = new_status
-            request_data["decision_by"] = st.session_state.username
-            request_data["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             st.success(f"✅ ✅ Status CHANGED: **{current_status.upper()} → {new_status.upper()}**")
             st.info(f"📄 Saved to: {excel_path}")
