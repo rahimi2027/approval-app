@@ -532,8 +532,18 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
             pdf.cell(0, 5, dir_approve, ln=True)
+            
+            # ✅ Show Director Comments if provided
+            dir_comments = fresh_data.get("director_comments", "").strip()
+            if dir_comments and dir_comments.lower() != "none":
+                pdf.ln(2)
+                pdf.set_font("Courier", "B", 9)
+                pdf.cell(52, 5, "Director Comments:", 0, 0)
+                pdf.set_font("Courier", "", 9)
+                pdf.ln(5)
+                pdf.multi_cell(0, 5, dir_comments)
 
-        # ✅ REJECTED — Red text + Rejected By + Date + Stamp
+        # ✅ REJECTED — Red text + Rejected By + Date + REASON
         elif status.lower() == "rejected" and dir_approve != "-":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9)
@@ -545,6 +555,16 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Rejection Date / Time:", 0, 0)
             pdf.cell(0, 5, dir_approve, ln=True)
+            
+            # ✅ SHOW REJECTION REASON / COMMENT IN PDF
+            dir_comments = fresh_data.get("director_comments", "").strip()
+            if dir_comments and dir_comments.lower() != "none":
+                pdf.ln(2)
+                pdf.set_font("Courier", "B", 9)
+                pdf.cell(52, 5, "Reason for Rejection:", 0, 0)
+                pdf.set_font("Courier", "", 9)
+                pdf.ln(5)
+                pdf.multi_cell(0, 5, dir_comments)
 
         # ⏳ PENDING — Default
         else:
