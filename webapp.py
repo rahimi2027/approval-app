@@ -598,7 +598,7 @@ def director_switch_status(request_data):
     st.warning("🔧 ⚙️ DIRECTOR STATUS SWITCH PANEL")
     
     # ✅ Show what keys are in the request data
-    st.info(f"📋 Request data keys: {list(request_data.keys())}")
+    #st.info(f"📋 Request data keys: {list(request_data.keys())}")
     
     # ✅ Try ALL possible id column names
     req_id = None
