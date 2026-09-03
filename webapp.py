@@ -37,13 +37,12 @@ def github_auto_save():
 # ─── DATE FORMATTING HELPER ──────────────────────────────────────
 def format_date(d):
     """Format dates safely — returns first 10 chars or placeholder"""
-    if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
-        return "—"
+    if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
+        return "-"
     return str(d).strip()[:10]
 
 def display_attachments(req):
     import streamlit as st
-    import os
     att = req.get("attachment_name", "None")
     if not att or str(att).strip() == "" or str(att).strip().lower() == "none":
         st.info("📎 No attachments.")
@@ -100,7 +99,7 @@ def update_record_status_in_excel(req_id, new_status, comments, approved_by):
     decision_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for r in records:
         if int(r["id"]) == int(req_id):
-            r["status"] = new_status
+            r["status"] = new_status.lower()
             r["decision_date"] = decision_datetime
             r["decision_by"] = approved_by
             if comments.strip():
@@ -181,12 +180,16 @@ if "win32" in sys.platform:
     BASE_DIR = r"D:\Acoole_portal"
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
+APPROVED_STAMP_PATH = os.path.join(BASE_DIR, "approved_stamp.png")
+REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
 EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
 USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
+
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
@@ -416,13 +419,13 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ COURIER FONT + DOUBLE LINE + LOGO + STAMP
+# PDF GENERATION — ✅ FIXED STATUS DETECTION + STAMP
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        # ✅ READ FRESH DATA FROM EXCEL
+        # ✅ READ FRESH DATA FROM EXCEL — ALWAYS GET LATEST STATUS
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next(
@@ -442,12 +445,6 @@ def generate_approval_pdf(request_data):
                 t = t.replace(char, " ")
             return t.strip()
 
-        # ✅ SAFE DATE FORMAT
-        def format_date(d):
-            if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
-                return "-"
-            return str(d).strip()[:10]
-
         # ─── EXTRACT FIELDS ──────────────────────────────
         emp_name     = clean_text(fresh_data.get("emp_name", "Unknown"))
         dept         = clean_text(fresh_data.get("dept", ""))
@@ -456,28 +453,28 @@ def generate_approval_pdf(request_data):
         req_date     = format_date(fresh_data.get("date", ""))
         desc         = clean_text(fresh_data.get("desc", ""))
         manager      = clean_text(fresh_data.get("manager", ""))
-        status       = clean_text(fresh_data.get("status", "Pending")).strip().capitalize()
+        status       = str(fresh_data.get("status", "pending")).strip().lower()  # ✅ FORCE LOWERCASE
         dir_approve  = format_date(fresh_data.get("decision_date", ""))
         dir_name     = clean_text(fresh_data.get("decision_by", "Director"))
+        dir_comments = fresh_data.get("director_comments", "").strip()
 
         # ─── CREATE PDF ───────────────────────────────────
         pdf = FPDF()
         pdf.add_page()
 
         # ✅ LOGO — centered at top
-        LOGO_PATH = "logo.png"
         if os.path.exists(LOGO_PATH):
             pdf.image(LOGO_PATH, x=75, y=10, w=60)
 
         # ✅ MOVE DOWN AFTER LOGO
         pdf.ln(22)
 
-        # ✅ FORM TITLE — Courier font
+        # ✅ FORM TITLE
         pdf.set_font("Courier", "", 11)
         pdf.cell(0, 5, txt="Addition & Deduction Approval Form", ln=True, align="C")
         pdf.ln(3)
 
-        # ✅ DOUBLE HORIZONTAL LINE — matches your screenshot
+        # ✅ DOUBLE HORIZONTAL LINE
         line_y = pdf.get_y()
         pdf.line(10, line_y, 200, line_y)
         pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
@@ -520,8 +517,8 @@ def generate_approval_pdf(request_data):
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
 
-        # ✅ APPROVED — Green text + Approved By + Date + Stamp
-        if status.lower() == "approved" and dir_approve != "-":
+        # ✅ APPROVED — Green text + Stamp — STATUS IS KING!
+        if status == "approved":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9)
             pdf.set_text_color(0, 128, 0)  # Green
@@ -531,10 +528,8 @@ def generate_approval_pdf(request_data):
             pdf.cell(52, 5, "Approved By:", 0, 0)
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
-            pdf.cell(0, 5, dir_approve, ln=True)
-            
-            # ✅ Show Director Comments if provided
-            dir_comments = fresh_data.get("director_comments", "").strip()
+            pdf.cell(0, 5, dir_approve if dir_approve != "-" else "—", ln=True)
+
             if dir_comments and dir_comments.lower() != "none":
                 pdf.ln(2)
                 pdf.set_font("Courier", "B", 9)
@@ -543,8 +538,8 @@ def generate_approval_pdf(request_data):
                 pdf.ln(5)
                 pdf.multi_cell(0, 5, dir_comments)
 
-        # ✅ REJECTED — Red text + Rejected By + Date + REASON
-        elif status.lower() == "rejected" and dir_approve != "-":
+        # ✅ REJECTED — Red text
+        elif status == "rejected":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9)
             pdf.set_text_color(200, 0, 0)  # Red
@@ -554,10 +549,8 @@ def generate_approval_pdf(request_data):
             pdf.cell(52, 5, "Rejected By:", 0, 0)
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Rejection Date / Time:", 0, 0)
-            pdf.cell(0, 5, dir_approve, ln=True)
-            
-            # ✅ SHOW REJECTION REASON / COMMENT IN PDF
-            dir_comments = fresh_data.get("director_comments", "").strip()
+            pdf.cell(0, 5, dir_approve if dir_approve != "-" else "—", ln=True)
+
             if dir_comments and dir_comments.lower() != "none":
                 pdf.ln(2)
                 pdf.set_font("Courier", "B", 9)
@@ -566,29 +559,25 @@ def generate_approval_pdf(request_data):
                 pdf.ln(5)
                 pdf.multi_cell(0, 5, dir_comments)
 
-        # ⏳ PENDING — Default
+        # ⏳ PENDING
         else:
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.cell(0, 5, "Pending", ln=True)
 
         pdf.ln(10)
 
-        # ✅ DASHED / BROKEN LINE above signature
+        # ✅ DASHED LINE + STAMP IMAGE
         dash_y = pdf.get_y()
         for x in range(10, 200, 4):
             pdf.line(x, dash_y, x + 2, dash_y)
 
-        # ✅ APPROVED or REJECTED STAMP — centered on dashed line
-        APPROVED_STAMP_PATH = "approved_stamp.png"
-        REJECTED_STAMP_PATH = "rejected_stamp.png"
-        if status.lower() == "approved" and os.path.exists(APPROVED_STAMP_PATH):
+        # ✅ SHOW STAMP — STATUS IS KING (no longer requires decision_date!)
+        if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
             pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
-        elif status.lower() == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
+        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
             pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
 
         pdf.ln(8)
-
-        # ✅ SIGNATURE TEXT
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
 
@@ -599,14 +588,13 @@ def generate_approval_pdf(request_data):
         safe_date = datetime.now().strftime("%Y-%m-%d")
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
 
-        # ─── BYTES FIX — Works on ALL fpdf2 versions ───
+        # ─── OUTPUT ───
         pdf_output = pdf.output()
         if isinstance(pdf_output, (bytes, bytearray)):
             pdf_bytes = bytes(pdf_output)
         else:
             pdf_bytes = pdf_output.encode("latin-1")
 
-        # ✅ Save to disk
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f:
@@ -664,7 +652,6 @@ def settings_management_panel():
     st.subheader("⚙️ System Settings — Categories, Departments & Roles")
     st.info("🛡️ Super Admin Only — Add, Edit, Delete Categories, Departments and Permission Roles.")
     st.divider()
-
     cats_tab, dept_tab, roles_tab = st.tabs([
         "🏷️ Manage Categories", "🏢 Manage Departments", "🎖️ Manage Roles / Permissions"
     ])
@@ -672,6 +659,7 @@ def settings_management_panel():
     with cats_tab:
         st.markdown("### 🏷️ Request Categories")
         st.info("These options appear in the request form dropdown.")
+        st.divider()
         current_cats = load_categories()
         with st.form("add_category_form", clear_on_submit=True):
             new_cat = st.text_input("➕ Add New Category", placeholder="e.g. Travel Allowance")
@@ -894,7 +882,6 @@ def display_company_header():
     import os
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        LOGO_PATH = "logo.png"
         if os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, width=300)
         else:
@@ -944,9 +931,8 @@ else:
     # ========================================================
     # 🔐 ROLE-BASED PORTALS
     # ========================================================
-    
 
-    elif user["role"] == "Director":
+    if user["role"] == "Director":
         # ========================================================
         # 🎛️ DIRECTOR PORTAL — WITH FULL STATUS CONTROL
         # ========================================================
@@ -954,11 +940,9 @@ else:
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
         st.divider()
         tab_pending, tab_approved, tab_rejected = st.tabs([
-            "⏳ Pending Requests",
-            "✅ Approved Requests",
-            "❌ Rejected Requests"
+            "⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"
         ])
-        
+
         with tab_pending:
             pending = [r for r in all_live_requests if r["status"] == "pending"]
             if not pending:
@@ -979,7 +963,7 @@ else:
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         st.divider()
-                        
+
                         with st.form(f"change_status_pending_{req['id']}"):
                             st.subheader("🔧 Change Status")
                             comments = st.text_area("💬 Director Comments (Optional)")
