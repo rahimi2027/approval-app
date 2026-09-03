@@ -1268,7 +1268,7 @@ st.divider()
                         en = st.text_input("👤 Employee Name", rec["emp_name"])
                         rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec["type"]))
                         ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=CATEGORIES.index(rec["category"]) if rec["category"] in CATEGORIES else 0)
-                        amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec["amount"]))
+                        amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec["amount"])))
                     with c2:
                         from datetime import datetime as dt
                         try: d = dt.strptime(rec["date"][:10], "%Y-%m-%d")
