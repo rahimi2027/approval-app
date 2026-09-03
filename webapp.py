@@ -1430,23 +1430,21 @@ else:
     # ========================================================
     # 🛡️ SUPER ADMIN PORTAL
     # ========================================================
-    elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin Control Panel")
-        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
-        with tab_settings:
-            settings_management_panel()
-        with tab_users:
-            user_management_panel()
-    # ========================================================
-    # 🛡️ SUPER ADMIN PORTAL
-    # ========================================================
-    elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin Control Panel")
-        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
-        with tab_settings:
-            settings_management_panel()
-        with tab_users:
-            user_management_panel()
+elif user["role"] == "Super Admin":
+    st.subheader("🛡️ Super Admin Control Panel")
+    tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+    
+    with tab_settings:
+        settings_management_panel()   # ✅ Create / Edit / Delete Categories, Departments, Roles
+    
+    with tab_users:
+        user_management_panel()       # ✅ Create / Edit / Delete ALL User Accounts
+
+    # ✅ DOWNLOAD ALL DATA BACKUPS — ONLY SUPER ADMIN CAN SEE THIS!
+    st.subheader("📥 Download Data Backups")
+    st.download_button("📥 Download Requests", ...)   # Excel backup
+    st.download_button("📥 Download Users", ...)      # User list backup
+    st.download_button("📥 Download Settings", ...)    # Settings backup
      # ========================================================
     # 📥 DOWNLOAD BACKUPS — SUPER ADMIN ONLY
     # ========================================================
