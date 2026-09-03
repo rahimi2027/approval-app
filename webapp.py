@@ -76,6 +76,7 @@ def display_attachments(req):
     except Exception as e:
         st.info(f"📎 Attachments: {att}")
         # ─── PDF BUTTON HELPER ──────────────────────────────────────────────
+# ✅ NEW VERSION — PASTE THIS IN PLACE OF THE OLD ONE
 def display_pdf_button(req, can_generate=False):
     import streamlit as st
     import os
@@ -96,10 +97,10 @@ def display_pdf_button(req, can_generate=False):
         if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
             ok, path, name = generate_approval_pdf(req)
             if ok:
-                st.success(f"✅ Generated: {name}")
+                st.success(f"✅ Generated! Click below to download ↓")
                 st.rerun()
             else:
-                st.error(f"❌ Error: {path}")
+                st.error(f"❌ {name}")  # ✅ Shows REAL error message
     return False
 
 
@@ -427,20 +428,16 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — FULLY FIXED VERSION
-# ============================================================
-# ============================================================
-# PDF GENERATION — FIXED VERSION (Better Error Handling + Auto-Folders)
+# PDF GENERATION — CLOUD-COMPATIBLE VERSION (NO PERMISSION ISSUES)
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
+    
     try:
-        # ✅ ENSURE FOLDERS EXIST — CRITICAL FOR STREAMLIT CLOUD
-        os.makedirs(PDF_DIR, exist_ok=True)
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-        # ✅ READ FRESH DATA DIRECTLY FROM EXCEL — ALWAYS UP-TO-DATE!
+        import tempfile
+        
+        # ✅ READ FRESH DATA FROM EXCEL
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
@@ -448,7 +445,7 @@ def generate_approval_pdf(request_data):
         def clean_text(t):
             return str(t).replace("—", "-").replace("–", "-")
         
-        # ✅ GET LATEST STATUS
+        # ✅ GET STATUS & DATA
         status = str(fresh_data.get("status", "pending")).strip().lower()
         decision_by_safe = clean_text(fresh_data.get("decision_by", "Director"))
         decision_date_safe = clean_text(str(fresh_data.get("decision_date", "Not Approved Yet")))
@@ -463,12 +460,15 @@ def generate_approval_pdf(request_data):
         dept_safe = clean_text(fresh_data.get("dept", ""))
         manager_safe = clean_text(fresh_data.get("manager", ""))
         
-        # ✅ SAFE FILENAME — REMOVE £ AND SPECIAL CHARACTERS
+        # ✅ SAFE FILENAME (NO SPECIAL CHARS)
         safe_emp = "".join(c for c in emp_name_safe if c.isalnum() or c in (" ", "-", "_")).strip() or "Request"
         safe_cat = "".join(c for c in category_safe if c.isalnum() or c in (" ", "-", "_")).strip() or "Approval"
         safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
         filename = f"{safe_emp}_{safe_cat}_{safe_date}.pdf"
-        full_pdf_path = os.path.join(PDF_DIR, filename)
+        
+        # ✅ USE GUARANTEED-WRITABLE TEMP FOLDER
+        temp_dir = tempfile.gettempdir()
+        full_pdf_path = os.path.join(temp_dir, filename)
         
         # ✅ CREATE PDF
         pdf = FPDF("P", "mm", "A4")
@@ -478,7 +478,8 @@ def generate_approval_pdf(request_data):
         # Logo
         if os.path.exists(LOGO_PATH):
             try: pdf.image(LOGO_PATH, x=10, y=8, w=40)
-            except: pass
+            except Exception as e:
+                pass
         
         pdf.set_xy(60, 10)
         pdf.set_font("Courier", "B", 18)
@@ -523,12 +524,12 @@ def generate_approval_pdf(request_data):
         # ✅ STATUS DISPLAY
         pdf.set_font("Courier", "B", 14)
         if status == "approved":
-            pdf.cell(0, 8, f"✅ APPROVED", ln=True)
+            pdf.cell(0, 8, "✅ APPROVED", ln=True)
             pdf.set_font("Courier", "", 11)
             pdf.cell(0, 6, f"Approved by: {decision_by_safe}", ln=True)
             pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
         elif status == "rejected":
-            pdf.cell(0, 8, f"❌ REJECTED", ln=True)
+            pdf.cell(0, 8, "❌ REJECTED", ln=True)
             pdf.set_font("Courier", "", 11)
             pdf.cell(0, 6, f"Rejected by: {decision_by_safe}", ln=True)
             pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
@@ -540,28 +541,20 @@ def generate_approval_pdf(request_data):
         if comment_safe:
             pdf_row("Director Comments", comment_safe)
         
-        # ✅ SIGNATURE LINE
+        # ✅ SIGNATURE LINE + STAMP IMAGE
         pdf.ln(20)
         pdf.cell(0, 6, "-" * 50, ln=True)
         pdf.cell(0, 6, "Authorized Signature / Director", ln=True)
         
-        # ✅ APPROVAL STAMP IMAGE — WITH FALLBACK
         stamp_file_path = os.path.join(BASE_DIR, "approved_stamp.png")
         stamp_rejected_path = os.path.join(BASE_DIR, "rejected_stamp.png")
         
-        stamp_added = False
         if status == "approved" and os.path.exists(stamp_file_path):
-            try:
-                pdf.image(stamp_file_path, x=110, y=pdf.get_y() - 8, w=55)
-                stamp_added = True
-            except Exception as e:
-                pass
+            try: pdf.image(stamp_file_path, x=110, y=pdf.get_y() - 8, w=55)
+            except: pass
         elif status == "rejected" and os.path.exists(stamp_rejected_path):
-            try:
-                pdf.image(stamp_rejected_path, x=110, y=pdf.get_y() - 8, w=55)
-                stamp_added = True
-            except Exception as e:
-                pass
+            try: pdf.image(stamp_rejected_path, x=110, y=pdf.get_y() - 8, w=55)
+            except: pass
         
         # ✅ ATTACHMENTS
         att_names = fresh_data.get("attachment_name", "None")
@@ -579,21 +572,20 @@ def generate_approval_pdf(request_data):
                     pdf.ln(5)
                     pdf.cell(0, 0, "_" * 60, ln=True)
                     pdf.ln(5)
-                    try:
-                        pdf.image(file_path, x=10, y=pdf.get_y(), w=190)
-                    except Exception:
-                        pdf.multi_cell(0, 8, f"File: {file_name}")
+                    try: pdf.image(file_path, x=10, y=pdf.get_y(), w=190)
+                    except Exception: pdf.multi_cell(0, 8, f"File: {file_name}")
         
-        # ✅ SAVE PDF — EXPLICITLY
-        try:
-            pdf.output(full_pdf_path)
-        except Exception as save_err:
-            return False, None, f"Save Error: {str(save_err)}"
-
+        # ✅ SAVE PDF TO TEMP PATH
+        pdf.output(full_pdf_path)
+        
+        # ✅ VERIFY FILE WAS CREATED
         if not os.path.exists(full_pdf_path):
-            return False, None, f"File not created: {full_pdf_path}"
-
-        # ✅ SAVE PDF PATH BACK TO EXCEL
+            return False, None, f"FAILED: PDF not written to {full_pdf_path}"
+        
+        if os.path.getsize(full_pdf_path) < 100:
+            return False, None, f"FAILED: PDF file is empty/corrupted"
+        
+        # ✅ SAVE PATH TO EXCEL
         records = load_records_from_excel()
         for r in records:
             if int(r["id"]) == int(req_id):
@@ -605,8 +597,10 @@ def generate_approval_pdf(request_data):
     
     except Exception as e:
         import traceback
-        err_detail = traceback.format_exc()
-        return False, None, f"PDF Error: {str(e)}"
+        error_detail = traceback.format_exc()
+        print("=== FULL PDF ERROR ===")
+        print(error_detail)
+        return False, None, f"Error: {str(e)}"
 
 # ============================================================
 # SESSION STATE
