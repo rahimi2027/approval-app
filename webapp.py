@@ -1047,10 +1047,10 @@ else:
                         st.write(f"💷 **Amount:** £{req['amount']:.2f}")
                         st.write(f"👔 **Line Manager:** {req['manager']}")
                         st.write(f"📅 **Request Date:** {req['date']}")
-                        st.info(f"📝 **Description:** {req['desc']}")
+                                               st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         
-                        # ✅ PREVIOUS REJECTION COMMENT — NOW VISIBLE TO DIRECTOR!
+                        # ✅ SHOW PREVIOUS REJECTION COMMENT TO DIRECTOR
                         prev_comments = req.get("director_comments", "").strip()
                         if prev_comments:
                             st.warning(f"📌 PREVIOUS REJECTION REASON:\n\n{prev_comments}")
@@ -1071,9 +1071,6 @@ else:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
                                 st.warning(f"❌ Request #{req['id']} REJECTED!")
                                 st.rerun()
-                        st.divider()
-                        display_pdf_button(req, can_generate=True)
-                        director_switch_status(req)
 
        # ========================================================
     # MANAGER PORTAL
