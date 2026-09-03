@@ -515,10 +515,16 @@ def generate_approval_pdf(request_data):
             pdf_row("Decision", f"REJECTED — by {decision_by_safe} on {decision_date_safe}")
         else:
             stamp_file = None
-            pdf_row("Decision", "PENDING — Awaiting Approval")
-
-        pdf_row("Approved By", decision_by_safe)
-        pdf_row("Approval Date / Time", decision_date)
+        if status == "approved":
+            pdf_row("Decision", f"✅ APPROVED — by {decision_by_safe} on {decision_date_safe}")
+        elif status == "rejected":
+            pdf_row("Decision", f"❌ REJECTED — by {decision_by_safe} on {decision_date_safe}")
+        else:
+            pdf_row("Decision", "⏳ PENDING — Awaiting Approval")
+        
+        if status != "pending":
+            pdf_row("Approved By", decision_by_safe)
+            pdf_row("Approval Date / Time", decision_date_safe)
         if comment_safe:
             pdf_row("Director Comments", comment_safe)
         
