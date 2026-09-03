@@ -1095,12 +1095,12 @@ else:
                             st.session_state.editing_request_id = req["id"]
                             st.rerun()
 
-    # ========================================================
-    # 🎛️ DIRECTOR PORTAL
+        # ========================================================
+    # 🎛️ DIRECTOR PORTAL — WITH CHANGE STATUS CONTROLS
     # ========================================================
     elif user["role"] == "Director":
         st.subheader("🎛️ Director Approval Portal — Andy Acoole")
-        st.info("✅ Review all requests, Approve or Reject. Decisions update automatically.")
+        st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
         st.divider()
         tab_pending, tab_approved, tab_rejected = st.tabs([
             "⏳ Pending Requests",
@@ -1128,21 +1128,26 @@ else:
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         st.divider()
-                        with st.form(f"decision_form_{req['id']}"):
+                        
+                        # ✅ CHANGE STATUS — PENDING → APPROVE / REJECT
+                        with st.form(f"change_status_pending_{req['id']}"):
+                            st.subheader("🔧 Change Status")
                             comments = st.text_area("💬 Director Comments (Optional)")
                             col_approve, col_reject = st.columns(2)
                             with col_approve:
                                 approve_btn = st.form_submit_button("✅ APPROVE", type="primary")
                             with col_reject:
                                 reject_btn = st.form_submit_button("❌ REJECT", type="secondary")
+                            
                             if approve_btn:
                                 update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
-                                st.success(f"✅ Request #{req['id']} APPROVED!")
+                                st.success(f"✅ Request #{req['id']} APPROVED! Status updated.")
                                 st.rerun()
                             if reject_btn:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
-                                st.warning(f"❌ Request #{req['id']} REJECTED!")
+                                st.warning(f"❌ Request #{req['id']} REJECTED! Status updated.")
                                 st.rerun()
+                        
                         st.divider()
                         display_pdf_button(req, can_generate=True)
         
@@ -1166,6 +1171,27 @@ else:
                         st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider()
+                        
+                        # ✅ CHANGE STATUS — APPROVED → PENDING / REJECTED
+                        with st.form(f"change_status_approved_{req['id']}"):
+                            st.subheader("🔧 Change Status")
+                            comments = st.text_area("💬 Updated Comments (Optional)")
+                            col_pending, col_reject = st.columns(2)
+                            with col_pending:
+                                pending_btn = st.form_submit_button("⏳ Move to Pending")
+                            with col_reject:
+                                reject_btn = st.form_submit_button("❌ Change to REJECTED", type="secondary")
+                            
+                            if pending_btn:
+                                update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
+                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
+                                st.rerun()
+                            if reject_btn:
+                                update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
+                                st.warning(f"❌ Request #{req['id']} changed to REJECTED!")
+                                st.rerun()
+                        
+                        st.divider()
                         display_pdf_button(req, can_generate=True)
         
         with tab_rejected:
@@ -1187,6 +1213,27 @@ else:
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.error(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
+                        st.divider()
+                        
+                        # ✅ CHANGE STATUS — REJECTED → PENDING / APPROVED
+                        with st.form(f"change_status_rejected_{req['id']}"):
+                            st.subheader("🔧 Change Status")
+                            comments = st.text_area("💬 Updated Comments (Optional)")
+                            col_pending, col_approve = st.columns(2)
+                            with col_pending:
+                                pending_btn = st.form_submit_button("⏳ Move to Pending")
+                            with col_approve:
+                                approve_btn = st.form_submit_button("✅ Change to APPROVED", type="primary")
+                            
+                            if pending_btn:
+                                update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
+                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
+                                st.rerun()
+                            if approve_btn:
+                                update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
+                                st.success(f"✅ Request #{req['id']} changed to APPROVED!")
+                                st.rerun()
+                        
                         st.divider()
                         display_pdf_button(req, can_generate=True)
     
