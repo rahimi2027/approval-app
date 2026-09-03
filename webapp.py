@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ MATCHES YOUR PDF DESIGN + ALL FIXES
+# PDF GENERATION — ✅ EXACT SCREENSHOT DESIGN + LOGO + STAMP
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -450,7 +450,6 @@ def generate_approval_pdf(request_data):
 
         # ─── EXTRACT FIELDS ──────────────────────────────
         emp_name     = clean_text(fresh_data.get("emp_name", "Unknown"))
-        emp_id       = clean_text(fresh_data.get("emp_id", ""))
         dept         = clean_text(fresh_data.get("dept", ""))
         category     = clean_text(fresh_data.get("category", ""))
         amount       = clean_text(fresh_data.get("amount", "0"))
@@ -465,102 +464,106 @@ def generate_approval_pdf(request_data):
         pdf = FPDF()
         pdf.add_page()
 
-        # ✅ COMPANY HEADER — Centered, Bold, Large
+        # ✅ LOGO TOP-LEFT — same as screenshot
+        LOGO_PATH = "logo.png"
+        if os.path.exists(LOGO_PATH):
+            pdf.image(LOGO_PATH, x=10, y=8, w=55)
+
+        # ✅ COMPANY HEADER — centered, bold, all-caps, large
         pdf.set_font("Helvetica", "B", 18)
         pdf.cell(0, 12, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
-        pdf.set_font("Helvetica", "", 13)
-        pdf.cell(0, 8, txt="Addition & Deduction Approval Request", ln=True, align="C")
-        pdf.ln(6)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(10)
 
-        # ─── REQUEST DETAILS — TWO-COLUMN LAYOUT ──────────
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Request ID:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, str(fresh_data.get("id", "")), ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Employee Name:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, emp_name, ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Employee ID:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, emp_id, ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Department:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, dept, ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Category / Reason:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, category, ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Amount (£):", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, f"£{amount}", ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Date of Request:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, req_date, ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Line Manager:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, manager, ln=True)
-
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Description:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 7, desc)
+        # ✅ SUBTITLE — smaller, under company name
+        pdf.set_font("Helvetica", "", 11)
+        pdf.cell(0, 6, txt="Addition & Deduction - APPROVAL FORM", ln=True, align="C")
         pdf.ln(4)
 
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(55, 8, "Current Status:", 0, 0)
-        pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, status, ln=True)
+        # ✅ TOP HORIZONTAL LINE
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(12)
 
+        # ─── REQUEST DETAILS ─────────────────────────────
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 6, txt="REQUEST DETAILS", ln=True)
+        pdf.ln(2)
+
+        pdf.set_font("Helvetica", "", 10)
+
+        pdf.cell(50, 6, "Request ID:", 0, 0)
+        pdf.cell(0, 6, str(fresh_data.get("id", "")), ln=True)
+
+        pdf.cell(50, 6, "Employee Name:", 0, 0)
+        pdf.cell(0, 6, emp_name, ln=True)
+
+        pdf.cell(50, 6, "Department:", 0, 0)
+        pdf.cell(0, 6, dept, ln=True)
+
+        pdf.cell(50, 6, "Transaction Type:", 0, 0)
+        pdf.cell(0, 6, clean_text(fresh_data.get("type", "")), ln=True)
+
+        pdf.cell(50, 6, "Category / Reason:", 0, 0)
+        pdf.cell(0, 6, category, ln=True)
+
+        pdf.cell(50, 6, "Request Date:", 0, 0)
+        pdf.cell(0, 6, req_date, ln=True)
+
+        pdf.cell(50, 6, "Amount Approved:", 0, 0)
+        pdf.cell(0, 6, f"£{amount}", ln=True)
+
+        pdf.cell(50, 6, "Line Manager:", 0, 0)
+        pdf.cell(0, 6, manager, ln=True)
+
+        pdf.ln(8)
+
+        # ─── DESCRIPTION / JUSTIFICATION ──────────────────
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 6, txt="DESCRIPTION / JUSTIFICATION", ln=True)
+        pdf.ln(2)
+
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, desc)
         pdf.ln(10)
+
+        # ─── DIRECTOR APPROVAL ────────────────────────────
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 6, txt="DIRECTOR APPROVAL", ln=True)
+        pdf.ln(2)
+
+        pdf.set_font("Helvetica", "", 10)
+
+        if status.lower() == "approved" and dir_approve != "-":
+            pdf.cell(50, 6, "Decision:", 0, 0)
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_text_color(0, 128, 0)
+            pdf.cell(0, 6, "APPROVED", ln=True)
+            pdf.set_text_color(0, 0, 0)
+
+            pdf.set_font("Helvetica", "", 10)
+            pdf.cell(50, 6, "Approved By:", 0, 0)
+            pdf.cell(0, 6, dir_name, ln=True)
+
+            pdf.cell(50, 6, "Approval Date / Time:", 0, 0)
+            pdf.cell(0, 6, dir_approve, ln=True)
+        else:
+            pdf.cell(50, 6, "Decision:", 0, 0)
+            pdf.cell(0, 6, "Pending", ln=True)
+
+        pdf.ln(12)
+
+        # ✅ BOTTOM THIN LINE — matches screenshot
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(8)
 
-        # ─── DIRECTOR APPROVAL SECTION ────────────────────
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, "Director Approval", ln=True)
-        pdf.ln(4)
+        # ✅ BOTTOM LEFT TEXT — matches screenshot
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
 
+        # ✅ GREEN APPROVED STAMP — centered at bottom
         APPROVED_STAMP_PATH = "approved_stamp.png"
-        SIGNATURE_DIRECTOR_PATH = "director_sign.png"
-        
-        if status.lower() == "approved" and dir_approve != "-":
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(55, 8, "Approved Date:", 0, 0)
-            pdf.set_font("Helvetica", "", 12)
-            pdf.cell(0, 8, dir_approve, ln=True)
+        if status.lower() == "approved" and os.path.exists(APPROVED_STAMP_PATH):
+            pdf.image(APPROVED_STAMP_PATH, x=75, y=pdf.get_y() + 5, w=60)
 
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(55, 8, "Approved By:", 0, 0)
-            pdf.set_font("Helvetica", "", 12)
-            pdf.cell(0, 8, dir_name, ln=True)
-            pdf.ln(20)
-
-            # ✅ SIGNATURE on LEFT — STAMP on RIGHT
-            stamp_y = pdf.get_y()
-            if os.path.exists(SIGNATURE_DIRECTOR_PATH):
-                pdf.image(SIGNATURE_DIRECTOR_PATH, x=20, y=stamp_y, w=60)
-            if os.path.exists(APPROVED_STAMP_PATH):
-                pdf.image(APPROVED_STAMP_PATH, x=130, y=stamp_y - 10, w=55)
-        else:
-            pdf.set_font("Helvetica", "", 12)
-            pdf.cell(0, 8, "Pending Director Approval", ln=True)
-
-        # ─── ✅ FILENAME: ID# EmployeeName - Category - Date ───
+        # ─── ✅ FILENAME ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
