@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ NO EMOJI VERSION (Works Perfectly)
+# PDF GENERATION — ✅ FIXED: No Damage + Correct Filename Format
 # ============================================================
 def generate_approval_pdf(request_data):
     import os
@@ -429,7 +429,8 @@ def generate_approval_pdf(request_data):
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
         
         def clean_text(t):
-            return str(t).replace("—", "-").replace("–", "-")
+            # ✅ Remove special characters that break filenames
+            return str(t).replace("—", "-").replace("–", "-").replace(":", "-").replace("/", "-").replace("\\", "-").strip()
         
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
@@ -439,10 +440,12 @@ def generate_approval_pdf(request_data):
         fresh_status = str(fresh_data.get("status", "pending")).strip().lower()
         approved_by = clean_text(fresh_data.get("decision_by", fresh_data.get("approved_by", "")))
         approved_date = format_date(fresh_data.get("decision_date", fresh_data.get("approved_date", "")))
-        emp_name_safe = clean_text(fresh_data.get("emp_name", "Unknown"))
-        category_safe = clean_text(fresh_data.get("category", "-"))
-        amount_safe = clean_text(fresh_data.get("amount", "-"))
-        reason_safe = clean_text(fresh_data.get("desc", fresh_data.get("reason", "-")))
+        
+        emp_name = clean_text(fresh_data.get("emp_name", "Unknown"))
+        category = clean_text(fresh_data.get("category", "-"))
+        amount = clean_text(fresh_data.get("amount", "-"))
+        reason = clean_text(fresh_data.get("desc", fresh_data.get("reason", "-")))
+        dept = clean_text(fresh_data.get("dept", fresh_data.get("department", "-")))
         date_submitted = format_date(fresh_data.get("date", fresh_data.get("submitted_date", "")))
         
         # ✅ CREATE PDF
@@ -473,22 +476,27 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, txt="Employee Name:", border=0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=emp_name_safe, border=0, ln=True)
+        pdf.cell(0, 8, txt=emp_name, border=0, ln=True)
         
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(50, 8, txt="Category:", border=0)
+        pdf.cell(50, 8, txt="Department:", border=0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=category_safe, border=0, ln=True)
+        pdf.cell(0, 8, txt=dept, border=0, ln=True)
+        
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(50, 8, txt="Category / Type:", border=0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, txt=category, border=0, ln=True)
         
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, txt="Amount:", border=0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.cell(0, 8, txt=f"£{amount_safe}", border=0, ln=True)
+        pdf.cell(0, 8, txt=f"£{amount}", border=0, ln=True)
         
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(50, 8, txt="Reason / Details:", border=0)
         pdf.set_font("Helvetica", "", 12)
-        pdf.multi_cell(0, 8, txt=reason_safe)
+        pdf.multi_cell(0, 8, txt=reason)
         
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 12)
@@ -497,7 +505,7 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 8, txt=date_submitted, border=0, ln=True)
         pdf.ln(15)
         
-        # ─── STATUS — ✅ NO EMOJIS ───────────────────────────────
+        # ─── STATUS + STAMP ──────────────────────────────────────
         if fresh_status == "approved":
             pdf.set_font("Helvetica", "B", 16)
             pdf.set_text_color(0, 128, 0)
@@ -528,12 +536,17 @@ def generate_approval_pdf(request_data):
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt="Waiting for Director approval", ln=True, align="C")
         
-        # ─── SAVE PDF ─────────────────────────────────────────────
+        # ─── SAVE WITH CORRECT FILENAME FORMAT ───────────────────
         save_dir = "approved_pdfs"
         os.makedirs(save_dir, exist_ok=True)
-        filename = f"Request_{req_id}_{fresh_status}.pdf"
+        
+        # ✅ NEW FILENAME FORMAT: ID#1 - Employee Name - Category.pdf
+        filename = f"ID#{req_id} - {emp_name} - {category}.pdf"
         full_pdf_path = os.path.join(save_dir, filename)
+        
+        # ✅ SAVE AND CLOSE PROPERLY — prevents "damaged file" error
         pdf.output(full_pdf_path)
+        pdf.close()  # ✅ ENSURE PDF IS PROPERLY CLOSED
         
         return True, full_pdf_path, filename
     
