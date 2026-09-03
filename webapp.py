@@ -1103,7 +1103,7 @@ else:
                             st.session_state.editing_request_id = req["id"]
                             st.rerun()
 
-    # ========================================================
+      # ========================================================
     # 🎛️ DIRECTOR PORTAL
     # ========================================================
     elif user["role"] == "Director":
@@ -1151,11 +1151,8 @@ else:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
                                 st.warning(f"❌ Request #{req['id']} REJECTED!")
                                 st.rerun()
-                        display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-
-                        # ⭐ PASTE THE 2 LINES HERE (Approved Tab) ⭐
                         director_switch_status(req)
         
         with tab_approved:
@@ -1176,12 +1173,10 @@ else:
                         st.write(f"👔 **Line Manager:** {req['manager']}")
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
-                        st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-                        
-                        director_switch_status(req)  # ✅ ADDED
+                        director_switch_status(req)
         
         with tab_rejected:
             rejected = [r for r in all_live_requests if r["status"] == "rejected"]
@@ -1202,7 +1197,20 @@ else:
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.error(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
-
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+                        director_switch_status(req)
+    
+    # ========================================================
+    # 🛡️ SUPER ADMIN PORTAL
+    # ========================================================
+    elif user["role"] == "Super Admin":
+        st.subheader("🛡️ Super Admin Control Panel")
+        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+        with tab_settings:
+            settings_management_panel()
+        with tab_users:
+            user_management_panel()
     # ========================================================
     # 🛡️ SUPER ADMIN PORTAL
     # ========================================================
