@@ -97,18 +97,7 @@ def display_pdf_button(req, can_generate=False):
                 )
             else:
                 st.error(f"❌ {name}")
-    return False
-    
-    elif can_generate and PDF_AVAILABLE:
-        if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=f"genpdf_{req_id}"):
-            ok, path, name = generate_approval_pdf(req)
-            if ok:
-                st.success(f"✅ Generated! Click below to download ↓")
-                st.rerun()
-            else:
-                st.error(f"❌ {name}")  # ✅ Shows REAL error message
-    return False
-
+    return False  # ✅ ONLY return ONCE at the END
 
 # ─── GET NEXT REQUEST ID ────────────────────────────────────────────
 def get_next_id(all_records):
