@@ -986,16 +986,18 @@ if not st.session_state.logged_in:
 # ============================================================
 # ✅ MAIN APPLICATION — ALL ROLES
 # ============================================================
+# ============================================================
+# ✅ MAIN APPLICATION — ALL ROLES (CORRECTED STRUCTURE)
+# ============================================================
 else:
     user = st.session_state.user_info
     CAN_GEN_PDF = user["role"] in ["Payroll", "Super Admin"]
     FULL_NAME = user.get("full_name", user["username"])
-    # ✅ PASTE THE LINE RIGHT HERE ↓
     CATEGORIES = load_categories()
     refresh_data_button()
     all_live_requests = load_records_from_excel()
     display_company_header()
-
+    
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(f"🟢 **Welcome:** {FULL_NAME} | {user['dept']} | **{user['role']}**")
@@ -1014,6 +1016,7 @@ else:
         st.info("✅ View approved & pending requests, review details, generate/download PDFs.")
         st.divider()
         tab_approved, tab_pending = st.tabs(["✅ Approved Requests", "🟡 Pending Requests"])
+        
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
             if not approved:
@@ -1043,6 +1046,7 @@ else:
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
+        
         with tab_pending:
             pending = [r for r in all_live_requests if r["status"] == "pending"]
             if not pending:
@@ -1063,10 +1067,10 @@ else:
                         st.warning("⏳ Waiting for Director Approval")
                         display_attachments(req)
 
-      # ========================================================
+    # ========================================================
     # 👔 MANAGER PORTAL
     # ========================================================
-elif user["role"] == "Manager":
+    elif user["role"] == "Manager":
         if st.session_state.editing_request_id:
             eid = st.session_state.editing_request_id
             rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
@@ -1088,6 +1092,7 @@ elif user["role"] == "Manager":
                         mgr = st.text_input("👔 Line Manager", rec["manager"])
                         desc = st.text_area("📝 Description / Justification", rec["desc"])
                         files = st.file_uploader("📎 Add Supporting Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+                        
                         if st.form_submit_button("✅ Submit Edit"):
                             old = str({"emp_name": rec["emp_name"], "dept": rec["dept"], "type": rec["type"], "category": rec["category"], "date": rec["date"], "amount": rec["amount"], "manager": rec["manager"], "desc": rec["desc"]})
                             records = load_records_from_excel()
@@ -1122,6 +1127,7 @@ elif user["role"] == "Manager":
                 if st.button("❌ Cancel"):
                     st.session_state.editing_request_id = None
                     st.rerun()
+        
         st.subheader(f"➕ New Request — {user['dept']}")
         nid = get_next_id(all_live_requests)
         st.markdown(f"**🆔 Request ID:** `#{nid}`")
@@ -1159,6 +1165,7 @@ elif user["role"] == "Manager":
                         st.rerun()
                     else:
                         st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+        
         st.divider()
         st.subheader(f"📋 My Department Requests")
         my_reqs = [r for r in all_live_requests if r["dept"] == user["dept"]]
@@ -1181,42 +1188,147 @@ elif user["role"] == "Manager":
                         if st.button(f"✏️ Edit Request #{req['id']}", key=f"edit_{req['id']}"):
                             st.session_state.editing_request_id = req["id"]
                             st.rerun()
-    # ============================================================
-# 📥 BACKUP DOWNLOAD BUTTON — Add this in Super Admin section
+
+    # ========================================================
+    # 🎛️ DIRECTOR PORTAL
+    # ========================================================
+    elif user["role"] == "Director":
+        st.subheader("🎛️ Director Approval Portal — Andy Acoole")
+        st.info("✅ Review all requests, Approve or Reject. Decisions update automatically.")
+        st.divider()
+        tab_pending, tab_approved, tab_rejected = st.tabs([
+            "⏳ Pending Requests",
+            "✅ Approved Requests",
+            "❌ Rejected Requests"
+        ])
+        
+        with tab_pending:
+            pending = [r for r in all_live_requests if r["status"] == "pending"]
+            if not pending:
+                st.success("✅ No pending requests — all reviewed!")
+            else:
+                st.metric("⏳ Pending Approval", len(pending))
+                st.divider()
+                for req in reversed(pending):
+                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | 📅 {format_date(req['date'])} | £{req['amount']:.2f} | {req['dept']}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Transaction Type:** {req['type']}")
+                        st.write(f"🏷️ **Category / Reason:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.info(f"📝 **Description:** {req['desc']}")
+                        display_attachments(req)
+                        st.divider()
+                        with st.form(f"decision_form_{req['id']}"):
+                            comments = st.text_area("💬 Director Comments (Optional)")
+                            col_approve, col_reject = st.columns(2)
+                            with col_approve:
+                                approve_btn = st.form_submit_button("✅ APPROVE", type="primary")
+                            with col_reject:
+                                reject_btn = st.form_submit_button("❌ REJECT", type="secondary")
+                            if approve_btn:
+                                update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
+                                st.success(f"✅ Request #{req['id']} APPROVED!")
+                                st.rerun()
+                            if reject_btn:
+                                update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
+                                st.warning(f"❌ Request #{req['id']} REJECTED!")
+                                st.rerun()
+        
+        with tab_approved:
+            approved = [r for r in all_live_requests if r["status"] == "approved"]
+            if not approved:
+                st.info("📋 No approved requests yet.")
+            else:
+                st.metric("✅ Total Approved", len(approved))
+                st.divider()
+                for req in reversed(approved):
+                    approved_by_line = f"✅ Approved by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {approved_by_line}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+        
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+            if not rejected:
+                st.info("📋 No rejected requests yet.")
+            else:
+                st.metric("❌ Total Rejected", len(rejected))
+                st.divider()
+                for req in reversed(rejected):
+                    rejected_by_line = f"❌ Rejected by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
+                    title = f"🔴 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {rejected_by_line}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.error(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+
+    # ========================================================
+    # 🛡️ SUPER ADMIN PORTAL
+    # ========================================================
+    elif user["role"] == "Super Admin":
+        st.subheader("🛡️ Super Admin Control Panel")
+        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+        with tab_settings:
+            settings_management_panel()
+        with tab_users:
+            user_management_panel()
+
+    # ========================================================
+    # 📥 DOWNLOAD BACKUPS (Appears for ALL roles)
+    # ========================================================
+    st.divider()
+    st.subheader("📥 Download Data Backups")
+    backup_col1, backup_col2, backup_col3 = st.columns(3)
+    with backup_col1:
+        if os.path.exists(EXCEL_PATH):
+            with open(EXCEL_PATH, "rb") as f:
+                st.download_button(
+                    "📥 Download Requests",
+                    f.read(),
+                    file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    type="primary"
+                )
+    with backup_col2:
+        if os.path.exists(USER_DB_PATH):
+            with open(USER_DB_PATH, "rb") as f:
+                st.download_button(
+                    "📥 Download Users",
+                    f.read(),
+                    file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    type="primary"
+                )
+    with backup_col3:
+        if os.path.exists(SETTINGS_PATH):
+            with open(SETTINGS_PATH, "rb") as f:
+                st.download_button(
+                    "📥 Download Settings",
+                    f.read(),
+                    file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    type="primary"
+                )
+    st.caption("💾 Save these files to your computer for backup")
+
 # ============================================================
-st.subheader("📥 Download Data Backups")
-backup_col1, backup_col2, backup_col3 = st.columns(3)
-
-with backup_col1:
-    if os.path.exists(EXCEL_PATH):
-        with open(EXCEL_PATH, "rb") as f:
-            st.download_button(
-                "📥 Download Requests",
-                f.read(),
-                file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                type="primary"
-            )
-with backup_col2:
-    if os.path.exists(USER_DB_PATH):
-        with open(USER_DB_PATH, "rb") as f:
-            st.download_button(
-                "📥 Download Users",
-                f.read(),
-                file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                type="primary"
-            )
-with backup_col3:
-    if os.path.exists(SETTINGS_PATH):
-        with open(SETTINGS_PATH, "rb") as f:
-            st.download_button(
-                "📥 Download Settings",
-                f.read(),
-                file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                type="primary"
-            )
-
-st.caption("💾 Save these files to your computer for backup")
-st.divider()
+# END OF APPLICATION
+# ============================================================
     # ========================================================
     # 👔 MANAGER PORTAL
     # ========================================================
