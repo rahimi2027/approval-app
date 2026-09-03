@@ -1027,35 +1027,7 @@ else:
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         
-                        # ✅ PREVIOUS REJECTION COMMENT — NOW VISIBLE
-                        prev_comments = req.get("director_comments", "").strip()
-                        if prev_comments:
-                            st.warning(f"📌 PREVIOUS REJECTION REASON:\n\n{prev_comments}")
-                        
-                        st.divider()
-                        display_pdf_button(req, can_generate=True, key_suffix="pay_approved")
-
-        with tab_pending:
-            pending = [r for r in all_live_requests if r["status"] == "pending"]
-            if not pending:
-                st.success("✅ No pending requests — all reviewed!")
-            else:
-                st.metric("⏳ Pending Approval", len(pending))
-                st.divider()
-                for req in reversed(pending):
-                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | 📅 {format_date(req['date'])} | £{req['amount']:.2f} | {req['dept']}"
-                    with st.expander(title):
-                        st.write(f"👤 **Employee:** {req['emp_name']}")
-                        st.write(f"🏢 **Department:** {req['dept']}")
-                        st.write(f"🔄 **Transaction Type:** {req['type']}")
-                        st.write(f"🏷️ **Category / Reason:** {req['category']}")
-                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
-                        st.write(f"👔 **Line Manager:** {req['manager']}")
-                        st.write(f"📅 **Request Date:** {req['date']}")
-                        st.info(f"📝 **Description:** {req['desc']}")
-                        display_attachments(req)
-                        
-                        # ✅ SHOW PREVIOUS REJECTION COMMENT TO DIRECTOR — ADDED!
+                        # ✅ SHOW PREVIOUS REJECTION COMMENT — NOW IN PENDING TOO!
                         prev_comments = req.get("director_comments", "").strip()
                         if prev_comments and prev_comments.lower() not in ["none", ""]:
                             st.warning(f"📌 **PREVIOUS REJECTION REASON:**\n\n{prev_comments}")
