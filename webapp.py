@@ -416,14 +416,14 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ FIXED: os import + lowercase status + correct columns
+# PDF GENERATION — ✅ NO EMOJI VERSION (Works Perfectly)
 # ============================================================
 def generate_approval_pdf(request_data):
-    import os  # ✅ MOVED TO TOP — fixes "cannot access local variable 'os'"
+    import os
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        # ✅ READ FRESH DATA DIRECTLY FROM EXCEL — ALWAYS UP-TO-DATE!
+        # ✅ READ FRESH DATA
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
@@ -436,26 +436,14 @@ def generate_approval_pdf(request_data):
                 return "—"
             return str(d).strip()[:10]
         
-        # ✅ GET UPDATED STATUS FROM EXCEL — FORCE LOWERCASE
         fresh_status = str(fresh_data.get("status", "pending")).strip().lower()
-        
-        # ✅ USE YOUR EXCEL COLUMN NAMES — try BOTH variants
-        approved_by = clean_text(
-            fresh_data.get("decision_by", fresh_data.get("approved_by", ""))
-        )
-        approved_date = format_date(
-            fresh_data.get("decision_date", fresh_data.get("approved_date", ""))
-        )
-        
+        approved_by = clean_text(fresh_data.get("decision_by", fresh_data.get("approved_by", "")))
+        approved_date = format_date(fresh_data.get("decision_date", fresh_data.get("approved_date", "")))
         emp_name_safe = clean_text(fresh_data.get("emp_name", "Unknown"))
         category_safe = clean_text(fresh_data.get("category", "-"))
         amount_safe = clean_text(fresh_data.get("amount", "-"))
-        reason_safe = clean_text(
-            fresh_data.get("desc", fresh_data.get("reason", "-"))
-        )
-        date_submitted = format_date(
-            fresh_data.get("date", fresh_data.get("submitted_date", ""))
-        )
+        reason_safe = clean_text(fresh_data.get("desc", fresh_data.get("reason", "-")))
+        date_submitted = format_date(fresh_data.get("date", fresh_data.get("submitted_date", "")))
         
         # ✅ CREATE PDF
         from fpdf import FPDF
@@ -507,14 +495,13 @@ def generate_approval_pdf(request_data):
         pdf.cell(50, 8, txt="Submitted Date:", border=0)
         pdf.set_font("Helvetica", "", 12)
         pdf.cell(0, 8, txt=date_submitted, border=0, ln=True)
-        
         pdf.ln(15)
         
-        # ─── STATUS + STAMP IMAGE — ✅ LOWERCASE MATCH ───────────
+        # ─── STATUS — ✅ NO EMOJIS ───────────────────────────────
         if fresh_status == "approved":
             pdf.set_font("Helvetica", "B", 16)
             pdf.set_text_color(0, 128, 0)
-            pdf.cell(0, 10, txt="✅ APPROVED", ln=True, align="C")
+            pdf.cell(0, 10, txt="APPROVED", ln=True, align="C")
             pdf.set_font("Helvetica", "", 11)
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt=f"Approved by: {approved_by}  |  Date: {approved_date}", ln=True, align="C")
@@ -525,7 +512,7 @@ def generate_approval_pdf(request_data):
         elif fresh_status == "rejected":
             pdf.set_font("Helvetica", "B", 16)
             pdf.set_text_color(200, 0, 0)
-            pdf.cell(0, 10, txt="❌ REJECTED", ln=True, align="C")
+            pdf.cell(0, 10, txt="REJECTED", ln=True, align="C")
             pdf.set_font("Helvetica", "", 11)
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt=f"Rejected by: {approved_by}  |  Date: {approved_date}", ln=True, align="C")
@@ -536,13 +523,13 @@ def generate_approval_pdf(request_data):
         else:
             pdf.set_font("Helvetica", "B", 16)
             pdf.set_text_color(150, 150, 0)
-            pdf.cell(0, 10, txt="⏳ PENDING APPROVAL", ln=True, align="C")
+            pdf.cell(0, 10, txt="PENDING APPROVAL", ln=True, align="C")
             pdf.set_font("Helvetica", "", 11)
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt="Waiting for Director approval", ln=True, align="C")
         
         # ─── SAVE PDF ─────────────────────────────────────────────
-        save_dir = "approved_pdfs"  # ✅ Matches your folder
+        save_dir = "approved_pdfs"
         os.makedirs(save_dir, exist_ok=True)
         filename = f"Request_{req_id}_{fresh_status}.pdf"
         full_pdf_path = os.path.join(save_dir, filename)
