@@ -1070,7 +1070,7 @@ else:
     # MANAGER PORTAL
     # ========================================================
     elif user["role"] == "Manager":
-        if st.session_state.editing_request_id:
+               if st.session_state.editing_request_id:
             eid = st.session_state.editing_request_id
             rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
             if rec:
@@ -1091,52 +1091,53 @@ else:
                         mgr = st.text_input("👔 Line Manager", rec["manager"])
                         desc = st.text_area("📝 Description / Justification", rec["desc"])
                         files = st.file_uploader("📎 Add Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-
-                        if st.form_submit_button("✅ Submit Edit"):
-                            old = str({"emp_name": rec["emp_name"], "dept": rec["dept"], "type": rec["type"], "category": rec["category"], "date": rec["date"], "amount": rec["amount"], "manager": rec["manager"], "desc": rec["desc"]})
-                            records = load_records_from_excel()
-                            for r in records:
-                                if int(r["id"]) == int(eid):
-                                    r["emp_name"] = en.strip()
-                                    r["type"] = rt
-                                    r["category"] = ct
-                                    r["amount"] = amt
-                                    r["date"] = str(dt_val)
-                                    r["manager"] = mgr.strip()
-                                    r["desc"] = desc.strip()
-                                    r["status"] = "pending"
-                                    r["old_data"] = old
-                                    r["status"] = "pending"
-r["old_data"] = old
-
-# ✅ SAVE PREVIOUS REJECTION COMMENT FOR DIRECTOR TO SEE
-old_comments = r.get("director_comments", "").strip()
-if old_comments and "rejected" in str(r.get("status", "")).lower() or old_comments:
-    if "📌 PREVIOUS REJECTION REASON:" not in old_comments:
-        r["director_comments"] = f"📌 PREVIOUS REJECTION REASON:\n{old_comments}\n\n--- NEW REQUEST ---"
-    else:
-        r["director_comments"] = old_comments  # Keep existing note
-else:
-    r["director_comments"] = ""  # Only clear if no old comment
-
-r["decision_date"] = ""
-r["decision_by"] = ""
-                                    r["decision_date"] = ""
-                                    r["decision_by"] = ""
-                                    if files:
-                                        att_list = []
-                                        if r["attachment_name"] and r["attachment_name"] != "None":
-                                            att_list.extend([n.strip() for n in r["attachment_name"].split(",")])
-                                        for i, f in enumerate(files):
-                                            fn = f"ID_{eid}_EDIT_F{len(att_list)+1}_{f.name}"
-                                            with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
-                                                out.write(f.getbuffer())
-                                            att_list.append(fn)
-                                        r["attachment_name"] = ", ".join(att_list) if att_list else "None"
-                            save_all_records(records)
-                            st.success(f"✅ Updated & sent for approval!")
-                            st.session_state.editing_request_id = None
-                            st.rerun()
+                    
+                    if st.form_submit_button("✅ Submit Edit"):
+                        old = str({"emp_name": rec["emp_name"], "dept": rec["dept"], "type": rec["type"], 
+                                   "category": rec["category"], "date": rec["date"], "amount": rec["amount"], 
+                                   "manager": rec["manager"], "desc": rec["desc"]})
+                        records = load_records_from_excel()
+                        
+                        for r in records:
+                            if int(r["id"]) == int(eid):
+                                r["emp_name"] = en.strip()
+                                r["type"] = rt
+                                r["category"] = ct
+                                r["amount"] = amt
+                                r["date"] = str(dt_val)
+                                r["manager"] = mgr.strip()
+                                r["desc"] = desc.strip()
+                                r["status"] = "pending"
+                                r["old_data"] = old
+                                
+                                # ✅ SAVE PREVIOUS REJECTION COMMENT — KEEP & LABEL IT
+                                old_comments = r.get("director_comments", "").strip()
+                                if old_comments and old_comments != "":
+                                    if "📌 PREVIOUS REJECTION REASON:" not in old_comments:
+                                        r["director_comments"] = f"📌 PREVIOUS REJECTION REASON:\n{old_comments}\n\n--- NEW REQUEST ---"
+                                    # else: keep existing note as-is
+                                else:
+                                    r["director_comments"] = ""  # Only clear if truly empty
+                                
+                                r["decision_date"] = ""
+                                r["decision_by"] = ""
+                                
+                                if files:
+                                    att_list = []
+                                    if r["attachment_name"] and r["attachment_name"] != "None":
+                                        att_list.extend([n.strip() for n in r["attachment_name"].split(",")])
+                                    for i, f in enumerate(files):
+                                        fn = f"ID_{eid}_EDIT_F{len(att_list)+1}_{f.name}"
+                                        with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
+                                            out.write(f.getbuffer())
+                                        att_list.append(fn)
+                                    r["attachment_name"] = ", ".join(att_list) if att_list else "None"
+                        
+                        save_all_records(records)
+                        st.success(f"✅ Updated & sent for approval! Previous rejection reason saved.")
+                        st.session_state.editing_request_id = None
+                        st.rerun()
+                
                 if st.button("❌ Cancel"):
                     st.session_state.editing_request_id = None
                     st.rerun()
@@ -1194,7 +1195,7 @@ r["decision_by"] = ""
                     st.info(f"📝 Description: {req['desc']}")
                     display_attachments(req)
                     if req.get("director_comments", "").strip():
-                    st.warning(f"📌 **PREVIOUS COMMENT / REJECTION REASON:**\n\n{req['director_comments']}")
+                        st.warning(f"📌 **PREVIOUS COMMENT / REJECTION REASON:**\n\n{req['director_comments']}")
                     if req["status"] == "approved":
                         display_pdf_button(req, can_generate=False)
                     if req["status"] in ["pending", "rejected"]:
