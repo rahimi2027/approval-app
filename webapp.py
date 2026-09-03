@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ LOGO ONLY + NO COMPANY TITLE
+# PDF GENERATION — ✅ SYNTAX FIXED + LOGO ONLY + DASHED LINE + STAMP
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -472,7 +472,7 @@ def generate_approval_pdf(request_data):
         # ✅ MOVE DOWN AFTER LOGO
         pdf.ln(22)
 
-        # ✅ FORM TITLE ONLY — NO "ACOOLE ELECTRICAL LTD"
+        # ✅ FORM TITLE ONLY — NO COMPANY NAME
         pdf.set_font("Helvetica", "", 11)
         pdf.cell(0, 5, txt="Addition & Deduction Approval Form", ln=True, align="C")
         pdf.ln(4)
@@ -495,6 +495,8 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 5, emp_name, ln=True)
 
         pdf.cell(52, 5, "Department:", 0, 0)
+        pdf.cell(0, 5, dept, ln=True)
+
         pdf.cell(52, 5, "Transaction Type:", 0, 0)
         pdf.cell(0, 5, clean_text(fresh_data.get("type", "")), ln=True)
 
@@ -528,20 +530,18 @@ def generate_approval_pdf(request_data):
 
         pdf.set_font("Helvetica", "", 9)
 
+        # ✅ === FIXED IF/ELSE BLOCK ===
         if status.lower() == "approved" and dir_approve != "-":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(0, 128, 0)
             pdf.cell(0, 5, "APPROVED", ln=True)
             pdf.set_text_color(0, 0, 0)
-
-        pdf.set_font("Helvetica", "", 9)
-        pdf.cell(52, 5, "Approved By:", 0, 0)
-        pdf.cell(0, 5, dir_name, ln=True)
-
-        pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
-        pdf.cell(0, 5, dir_approve, ln=True)
-
+            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(52, 5, "Approved By:", 0, 0)
+            pdf.cell(0, 5, dir_name, ln=True)
+            pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
+            pdf.cell(0, 5, dir_approve, ln=True)
         else:
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.cell(0, 5, "Pending", ln=True)
@@ -579,6 +579,7 @@ def generate_approval_pdf(request_data):
             pdf_bytes = pdf_output.encode("latin-1")
 
         # ✅ Save to disk
+        os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f:
             f.write(pdf_bytes)
