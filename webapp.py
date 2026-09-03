@@ -1406,43 +1406,55 @@ else:
                         st.divider()
                         display_pdf_button(req, can_generate=True)
     elif user["role"] == "Super Admin":
-         st.subheader("🛡️ Super Admin Control Panel")
-       tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+        st.subheader("🛡️ Super Admin Control Panel")
+        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
         with tab_settings:
-        settings_management_panel()   # ✅ Calls your Settings panel
+            settings_management_panel()
         with tab_users:
-        user_management_panel()       # ✅ Calls your User Management panel
+            user_management_panel()
         st.divider()
-    st.subheader("📥 Download Data Backups")
-    backup_col1, backup_col2, backup_col3 = st.columns(3)
-    with backup_col1:
-        if os.path.exists(EXCEL_PATH):
-            with open(EXCEL_PATH, "rb") as f:
-                st.download_button(
-                    "📥 Download Requests",
-                    f.read(),
-                    file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                    type="primary"
-                )
-    with backup_col2:
-        if os.path.exists(USER_DB_PATH):
-            with open(USER_DB_PATH, "rb") as f:
-                st.download_button(
-                    "📥 Download Users",
-                    f.read(),
-                    file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                    type="primary"
-                )
-    with backup_col3:
-        if os.path.exists(SETTINGS_PATH):
-            with open(SETTINGS_PATH, "rb") as f:
-                st.download_button(
-                    "📥 Download Settings",
-                    f.read(),
-                    file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                    type="primary"
-                )
-    st.caption("💾 Save these files to your computer for backup")
+
+        st.subheader("📥 Download Data Backups")
+        backup_col1, backup_col2, backup_col3 = st.columns(3)
+        with backup_col1:
+            if os.path.exists(EXCEL_PATH):
+                with open(EXCEL_PATH, "rb") as f:
+                    st.download_button(
+                        "📥 Download Requests",
+                        f.read(),
+                        file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                        type="primary"
+                    )
+        with backup_col2:
+            if os.path.exists(USER_DB_PATH):
+                with open(USER_DB_PATH, "rb") as f:
+                    st.download_button(
+                        "📥 Download Users",
+                        f.read(),
+                        file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                        type="primary"
+                    )
+        with backup_col3:
+            if os.path.exists(SETTINGS_PATH):
+                with open(SETTINGS_PATH, "rb") as f:
+                    st.download_button(
+                        "📥 Download Settings",
+                        f.read(),
+                        file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                        type="primary"
+                    )
+        st.caption("💾 Save these files to your computer for backup")
+
+# ========================================================
+# ✅ END OF ROLE-BASED PORTALS — REMOVED DUPLICATE DIRECTOR
+# ========================================================
+
+    # Auto-save to GitHub after every page load
+    github_auto_save()
+
+# ============================================================
+# ✅ END OF FILE — NOTHING AFTER THIS!
+# ============================================================
 # ============================================================
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
