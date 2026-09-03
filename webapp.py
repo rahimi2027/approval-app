@@ -416,13 +416,13 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION
+# PDF GENERATION — READS FRESH FROM EXCEL + SHOWS CORRECT STATUS + STAMP
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        import io
+        # ✅ READ FRESH DATA DIRECTLY FROM EXCEL — ALWAYS UP-TO-DATE!
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
@@ -430,133 +430,176 @@ def generate_approval_pdf(request_data):
         def clean_text(t):
             return str(t).replace("—", "-").replace("–", "-")
 
-        status = str(fresh_data.get("status", "pending")).strip().lower()
-        decision_by_safe = clean_text(fresh_data.get("decision_by", "Director"))
-        decision_date_safe = clean_text(str(fresh_data.get("decision_date", "Not Approved Yet")))
+        def format_date(d):
+            if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
+                return "—"
+            return str(d).strip()[:10]
+
+        # ✅ GET UPDATED STATUS FROM EXCEL
+        fresh_status = str(fresh_data.get("status", "Pending")).strip()
+        approved_by = clean_text(fresh_data.get("approved_by", ""))
+        approved_date = format_date(fresh_data.get("approved_date", ""))
+
         emp_name_safe = clean_text(fresh_data.get("emp_name", "Unknown"))
-        category_safe = clean_text(fresh_data.get("category", "Approval"))
-        amount_val = float(fresh_data.get('amount', 0))
-        amount = f"£{amount_val:.2f}"
-        req_date = clean_text(str(fresh_data.get("date", "Unknown")))
-        comment_safe = clean_text(fresh_data.get("director_comments", ""))
-        desc_safe = clean_text(fresh_data.get("desc", ""))
-        dept_safe = clean_text(fresh_data.get("dept", ""))
-        manager_safe = clean_text(fresh_data.get("manager", ""))
+        category_safe = clean_text(fresh_data.get("category", "-"))
+        amount_safe = clean_text(fresh_data.get("amount", "-"))
+        reason_safe = clean_text(fresh_data.get("reason", "-"))
+        date_submitted = format_date(fresh_data.get("submitted_date", ""))
 
-        safe_emp = "".join(c for c in emp_name_safe if c.isalnum() or c in (" ", "-", "_")).strip() or "Request"
-        safe_cat = "".join(c for c in category_safe if c.isalnum() or c in (" ", "-", "_")).strip() or "Approval"
-        safe_date = req_date.replace("/", "-").replace(":", "-")[:10]
-        filename = f"{safe_emp}_{safe_cat}_{safe_date}.pdf"
-
-        pdf = FPDF("P", "mm", "A4")
+        # ✅ CREATE PDF
+        from fpdf import FPDF
+        pdf = FPDF()
         pdf.add_page()
-        pdf.set_font("Courier", "", 12)
 
+        # ─── HEADER ──────────────────────────────────────────────
+        LOGO_PATH = "logo.png"
         if os.path.exists(LOGO_PATH):
-            try: pdf.image(LOGO_PATH, x=10, y=8, w=40)
-            except: pass
-
-        pdf.set_xy(60, 10)
-        pdf.set_font("Courier", "B", 18)
-        pdf.cell(0, 10, "ACOOLE ELECTRICAL LTD", ln=True)
-        pdf.set_font("Courier", "", 12)
-        pdf.cell(0, 6, "Addition & Deduction - APPROVAL FORM", ln=True)
+            pdf.image(LOGO_PATH, x=80, y=10, w=50)
+        pdf.ln(45)
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.cell(0, 12, txt="ACOOLE ELECTRICAL LTD", ln=True, align="C")
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 10, txt="Addition & Deduction Approval Request", ln=True, align="C")
         pdf.ln(5)
-        pdf.cell(0, 0, "_" * 85, ln=True)
-        pdf.ln(8)
+        pdf.set_draw_color(0, 0, 0)
+        pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+        pdf.ln(10)
 
-        def pdf_row(label, value):
-            pdf.set_font("Courier", "B", 11)
-            pdf.cell(60, 8, label + ":")
-            pdf.set_font("Courier", "", 11)
-            pdf.multi_cell(0, 8, clean_text(str(value)))
-            pdf.ln(1)
+        # ─── REQUEST DETAILS ─────────────────────────────────────
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(50, 8, txt="Request ID:", border=0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, txt=str(req_id), border=0, ln=True)
 
-        pdf.set_font("Courier", "B", 12)
-        pdf.cell(0, 8, "REQUEST DETAILS", ln=True)
-        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(50, 8, txt="Employee Name:", border=0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, txt=emp_name_safe, border=0, ln=True)
 
-        pdf_row("Request ID", f"#{req_id}")
-        pdf_row("Employee Name", emp_name_safe)
-        pdf_row("Department", dept_safe)
-        pdf_row("Transaction Type", clean_text(fresh_data.get("type", "")))
-        pdf_row("Category / Reason", category_safe)
-        pdf_row("Request Date", req_date)
-        pdf_row("Amount Approved", amount)
-        pdf_row("Line Manager", manager_safe)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(50, 8, txt="Category:", border=0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, txt=category_safe, border=0, ln=True)
+
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(50, 8, txt="Amount:", border=0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, txt=f"£{amount_safe}", border=0, ln=True)
+
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(50, 8, txt="Reason / Details:", border=0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.multi_cell(0, 8, txt=reason_safe)
+
         pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(50, 8, txt="Submitted Date:", border=0)
+        pdf.set_font("Helvetica", "", 12)
+        pdf.cell(0, 8, txt=date_submitted, border=0, ln=True)
 
-        pdf.set_font("Courier", "B", 12)
-        pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
-        pdf.set_font("Courier", "", 11)
-        pdf.multi_cell(0, 7, desc_safe)
-        pdf.ln(8)
+        pdf.ln(15)
 
-        pdf.set_font("Courier", "B", 12)
-        pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
-        pdf.ln(2)
+        # ─── STATUS + STAMP IMAGE — UPDATED AUTOMATICALLY ───────
+        if fresh_status == "Approved":
+            pdf.set_font("Helvetica", "B", 16)
+            pdf.set_text_color(0, 128, 0)
+            pdf.cell(0, 10, txt="✅ APPROVED", ln=True, align="C")
+            pdf.set_font("Helvetica", "", 11)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(0, 8, txt=f"Approved by: {approved_by}  |  Date: {approved_date}", ln=True, align="C")
+            stamp_path = "approved_stamp.png"
+            if os.path.exists(stamp_path):
+                pdf.image(stamp_path, x=140, y=210, w=50)
 
-        pdf.set_font("Courier", "B", 14)
-        if status == "approved":
-            pdf.cell(0, 8, "APPROVED", ln=True)
-            pdf.set_font("Courier", "", 11)
-            pdf.cell(0, 6, f"Approved by: {decision_by_safe}", ln=True)
-            pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
-        elif status == "rejected":
-            pdf.cell(0, 8, "REJECTED", ln=True)
-            pdf.set_font("Courier", "", 11)
-            pdf.cell(0, 6, f"Rejected by: {decision_by_safe}", ln=True)
-            pdf.cell(0, 6, f"Date/Time:  {decision_date_safe}", ln=True)
+        elif fresh_status == "Rejected":
+            pdf.set_font("Helvetica", "B", 16)
+            pdf.set_text_color(200, 0, 0)
+            pdf.cell(0, 10, txt="❌ REJECTED", ln=True, align="C")
+            pdf.set_font("Helvetica", "", 11)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(0, 8, txt=f"Rejected by: {approved_by}  |  Date: {approved_date}", ln=True, align="C")
+            stamp_path = "rejected_stamp.png"
+            if os.path.exists(stamp_path):
+                pdf.image(stamp_path, x=140, y=210, w=50)
+
         else:
-            pdf.set_font("Courier", "", 11)
-            pdf.cell(0, 8, "PENDING - Awaiting Director Approval", ln=True)
+            pdf.set_font("Helvetica", "B", 16)
+            pdf.set_text_color(150, 150, 0)
+            pdf.cell(0, 10, txt="⏳ PENDING APPROVAL", ln=True, align="C")
+            pdf.set_font("Helvetica", "", 11)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(0, 8, txt="Waiting for Director approval", ln=True, align="C")
 
-        pdf.ln(3)
-        if comment_safe:
-            pdf_row("Director Comments", comment_safe)
+        # ─── SAVE PDF ─────────────────────────────────────────────
+        import os
+        save_dir = "generated_pdfs"
+        os.makedirs(save_dir, exist_ok=True)
+        filename = f"Request_{req_id}_{fresh_status}.pdf"
+        full_pdf_path = os.path.join(save_dir, filename)
+        pdf.output(full_pdf_path)
 
-        pdf.ln(20)
-        pdf.cell(0, 6, "-" * 50, ln=True)
-        pdf.cell(0, 6, "Authorized Signature / Director", ln=True)
-
-        stamp_file_path = os.path.join(BASE_DIR, "approved_stamp.png")
-        stamp_rejected_path = os.path.join(BASE_DIR, "rejected_stamp.png")
-
-        if status == "approved" and os.path.exists(stamp_file_path):
-            try: pdf.image(stamp_file_path, x=110, y=pdf.get_y() - 8, w=55)
-            except: pass
-        elif status == "rejected" and os.path.exists(stamp_rejected_path):
-            try: pdf.image(stamp_rejected_path, x=110, y=pdf.get_y() - 8, w=55)
-            except: pass
-
-        att_names = fresh_data.get("attachment_name", "None")
-        if att_names and att_names != "None":
-            attached_files = [n.strip() for n in att_names.split(",")]
-            for file_name in attached_files:
-                file_path = os.path.join(UPLOAD_DIR, file_name)
-                if os.path.exists(file_path):
-                    pdf.add_page()
-                    pdf.set_font("Courier", "B", 14)
-                    pdf.cell(0, 12, "ATTACHED DOCUMENT", ln=True)
-                    pdf.set_font("Courier", "", 11)
-                    pdf.cell(0, 8, f"File: {file_name}", ln=True)
-                    pdf.cell(0, 8, f"Request ID: #{req_id}", ln=True)
-                    pdf.ln(5)
-                    pdf.cell(0, 0, "_" * 60, ln=True)
-                    pdf.ln(5)
-                    try: pdf.image(file_path, x=10, y=pdf.get_y(), w=190)
-                    except Exception: pdf.multi_cell(0, 8, f"File: {file_name}")
-
-        pdf_bytes = io.BytesIO()
-        pdf.output(pdf_bytes)
-        pdf_bytes.seek(0)
-        return True, pdf_bytes, filename
+        return True, full_pdf_path, filename
 
     except Exception as e:
-        import traceback
-        print("=== FULL PDF ERROR ===")
-        print(traceback.format_exc())
-        return False, None, f"Error: {str(e)}"
+        return False, None, f"PDF Error: {str(e)}"
+
+
+# ============================================================
+# DIRECTOR STATUS SWITCH — APPROVED ↔ REJECTED
+# ============================================================
+def director_switch_status(request_data):
+    """Only Director/Super Admin can change status"""
+    user_role = st.session_state.get("role", "")
+    if user_role not in ["Director", "Super Admin"]:
+        return False, "Not authorized"
+# ✅ Add this line under your request details
+if st.session_state.role in ["Director", "Super Admin"]:
+    director_switch_status(request_data)
+    req_id = request_data.get("id")
+    current_status = str(request_data.get("status", "Pending")).strip()
+
+    st.markdown("---")
+    st.warning("🔧 Director Tools — Change Approval Status")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        new_status = st.selectbox(
+            "Change Status To:",
+            ["Pending", "Approved", "Rejected"],
+            index=["Pending", "Approved", "Rejected"].index(current_status) if current_status in ["Pending", "Approved", "Rejected"] else 0,
+            key=f"switch_status_{req_id}"
+        )
+    with col2:
+        confirm = st.checkbox("✅ Confirm Change", key=f"confirm_switch_{req_id}")
+
+    if st.button("🔄 Update Status", type="primary", disabled=not confirm, key=f"btn_switch_{req_id}"):
+        if new_status == current_status:
+            return False, "No change needed"
+
+        try:
+            excel_path = "requests_data.xlsx"
+            df = pd.read_excel(excel_path)
+            mask = df["id"].astype(str) == str(req_id)
+            if mask.any():
+                from datetime import datetime
+                df.loc[mask, "status"] = new_status
+                df.loc[mask, "approved_by"] = st.session_state.username
+                df.loc[mask, "approved_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                df.to_excel(excel_path, index=False)
+
+                request_data["status"] = new_status
+                request_data["approved_by"] = st.session_state.username
+                request_data["approved_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                st.success(f"✅ Status changed to: {new_status}")
+                st.info("📄 PDF will now show updated status & stamp")
+                st.rerun()
+                return True, f"Updated to {new_status}"
+            else:
+                return False, "❌ Request not found in Excel"
+        except Exception as e:
+            return False, f"❌ Error: {str(e)}"
+    return False, "Awaiting confirmation"
 
 # ============================================================
 # SESSION STATE
