@@ -416,10 +416,11 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ FIXED FILENAME (No # symbol)
+# PDF GENERATION — ✅ RETURNS BINARY DATA (Fixes Damaged PDF Error)
 # ============================================================
 def generate_approval_pdf(request_data):
     import os
+    import io
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
@@ -429,7 +430,7 @@ def generate_approval_pdf(request_data):
         fresh_data = next((r for r in all_recs if int(r["id"]) == int(req_id)), request_data)
         
         def clean_text(t):
-            return str(t).replace("—", "-").replace("–", "-").replace(":", "-").replace("/", "-").replace("\\", "-").replace("#", "No.").strip()
+            return str(t).replace("—", "-").replace("–", "-").replace(":", "-").replace("/", "-").replace("\\", "-").strip()
         
         def format_date(d):
             if not d or str(d).strip() == "" or str(d).strip().lower() == "none":
@@ -453,7 +454,7 @@ def generate_approval_pdf(request_data):
         pdf.add_page()
         
         # ─── HEADER ──────────────────────────────────────────────
-        LOGO_PATH = "logo.png"
+        LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
         if os.path.exists(LOGO_PATH):
             pdf.image(LOGO_PATH, x=80, y=10, w=50)
         pdf.ln(45)
@@ -512,7 +513,7 @@ def generate_approval_pdf(request_data):
             pdf.set_font("Helvetica", "", 11)
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt=f"Approved by: {approved_by}  |  Date: {approved_date}", ln=True, align="C")
-            stamp_path = "approved_stamp.png"
+            stamp_path = os.path.join(BASE_DIR, "approved_stamp.png")
             if os.path.exists(stamp_path):
                 pdf.image(stamp_path, x=140, y=210, w=50)
         
@@ -523,7 +524,7 @@ def generate_approval_pdf(request_data):
             pdf.set_font("Helvetica", "", 11)
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt=f"Rejected by: {approved_by}  |  Date: {approved_date}", ln=True, align="C")
-            stamp_path = "rejected_stamp.png"
+            stamp_path = os.path.join(BASE_DIR, "rejected_stamp.png")
             if os.path.exists(stamp_path):
                 pdf.image(stamp_path, x=140, y=210, w=50)
         
@@ -535,21 +536,20 @@ def generate_approval_pdf(request_data):
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, txt="Waiting for Director approval", ln=True, align="C")
         
-        # ─── SAVE — ✅ NO # IN FILENAME ──────────────────────────
-        save_dir = "approved_pdfs"
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # ✅ FILENAME: ID No.1 - Wais Rahimi - GYM Membership.pdf
+        # ─── ✅ OUTPUT TO BINARY MEMORY (NOT FILE PATH) ──────────
+        # Filename format: ID No.1 - Employee Name - Category.pdf
         filename = f"ID No.{req_id} - {emp_name} - {category}.pdf"
-        full_pdf_path = os.path.join(save_dir, filename)
         
-        pdf.output(full_pdf_path)
+        # ✅ WRITE PDF TO MEMORY → RETURNS BINARY DATA
+        pdf_bytes = io.BytesIO()
+        pdf.output(pdf_bytes)
+        pdf_bytes.seek(0)  # Go to start of binary data
         
-        return True, full_pdf_path, filename
+        # ✅ RETURN: (success, BINARY_DATA, filename)
+        return True, pdf_bytes.read(), filename
     
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
-
 # ============================================================
 # DIRECTOR STATUS SWITCH — DEBUG VERSION
 # ============================================================
