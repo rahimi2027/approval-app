@@ -545,14 +545,13 @@ def generate_approval_pdf(request_data):
 
 
 # ============================================================
-# DIRECTOR STATUS SWITCH — FULL WORKING VERSION
+# DIRECTOR STATUS SWITCH — AUTO-FINDS YOUR EXCEL FILE
 # ============================================================
 def director_switch_status(request_data):
-    """Director can flip status — FORCES VISIBILITY & MATCHES YOUR EXCEL"""
+    """Director can flip status — AUTO-DETECTS YOUR EXCEL PATH"""
     
-    # ✅ SHOW FOR DEBUG — REMOVE LATER IF YOU WANT
     st.markdown("---")
-    st.warning("🔧 ⚙️ DIRECTOR STATUS SWITCH PANEL IS LOADED")  # ← DEBUG TEXT — should ALWAYS show
+    st.warning("🔧 ⚙️ DIRECTOR STATUS SWITCH PANEL")
     
     req_id = request_data.get("id")
     current_status = str(request_data.get("status", "pending")).strip().lower()
@@ -576,8 +575,30 @@ def director_switch_status(request_data):
         try:
             import pandas as pd
             from datetime import datetime
+            import os
 
-            excel_path = "requests_data.xlsx"
+            # ✅ AUTO-FIND YOUR EXCEL FILE — SAME FOLDER AS YOUR CODE
+            possible_files = [
+                "requests_data.xlsx",
+                "request_data.xlsx",
+                "requests_data.xls",
+                "request_data.xls",
+                "data.xlsx",
+                "Requests.xlsx"
+            ]
+            
+            excel_path = None
+            for f in possible_files:
+                if os.path.exists(f):
+                    excel_path = f
+                    st.info(f"✅ Found Excel file: **{f}**")
+                    break
+            
+            if not excel_path:
+                st.error("❌ Could not find Excel file!")
+                st.info("📂 Files in folder: " + ", ".join(os.listdir("."))[:200])
+                return
+
             df = pd.read_excel(excel_path)
 
             mask = df["id"].astype(str) == str(req_id)
@@ -585,7 +606,7 @@ def director_switch_status(request_data):
                 st.error(f"❌ Request ID #{req_id} NOT FOUND in Excel!")
                 return
 
-            # ✅ USE YOUR EXACT COLUMN NAMES — matches your screenshot!
+            # ✅ UPDATE THE RECORD
             df.loc[mask, "status"] = new_status
             df.loc[mask, "decision_by"] = st.session_state.username
             df.loc[mask, "decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -597,7 +618,7 @@ def director_switch_status(request_data):
             request_data["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             st.success(f"✅ ✅ Status CHANGED: **{current_status.upper()} → {new_status.upper()}**")
-            st.info("📄 Page refreshing...")
+            st.info(f"📄 Saved to: {excel_path}")
             st.rerun()
 
         except Exception as e:
