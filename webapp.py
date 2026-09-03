@@ -1027,10 +1027,10 @@ else:
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         
-                        # ✅ SHOW PREVIOUS REJECTION COMMENT — NOW IN PENDING TOO!
-                        prev_comments = req.get("director_comments", "").strip()
-                        if prev_comments and prev_comments.lower() not in ["none", ""]:
-                            st.warning(f"📌 **PREVIOUS REJECTION REASON:**\n\n{prev_comments}")
+                        # ✅ SHOW PREVIOUS REJECTION — THE MISSING CODE!
+                        comment_text = req.get("director_comments", "").strip()
+                        if comment_text and comment_text.lower() not in ["none", ""]:
+                            st.warning(f"📌 **PREVIOUS REJECTION REASON:**\n\n{comment_text}")
                         
                         st.divider()
                         with st.form(f"decision_form_{req['id']}"):
