@@ -873,7 +873,42 @@ def user_management_panel():
                 save_users(USERS)
                 st.success(f"✅ User **{del_name}** deleted!")
                 st.rerun()
-
+# ============================================================
+# 🔑 PASSWORD CHANGE — ANY USER CAN CHANGE THEIR OWN PASSWORD
+# ============================================================
+def change_my_password_form():
+    """Allow ANY logged-in user to change their own password"""
+    with st.sidebar.expander("🔑 Change My Password", expanded=False):
+        USERS = load_users()
+        current_username = st.session_state.user_info["username"]
+        curr_user = USERS.get(current_username, {})
+        
+        with st.form("change_my_password", clear_on_submit=True):
+            old_pass = st.text_input("🔑 Current Password", type="password")
+            new_pass1 = st.text_input("🔑 New Password", type="password")
+            new_pass2 = st.text_input("🔑 Confirm New Password", type="password")
+            
+            if st.form_submit_button("✅ Update Password", type="primary"):
+                # Verify old password matches
+                if USERS[current_username]["password"] != old_pass:
+                    st.error("❌ Current password is NOT correct!")
+                    return
+                # Check new passwords match
+                if new_pass1 != new_pass2:
+                    st.error("❌ New passwords do NOT match!")
+                    return
+                # Minimum length check
+                if len(new_pass1) < 4:
+                    st.error("❌ New password must be at least 4 characters!")
+                    return
+                # Update password
+                USERS[current_username]["password"] = new_pass1
+                save_users(USERS)
+                # Update session so it stays in sync
+                st.session_state.user_info["password"] = new_pass1
+                st.success("✅ Password changed successfully!")
+                st.balloons()
+                st.rerun()
 # ============================================================
 # LOGIN PAGE
 # ============================================================
