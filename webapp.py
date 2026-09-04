@@ -1,5 +1,5 @@
 # ============================================================
-# 🔄 GITHUB AUTO-SAVE — IMPROVED VERSION
+# 🔄 GITHUB AUTO-SAVE — FINAL WORKING VERSION
 # ============================================================
 import streamlit as st
 import os
@@ -9,12 +9,12 @@ from datetime import datetime
 def github_auto_save():
     """Push changed Excel files to GitHub automatically"""
     
-    # Only run on Streamlit Cloud — skip locally
+    # Only run on Streamlit Cloud — skip when running locally
     if not os.path.exists("/mount/src/"):
         return
     
     try:
-        # Load secrets
+        # Load secrets and clean up quotes/spaces
         GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "").strip().strip('"').strip("'")
         GITHUB_REPO = st.secrets.get("GITHUB_REPO", "").strip().strip('"').strip("'")
         GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main").strip().strip('"').strip("'")
@@ -28,15 +28,21 @@ def github_auto_save():
         os.system("git config --global user.name 'Streamlit Auto-Save'")
         os.system("git config --global user.email 'rahimi2027@users.noreply.github.com'")
         
-        # Ensure we are on the right branch
+        # Make sure we are on the right branch
         subprocess.run(["git", "checkout", GITHUB_BRANCH], capture_output=True)
         
         # Add Excel data files
         data_files = ["requests.xlsx", "user_database.xlsx", "settings.xlsx"]
+        files_added = False
         for f in data_files:
             if os.path.exists(f):
                 subprocess.run(["git", "add", f], capture_output=True)
-                print(f"✅ Added: {f}")
+                print(f"✅ Added file: {f}")
+                files_added = True
+        
+        if not files_added:
+            print("⚠️ No Excel files found to save")
+            return
         
         # Check if anything changed
         status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
@@ -44,15 +50,16 @@ def github_auto_save():
             print("ℹ️ No changes to save")
             return
         
-        # Commit & Push
+        # Commit
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         commit_msg = f"Auto-save: data updated {timestamp}"
-        subprocess.run(["git", "commit", "-m", commit_msg], capture_output=True)
+        commit_result = subprocess.run(["git", "commit", "-m", commit_msg], capture_output=True, text=True)
+        
+        # Push
         push_result = subprocess.run(["git", "push", repo_url, GITHUB_BRANCH], capture_output=True, text=True)
         
         if push_result.returncode == 0:
-            print("✅ SUCCESS: Data saved to GitHub!")
-            st.toast("✅ Saved to GitHub!", icon="✅")
+            print("✅ SUCCESS: All data saved to GitHub!")
         else:
             print(f"⚠️ Push failed: {push_result.stderr}")
             
