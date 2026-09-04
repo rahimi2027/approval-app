@@ -467,20 +467,18 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ FIXED FONT ERROR + ATTACHMENTS LIST
+# PDF GENERATION — ✅ ATTACHMENTS FIXED + FONT SAFE
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        # ✅ READ FRESH DATA FROM EXCEL
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next(
             (r for r in all_recs if int(str(r.get("id", "0"))) == int(str(req_id))),
             request_data
         )
-        # ✅ CLEAN TEXT — REMOVE UNSUPPORTED CHARACTERS
         def clean_text(t):
             t = str(t)
             t = t.replace("\u2013", "-")
@@ -488,7 +486,6 @@ def generate_approval_pdf(request_data):
             t = t.replace("\u2212", "-")
             t = t.replace("—", "-")
             t = t.replace("–", "-")
-            t = t.replace("📎", "")  # ✅ REMOVE EMOJI — BREAKS COURIER FONT
             for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
                 t = t.replace(char, " ")
             return t.strip()
@@ -504,20 +501,19 @@ def generate_approval_pdf(request_data):
         dir_approve  = format_date(fresh_data.get("decision_date", ""))
         dir_name     = clean_text(fresh_data.get("decision_by", "Director"))
         dir_comments = clean_text(fresh_data.get("director_comments", ""))
-        att_names    = clean_text(fresh_data.get("attachment_name", "None").strip())
+        
+        # ✅ TRY BOTH FIELD NAMES — attachment_name OR attachment
+        att_names = clean_text(fresh_data.get("attachment_name", fresh_data.get("attachment", "None")))
+        
         # ─── CREATE PDF ───────────────────────────────────
         pdf = FPDF()
         pdf.add_page()
-        # ✅ LOGO — centered at top
         if os.path.exists(LOGO_PATH):
             pdf.image(LOGO_PATH, x=75, y=10, w=60)
-        # ✅ MOVE DOWN AFTER LOGO
         pdf.ln(22)
-        # ✅ FORM TITLE
         pdf.set_font("Courier", "", 11)
         pdf.cell(0, 5, txt="Addition & Deduction Approval Form", ln=True, align="C")
         pdf.ln(3)
-        # ✅ DOUBLE HORIZONTAL LINE
         line_y = pdf.get_y()
         pdf.line(10, line_y, 200, line_y)
         pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
@@ -544,7 +540,7 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Line Manager:", 0, 0)
         pdf.cell(0, 5, manager, ln=True)
         pdf.ln(6)
-        # ─── DESCRIPTION / JUSTIFICATION ──────────────────
+        # ─── DESCRIPTION ─────────────────────────────────
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.ln(2)
@@ -556,7 +552,6 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
-        # ✅ APPROVED — Green text + Stamp
         if status == "approved":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9)
@@ -575,7 +570,6 @@ def generate_approval_pdf(request_data):
                 pdf.set_font("Courier", "", 9)
                 pdf.ln(5)
                 pdf.multi_cell(0, 5, dir_comments)
-        # ✅ REJECTED — Red text
         elif status == "rejected":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9)
@@ -594,29 +588,36 @@ def generate_approval_pdf(request_data):
                 pdf.set_font("Courier", "", 9)
                 pdf.ln(5)
                 pdf.multi_cell(0, 5, dir_comments)
-        # ⏳ PENDING
         else:
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.cell(0, 5, "Pending", ln=True)
         
-        # 📎 ATTACHMENTS LIST — ✅ NO EMOJI, CLEAN TEXT ONLY
-        if att_names and att_names != "None" and att_names != "":
+        # ==================================================
+        # 📎 ATTACHMENTS SECTION — SIMPLIFIED & ROBUST
+        # ==================================================
+        # ✅ Remove "None" / empty checks
+        has_attachment = False
+        display_files = []
+        if att_names:
+            lowered = att_names.lower().strip()
+            if lowered != "none" and lowered != "" and lowered != "no attachments":
+                has_attachment = True
+                display_files = [f.strip() for f in att_names.split(",") if f.strip()]
+        
+        if has_attachment:
             pdf.ln(6)
             pdf.set_font("Courier", "B", 10)
             pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
             pdf.ln(2)
             pdf.set_font("Courier", "", 9)
-            for fname in att_names.split(","):
-                fname = fname.strip()
-                if fname:
-                    pdf.cell(0, 5, f"- {fname}", ln=True)
+            for fname in display_files:
+                pdf.cell(0, 5, f"- {fname}", ln=True)
+        # ==================================================
         
         pdf.ln(10)
-        # ✅ DASHED LINE + STAMP IMAGE
         dash_y = pdf.get_y()
         for x in range(10, 200, 4):
             pdf.line(x, dash_y, x + 2, dash_y)
-        # ✅ SHOW STAMP
         if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
             pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
