@@ -503,7 +503,8 @@ def generate_approval_pdf(request_data):
         dir_comments = clean_text(fresh_data.get("director_comments", ""))
         
         # ✅ TRY BOTH FIELD NAMES — attachment_name OR attachment
-        att_names = clean_text(fresh_data.get("attachment_name", fresh_data.get("attachment", "None")))
+        att_names = fresh_data.get("attachment_name", fresh_data.get("attachment", ""))
+        att_names = clean_text(att_names)
         
         # ─── CREATE PDF ───────────────────────────────────
         pdf = FPDF()
@@ -593,16 +594,20 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, "Pending", ln=True)
         
         # ==================================================
-        # 📎 ATTACHMENTS SECTION — SIMPLIFIED & ROBUST
+        # ✅ ATTACHMENTS SECTION — FIXED
         # ==================================================
-        # ✅ Remove "None" / empty checks
         has_attachment = False
         display_files = []
         if att_names:
-            lowered = att_names.lower().strip()
-            if lowered != "none" and lowered != "" and lowered != "no attachments":
+            val = str(att_names).strip()
+            lowered = val.lower()
+            # ✅ Only skip if truly empty or literally "None" with no real filename
+            if val and lowered not in ["none", "no attachments", ""]:
                 has_attachment = True
-                display_files = [f.strip() for f in att_names.split(",") if f.strip()]
+                display_files = [f.strip() for f in val.split(",") if f.strip() and f.strip().lower() not in ["none", ""]]
+                # ✅ Double-check we actually have filenames
+                if not display_files:
+                    has_attachment = False
         
         if has_attachment:
             pdf.ln(6)
