@@ -1,5 +1,5 @@
 # ============================================================
-# 🔄 GITHUB AUTO-SAVE — KEEPS DATA PERMANENT & SYNCED
+# 🔄 GITHUB AUTO-SAVE — IMPROVED VERSION
 # ============================================================
 import streamlit as st
 import os
@@ -8,31 +8,56 @@ from datetime import datetime
 
 def github_auto_save():
     """Push changed Excel files to GitHub automatically"""
+    
+    # Only run on Streamlit Cloud — skip locally
     if not os.path.exists("/mount/src/"):
         return
+    
     try:
-        GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
-        GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
-        GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
+        # Load secrets
+        GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "").strip().strip('"').strip("'")
+        GITHUB_REPO = st.secrets.get("GITHUB_REPO", "").strip().strip('"').strip("'")
+        GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main").strip().strip('"').strip("'")
+        
         if not GITHUB_TOKEN or not GITHUB_REPO:
-            print("⚠️ GitHub secrets not set — skipping auto-save")
+            print("⚠️ Secrets missing — cannot auto-save")
             return
+        
+        # Configure git
         repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
         os.system("git config --global user.name 'Streamlit Auto-Save'")
         os.system("git config --global user.email 'rahimi2027@users.noreply.github.com'")
+        
+        # Ensure we are on the right branch
+        subprocess.run(["git", "checkout", GITHUB_BRANCH], capture_output=True)
+        
+        # Add Excel data files
         data_files = ["requests.xlsx", "user_database.xlsx", "settings.xlsx"]
         for f in data_files:
             if os.path.exists(f):
-                os.system(f"git add {f}")
+                subprocess.run(["git", "add", f], capture_output=True)
+                print(f"✅ Added: {f}")
+        
+        # Check if anything changed
         status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
-        if status.stdout.strip():
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            commit_msg = f"🔄 Auto-save: data updated {timestamp}"
-            os.system(f'git commit -m "{commit_msg}"')
-            os.system(f"git push {repo_url} {GITHUB_BRANCH}")
-            st.toast("✅ Data saved & synced to GitHub!", icon="✅")
+        if not status.stdout.strip():
+            print("ℹ️ No changes to save")
+            return
+        
+        # Commit & Push
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        commit_msg = f"Auto-save: data updated {timestamp}"
+        subprocess.run(["git", "commit", "-m", commit_msg], capture_output=True)
+        push_result = subprocess.run(["git", "push", repo_url, GITHUB_BRANCH], capture_output=True, text=True)
+        
+        if push_result.returncode == 0:
+            print("✅ SUCCESS: Data saved to GitHub!")
+            st.toast("✅ Saved to GitHub!", icon="✅")
+        else:
+            print(f"⚠️ Push failed: {push_result.stderr}")
+            
     except Exception as e:
-        print(f"⚠️ GitHub save error: {e}")
+        print(f"⚠️ Auto-save error: {str(e)}")
 
 # ─── DATE FORMATTING HELPER ──────────────────────────────────────
 def format_date(d):
