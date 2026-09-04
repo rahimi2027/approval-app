@@ -1,5 +1,5 @@
 # ============================================================
-# 🔄 GITHUB AUTO-SAVE — FINAL WORKING VERSION
+# 🔄 GITHUB AUTO-SAVE — FINAL FIXED VERSION
 # ============================================================
 import streamlit as st
 import os
@@ -9,12 +9,12 @@ from datetime import datetime
 def github_auto_save():
     """Push changed Excel files to GitHub automatically"""
     
-    # Only run on Streamlit Cloud — skip when running locally
+    # Only run on Streamlit Cloud — skip locally
     if not os.path.exists("/mount/src/"):
         return
     
     try:
-        # Load secrets and clean up quotes/spaces
+        # Load secrets — clean quotes/spaces
         GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "").strip().strip('"').strip("'")
         GITHUB_REPO = st.secrets.get("GITHUB_REPO", "").strip().strip('"').strip("'")
         GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main").strip().strip('"').strip("'")
@@ -24,11 +24,10 @@ def github_auto_save():
             return
         
         # Configure git
-        repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
         os.system("git config --global user.name 'Streamlit Auto-Save'")
         os.system("git config --global user.email 'rahimi2027@users.noreply.github.com'")
         
-        # Make sure we are on the right branch
+        # Ensure correct branch
         subprocess.run(["git", "checkout", GITHUB_BRANCH], capture_output=True)
         
         # Add Excel data files
@@ -44,7 +43,7 @@ def github_auto_save():
             print("⚠️ No Excel files found to save")
             return
         
-        # Check if anything changed
+        # Check changes
         status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
         if not status.stdout.strip():
             print("ℹ️ No changes to save")
@@ -53,10 +52,16 @@ def github_auto_save():
         # Commit
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         commit_msg = f"Auto-save: data updated {timestamp}"
-        commit_result = subprocess.run(["git", "commit", "-m", commit_msg], capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", commit_msg], capture_output=True, text=True)
         
-        # Push
-        push_result = subprocess.run(["git", "push", repo_url, GITHUB_BRANCH], capture_output=True, text=True)
+        # PUSH WITH TOKEN IN HEADER — FIXES THE PASSWORD PROMPT!
+        remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+        push_result = subprocess.run(
+            ["git", "push", remote_url, GITHUB_BRANCH],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GIT_ASKPASS": "/bin/true"}
+        )
         
         if push_result.returncode == 0:
             print("✅ SUCCESS: All data saved to GitHub!")
@@ -373,30 +378,41 @@ EXCEL_COLUMNS = [
     "PDF File Path", "Edited From ID", "Old Data"
 ]
 
+# ============================================================
+# ✅ FIXED EXCEL FUNCTIONS — with engine="openpyxl"
+# ============================================================
+
 def initialise_excel():
     if not os.path.exists(EXCEL_PATH):
-        pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False)
+        pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
     else:
-        df = pd.read_excel(EXCEL_PATH)
+        df = pd.read_excel(EXCEL_PATH, engine="openpyxl")
         for col in EXCEL_COLUMNS:
             if col not in df.columns:
                 df[col] = ""
-        df.to_excel(EXCEL_PATH, index=False)
+        df.to_excel(EXCEL_PATH, index=False, engine="openpyxl")
 
 initialise_excel()
 
+
 def load_records_from_excel():
     try:
-        if not os.path.exists(EXCEL_PATH): return []
-        df = pd.read_excel(EXCEL_PATH).fillna("")
-        if df.empty: return []
+        if not os.path.exists(EXCEL_PATH):
+            return []
+        df = pd.read_excel(EXCEL_PATH, engine="openpyxl").fillna("")
+        if df.empty:
+            return []
         records = df.to_dict(orient="records")
         parsed = []
         for r in records:
-            try: record_id = int(r.get("ID", 0))
-            except: record_id = 0
-            try: amount = float(r.get("Amount (£)", 0))
-            except: amount = 0.0
+            try:
+                record_id = int(r.get("ID", 0))
+            except:
+                record_id = 0
+            try:
+                amount = float(r.get("Amount (£)", 0))
+            except:
+                amount = 0.0
             parsed.append({
                 "id": record_id,
                 "emp_name": str(r.get("Employee Name", "Not Specified")).strip(),
