@@ -467,13 +467,13 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ WITH ATTACHMENTS LISTED IN PDF
+# PDF GENERATION — ✅ FIXED FONT ERROR + ATTACHMENTS LIST
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
         return False, None, "Install fpdf2: pip install fpdf2"
     try:
-        # ✅ READ FRESH DATA FROM EXCEL — ALWAYS GET LATEST STATUS
+        # ✅ READ FRESH DATA FROM EXCEL
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
         fresh_data = next(
@@ -488,6 +488,7 @@ def generate_approval_pdf(request_data):
             t = t.replace("\u2212", "-")
             t = t.replace("—", "-")
             t = t.replace("–", "-")
+            t = t.replace("📎", "")  # ✅ REMOVE EMOJI — BREAKS COURIER FONT
             for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
                 t = t.replace(char, " ")
             return t.strip()
@@ -502,8 +503,8 @@ def generate_approval_pdf(request_data):
         status       = str(fresh_data.get("status", "pending")).strip().lower()
         dir_approve  = format_date(fresh_data.get("decision_date", ""))
         dir_name     = clean_text(fresh_data.get("decision_by", "Director"))
-        dir_comments = fresh_data.get("director_comments", "").strip()
-        att_names    = fresh_data.get("attachment_name", "None").strip()
+        dir_comments = clean_text(fresh_data.get("director_comments", ""))
+        att_names    = clean_text(fresh_data.get("attachment_name", "None").strip())
         # ─── CREATE PDF ───────────────────────────────────
         pdf = FPDF()
         pdf.add_page()
@@ -566,8 +567,8 @@ def generate_approval_pdf(request_data):
             pdf.cell(52, 5, "Approved By:", 0, 0)
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
-            pdf.cell(0, 5, dir_approve if dir_approve != "-" else "—", ln=True)
-            if dir_comments and dir_comments.lower() != "none":
+            pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
+            if dir_comments and dir_comments != "None" and dir_comments != "":
                 pdf.ln(2)
                 pdf.set_font("Courier", "B", 9)
                 pdf.cell(52, 5, "Director Comments:", 0, 0)
@@ -585,8 +586,8 @@ def generate_approval_pdf(request_data):
             pdf.cell(52, 5, "Rejected By:", 0, 0)
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Rejection Date / Time:", 0, 0)
-            pdf.cell(0, 5, dir_approve if dir_approve != "-" else "—", ln=True)
-            if dir_comments and dir_comments.lower() != "none":
+            pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
+            if dir_comments and dir_comments != "None" and dir_comments != "":
                 pdf.ln(2)
                 pdf.set_font("Courier", "B", 9)
                 pdf.cell(52, 5, "Reason for Rejection:", 0, 0)
@@ -598,17 +599,17 @@ def generate_approval_pdf(request_data):
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.cell(0, 5, "Pending", ln=True)
         
-        # 📎 ATTACHMENTS LIST — ✅ NEW SECTION!
-        if att_names and att_names.lower() != "none":
+        # 📎 ATTACHMENTS LIST — ✅ NO EMOJI, CLEAN TEXT ONLY
+        if att_names and att_names != "None" and att_names != "":
             pdf.ln(6)
             pdf.set_font("Courier", "B", 10)
-            pdf.cell(0, 5, txt="📎 ATTACHMENTS", ln=True)
+            pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
             pdf.ln(2)
             pdf.set_font("Courier", "", 9)
             for fname in att_names.split(","):
                 fname = fname.strip()
                 if fname:
-                    pdf.cell(0, 5, f"• {fname}", ln=True)
+                    pdf.cell(0, 5, f"- {fname}", ln=True)
         
         pdf.ln(10)
         # ✅ DASHED LINE + STAMP IMAGE
