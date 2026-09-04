@@ -950,6 +950,7 @@ else:
     FULL_NAME = user.get("full_name", user["username"])
     CATEGORIES = load_categories()
     refresh_data_button()
+    change_my_password_form()   # ✅ ADD THIS LINE — enables password change for ALL users
     all_live_requests = load_records_from_excel()
     display_company_header()
 
