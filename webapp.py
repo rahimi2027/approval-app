@@ -467,7 +467,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION — ✅ FIXED STATUS DETECTION + STAMP
+# PDF GENERATION — ✅ WITH ATTACHMENTS LISTED IN PDF
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -480,7 +480,6 @@ def generate_approval_pdf(request_data):
             (r for r in all_recs if int(str(r.get("id", "0"))) == int(str(req_id))),
             request_data
         )
-
         # ✅ CLEAN TEXT — REMOVE UNSUPPORTED CHARACTERS
         def clean_text(t):
             t = str(t)
@@ -492,7 +491,6 @@ def generate_approval_pdf(request_data):
             for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
                 t = t.replace(char, " ")
             return t.strip()
-
         # ─── EXTRACT FIELDS ──────────────────────────────
         emp_name     = clean_text(fresh_data.get("emp_name", "Unknown"))
         dept         = clean_text(fresh_data.get("dept", ""))
@@ -501,33 +499,28 @@ def generate_approval_pdf(request_data):
         req_date     = format_date(fresh_data.get("date", ""))
         desc         = clean_text(fresh_data.get("desc", ""))
         manager      = clean_text(fresh_data.get("manager", ""))
-        status       = str(fresh_data.get("status", "pending")).strip().lower()  # ✅ FORCE LOWERCASE
+        status       = str(fresh_data.get("status", "pending")).strip().lower()
         dir_approve  = format_date(fresh_data.get("decision_date", ""))
         dir_name     = clean_text(fresh_data.get("decision_by", "Director"))
         dir_comments = fresh_data.get("director_comments", "").strip()
-
+        att_names    = fresh_data.get("attachment_name", "None").strip()
         # ─── CREATE PDF ───────────────────────────────────
         pdf = FPDF()
         pdf.add_page()
-
         # ✅ LOGO — centered at top
         if os.path.exists(LOGO_PATH):
             pdf.image(LOGO_PATH, x=75, y=10, w=60)
-
         # ✅ MOVE DOWN AFTER LOGO
         pdf.ln(22)
-
         # ✅ FORM TITLE
         pdf.set_font("Courier", "", 11)
         pdf.cell(0, 5, txt="Addition & Deduction Approval Form", ln=True, align="C")
         pdf.ln(3)
-
         # ✅ DOUBLE HORIZONTAL LINE
         line_y = pdf.get_y()
         pdf.line(10, line_y, 200, line_y)
         pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
         pdf.ln(12)
-
         # ─── REQUEST DETAILS ─────────────────────────────
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True)
@@ -550,7 +543,6 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Line Manager:", 0, 0)
         pdf.cell(0, 5, manager, ln=True)
         pdf.ln(6)
-
         # ─── DESCRIPTION / JUSTIFICATION ──────────────────
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True)
@@ -558,18 +550,16 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Courier", "", 9)
         pdf.multi_cell(0, 5, desc)
         pdf.ln(8)
-
         # ─── DIRECTOR APPROVAL ────────────────────────────
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
-
-        # ✅ APPROVED — Green text + Stamp — STATUS IS KING!
+        # ✅ APPROVED — Green text + Stamp
         if status == "approved":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9)
-            pdf.set_text_color(0, 128, 0)  # Green
+            pdf.set_text_color(0, 128, 0)
             pdf.cell(0, 5, "APPROVED", ln=True)
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Courier", "", 9)
@@ -577,7 +567,6 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
             pdf.cell(0, 5, dir_approve if dir_approve != "-" else "—", ln=True)
-
             if dir_comments and dir_comments.lower() != "none":
                 pdf.ln(2)
                 pdf.set_font("Courier", "B", 9)
@@ -585,12 +574,11 @@ def generate_approval_pdf(request_data):
                 pdf.set_font("Courier", "", 9)
                 pdf.ln(5)
                 pdf.multi_cell(0, 5, dir_comments)
-
         # ✅ REJECTED — Red text
         elif status == "rejected":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9)
-            pdf.set_text_color(200, 0, 0)  # Red
+            pdf.set_text_color(200, 0, 0)
             pdf.cell(0, 5, "REJECTED", ln=True)
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Courier", "", 9)
@@ -598,7 +586,6 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Rejection Date / Time:", 0, 0)
             pdf.cell(0, 5, dir_approve if dir_approve != "-" else "—", ln=True)
-
             if dir_comments and dir_comments.lower() != "none":
                 pdf.ln(2)
                 pdf.set_font("Courier", "B", 9)
@@ -606,50 +593,53 @@ def generate_approval_pdf(request_data):
                 pdf.set_font("Courier", "", 9)
                 pdf.ln(5)
                 pdf.multi_cell(0, 5, dir_comments)
-
         # ⏳ PENDING
         else:
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.cell(0, 5, "Pending", ln=True)
-
+        
+        # 📎 ATTACHMENTS LIST — ✅ NEW SECTION!
+        if att_names and att_names.lower() != "none":
+            pdf.ln(6)
+            pdf.set_font("Courier", "B", 10)
+            pdf.cell(0, 5, txt="📎 ATTACHMENTS", ln=True)
+            pdf.ln(2)
+            pdf.set_font("Courier", "", 9)
+            for fname in att_names.split(","):
+                fname = fname.strip()
+                if fname:
+                    pdf.cell(0, 5, f"• {fname}", ln=True)
+        
         pdf.ln(10)
-
         # ✅ DASHED LINE + STAMP IMAGE
         dash_y = pdf.get_y()
         for x in range(10, 200, 4):
             pdf.line(x, dash_y, x + 2, dash_y)
-
-        # ✅ SHOW STAMP — STATUS IS KING (no longer requires decision_date!)
+        # ✅ SHOW STAMP
         if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
             pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
             pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
-
         pdf.ln(8)
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
-
         # ─── FILENAME ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
         safe_date = datetime.now().strftime("%Y-%m-%d")
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
-
         # ─── OUTPUT ───
         pdf_output = pdf.output()
         if isinstance(pdf_output, (bytes, bytearray)):
             pdf_bytes = bytes(pdf_output)
         else:
             pdf_bytes = pdf_output.encode("latin-1")
-
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f:
             f.write(pdf_bytes)
-
         return True, pdf_bytes, filename
-
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
 
