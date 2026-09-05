@@ -607,14 +607,17 @@ def generate_approval_pdf(request_data):
         # ==================================================
         # ✅ ATTACHMENTS SECTION — FULLY FIXED
         # ==================================================
+        # ─── ONE extraction only (no duplicate code!) ───
         att_names = ""
-        # ✅ Check ALL possible column names
         for field_key in ["attachment_name", "Attachment Name", "attachment", "Attachment"]:
             val = str(fresh_data.get(field_key, "")).strip()
             if val and val.lower() not in ["none", "nan", ""]:
                 att_names = val
                 break
+        print(f"🔍 DEBUG: att_names = [{att_names}]")
+        att_names = clean_text(att_names)
 
+        # ─── Build clean list ───
         display_files = []
         if att_names:
             raw_list = att_names.split(",")
@@ -623,18 +626,19 @@ def generate_approval_pdf(request_data):
                 if clean_name and clean_name.lower() not in ["none", ""]:
                     display_files.append(clean_name)
 
+        # ─── ACTUALLY PRINT TO PDF ✅ ───
         pdf.ln(6)
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
-
         if len(display_files) > 0:
             for fname in display_files:
                 pdf.cell(0, 5, f"- {fname}", ln=True)
+                print(f"📄 PDF showing: {fname}")  # debug
         else:
             pdf.cell(0, 5, "- No files attached", ln=True)
-        # ==================================================
+            print("📄 PDF showing: No files attached")
         # ==================================================
         # ==================================================
         
