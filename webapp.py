@@ -1011,20 +1011,6 @@ if not st.session_state.logged_in:
             else:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
-    # ========================================================
-    # ✅ HIDE MANAGE APP BUTTON — ONLY SUPER ADMIN CAN SEE
-    # ========================================================
-    hide_manage_app = """
-    <style>
-    div[data-testid="stStatusWidget"] {display: none !important;}
-    .stApp [data-testid="collapsedControl"] {display: none !important;}
-    </style>
-    """
-    show_manage_app = """
-    <style>
-    div[data-testid="stStatusWidget"] {display: block !important;}
-    </style>
-    """
     
 # ============================================================
 # MAIN APPLICATION
@@ -1047,14 +1033,7 @@ else:
             st.session_state.user_info = None
             st.rerun()
     st.divider()
-    # ✅ Only Super Admin can see "Manage app" button
-    if user["role"] != "Super Admin":
-        hide_manage_btn = """
-        <style>
-        div[data-testid="stStatusWidget"] {display: none !important;}
-        </style>
-        """
-        st.markdown(hide_manage_btn, unsafe_allow_html=True)
+
     # ========================================================
     # 🔐 ROLE-BASED PORTALS
     # ========================================================
