@@ -90,7 +90,7 @@ def display_attachments(req):
                         file_name=name, key=f"att_{req.get('id', idx)}_{idx}"
                     )
             else:
-                st.warning(f"⚠️ File not found: {name}")
+                continue  # Skip missing files silently
     except Exception as e:
         st.info(f"📎 Attachments: {att}")
 
