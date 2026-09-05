@@ -604,20 +604,20 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, "Pending", ln=True)
         
         # ==================================================
-        # ✅ ATTACHMENTS SECTION — FIXED
+        # ✅ ATTACHMENTS SECTION — FULLY FIXED
         # ==================================================
         has_attachment = False
         display_files = []
-        if att_names:
-            val = str(att_names).strip()
-            lowered = val.lower()
-            # ✅ Only skip if truly empty or literally "None" with no real filename
-            if val and lowered not in ["none", "no attachments", ""]:
-                has_attachment = True
-                display_files = [f.strip() for f in val.split(",") if f.strip() and f.strip().lower() not in ["none", ""]]
-                # ✅ Double-check we actually have filenames
-                if not display_files:
-                    has_attachment = False
+        
+        # ✅ Get attachment names from BOTH possible field names
+        att_names = fresh_data.get("attachment_name", fresh_data.get("attachment", ""))
+        val = str(att_names).strip()
+        
+        lowered = val.lower()
+        if val and lowered not in ["none", "no attachments", "nan", ""]:
+            display_files = [f.strip() for f in val.split(",")]
+            display_files = [f for f in display_files if f and f.lower() not in ["none", ""]]
+            has_attachment = len(display_files) > 0
         
         if has_attachment:
             pdf.ln(6)
@@ -626,7 +626,15 @@ def generate_approval_pdf(request_data):
             pdf.ln(2)
             pdf.set_font("Courier", "", 9)
             for fname in display_files:
-                pdf.cell(0, 5, f"- {fname}", ln=True)
+                pdf.cell(0, 5, f"• {fname}", ln=True)
+        else:
+            pdf.ln(6)
+            pdf.set_font("Courier", "B", 10)
+            pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
+            pdf.ln(2)
+            pdf.set_font("Courier", "", 9)
+            pdf.cell(0, 5, "No files attached", ln=True)
+        # ==================================================
         # ==================================================
         
         pdf.ln(10)
