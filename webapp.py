@@ -209,20 +209,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# ============================================================
-# ✅ HIDE TOP ICONS FROM ALL USERS EXCEPT SUPER ADMIN
-# ============================================================
-if st.session_state.get("user_info", {}).get("role") != "Super Admin":
-    hide_menu_style = """
-    <style>
-    #MainMenu {visibility: hidden;}
-    header [data-testid="stHeaderActionElements"] {display: none !important;}
-    </style>
-    """
-else:
-    # Super Admin sees everything
-    hide_menu_style = ""
-st.markdown(hide_menu_style, unsafe_allow_html=True)
 
 # ============================================================
 # FILE PATHS
