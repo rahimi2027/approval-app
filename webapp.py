@@ -626,7 +626,7 @@ def generate_approval_pdf(request_data):
             pdf.ln(2)
             pdf.set_font("Courier", "", 9)
             for fname in display_files:
-                pdf.cell(0, 5, f"• {fname}", ln=True)
+                pdf.cell(0, 5, f"- {fname}", ln=True)
         else:
             pdf.ln(6)
             pdf.set_font("Courier", "B", 10)
