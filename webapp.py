@@ -1032,7 +1032,7 @@ else:
         else:
             for req in reversed(my_reqs):
                 icon = "🟡" if req["status"] == "pending" else ("🟢" if req["status"] == "approved" else "🔴")
-                title = f"{icon} ID #{req['id']} | {req['status'].upper()} | £{req['amount']:.2f} | 📅 {format_date(req['date'])}"
+                title = f"{icon} ID #{req['id']} | {req['emp_name']} | {req['status'].upper()} | £{req['amount']:.2f} | 📅 {format_date(req['date'])}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req['emp_name']} | 👔 Manager: {req['manager']}")
                     st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
