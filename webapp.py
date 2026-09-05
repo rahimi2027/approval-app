@@ -893,7 +893,8 @@ else:
                 st.metric("✅ Approved", len(approved))
                 st.divider()
                 for req in reversed(approved):
-                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"
+                    approved_by_line = f"by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | APPROVED | £{req['amount']:.2f} | {approved_by_line}"
                     with st.expander(title):
                         st.write(f"👤 **Employee:** {req['emp_name']}")
                         st.write(f"🏢 **Department:** {req['dept']}")
@@ -912,7 +913,8 @@ else:
                 st.metric("❌ Rejected", len(rejected))
                 st.divider()
                 for req in reversed(rejected):
-                    title = f"🔴 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"
+                    rejected_by_line = f"by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
+                    title = f"🔴 ID #{req['id']} | {req['emp_name']} | REJECTED | £{req['amount']:.2f} | {rejected_by_line}"
                     with st.expander(title):
                         st.write(f"👤 **Employee:** {req['emp_name']}")
                         st.write(f"🏢 **Department:** {req['dept']}")
@@ -1066,7 +1068,7 @@ else:
                 st.metric("⏳ Pending Approval", len(pending))
                 st.divider()
                 for req in reversed(pending):
-                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | 📅 {format_date(req['date'])} | £{req['amount']:.2f} | {req['dept']}"
+                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | PENDING | £{req['amount']:.2f} | 📅 {format_date(req['date'])} | {req['dept']}"
                     with st.expander(title):
                         st.write(f"👤 **Employee:** {req['emp_name']}")
                         st.write(f"🏢 **Department:** {req['dept']}")
