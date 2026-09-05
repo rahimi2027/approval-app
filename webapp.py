@@ -416,7 +416,7 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# PDF GENERATION
+# PDF GENERATION — ATTACHMENTS ON PAGE 2 ONLY
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -457,11 +457,17 @@ def generate_approval_pdf(request_data):
                 clean_name = name.strip()
                 if clean_name and clean_name.lower() not in ["none", ""]:
                     display_files.append(clean_name)
+
+        # ────────────── PAGE 1: APPROVAL DOCUMENT ONLY ──────────────
         pdf = FPDF()
         pdf.add_page()
+
+        # Logo
         if os.path.exists(LOGO_PATH):
             pdf.image(LOGO_PATH, x=75, y=10, w=60)
         pdf.ln(22)
+
+        # Title
         pdf.set_font("Courier", "", 11)
         pdf.cell(0, 5, txt="Addition & Deduction Approval Form", ln=True, align="C")
         pdf.ln(3)
@@ -469,6 +475,8 @@ def generate_approval_pdf(request_data):
         pdf.line(10, line_y, 200, line_y)
         pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
         pdf.ln(12)
+
+        # Request Details
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True)
         pdf.ln(2)
@@ -482,16 +490,21 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
         pdf.ln(6)
+
+        # Description
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
         pdf.multi_cell(0, 5, desc)
         pdf.ln(8)
+
+        # Director Approval
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
+
         if status == "approved":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9); pdf.set_text_color(0, 128, 0)
@@ -512,27 +525,49 @@ def generate_approval_pdf(request_data):
                 pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
         else:
             pdf.cell(52, 5, "Decision:", 0, 0); pdf.cell(0, 5, "Pending", ln=True)
-        pdf.ln(6)
-        pdf.set_font("Courier", "B", 10)
-        pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
-        pdf.ln(2)
-        pdf.set_font("Courier", "", 9)
-        if len(display_files) > 0:
-            for fname in display_files:
-                pdf.cell(0, 5, f"- {fname}", ln=True)
-        else:
-            pdf.cell(0, 5, "- No files attached", ln=True)
-        pdf.ln(10)
+
+        pdf.ln(12)
+
+        # Signature Line + Stamp
         dash_y = pdf.get_y()
         for x in range(10, 200, 4):
             pdf.line(x, dash_y, x + 2, dash_y)
+
         if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
             pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
             pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
+
         pdf.ln(8)
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
+
+        # ────────────── FORCE NEW PAGE ──────────────
+        pdf.add_page()  # ← ALL ATTACHMENTS GO TO PAGE 2
+
+        # ────────────── PAGE 2: ATTACHMENTS ──────────────
+        pdf.set_font("Courier", "B", 10)
+        pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
+        pdf.ln(4)
+        pdf.set_font("Courier", "", 9)
+
+        if len(display_files) > 0:
+            for fname in display_files:
+                pdf.cell(0, 5, f"- {fname}", ln=True)
+                # Try to embed the actual image if it exists
+                file_path = os.path.join(UPLOAD_DIR, fname)
+                if os.path.exists(file_path) and fname.lower().endswith((".png", ".jpg", ".jpeg")):
+                    pdf.ln(2)
+                    try:
+                        pdf.image(file_path, x=10, w=190)  # Full width
+                        pdf.ln(60)  # Space for next file
+                    except:
+                        pdf.cell(0, 5, "  (Preview could not display)", ln=True)
+                pdf.ln(3)
+        else:
+            pdf.cell(0, 5, "- No files attached", ln=True)
+
+        # ────────────── SAVE & RETURN ──────────────
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
@@ -547,7 +582,6 @@ def generate_approval_pdf(request_data):
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
-
 # ============================================================
 # PANEL FUNCTIONS
 # ============================================================
