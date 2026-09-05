@@ -1188,6 +1188,73 @@ else:
                         
                         st.divider()
                         display_pdf_button(req, can_generate=True)
+        # ========================================================
+    # 👤 STAFF / TEAM MEMBER PORTAL
+    # ========================================================
+    elif user["role"] == "Staff":
+        st.subheader("👤 My Requests Portal")
+        st.info("✅ Submit and view your own requests."); st.divider()
+
+        # ─── NEW REQUEST FORM ───
+        st.subheader("➕ Submit New Request")
+        nid = get_next_id(all_live_requests)
+        st.markdown(f"**🆔 Request ID:** `#{nid}`")
+        with st.form("staff_new_req", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                en = st.text_input("👤 Employee Name", value=FULL_NAME, disabled=True)
+                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
+                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
+                amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
+            with c2:
+                from datetime import datetime as dt
+                dt_val = st.date_input("📅 Date", value=dt.today())
+                mgr = st.text_input("👔 Line Manager")
+                files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+                desc = st.text_area("📝 Description / Justification")
+                if st.form_submit_button("📤 Submit for Approval", type="primary"):
+                    if mgr.strip() and desc.strip():
+                        att_list = []
+                        if files:
+                            for i, f in enumerate(files):
+                                fn = f"ID_{nid}_F{i+1}_{f.name}"
+                                with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
+                                    out.write(f.getbuffer())
+                                att_list.append(fn)
+                        payload = {
+                            "id": nid, "emp_name": FULL_NAME, "dept": user["dept"], "type": rt,
+                            "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
+                            "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
+                            "status": "pending", "director_comments": "", "decision_date": "",
+                            "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
+                        }
+                        save_record_to_excel(payload)
+                        st.success(f"✅ Request #{nid} submitted for approval!")
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Please fill in: Line Manager and Description")
+
+        # ─── VIEW MY OWN REQUESTS ───
+        st.divider()
+        st.subheader("📋 My Requests")
+        my_reqs = [r for r in all_live_requests if r["emp_name"].strip().lower() == FULL_NAME.strip().lower()]
+        if not my_reqs:
+            st.info("📋 You haven't submitted any requests yet.")
+        else:
+            for req in reversed(my_reqs):
+                icon = "🟡" if req["status"] == "pending" else ("🟢" if req["status"] == "approved" else "🔴")
+                title = f"{icon} ID #{req['id']} | {req['status'].upper()} | £{req['amount']:.2f} | 📅 {format_date(req['date'])}"
+                with st.expander(title):
+                    st.write(f"🏢 **Department:** {req['dept']}")
+                    st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
+                    st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                    st.write(f"👔 **Line Manager:** {req['manager']}")
+                    st.info(f"📝 **Description:** {req['desc']}")
+                    display_attachments(req)
+                    if req["director_comments"]:
+                        st.info(f"💬 Director Comments: {req['director_comments']}")
+                    if req["status"] == "approved":
+                        display_pdf_button(req, can_generate=True)
     elif user["role"] == "Super Admin":
         st.subheader("🛡️ Super Admin Control Panel")
         tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
