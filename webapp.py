@@ -210,6 +210,16 @@ st.set_page_config(
 )
 
 # ============================================================
+# ✅ HIDE TOP-RIGHT 3-DOTS MENU
+# ============================================================
+hide_menu_style = """
+<style>
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+</style>
+"""
+st.markdown(hide_menu_style, unsafe_allow_html=True)
+# ============================================================
 # FILE PATHS
 # ============================================================
 import sys
@@ -987,6 +997,25 @@ if not st.session_state.logged_in:
             else:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
+    # ========================================================
+    # ✅ HIDE MANAGE APP BUTTON — ONLY SUPER ADMIN CAN SEE
+    # ========================================================
+    hide_manage_app = """
+    <style>
+    div[data-testid="stStatusWidget"] {display: none !important;}
+    .stApp [data-testid="collapsedControl"] {display: none !important;}
+    </style>
+    """
+    show_manage_app = """
+    <style>
+    div[data-testid="stStatusWidget"] {display: block !important;}
+    </style>
+    """
+    
+    if user["role"] != "Super Admin":
+        st.markdown(hide_manage_app, unsafe_allow_html=True)
+    else:
+        st.markdown(show_manage_app, unsafe_allow_html=True)
 # ============================================================
 # MAIN APPLICATION
 # ============================================================
@@ -1008,7 +1037,14 @@ else:
             st.session_state.user_info = None
             st.rerun()
     st.divider()
-
+    # ✅ Only Super Admin can see "Manage app" button
+    if user["role"] != "Super Admin":
+        hide_manage_btn = """
+        <style>
+        div[data-testid="stStatusWidget"] {display: none !important;}
+        </style>
+        """
+        st.markdown(hide_manage_btn, unsafe_allow_html=True)
     # ========================================================
     # 🔐 ROLE-BASED PORTALS
     # ========================================================
