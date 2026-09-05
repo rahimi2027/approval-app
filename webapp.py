@@ -1012,10 +1012,6 @@ if not st.session_state.logged_in:
     </style>
     """
     
-    if user["role"] != "Super Admin":
-        st.markdown(hide_manage_app, unsafe_allow_html=True)
-    else:
-        st.markdown(show_manage_app, unsafe_allow_html=True)
 # ============================================================
 # MAIN APPLICATION
 # ============================================================
