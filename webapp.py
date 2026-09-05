@@ -512,8 +512,14 @@ def generate_approval_pdf(request_data):
         dir_name     = clean_text(fresh_data.get("decision_by", "Director"))
         dir_comments = clean_text(fresh_data.get("director_comments", ""))
         
-        # ✅ TRY BOTH FIELD NAMES — attachment_name OR attachment
-        att_names = fresh_data.get("attachment_name", fresh_data.get("attachment", ""))
+        # ✅ Get attachment names — checks ALL possible column names
+        att_names = ""
+        for field_key in ["attachment_name", "Attachment Name", "attachment", "Attachment"]:
+            val = str(fresh_data.get(field_key, "")).strip()
+            if val and val.lower() not in ["none", "nan", ""]:
+                att_names = val
+                break
+        print(f"🔍 DEBUG: att_names = [{att_names}]")
         att_names = clean_text(att_names)
         
         # ─── CREATE PDF ───────────────────────────────────
@@ -606,34 +612,34 @@ def generate_approval_pdf(request_data):
         # ==================================================
         # ✅ ATTACHMENTS SECTION — FULLY FIXED
         # ==================================================
-        has_attachment = False
+        att_names = ""
+        # ✅ Check ALL possible column names
+        for field_key in ["attachment_name", "Attachment Name", "attachment", "Attachment"]:
+            val = str(fresh_data.get(field_key, "")).strip()
+            if val and val.lower() not in ["none", "nan", ""]:
+                att_names = val
+                break
+
         display_files = []
-        
-        # ✅ Get attachment names from BOTH possible field names
-        att_names = fresh_data.get("attachment_name", fresh_data.get("attachment", ""))
-        val = str(att_names).strip()
-        
-        lowered = val.lower()
-        if val and lowered not in ["none", "no attachments", "nan", ""]:
-            display_files = [f.strip() for f in val.split(",")]
-            display_files = [f for f in display_files if f and f.lower() not in ["none", ""]]
-            has_attachment = len(display_files) > 0
-        
-        if has_attachment:
-            pdf.ln(6)
-            pdf.set_font("Courier", "B", 10)
-            pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
-            pdf.ln(2)
-            pdf.set_font("Courier", "", 9)
+        if att_names:
+            raw_list = att_names.split(",")
+            for name in raw_list:
+                clean_name = name.strip()
+                if clean_name and clean_name.lower() not in ["none", ""]:
+                    display_files.append(clean_name)
+
+        pdf.ln(6)
+        pdf.set_font("Courier", "B", 10)
+        pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
+        pdf.ln(2)
+        pdf.set_font("Courier", "", 9)
+
+        if len(display_files) > 0:
             for fname in display_files:
                 pdf.cell(0, 5, f"- {fname}", ln=True)
         else:
-            pdf.ln(6)
-            pdf.set_font("Courier", "B", 10)
-            pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
-            pdf.ln(2)
-            pdf.set_font("Courier", "", 9)
-            pdf.cell(0, 5, "No files attached", ln=True)
+            pdf.cell(0, 5, "- No files attached", ln=True)
+        # ==================================================
         # ==================================================
         # ==================================================
         
