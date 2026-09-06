@@ -161,15 +161,15 @@ def display_pdf_button(req, can_generate=False, key_suffix=""):
     unique_key = f"genpdf_{req_id}_{key_suffix}"
     if can_generate and PDF_AVAILABLE:
         st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=unique_key)
-            ok, pdf_bytes, name = generate_approval_pdf(req)
-            if ok:
-                st.success(f"✅ Generated! Ready to download ↓")
-                st.download_button(
-                    f"📥 Download: {name}", data=pdf_bytes, file_name=name,
-                    mime="application/pdf", type="primary", key=f"dl_{unique_key}"
-                )
-            else:
-                st.error(f"❌ {name}")
+        ok, pdf_bytes, name = generate_approval_pdf(req)
+        if ok:
+            st.success(f"✅ Generated! Ready to download ⬇")
+            st.download_button(
+                f"📥 Download: {name}", data=pdf_bytes, file_name=name,
+                mime="application/pdf", type="primary", key=f"dl_{unique_key}"
+            )
+        else:
+            st.error(f"❌ {name}")
     return False
 
 def get_next_id(all_records):
