@@ -1039,6 +1039,7 @@ if not st.session_state.logged_in:
 
 # ============================================================
 # ============================================================
+# ============================================================
 # MAIN APPLICATION — ROLE-BASED PORTALS
 # ============================================================
 else:
@@ -1401,59 +1402,119 @@ else:
                         st.divider()
                         display_pdf_button(req, can_generate=True)
 
-    # ─── SUPER ADMIN PORTAL ───
+    # ─── ✅ UPGRADED SUPER ADMIN PORTAL ───
     elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin Control Panel")
-        tab_settings, tab_users, tab_audit = st.tabs([
-            "⚙️ System Settings",
-            "👤 User Management",
-            "📖 Audit History"
-        ])
-        with tab_settings:
-            settings_management_panel()
-        with tab_users:
-            user_management_panel()
-        with tab_audit:
-            display_audit_log_panel()
+        st.subheader("🛡️ Super Admin — All Requests (View & Edit)")
+        st.info("✅ View ALL requests across ALL departments. Can Edit & Download PDFs. **Approval → Director only.**")
         st.divider()
-        st.subheader("📥 Download Data Backups")
-        backup_col1, backup_col2, backup_col3 = st.columns(3)
-        with backup_col1:
-            if os.path.exists(EXCEL_PATH):
-                with open(EXCEL_PATH, "rb") as f:
-                    st.download_button(
-                        "📥 Download Requests",
-                        f.read(),
-                        file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                        type="primary"
-                    )
-        with backup_col2:
-            if os.path.exists(USER_DB_PATH):
-                with open(USER_DB_PATH, "rb") as f:
-                    st.download_button(
-                        "📥 Download Users",
-                        f.read(),
-                        file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                        type="primary"
-                    )
-        with backup_col3:
-            if os.path.exists(SETTINGS_PATH):
-                with open(SETTINGS_PATH, "rb") as f:
-                    st.download_button(
-                        "📥 Download Settings",
-                        f.read(),
-                        file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                        type="primary"
-                    )
-        st.caption("💾 Save these files to your computer for backup")
+
+        tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs([
+            "⏳ All Pending", "✅ All Approved", "❌ All Rejected", "🔧 System Management"
+        ])
+
+        with tab_pending:
+            pending = [r for r in all_live_requests if r["status"] == "pending"]
+            if not pending:
+                st.success("✅ No pending requests.")
+            else:
+                st.metric("⏳ All Pending", len(pending)); st.divider()
+                for req in reversed(pending):
+                    title = f"🟡 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}"
+                    with st.expander(title):
+                        st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
+                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
+                        st.write(f"💷 Amount: £{req['amount']:.2f}")
+                        st.write(f"👔 Line Manager: {req['manager']} | 📅 Date: {req['date']}")
+                        st.info(f"📝 Description: {req['desc']}")
+                        display_attachments(req)
+                        if req["director_comments"]:
+                            st.info(f"💬 Director Comments: {req['director_comments']}")
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+                        if st.button(f"✏️ Edit Request #{req['id']}", key=f"sa_edit_pend_{req['id']}"):
+                            st.session_state.editing_request_id = req["id"]
+                            st.rerun()
+
+        with tab_approved:
+            approved = [r for r in all_live_requests if r["status"] == "approved"]
+            if not approved:
+                st.info("📋 No approved requests.")
+            else:
+                st.metric("✅ All Approved", len(approved)); st.divider()
+                for req in reversed(approved):
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}"
+                    with st.expander(title):
+                        st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
+                        st.write(f"💷 Amount: £{req['amount']:.2f}")
+                        st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+            if not rejected:
+                st.info("📋 No rejected requests.")
+            else:
+                st.metric("❌ All Rejected", len(rejected)); st.divider()
+                for req in reversed(rejected):
+                    title = f"🔴 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}"
+                    with st.expander(title):
+                        st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
+                        st.write(f"💷 Amount: £{req['amount']:.2f}")
+                        st.error(f"💬 Director Comments: {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+
+        with tab_manage:
+            tab_settings, tab_users, tab_audit = st.tabs([
+                "⚙️ System Settings", "👤 User Management", "📖 Audit History"
+            ])
+            with tab_settings:
+                settings_management_panel()
+            with tab_users:
+                user_management_panel()
+            with tab_audit:
+                display_audit_log_panel()
+            
+            st.divider()
+            st.subheader("📥 Download Data Backups")
+            backup_col1, backup_col2, backup_col3 = st.columns(3)
+            with backup_col1:
+                if os.path.exists(EXCEL_PATH):
+                    with open(EXCEL_PATH, "rb") as f:
+                        st.download_button(
+                            "📥 Download Requests",
+                            f.read(),
+                            file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                            type="primary"
+                        )
+            with backup_col2:
+                if os.path.exists(USER_DB_PATH):
+                    with open(USER_DB_PATH, "rb") as f:
+                        st.download_button(
+                            "📥 Download Users",
+                            f.read(),
+                            file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                            type="primary"
+                        )
+            with backup_col3:
+                if os.path.exists(SETTINGS_PATH):
+                    with open(SETTINGS_PATH, "rb") as f:
+                        st.download_button(
+                            "📥 Download Settings",
+                            f.read(),
+                            file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                            type="primary"
+                        )
+            st.caption("💾 Save these files to your computer for backup")
 
 # ========================================================
 # ✅ END OF ROLE-BASED PORTALS
 # ========================================================
-
 # Auto-save to GitHub after every page load
 github_auto_save()
-
 # ============================================================
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
