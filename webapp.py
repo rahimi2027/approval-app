@@ -1,4 +1,3 @@
-# ============================================================
 # 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.1 (FIXED)
 # ============================================================
 # ✅ Silent missing-file warnings
@@ -27,7 +26,54 @@ except ImportError:
         PDF_AVAILABLE = True
     except ImportError:
         PDF_AVAILABLE = False
+# ============================================================
+# 🔐 EXTRA PERMISSION CHECKBOXES — ROLE DEFAULTS PRESERVED
+# ============================================================
+PERMISSION_DEFAULTS = {
+    "Staff": {
+        "can_view_all_dept": False,
+        "can_generate_pdf": False,
+        "can_download_data": False,
+        "can_approve_requests": False
+    },
+    "Team Member": {
+        "can_view_all_dept": True,
+        "can_generate_pdf": False,
+        "can_download_data": False,
+        "can_approve_requests": False
+    },
+    "Manager": {
+        "can_view_all_dept": True,
+        "can_generate_pdf": True,
+        "can_download_data": False,
+        "can_approve_requests": False
+    },
+    "Director": {
+        "can_view_all_dept": True,
+        "can_generate_pdf": True,
+        "can_download_data": True,
+        "can_approve_requests": True
+    },
+    "Payroll": {
+        "can_view_all_dept": True,
+        "can_generate_pdf": True,
+        "can_download_data": True,
+        "can_approve_requests": False
+    },
+    "Super Admin": {
+        "can_view_all_dept": True,
+        "can_generate_pdf": True,
+        "can_download_data": True,
+        "can_approve_requests": True
+    }
+}
 
+PERMISSION_LABELS = {
+    "can_view_all_dept": "👁️ View All Department Requests",
+    "can_generate_pdf": "📄 Generate & Download PDFs",
+    "can_download_data": "📥 Download Data Backups",
+    "can_approve_requests": "✅ Approve/Reject Requests"
+}
 # ============================================================
 # GITHUB AUTO-SAVE
 # ============================================================
@@ -343,24 +389,17 @@ def load_users():
                 "full_name": str(r.get("full_name", r["username"])).strip(),
                 "password": str(r["password"]),
                 "role": str(r["role"]),
-                "dept": str(r["dept"])
+                "dept": str(r["dept"]),
+                # ✅ Load extra permissions (default False if missing)
+                "can_view_all_dept": str(r.get("can_view_all_dept", "False")).lower() == "true",
+                "can_generate_pdf": str(r.get("can_generate_pdf", "False")).lower() == "true",
+                "can_download_data": str(r.get("can_download_data", "False")).lower() == "true",
+                "can_approve_requests": str(r.get("can_approve_requests", "False")).lower() == "true"
             }
         return users
     except Exception as e:
         st.error(f"User DB Load Error: {e}")
         return {}
-
-def save_users(users_dict):
-    export = []
-    for uname, data in users_dict.items():
-        export.append({
-            "full_name": data.get("full_name", uname),
-            "username": uname,
-            "password": data["password"],
-            "role": data["role"],
-            "dept": data["dept"]
-        })
-    pd.DataFrame(export).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
 
 # ============================================================
 # REQUESTS EXCEL
@@ -954,6 +993,7 @@ def user_management_panel():
     st.info("🛡️ Super Admin Only — Create, edit, or delete user accounts."); st.divider()
     USERS = load_users(); ROLES = load_roles()
     tab1, tab2, tab3 = st.tabs(["➕ Create New User", "✏️ Edit User", "🗑️ Delete User"])
+    
     with tab1:
         st.markdown("### ➕ Create New System User")
         with st.form("create_user_form", border=True, clear_on_submit=True):
@@ -961,19 +1001,39 @@ def user_management_panel():
             new_username = st.text_input("🔐 Username", placeholder="e.g. john_smith").lower().strip()
             new_password = st.text_input("🔑 Password", type="password")
             new_role = st.selectbox("🎖️ Role / Permission Level", ROLES)
+            
+            # ─── ✅ EXTRA PERMISSION CHECKBOXES (CORRECTLY PLACED) ───
+            st.markdown("### ✅ Extra Permissions (optional — adjust if needed)")
+            st.caption(f"Defaults for **{new_role}** are pre-selected below")
+            defaults = PERMISSION_DEFAULTS[new_role]
+            col1, col2 = st.columns(2)
+            perm_view_all = col1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=defaults["can_view_all_dept"])
+            perm_pdf = col1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=defaults["can_generate_pdf"])
+            perm_download = col2.checkbox(PERMISSION_LABELS["can_download_data"], value=defaults["can_download_data"])
+            perm_approve = col2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=defaults["can_approve_requests"])
+            
             new_dept = st.selectbox("🏢 Department", load_departments())
+            
             if st.form_submit_button("✅ Create User Account", type="primary"):
                 if not new_full_name.strip() or not new_username or not new_password:
                     st.error("❌ All fields required!")
                 elif new_username in USERS:
                     st.error(f"❌ Username '{new_username}' already exists!")
                 else:
+                    # ✅ Save permissions along with user
                     USERS[new_username] = {
-                        "full_name": new_full_name.strip(), "password": new_password,
-                        "role": new_role, "dept": new_dept
+                        "full_name": new_full_name.strip(),
+                        "password": new_password,
+                        "role": new_role,
+                        "dept": new_dept,
+                        "can_view_all_dept": perm_view_all,
+                        "can_generate_pdf": perm_pdf,
+                        "can_download_data": perm_download,
+                        "can_approve_requests": perm_approve
                     }
                     save_users(USERS)
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
+
     with tab2:
         st.markdown("### ✏️ Edit User")
         edit_user_sel = st.selectbox("Select User to Edit", list(USERS.keys()), key="edit_user_selector")
@@ -987,6 +1047,19 @@ def user_management_panel():
                 upd_role = st.selectbox("🎖️ Role", ROLES, index=ROLES.index(curr["role"]) if curr["role"] in ROLES else 0)
                 dept_list = load_departments()
                 upd_dept = st.selectbox("🏢 Department", dept_list, index=dept_list.index(curr["dept"]) if curr["dept"] in dept_list else 0)
+                
+                # ✅ Edit Permissions Checkboxes
+                st.markdown("### ✅ Update Permissions")
+                curr_perm_view = str(curr.get("can_view_all_dept", "False")).lower() == "true"
+                curr_perm_pdf = str(curr.get("can_generate_pdf", "False")).lower() == "true"
+                curr_perm_dl = str(curr.get("can_download_data", "False")).lower() == "true"
+                curr_perm_app = str(curr.get("can_approve_requests", "False")).lower() == "true"
+                ecol1, ecol2 = st.columns(2)
+                edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
+                edit_pdf = ecol1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=curr_perm_pdf)
+                edit_dl = ecol2.checkbox(PERMISSION_LABELS["can_download_data"], value=curr_perm_dl)
+                edit_app = ecol2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=curr_perm_app)
+                
                 if st.form_submit_button("🔄 Update User", type="primary"):
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
@@ -995,7 +1068,12 @@ def user_management_panel():
                         USERS[upd_username_new] = {
                             "full_name": upd_full_name.strip(),
                             "password": upd_password if upd_password else curr["password"],
-                            "role": upd_role, "dept": upd_dept
+                            "role": upd_role,
+                            "dept": upd_dept,
+                            "can_view_all_dept": edit_view,
+                            "can_generate_pdf": edit_pdf,
+                            "can_download_data": edit_dl,
+                            "can_approve_requests": edit_app
                         }
                         del USERS[edit_user_sel]
                     else:
@@ -1003,8 +1081,13 @@ def user_management_panel():
                         if upd_password: USERS[edit_user_sel]["password"] = upd_password
                         USERS[edit_user_sel]["role"] = upd_role
                         USERS[edit_user_sel]["dept"] = upd_dept
+                        USERS[edit_user_sel]["can_view_all_dept"] = edit_view
+                        USERS[edit_user_sel]["can_generate_pdf"] = edit_pdf
+                        USERS[edit_user_sel]["can_download_data"] = edit_dl
+                        USERS[edit_user_sel]["can_approve_requests"] = edit_app
                     save_users(USERS)
                     st.success(f"✅ User updated: **{upd_full_name}**"); st.rerun()
+    
     with tab3:
         st.markdown("### ⚠️ Delete User Account")
         st.warning("Existing requests remain safe.")
