@@ -1876,9 +1876,9 @@ else:
                             st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
     
                         # Show Old → New comparison
-                        if old_data_json and old_data_json != "{}":
-                            with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
-                        show_old_new_comparison(old_data_json, req)
+                        if old_data_json and old_data_json != "{}":          # ← Level 1
+                            with st.expander("...", expanded=True):         # ← Level 2 (+4)
+                                show_old_new_comparison(old_data_json, req)  # ← Level 3 (+4 more)
                         st.divider()
                         
                         with st.form(f"change_status_rejected_{req['id']}"):
