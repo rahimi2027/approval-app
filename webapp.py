@@ -1,11 +1,12 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.0
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.1 (FIXED)
 # ============================================================
 # ✅ Silent missing-file warnings
 # ✅ Standardized all expander titles
 # ✅ Dashboard landing page with stats
 # ✅ Staff role = full Manager access
 # ✅ Clean status audit display
+# ✅ FIXED: Super Admin tabs, indentation & syntax errors
 # ============================================================
 import streamlit as st
 import os
@@ -99,7 +100,6 @@ def display_attachments(req):
                         f"⬇️ Download {name}", f.read(),
                         file_name=name, key=f"att_{req.get('id', idx)}_{idx}"
                     )
-            # ✅ MISSING FILE = SILENTLY SKIP — NO WARNING
         if not found_any:
             st.info("📎 Attachments referenced but files not available.")
     except Exception as e:
@@ -140,13 +140,12 @@ def update_record_status_in_excel(req_id, new_status, comments, approved_by):
             r["pdf_path"] = ""
             break
     save_all_records(records)
-    save_all_records(records)
 
 def delete_record_by_id(req_id):
     records = load_records_from_excel()
     records = [r for r in records if int(r["id"]) != int(req_id)]
     save_all_records(records)
-    log_action("DELETED", req_id)  # ✅ ADD THIS LINE
+    log_action("DELETED", req_id)
 
 def show_old_new_comparison(old_json, new_rec):
     try:
@@ -179,7 +178,7 @@ def refresh_data_button():
         st.rerun()
 
 # ============================================================
-# 📊 STANDARDIZED TITLE HELPER — Consistent format everywhere
+# 📊 STANDARDIZED TITLE HELPER
 # ============================================================
 def make_request_title(req):
     """✅ Standard format: [ICON] ID #X | Name | STATUS | £0.00 | Date/Decision"""
@@ -188,7 +187,6 @@ def make_request_title(req):
     dt = format_date(req.get("date", ""))
     decision_dt = format_date(req.get("decision_date", ""))
     dec_by = req.get("decision_by", "")
-
     if req["status"] == "pending":
         return f"🟡 ID #{req['id']} | {req['emp_name']} | PENDING | {amount} | 📅 {dt}"
     elif req["status"] == "approved":
@@ -206,6 +204,7 @@ if "win32" in sys.platform:
     BASE_DIR = r"D:\Acoole_portal"
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
@@ -214,6 +213,7 @@ REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
 EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
 USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
+
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
@@ -224,12 +224,14 @@ os.makedirs(PDF_DIR, exist_ok=True)
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
 DEFAULT_ROLES = ["Manager", "Staff", "Director", "Payroll", "Super Admin"]
 DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
+
 EXCEL_COLUMNS = [
     "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
     "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name",
     "Status", "Director Comments", "Decision Date", "Decision By",
     "PDF File Path", "Edited From ID", "Old Data"
 ]
+
 DEFAULT_USERS = [
     {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid"},
     {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator"},
@@ -372,6 +374,7 @@ def initialise_excel():
             if col not in df.columns:
                 df[col] = ""
         df.to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+
 initialise_excel()
 
 def load_records_from_excel():
@@ -444,8 +447,9 @@ def save_record_to_excel(new_record):
     current = load_records_from_excel()
     current.append(new_record)
     save_all_records(current)
+
 # ============================================================
-# 📖 FULL AUDIT LOG SYSTEM — Track EVERY Change
+# 📖 FULL AUDIT LOG SYSTEM
 # ============================================================
 AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
 AUDIT_COLUMNS = [
@@ -455,12 +459,10 @@ AUDIT_COLUMNS = [
 ]
 
 def init_audit_log():
-    """Create audit log file if it doesn't exist"""
     if not os.path.exists(AUDIT_LOG_PATH):
         pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
 
 def load_audit_log():
-    """Read all audit entries"""
     init_audit_log()
     try:
         df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
@@ -469,7 +471,6 @@ def load_audit_log():
         return []
 
 def save_audit_entry(entry):
-    """Save ONE audit entry (append-only — NEVER delete)"""
     init_audit_log()
     df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
     new_row = pd.DataFrame([entry])
@@ -477,10 +478,6 @@ def save_audit_entry(entry):
     df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
 
 def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None):
-    """
-    ✅ MAIN AUDIT FUNCTION — Updated to handle ALL status changes
-    Automatically logs WHO, WHAT, WHEN, OLD vs NEW
-    """
     if not st.session_state.get("logged_in"):
         return
     user = st.session_state.user_info
@@ -488,7 +485,6 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
     role = user.get("role", "Unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Determine what fields changed
     if action in ["CREATED", "DELETED"]:
         fields = "-"
         old_val = "-"
@@ -505,9 +501,8 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
             "New_Value": new_val,
             "IP_Address": "Auto-Logged"
         })
-
     elif action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
-        status_text = "Approved" if action == "APPROVED" else "Rejected"
+        status_text = "Approved" if action == "APPROVED" else "Rejected" if action == "REJECTED" else "Status Changed"
         save_audit_entry({
             "AuditID": len(load_audit_log()) + 1,
             "Timestamp": timestamp,
@@ -520,9 +515,7 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
             "New_Value": status_text,
             "IP_Address": "Auto-Logged"
         })
-
     elif action == "EDITED" and old_data and new_data:
-        # ✅ Compare OLD vs NEW — detect exactly what changed
         field_labels = {
             "emp_name": "Employee Name", "dept": "Department",
             "type": "Transaction Type", "category": "Category",
@@ -563,24 +556,20 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
             })
 
 def display_audit_log_panel():
-    """✅ Show full history — Super Admin Only"""
     st.subheader("📖 Full System Audit Log — Complete History")
     st.info("🔒 Super Admin Only — Cannot be deleted or modified."); st.divider()
     logs = load_audit_log()
     if not logs:
         st.info("📋 No activity recorded yet.")
         return
-    # Filters
     c1, c2, c3 = st.columns(3)
     with c1: filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
     with c2: filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
     with c3: filter_req = st.multiselect("🆔 Filter by Request ID", sorted(set([str(l["Request_ID"]) for l in logs])))
-
     filtered = logs
     if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
     if filter_action: filtered = [l for l in filtered if l["Action"] in filter_action]
     if filter_req: filtered = [l for l in filtered if str(l["Request_ID"]) in filter_req]
-
     st.metric(f"📄 Total Entries", len(filtered))
     st.divider()
     for entry in reversed(filtered):
@@ -593,7 +582,6 @@ def display_audit_log_panel():
         field = entry["Field_Changed"]
         old_val = entry["Old_Value"]
         new_val = entry["New_Value"]
-
         icon = {"CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌", "DELETED": "🗑️", "STATUS_CHANGED": "🔄"}.get(action, "ℹ️")
         title = f"{icon} {action} — Request #{req_id} | {user} ({role}) | {ts}"
         with st.expander(title):
@@ -607,10 +595,10 @@ def display_audit_log_panel():
             else:
                 st.write(f"**📋 Details:** {new_val}")
     st.divider()
-    # Download full log
     df_export = pd.DataFrame(filtered)
     csv = df_export.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
+
 # ============================================================
 # PDF GENERATION
 # ============================================================
@@ -653,7 +641,6 @@ def generate_approval_pdf(request_data):
                 clean_name = name.strip()
                 if clean_name and clean_name.lower() not in ["none", ""]:
                     display_files.append(clean_name)
-
         pdf = FPDF()
         pdf.add_page()
         if os.path.exists(LOGO_PATH):
@@ -739,7 +726,6 @@ def generate_approval_pdf(request_data):
                 pdf.ln(3)
         else:
             pdf.cell(0, 5, "- No files attached", ln=True)
-
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
