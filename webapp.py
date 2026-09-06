@@ -503,8 +503,17 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# 📖 FULL AUDIT LOG SYSTEM — ENHANCED VERSION
+# 📖 FULL AUDIT LOG SYSTEM — COMPLETE WORKING VERSION
+# Logs: Requests | Categories | Departments | Roles | Users
 # ============================================================
+import streamlit as st
+import pandas as pd
+import os
+from datetime import datetime
+import json
+
+# ─── CONFIGURATION ─────────────────────────────────────────
+BASE_DIR = os.path.dirname(__file__)
 AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
 AUDIT_COLUMNS = [
     "AuditID", "Timestamp", "User_Name", "User_Role",
@@ -513,33 +522,41 @@ AUDIT_COLUMNS = [
     "Old_Value", "New_Value", "IP_Address"
 ]
 
+# ─── INITIALISE AUDIT LOG ──────────────────────────────────
 def init_audit_log():
     if not os.path.exists(AUDIT_LOG_PATH):
         pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
 
+# ─── LOAD AUDIT LOG ────────────────────────────────────────
 def load_audit_log():
     init_audit_log()
     try:
         df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
         return df.to_dict(orient="records")
-    except:
+    except Exception as e:
+        print(f"⚠️ Failed to load audit log: {e}")
         return []
 
+# ─── SAVE SINGLE AUDIT ENTRY ──────────────────────────────
 def save_audit_entry(entry):
     init_audit_log()
-    df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
-    new_row = pd.DataFrame([entry])
-    df = pd.concat([df, new_row], ignore_index=True)
-    df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
+    try:
+        df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
+        new_row = pd.DataFrame([entry])
+        df = pd.concat([df, new_row], ignore_index=True)
+        df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
+    except Exception as e:
+        print(f"⚠️ Failed to save audit entry: {e}")
 
+# ─── HELPER: GET REQUEST DETAILS ──────────────────────────
 def get_request_details(req_id):
-    """Helper: Fetch Department, Amount, Decision Info from request"""
+    """Fetch Department, Amount, Decision Info from request"""
     dept = "-"
     amount = "-"
     decision_by = "-"
     decision_date = "-"
     try:
-        all_recs = load_records_from_excel()
+        all_recs = load_records_from_excel()  # Ensure this function exists in your main code
         req = next((r for r in all_recs if str(r.get("id")) == str(req_id)), None)
         if req:
             dept = req.get("dept", "-")
@@ -547,44 +564,107 @@ def get_request_details(req_id):
             amount = f"£{amt:.2f}" if amt and amt != "-" else "-"
             decision_by = req.get("decision_by", "-") or "-"
             decision_date = req.get("decision_date", "-") or "-"
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ Audit lookup failed: {e}")
     return dept, amount, decision_by, decision_date
 
-def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None, decision_by=None, decision_date=None):
+# ─── MAIN LOG ACTION — ALL ACTIONS HANDLED ─────────────────
+def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=None, decision_by=None, decision_date=None):
     if not st.session_state.get("logged_in"):
         return
+
     user = st.session_state.user_info
     username = user.get("full_name", user.get("username", "Unknown"))
     role = user.get("role", "Unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Fetch request details
+    # Default values for settings/user actions (no request involved)
+    dept = "-"
+    amount = "-"
+    final_decision_by = "-"
+    final_decision_date = "-"
+
+    # ═══════════════════════════════════════════════════════════
+    # ✅ SETTINGS & USER MANAGEMENT ACTIONS — NEWLY ADDED
+    # ═══════════════════════════════════════════════════════════
+    SETTING_ACTIONS = [
+        "CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
+        "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED",
+        "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED",
+        "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET"
+    ]
+
+    if action in SETTING_ACTIONS:
+        action_labels = {
+            "CATEGORY_ADDED": "🏷️ Category Added",
+            "CATEGORY_EDITED": "🏷️ Category Edited",
+            "CATEGORY_DELETED": "🏷️ Category Deleted",
+            "DEPARTMENT_ADDED": "🏢 Department Added",
+            "DEPARTMENT_EDITED": "🏢 Department Edited",
+            "DEPARTMENT_DELETED": "🏢 Department Deleted",
+            "ROLE_ADDED": "🎖️ Role Added",
+            "ROLE_EDITED": "🎖️ Role/Permissions Edited",
+            "ROLE_DELETED": "🎖️ Role Deleted",
+            "USER_CREATED": "👤 User Account Created",
+            "USER_EDITED": "👤 User Account Edited",
+            "USER_DELETED": "👤 User Account Deleted",
+            "PASSWORD_CHANGED": "🔑 Password Changed",
+            "PASSWORD_RESET": "🔑 Password Reset"
+        }
+        display_action = action_labels.get(action, action)
+
+        old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
+        new_val = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
+        field_changed = "System Configuration"
+
+        save_audit_entry({
+            "AuditID": len(load_audit_log()) + 1,
+            "Timestamp": timestamp,
+            "User_Name": username,
+            "User_Role": role,
+            "Action": display_action,
+            "Request_ID": str(req_id),
+            "Department": dept,
+            "Amount": amount,
+            "Decision_By": final_decision_by,
+            "Decision_Date": final_decision_date,
+            "Field_Changed": field_changed,
+            "Old_Value": old_val,
+            "New_Value": new_val,
+            "IP_Address": "Auto-Logged"
+        })
+        return  # Exit early — no request lookup needed
+
+    # ═══════════════════════════════════════════════════════════
+    # ✅ REQUEST ACTIONS — ORIGINAL FUNCTIONALITY
+    # ═══════════════════════════════════════════════════════════
     dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
     final_decision_by = decision_by or saved_decision_by
     final_decision_date = decision_date or saved_decision_date
 
+    # ─── CREATED / DELETED ───
     if action in ["CREATED", "DELETED"]:
         fields = "-"
         old_val = "-"
-        new_val = "New Request Created" if action == "CREATED" else "Request Permanently Deleted"
+        new_val_text = "New Request Created" if action == "CREATED" else "Request Permanently Deleted"
         save_audit_entry({
             "AuditID": len(load_audit_log()) + 1,
             "Timestamp": timestamp,
             "User_Name": username,
             "User_Role": role,
             "Action": action,
-            "Request_ID": req_id,
+            "Request_ID": str(req_id),
             "Department": dept,
             "Amount": amount,
             "Decision_By": "-",
             "Decision_Date": "-",
             "Field_Changed": fields,
             "Old_Value": old_val,
-            "New_Value": new_val,
+            "New_Value": new_val_text,
             "IP_Address": "Auto-Logged"
         })
 
+    # ─── APPROVED / REJECTED / STATUS CHANGE ───
     elif action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
         status_text = "Approved" if action == "APPROVED" else "Rejected" if action == "REJECTED" else "Status Changed"
         save_audit_entry({
@@ -593,7 +673,7 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
             "User_Name": username,
             "User_Role": role,
             "Action": action,
-            "Request_ID": req_id,
+            "Request_ID": str(req_id),
             "Department": dept,
             "Amount": amount,
             "Decision_By": final_decision_by,
@@ -604,13 +684,14 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
             "IP_Address": "Auto-Logged"
         })
 
+    # ─── EDITED — Track Each Changed Field Separately ───
     elif action == "EDITED" and old_data and new_data:
         field_labels = {
             "emp_name": "Employee Name", "dept": "Department",
             "type": "Transaction Type", "category": "Category",
             "date": "Date", "amount": "Amount (£)",
             "manager": "Line Manager", "desc": "Description",
-            "status": "Status"
+            "status": "Status", "attachment_name": "Attachments"
         }
         any_change = False
         for key, label in field_labels.items():
@@ -624,7 +705,7 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
                     "User_Name": username,
                     "User_Role": role,
                     "Action": "EDITED",
-                    "Request_ID": req_id,
+                    "Request_ID": str(req_id),
                     "Department": dept,
                     "Amount": amount,
                     "Decision_By": "-",
@@ -641,7 +722,7 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
                 "User_Name": username,
                 "User_Role": role,
                 "Action": "EDITED",
-                "Request_ID": req_id,
+                "Request_ID": str(req_id),
                 "Department": dept,
                 "Amount": amount,
                 "Decision_By": "-",
@@ -652,21 +733,31 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
                 "IP_Address": "Auto-Logged"
             })
 
+# ─── DISPLAY AUDIT LOG PANEL (FOR SUPER ADMIN) ────────────
 def display_audit_log_panel():
     st.subheader("📖 Full System Audit Log — Complete History")
-    st.info("🔒 Super Admin Only — Cannot be deleted or modified."); st.divider()
+    st.info("🔒 Super Admin Only — Cannot be deleted or modified.")
+    st.divider()
+
     logs = load_audit_log()
     if not logs:
         st.info("📋 No activity recorded yet.")
         return
 
-    # Filters
+    # ─── FILTERS ───
     c1, c2, c3, c4 = st.columns(4)
-    with c1: filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
-    with c2: filter_dept = st.multiselect("🏢 Filter by Department", sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"])))
-    with c3: filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
-    with c4: filter_req = st.multiselect("🆔 Filter by Request ID", sorted(set([str(l["Request_ID"]) for l in logs])))
+    with c1:
+        filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
+    with c2:
+        dept_list = sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"]))
+        filter_dept = st.multiselect("🏢 Filter by Department", dept_list)
+    with c3:
+        filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
+    with c4:
+        req_list = sorted(set([str(l["Request_ID"]) for l in logs if str(l["Request_ID"]) != "-"]))
+        filter_req = st.multiselect("🆔 Filter by Request ID", req_list)
 
+    # Apply filters
     filtered = logs
     if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
     if filter_dept: filtered = [l for l in filtered if l.get("Department", "") in filter_dept]
@@ -676,7 +767,7 @@ def display_audit_log_panel():
     st.metric(f"📄 Total Entries", len(filtered))
     st.divider()
 
-    # Display logs
+    # ─── DISPLAY ENTRIES ───
     for entry in reversed(filtered):
         aid = entry["AuditID"]
         ts = entry["Timestamp"]
@@ -692,27 +783,47 @@ def display_audit_log_panel():
         old_val = entry["Old_Value"]
         new_val = entry["New_Value"]
 
-        icon = {"CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌", "DELETED": "🗑️", "STATUS_CHANGED": "🔄"}.get(action, "ℹ️")
-        title = f"{icon} {action} — Request #{req_id} | {user} ({role}) | {ts}"
+        # Icon mapping — includes ALL new actions
+        icon = {
+            "CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌",
+            "DELETED": "🗑️", "STATUS_CHANGED": "🔄",
+            "🏷️ Category Added": "🏷️", "🏷️ Category Edited": "🏷️", "🏷️ Category Deleted": "🏷️",
+            "🏢 Department Added": "🏢", "🏢 Department Edited": "🏢", "🏢 Department Deleted": "🏢",
+            "🎖️ Role Added": "🎖️", "🎖️ Role/Permissions Edited": "🎖️", "🎖️ Role Deleted": "🎖️",
+            "👤 User Account Created": "👤", "👤 User Account Edited": "✏️",
+            "👤 User Account Deleted": "🗑️", "🔑 Password Changed": "🔑",
+            "🔑 Password Reset": "🔑"
+        }.get(action, "ℹ️")
+
+        title = f"{icon} {action}"
+        if str(req_id) != "-":
+            title += f" — Request #{req_id}"
+        title += f" | {user} ({role}) | {ts}"
 
         with st.expander(title):
             st.write(f"**🕐 Time:** {ts}")
             st.write(f"**👤 User:** {user} — *{role}*")
-            st.write(f"**🆔 Request ID:** #{req_id}")
-            st.write(f"**🏢 Department:** {dept}")
+            if str(req_id) != "-":
+                st.write(f"**🆔 Request ID:** #{req_id}")
+            if dept != "-":
+                st.write(f"**🏢 Department:** {dept}")
             if amount != "-":
                 st.write(f"**💷 Amount:** {amount}")
             if action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
                 st.write(f"**🎯 Decision By:** {dec_by}")
                 st.write(f"**📅 Decision Date:** {dec_date}")
-            if field != "-" and field != "No Changes":
+            if field and field != "-" and field != "No Changes":
                 st.write(f"**📝 Field Changed:** {field}")
-                st.markdown(f"**⬅️ Old:** `{old_val}`")
-                st.markdown(f"**➡️ New:** `{new_val}`")
+                if old_val and old_val != "-":
+                    st.markdown(f"**⬅️ Old:** `{old_val}`")
+                if new_val and new_val != "-":
+                    st.markdown(f"**➡️ New:** `{new_val}`")
             else:
                 st.write(f"**📋 Details:** {new_val}")
 
     st.divider()
+
+    # ─── EXPORT TO CSV ───
     df_export = pd.DataFrame(filtered)
     csv = df_export.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
@@ -906,6 +1017,7 @@ def settings_management_panel():
             if st.form_submit_button("✅ Add Category"):
                 if new_cat.strip() and new_cat.strip() not in current_cats:
                     current_cats.append(new_cat.strip()); save_categories(current_cats)
+                    log_action("CATEGORY_ADDED", new_data={"name": new_cat.strip()})
                     st.success(f"✅ Added: {new_cat}"); st.rerun()
                 elif new_cat.strip() in current_cats:
                     st.warning("⚠️ Category already exists!")
@@ -919,6 +1031,7 @@ def settings_management_panel():
             with c3:
                 if len(current_cats) > 1 and st.button(f"🗑️ Delete", key=f"del_cat_{i}"):
                     current_cats.pop(i); save_categories(current_cats)
+                    log_action("CATEGORY_DELETED", old_data={"name": cat})
                     st.success(f"✅ Deleted: {cat}"); st.rerun()
             if st.session_state.get(f"editing_cat_{i}", False):
                 with st.form(f"save_cat_form_{i}", clear_on_submit=True):
@@ -927,6 +1040,7 @@ def settings_management_panel():
                     with col1:
                         if st.form_submit_button("💾 Save"):
                             current_cats[i] = renamed.strip(); save_categories(current_cats)
+                            log_action("CATEGORY_EDITED", old_data={"name": cat}, new_data={"name": renamed.strip()})
                             st.session_state[f"editing_cat_{i}"] = False
                             st.success(f"✅ Renamed to: {renamed}"); st.rerun()
                     with col2:
@@ -941,6 +1055,7 @@ def settings_management_panel():
             if st.form_submit_button("✅ Add Department"):
                 if new_dept.strip() and new_dept.strip() not in current_depts:
                     current_depts.append(new_dept.strip()); save_departments(current_depts)
+                    log_action("DEPARTMENT_ADDED", new_data={"name": new_dept.strip()})
                     st.success(f"✅ Added: {new_dept}"); st.rerun()
                 elif new_dept.strip() in current_depts:
                     st.warning("⚠️ Department already exists!")
@@ -954,6 +1069,7 @@ def settings_management_panel():
             with c3:
                 if len(current_depts) > 1 and st.button(f"🗑️ Delete", key=f"del_dept_{i}"):
                     current_depts.pop(i); save_departments(current_depts)
+                    log_action("DEPARTMENT_DELETED", old_data={"name": dept_name})
                     st.success(f"✅ Deleted: {dept_name}"); st.rerun()
             if st.session_state.get(f"editing_dept_{i}", False):
                 with st.form(f"save_dept_form_{i}", clear_on_submit=True):
@@ -962,6 +1078,7 @@ def settings_management_panel():
                     with col1:
                         if st.form_submit_button("💾 Save"):
                             current_depts[i] = renamed.strip(); save_departments(current_depts)
+                            log_action("DEPARTMENT_EDITED", old_data={"name": dept_name}, new_data={"name": renamed.strip()})
                             st.session_state[f"editing_dept_{i}"] = False
                             st.success(f"✅ Renamed to: {renamed}"); st.rerun()
                     with col2:
@@ -976,6 +1093,8 @@ def settings_management_panel():
             if st.form_submit_button("✅ Add Role"):
                 if new_role.strip() and new_role.strip() not in current_roles:
                     current_roles.append(new_role.strip()); save_roles(current_roles)
+                    default_perms = PERMISSION_DEFAULTS.get(new_role.strip(), {})
+                    log_action("ROLE_ADDED", new_data={"role": new_role.strip(), "permissions": default_perms})
                     st.success(f"✅ Added: {new_role}"); st.rerun()
                 elif new_role.strip() in current_roles:
                     st.warning("⚠️ Role already exists!")
@@ -989,6 +1108,7 @@ def settings_management_panel():
             with c3:
                 if role != "Super Admin" and len(current_roles) > 1 and st.button(f"🗑️ Delete", key=f"del_role_{i}"):
                     current_roles.pop(i); save_roles(current_roles)
+                    log_action("ROLE_DELETED", old_data={"role": role})
                     st.success(f"✅ Deleted: {role}"); st.rerun()
             if st.session_state.get(f"editing_role_{i}", False):
                 with st.form(f"save_role_form_{i}", clear_on_submit=True):
@@ -997,6 +1117,7 @@ def settings_management_panel():
                     with col1:
                         if st.form_submit_button("💾 Save"):
                             current_roles[i] = renamed.strip(); save_roles(current_roles)
+                            log_action("ROLE_EDITED", old_data={"role": old_role_data}, new_data={"role": renamed.strip()})
                             st.session_state[f"editing_role_{i}"] = False
                             st.success(f"✅ Renamed to: {renamed}"); st.rerun()
                     with col2:
@@ -1047,6 +1168,12 @@ def user_management_panel():
                         "can_approve_requests": perm_approve
                     }
                     save_users(USERS)
+                    log_action("USER_CREATED", new_data={
+                    "username": new_username, "full_name": new_full_name.strip(),
+                    "role": new_role, "department": new_dept,
+                    "permissions": {"can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf,
+                    "can_download_data": perm_download, "can_approve_requests": perm_approve}
+                    })
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
 
     with tab2:
@@ -1101,6 +1228,13 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_download_data"] = edit_dl
                         USERS[edit_user_sel]["can_approve_requests"] = edit_app
                     save_users(USERS)
+                    old_user_data = USERS[edit_user_sel].copy() if edit_user_sel in USERS else {}
+                    log_action("USER_EDITED", old_data=old_user_data, new_data={
+                    "full_name": upd_full_name.strip(), "username": upd_username_new,
+                    "role": upd_role, "department": upd_dept,
+                    "permissions": {"can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf,
+                    "can_download_data": edit_dl, "can_approve_requests": edit_app}
+                    })
                     st.success(f"✅ User updated: **{upd_full_name}**"); st.rerun()
     
     with tab3:
@@ -1112,6 +1246,7 @@ def user_management_panel():
             if st.button(f"🗑️ DELETE: {del_name} ({del_user_sel})", type="secondary"):
                 del USERS[del_user_sel]
                 save_users(USERS)
+                log_action("USER_DELETED", old_data={"username": del_user_sel, "full_name": del_name})
                 st.success(f"✅ User **{del_name}** deleted!"); st.rerun()
 
 # ============================================================
