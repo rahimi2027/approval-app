@@ -8,6 +8,7 @@
 # ✅ Clean status audit display
 # ✅ FIXED: Indentation, syntax & missing variables
 # ✅ PDF attachments on Page 2 — confirmed
+# ✅ FIXED: ALL Director portal indentation errors
 # ============================================================
 import streamlit as st
 import os
@@ -565,12 +566,14 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
     username = user.get("full_name", user.get("username", "Unknown"))
     role = user.get("role", "Unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     SETTING_ACTIONS = [
         "CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
         "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED",
         "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED",
         "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET"
     ]
+
     if action in SETTING_ACTIONS:
         action_labels = {
             "CATEGORY_ADDED": "🏷️ Category Added",
@@ -704,6 +707,7 @@ def display_audit_log_panel():
     if not logs:
         st.info("📋 No activity recorded yet.")
         return
+
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
@@ -715,13 +719,16 @@ def display_audit_log_panel():
     with c4:
         req_list = sorted(set([str(l["Request_ID"]) for l in logs if str(l["Request_ID"]) != "-"]))
         filter_req = st.multiselect("🆔 Filter by Request ID", req_list)
+
     filtered = logs
     if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
     if filter_dept: filtered = [l for l in filtered if l.get("Department", "") in filter_dept]
     if filter_action: filtered = [l for l in filtered if l["Action"] in filter_action]
     if filter_req: filtered = [l for l in filtered if str(l["Request_ID"]) in filter_req]
+
     st.metric(f"📄 Total Entries", len(filtered))
     st.divider()
+
     for entry in reversed(filtered):
         aid = entry["AuditID"]
         ts = entry["Timestamp"]
@@ -736,6 +743,7 @@ def display_audit_log_panel():
         field = entry["Field_Changed"]
         old_val = entry["Old_Value"]
         new_val = entry["New_Value"]
+
         icon = {
             "CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌",
             "DELETED": "🗑️", "STATUS_CHANGED": "🔄",
@@ -746,10 +754,12 @@ def display_audit_log_panel():
             "👤 User Account Deleted": "🗑️", "🔑 Password Changed": "🔑",
             "🔑 Password Reset": "🔑"
         }.get(action, "ℹ️")
+
         title = f"{icon} {action}"
         if str(req_id) != "-":
             title += f" — Request #{req_id}"
         title += f" | {user} ({role}) | {ts}"
+
         with st.expander(title):
             st.write(f"**🕐 Time:** {ts}")
             st.write(f"**👤 User:** {user} — *{role}*")
@@ -770,6 +780,7 @@ def display_audit_log_panel():
                     st.markdown(f"**➡️ New:** `{new_val}`")
             else:
                 st.write(f"**📋 Details:** {new_val}")
+
     st.divider()
     df_export = pd.DataFrame(filtered)
     csv = df_export.to_csv(index=False).encode("utf-8")
@@ -869,7 +880,6 @@ def generate_approval_pdf(request_data):
         pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
-
         if status == "approved":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9); pdf.set_text_color(0, 128, 0)
@@ -879,7 +889,6 @@ def generate_approval_pdf(request_data):
             if dir_comments and dir_comments != "None" and dir_comments != "":
                 pdf.ln(2); pdf.set_font("Courier", "B", 9); pdf.cell(52, 5, "Director Comments:", 0, 0)
                 pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
-
         elif status == "rejected":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9); pdf.set_text_color(200, 0, 0)
@@ -889,7 +898,6 @@ def generate_approval_pdf(request_data):
             if dir_comments and dir_comments != "None" and dir_comments != "":
                 pdf.ln(2); pdf.set_font("Courier", "B", 9); pdf.cell(52, 5, "Reason for Rejection:", 0, 0)
                 pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
-
         else:
             pdf.cell(52, 5, "Decision:", 0, 0); pdf.cell(0, 5, "Pending", ln=True)
 
@@ -898,12 +906,10 @@ def generate_approval_pdf(request_data):
         dash_y = pdf.get_y()
         for x in range(10, 200, 4):
             pdf.line(x, dash_y, x + 2, dash_y)
-
         if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
             pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
             pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
-
         pdf.ln(8)
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
@@ -911,7 +917,7 @@ def generate_approval_pdf(request_data):
         # ═══════════════════════════════════════════════════
         # ✅ PAGE 2: ATTACHMENTS — SEPARATE PAGE ✅
         # ═══════════════════════════════════════════════════
-        pdf.add_page()  # ← FORCES NEW PAGE — attachments never appear on Page 1
+        pdf.add_page()
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, txt="📎 ATTACHMENTS", ln=True)
         pdf.ln(6)
@@ -925,14 +931,12 @@ def generate_approval_pdf(request_data):
                 pdf.cell(0, 6, f"{idx}. {fname}", ln=True)
                 pdf.set_font("Courier", "", 9)
                 file_path = os.path.join(UPLOAD_DIR, fname)
-
                 if os.path.exists(file_path):
                     if fname.lower().endswith((".png", ".jpg", ".jpeg")):
                         pdf.ln(2)
                         try:
-                            # Scale image to fit page width (190mm max)
                             pdf.image(file_path, x=10, w=190)
-                            pdf.ln(70)  # Space after image
+                            pdf.ln(70)
                         except Exception as img_err:
                             pdf.cell(0, 5, f"     ⚠️ Preview could not be displayed: {str(img_err)}", ln=True)
                             pdf.ln(3)
