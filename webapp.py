@@ -140,11 +140,19 @@ def update_record_status_in_excel(req_id, new_status, comments, approved_by):
             r["pdf_path"] = ""
             break
     save_all_records(records)
+    save_all_records(records)
+log_action("EDITED", eid, old_data=rec, new_data={  # ✅ ADD THIS BLOCK
+    "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+    "category": ct, "date": str(dt_val), "amount": amt,
+    "manager": mgr.strip(), "desc": desc.strip()
+})
+st.success(f"✅ Updated & sent for approval!")
 
 def delete_record_by_id(req_id):
     records = load_records_from_excel()
     records = [r for r in records if int(r["id"]) != int(req_id)]
     save_all_records(records)
+    log_action("DELETED", req_id)  # ✅ ADD THIS LINE
 
 def show_old_new_comparison(old_json, new_rec):
     try:
@@ -1226,6 +1234,8 @@ else:
                             "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
                         }
                         save_record_to_excel(payload)
+                        log_action("CREATED", nid)  # ✅ ADD THIS LINE
+                        st.success(f"✅ Request #{nid} sent for approval!")
                         st.success(f"✅ Request #{nid} sent for approval!")
                         st.rerun()
                     else:
@@ -1300,10 +1310,12 @@ else:
                             
                             if approve_btn:
                                 update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
+                                log_action("APPROVED", req["id"])  # ✅ ADD THIS LINE
                                 st.success(f"✅ Request #{req['id']} APPROVED! Status updated.")
                                 st.rerun()
                             if reject_btn:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
+                                log_action("REJECTED", req["id"])  # ✅ ADD THIS LINE
                                 st.warning(f"❌ Request #{req['id']} REJECTED! Status updated.")
                                 st.rerun()
                         
@@ -1469,6 +1481,10 @@ else:
             settings_management_panel()
         with tab_users:
             user_management_panel()
+            # ✅ ADD THIS NEW TAB
+            tab_audit = st.tabs(["⚙️ System Settings", "👤 User Management", "📖 Audit History"])[2]
+            with tab_audit:
+    display_audit_log_panel()
         st.divider()
 
         st.subheader("📥 Download Data Backups")
