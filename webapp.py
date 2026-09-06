@@ -1639,9 +1639,9 @@ else:
                         prev_comments = req.get("director_comments", "").strip()
                         old_data_json = req.get("old_data", "").strip()
 
-                        if prev_comments or (old_data_json and old_data_json != "{}"):
-                        st.divider()
-                        st.subheader("📋 Previous Review History")
+          if prev_comments or (old_data_json and old_data_json != "{}"):
+              st.divider()
+              st.subheader("📋 Previous Review History")
     
                         if prev_comments:
                         st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
