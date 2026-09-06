@@ -141,12 +141,6 @@ def update_record_status_in_excel(req_id, new_status, comments, approved_by):
             break
     save_all_records(records)
     save_all_records(records)
-log_action("EDITED", eid, old_data=rec, new_data={  # ✅ ADD THIS BLOCK
-    "emp_name": en.strip(), "dept": user["dept"], "type": rt,
-    "category": ct, "date": str(dt_val), "amount": amt,
-    "manager": mgr.strip(), "desc": desc.strip()
-})
-st.success(f"✅ Updated & sent for approval!")
 
 def delete_record_by_id(req_id):
     records = load_records_from_excel()
@@ -484,7 +478,7 @@ def save_audit_entry(entry):
 
 def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None):
     """
-    ✅ MAIN AUDIT FUNCTION
+    ✅ MAIN AUDIT FUNCTION — Updated to handle ALL status changes
     Automatically logs WHO, WHAT, WHEN, OLD vs NEW
     """
     if not st.session_state.get("logged_in"):
@@ -1193,6 +1187,20 @@ else:
                                                 out.write(f.getbuffer())
                                             att_list.append(fn)
                                         r["attachment_name"] = ", ".join(att_list) if att_list else "None"
+                                                        # ✅ AUDIT LOG: Capture OLD vs NEW values
+                            old_full = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
+                            old_data_dict = {
+                                "emp_name": old_full["emp_name"], "dept": old_full["dept"],
+                                "type": old_full["type"], "category": old_full["category"],
+                                "date": old_full["date"], "amount": old_full["amount"],
+                                "manager": old_full["manager"], "desc": old_full["desc"]
+                            }
+                            new_data_dict = {
+                                "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+                                "category": ct, "date": str(dt_val), "amount": amt,
+                                "manager": mgr.strip(), "desc": desc.strip()
+                            }
+                            log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
                             save_all_records(records)
                             st.success(f"✅ Updated & sent for approval!")
                             st.session_state.editing_request_id = None
@@ -1355,11 +1363,13 @@ else:
                             
                             if pending_btn:
                                 update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
+                                log_action("STATUS_CHANGED", req["id"])
                                 st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
                                 st.rerun()
                             if reject_btn:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
                                 st.warning(f"❌ Request #{req['id']} changed to REJECTED!")
+                                log_action("REJECTED", req["id"])
                                 st.rerun()
                         
                         st.divider()
@@ -1399,10 +1409,12 @@ else:
                             if pending_btn:
                                 update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
                                 st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
+                                log_action("STATUS_CHANGED", req["id"])
                                 st.rerun()
                             if approve_btn:
                                 update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
                                 st.success(f"✅ Request #{req['id']} changed to APPROVED!")
+                                log_action("APPROVED", req["id"])
                                 st.rerun()
                         
                         st.divider()
@@ -1474,13 +1486,13 @@ else:
                         st.info(f"💬 Director Comments: {req['director_comments']}")
                     if req["status"] == "approved":
                         display_pdf_button(req, can_generate=True)
-    elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin Control Panel")
-        tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
-        with tab_settings:
-            settings_management_panel()
-        with tab_users:
-            user_management_panel()
+elif user["role"] == "Super Admin":
+    st.subheader("🛡️ Super Admin Control Panel")
+    tab_settings, tab_users = st.tabs(["⚙️ System Settings", "👤 User Management"])
+    with tab_settings:
+        settings_management_panel()
+    with tab_users:
+        user_management_panel()
             # ✅ ADD THIS NEW TAB
             tab_audit = st.tabs(["⚙️ System Settings", "👤 User Management", "📖 Audit History"])[2]
             with tab_audit:
