@@ -1824,7 +1824,7 @@ else:
                                 st.rerun()
                         
                         st.divider()
-                        display_pdf_button(req, can_generate=True)
+                        display_pdf_button(req, can_generate=True, key_suffix="approved")
         
         with tab_rejected:
             rejected = [r for r in all_live_requests if r["status"] == "rejected"]
