@@ -919,7 +919,7 @@ def generate_approval_pdf(request_data):
         # ═══════════════════════════════════════════════════
         pdf.add_page()
         pdf.set_font("Courier", "B", 12)
-        pdf.cell(0, 8, txt="📎 ATTACHMENTS", ln=True)
+        pdf.cell(0, 8, txt="ATTACHMENTS", ln=True)
         pdf.ln(6)
         pdf.set_font("Courier", "", 9)
 
