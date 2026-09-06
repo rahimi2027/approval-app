@@ -1868,7 +1868,7 @@ else:
                         old_data_json = req.get("old_data", "").strip()
 
                         if prev_comments or (old_data_json and old_data_json != "{}"):
-                        st.divider()
+                            st.divider()
                         st.subheader("📋 Previous Review History")
     
                         # Show previous rejection reason
