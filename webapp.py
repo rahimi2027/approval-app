@@ -378,7 +378,22 @@ def save_roles(roles_list):
 def init_user_db():
     if not os.path.exists(USER_DB_PATH):
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-
+def save_users(users_dict):
+    rows = []
+    for username, u in users_dict.items():
+        rows.append({
+            "full_name": u.get("full_name", username),
+            "username": username,
+            "password": u.get("password", ""),
+            "role": u.get("role", "Staff"),
+            "dept": u.get("dept", ""),
+            "can_view_all_dept": u.get("can_view_all_dept", False),
+            "can_generate_pdf": u.get("can_generate_pdf", False),
+            "can_download_data": u.get("can_download_data", False),
+            "can_approve_requests": u.get("can_approve_requests", False),
+        })
+    pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+        
 def load_users():
     init_user_db()
     try:
@@ -1277,6 +1292,47 @@ else:
             if rec:
                 st.subheader(f"✏️ Edit Request #{eid}")
                 show_old_new_comparison("{}", rec)
+
+                # ─── ✅ ATTACHMENT MANAGEMENT: Show existing + Allow Remove ───
+                st.markdown("### 📎 Manage Attachments")
+                existing_files = []
+                att_name_raw = rec.get("attachment_name", "None")
+                if att_name_raw and att_name_raw.lower() != "none":
+                    existing_files = [n.strip() for n in att_name_raw.split(",") if n.strip()]
+
+                files_to_keep = []
+                files_removed = False
+
+                if existing_files:
+                    st.info(f"📋 {len(existing_files)} attachment(s) currently attached:")
+                    for fname in existing_files:
+                        file_path = os.path.join(UPLOAD_DIR, fname)
+                        col_check, col_name, col_dl = st.columns([1, 5, 2])
+                        keep = col_check.checkbox(f"Keep", value=True, key=f"keep_att_{eid}_{fname}")
+                        col_name.markdown(f"• `{fname}`")
+                        if os.path.exists(file_path):
+                            with open(file_path, "rb") as f:
+                                col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_att_{eid}_{fname}")
+                        if keep:
+                            files_to_keep.append(fname)
+                        else:
+                            files_removed = True
+                            # Optionally delete file from disk
+                            # if os.path.exists(file_path): os.remove(file_path)
+                else:
+                    st.info("📋 No existing attachments.")
+
+                st.markdown("#### ➕ Add New Attachments")
+                new_files_upload = st.file_uploader(
+                    "Upload replacement or additional files",
+                    type=["pdf", "png", "jpg", "jpeg"],
+                    accept_multiple_files=True,
+                    key=f"edit_upload_{eid}"
+                )
+
+                if files_removed or new_files_upload:
+                    st.info(f"✅ Will keep {len(files_to_keep)} existing + add {len(new_files_upload)} new file(s)")
+
                 with st.form("edit_form"):
                     c1, c2 = st.columns(2)
                     with c1:
@@ -1291,11 +1347,11 @@ else:
                         dt_val = st.date_input("📅 Date", d)
                         mgr = st.text_input("👔 Line Manager", rec["manager"])
                         desc = st.text_area("📝 Description / Justification", rec["desc"])
-                        files = st.file_uploader("📎 Add Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-                        
-                        if st.form_submit_button("✅ Submit Edit"):
+
+                        if st.form_submit_button("✅ Submit Edit", type="primary"):
                             old = str({"emp_name": rec["emp_name"], "dept": rec["dept"], "type": rec["type"], "category": rec["category"], "date": rec["date"], "amount": rec["amount"], "manager": rec["manager"], "desc": rec["desc"]})
                             records = load_records_from_excel()
+
                             for r in records:
                                 if int(r["id"]) == int(eid):
                                     r["emp_name"] = en.strip()
@@ -1310,18 +1366,24 @@ else:
                                     r["director_comments"] = ""
                                     r["decision_date"] = ""
                                     r["decision_by"] = ""
-                                    
-                                    if files:
-                                        att_list = []
-                                        if r["attachment_name"] and r["attachment_name"] != "None":
-                                            att_list.extend([n.strip() for n in r["attachment_name"].split(",")])
-                                        for i, f in enumerate(files):
-                                            fn = f"ID_{eid}_EDIT_F{len(att_list)+1}_{f.name}"
+
+                                    # ─── ✅ BUILD FINAL ATTACHMENT LIST ───
+                                    final_attachments = list(files_to_keep)  # Keep checked ones
+
+                                    # Save newly uploaded files
+                                    if new_files_upload:
+                                        for i, f in enumerate(new_files_upload):
+                                            fn = f"ID_{eid}_EDIT_F{len(final_attachments)+1}_{f.name}"
                                             with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
                                                 out.write(f.getbuffer())
-                                            att_list.append(fn)
-                                        r["attachment_name"] = ", ".join(att_list) if att_list else "None"
-                            
+                                            final_attachments.append(fn)
+
+                                    # Update record
+                                    if final_attachments:
+                                        r["attachment_name"] = ", ".join(final_attachments)
+                                    else:
+                                        r["attachment_name"] = "None"
+
                             old_full = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
                             old_data_dict = {
                                 "emp_name": old_full["emp_name"], "dept": old_full["dept"],
@@ -1336,10 +1398,11 @@ else:
                             }
                             log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
                             save_all_records(records)
-                            st.success(f"✅ Updated & sent for approval!")
+                            st.success(f"✅ Updated & sent for approval! Attachments updated.")
                             st.session_state.editing_request_id = None
                             st.rerun()
-                if st.button("❌ Cancel"):
+
+                if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
                     st.session_state.editing_request_id = None
                     st.rerun()
         
