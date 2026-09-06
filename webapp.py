@@ -449,12 +449,13 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# 📖 FULL AUDIT LOG SYSTEM
+# 📖 FULL AUDIT LOG SYSTEM — ENHANCED VERSION
 # ============================================================
 AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
 AUDIT_COLUMNS = [
     "AuditID", "Timestamp", "User_Name", "User_Role",
-    "Action", "Request_ID", "Field_Changed",
+    "Action", "Request_ID", "Department", "Amount",
+    "Decision_By", "Decision_Date", "Field_Changed",
     "Old_Value", "New_Value", "IP_Address"
 ]
 
@@ -477,13 +478,37 @@ def save_audit_entry(entry):
     df = pd.concat([df, new_row], ignore_index=True)
     df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
 
-def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None):
+def get_request_details(req_id):
+    """Helper: Fetch Department, Amount, Decision Info from request"""
+    dept = "-"
+    amount = "-"
+    decision_by = "-"
+    decision_date = "-"
+    try:
+        all_recs = load_records_from_excel()
+        req = next((r for r in all_recs if str(r.get("id")) == str(req_id)), None)
+        if req:
+            dept = req.get("dept", "-")
+            amt = req.get("amount", "-")
+            amount = f"£{amt:.2f}" if amt and amt != "-" else "-"
+            decision_by = req.get("decision_by", "-") or "-"
+            decision_date = req.get("decision_date", "-") or "-"
+    except:
+        pass
+    return dept, amount, decision_by, decision_date
+
+def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None, decision_by=None, decision_date=None):
     if not st.session_state.get("logged_in"):
         return
     user = st.session_state.user_info
     username = user.get("full_name", user.get("username", "Unknown"))
     role = user.get("role", "Unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Fetch request details
+    dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
+    final_decision_by = decision_by or saved_decision_by
+    final_decision_date = decision_date or saved_decision_date
 
     if action in ["CREATED", "DELETED"]:
         fields = "-"
@@ -496,11 +521,16 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
             "User_Role": role,
             "Action": action,
             "Request_ID": req_id,
+            "Department": dept,
+            "Amount": amount,
+            "Decision_By": "-",
+            "Decision_Date": "-",
             "Field_Changed": fields,
             "Old_Value": old_val,
             "New_Value": new_val,
             "IP_Address": "Auto-Logged"
         })
+
     elif action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
         status_text = "Approved" if action == "APPROVED" else "Rejected" if action == "REJECTED" else "Status Changed"
         save_audit_entry({
@@ -510,11 +540,16 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
             "User_Role": role,
             "Action": action,
             "Request_ID": req_id,
+            "Department": dept,
+            "Amount": amount,
+            "Decision_By": final_decision_by,
+            "Decision_Date": final_decision_date,
             "Field_Changed": "Status",
             "Old_Value": "Pending",
             "New_Value": status_text,
             "IP_Address": "Auto-Logged"
         })
+
     elif action == "EDITED" and old_data and new_data:
         field_labels = {
             "emp_name": "Employee Name", "dept": "Department",
@@ -536,6 +571,10 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
                     "User_Role": role,
                     "Action": "EDITED",
                     "Request_ID": req_id,
+                    "Department": dept,
+                    "Amount": amount,
+                    "Decision_By": "-",
+                    "Decision_Date": "-",
                     "Field_Changed": label,
                     "Old_Value": old,
                     "New_Value": new,
@@ -549,6 +588,10 @@ def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None
                 "User_Role": role,
                 "Action": "EDITED",
                 "Request_ID": req_id,
+                "Department": dept,
+                "Amount": amount,
+                "Decision_By": "-",
+                "Decision_Date": "-",
                 "Field_Changed": "No Changes",
                 "Old_Value": "-",
                 "New_Value": "-",
@@ -562,16 +605,24 @@ def display_audit_log_panel():
     if not logs:
         st.info("📋 No activity recorded yet.")
         return
-    c1, c2, c3 = st.columns(3)
+
+    # Filters
+    c1, c2, c3, c4 = st.columns(4)
     with c1: filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
-    with c2: filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
-    with c3: filter_req = st.multiselect("🆔 Filter by Request ID", sorted(set([str(l["Request_ID"]) for l in logs])))
+    with c2: filter_dept = st.multiselect("🏢 Filter by Department", sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"])))
+    with c3: filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
+    with c4: filter_req = st.multiselect("🆔 Filter by Request ID", sorted(set([str(l["Request_ID"]) for l in logs])))
+
     filtered = logs
     if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
+    if filter_dept: filtered = [l for l in filtered if l.get("Department", "") in filter_dept]
     if filter_action: filtered = [l for l in filtered if l["Action"] in filter_action]
     if filter_req: filtered = [l for l in filtered if str(l["Request_ID"]) in filter_req]
+
     st.metric(f"📄 Total Entries", len(filtered))
     st.divider()
+
+    # Display logs
     for entry in reversed(filtered):
         aid = entry["AuditID"]
         ts = entry["Timestamp"]
@@ -579,21 +630,34 @@ def display_audit_log_panel():
         role = entry["User_Role"]
         action = entry["Action"]
         req_id = entry["Request_ID"]
+        dept = entry.get("Department", "-")
+        amount = entry.get("Amount", "-")
+        dec_by = entry.get("Decision_By", "-")
+        dec_date = entry.get("Decision_Date", "-")
         field = entry["Field_Changed"]
         old_val = entry["Old_Value"]
         new_val = entry["New_Value"]
+
         icon = {"CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌", "DELETED": "🗑️", "STATUS_CHANGED": "🔄"}.get(action, "ℹ️")
         title = f"{icon} {action} — Request #{req_id} | {user} ({role}) | {ts}"
+
         with st.expander(title):
             st.write(f"**🕐 Time:** {ts}")
             st.write(f"**👤 User:** {user} — *{role}*")
             st.write(f"**🆔 Request ID:** #{req_id}")
+            st.write(f"**🏢 Department:** {dept}")
+            if amount != "-":
+                st.write(f"**💷 Amount:** {amount}")
+            if action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
+                st.write(f"**🎯 Decision By:** {dec_by}")
+                st.write(f"**📅 Decision Date:** {dec_date}")
             if field != "-" and field != "No Changes":
                 st.write(f"**📝 Field Changed:** {field}")
                 st.markdown(f"**⬅️ Old:** `{old_val}`")
                 st.markdown(f"**➡️ New:** `{new_val}`")
             else:
                 st.write(f"**📋 Details:** {new_val}")
+
     st.divider()
     df_export = pd.DataFrame(filtered)
     csv = df_export.to_csv(index=False).encode("utf-8")
