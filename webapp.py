@@ -1873,7 +1873,7 @@ else:
     
                         # Show previous rejection reason
                         if prev_comments:
-                        st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+                            st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
     
                         # Show Old → New comparison
                         if old_data_json and old_data_json != "{}":
