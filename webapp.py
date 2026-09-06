@@ -776,7 +776,7 @@ def display_audit_log_panel():
     st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
 
 # ============================================================
-# PDF GENERATION — Attachments go to PAGE 2 ✅
+# PDF GENERATION — Attachments go to PAGE 2 ✅ FULLY UPDATED
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -788,15 +788,20 @@ def generate_approval_pdf(request_data):
             (r for r in all_recs if int(str(r.get("id", "0"))) == int(str(req_id))),
             request_data
         )
+
+        # ─── TEXT CLEANING HELPER ───
         def clean_text(t):
             t = str(t).replace("\u2013", "-").replace("\u2014", "-").replace("\u2212", "-").replace("—", "-").replace("–", "-")
             for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
                 t = t.replace(char, " ")
             return t.strip()
+
+        # ─── EXTRACT FIELDS ───
         emp_name = clean_text(fresh_data.get("emp_name", "Unknown"))
         dept = clean_text(fresh_data.get("dept", ""))
         category = clean_text(fresh_data.get("category", ""))
-        amount = clean_text(fresh_data.get("amount", "0"))
+        amount_val = fresh_data.get("amount", "0")
+        amount = f"{float(amount_val):.2f}" if str(amount_val).replace('.','').isdigit() else str(amount_val)
         req_date = format_date(fresh_data.get("date", ""))
         desc = clean_text(fresh_data.get("desc", ""))
         manager = clean_text(fresh_data.get("manager", ""))
@@ -805,6 +810,7 @@ def generate_approval_pdf(request_data):
         dir_name = clean_text(fresh_data.get("decision_by", "Director"))
         dir_comments = clean_text(fresh_data.get("director_comments", ""))
 
+        # ─── ATTACHMENT DETECTION ───
         att_names = ""
         for field_key in ["attachment_name", "Attachment Name", "attachment", "Attachment"]:
             val = str(fresh_data.get(field_key, "")).strip()
@@ -819,8 +825,11 @@ def generate_approval_pdf(request_data):
                 if clean_name and clean_name.lower() not in ["none", ""]:
                     display_files.append(clean_name)
 
+        # ─── BUILD PDF ───
         pdf = FPDF()
         pdf.add_page()
+
+        # ─── PAGE 1: HEADER & LOGO ───
         if os.path.exists(LOGO_PATH):
             pdf.image(LOGO_PATH, x=75, y=10, w=60)
         pdf.ln(22)
@@ -831,6 +840,8 @@ def generate_approval_pdf(request_data):
         pdf.line(10, line_y, 200, line_y)
         pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
         pdf.ln(12)
+
+        # ─── PAGE 1: REQUEST DETAILS ───
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True)
         pdf.ln(2)
@@ -844,16 +855,21 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
         pdf.ln(6)
+
+        # ─── PAGE 1: DESCRIPTION ───
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
         pdf.multi_cell(0, 5, desc)
         pdf.ln(8)
+
+        # ─── PAGE 1: DIRECTOR APPROVAL ───
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
         pdf.ln(2)
         pdf.set_font("Courier", "", 9)
+
         if status == "approved":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9); pdf.set_text_color(0, 128, 0)
@@ -863,6 +879,7 @@ def generate_approval_pdf(request_data):
             if dir_comments and dir_comments != "None" and dir_comments != "":
                 pdf.ln(2); pdf.set_font("Courier", "B", 9); pdf.cell(52, 5, "Director Comments:", 0, 0)
                 pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
+
         elif status == "rejected":
             pdf.cell(52, 5, "Decision:", 0, 0)
             pdf.set_font("Courier", "B", 9); pdf.set_text_color(200, 0, 0)
@@ -872,55 +889,80 @@ def generate_approval_pdf(request_data):
             if dir_comments and dir_comments != "None" and dir_comments != "":
                 pdf.ln(2); pdf.set_font("Courier", "B", 9); pdf.cell(52, 5, "Reason for Rejection:", 0, 0)
                 pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
+
         else:
             pdf.cell(52, 5, "Decision:", 0, 0); pdf.cell(0, 5, "Pending", ln=True)
+
+        # ─── PAGE 1: SIGNATURE & STAMP ───
         pdf.ln(12)
         dash_y = pdf.get_y()
         for x in range(10, 200, 4):
             pdf.line(x, dash_y, x + 2, dash_y)
+
         if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
             pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
             pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
+
         pdf.ln(8)
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
 
-        # ✅ ATTACHMENTS ON SEPARATE PAGE — PAGE 2
-        pdf.add_page()
-        pdf.set_font("Courier", "B", 10)
-        pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
-        pdf.ln(4)
+        # ═══════════════════════════════════════════════════
+        # ✅ PAGE 2: ATTACHMENTS — SEPARATE PAGE ✅
+        # ═══════════════════════════════════════════════════
+        pdf.add_page()  # ← FORCES NEW PAGE — attachments never appear on Page 1
+        pdf.set_font("Courier", "B", 12)
+        pdf.cell(0, 8, txt="📎 ATTACHMENTS", ln=True)
+        pdf.ln(6)
         pdf.set_font("Courier", "", 9)
-        if len(display_files) > 0:
-            for fname in display_files:
-                pdf.cell(0, 5, f"- {fname}", ln=True)
-                file_path = os.path.join(UPLOAD_DIR, fname)
-                if os.path.exists(file_path) and fname.lower().endswith((".png", ".jpg", ".jpeg")):
-                    pdf.ln(2)
-                    try:
-                        pdf.image(file_path, x=10, w=190)
-                        pdf.ln(60)
-                    except:
-                        pdf.cell(0, 5, "  (Preview could not display)", ln=True)
-                pdf.ln(3)
-        else:
-            pdf.cell(0, 5, "- No files attached", ln=True)
 
+        if len(display_files) > 0:
+            pdf.cell(0, 6, f"Total Attachments: {len(display_files)}", ln=True)
+            pdf.ln(3)
+            for idx, fname in enumerate(display_files, 1):
+                pdf.set_font("Courier", "B", 9)
+                pdf.cell(0, 6, f"{idx}. {fname}", ln=True)
+                pdf.set_font("Courier", "", 9)
+                file_path = os.path.join(UPLOAD_DIR, fname)
+
+                if os.path.exists(file_path):
+                    if fname.lower().endswith((".png", ".jpg", ".jpeg")):
+                        pdf.ln(2)
+                        try:
+                            # Scale image to fit page width (190mm max)
+                            pdf.image(file_path, x=10, w=190)
+                            pdf.ln(70)  # Space after image
+                        except Exception as img_err:
+                            pdf.cell(0, 5, f"     ⚠️ Preview could not be displayed: {str(img_err)}", ln=True)
+                            pdf.ln(3)
+                    else:
+                        pdf.cell(0, 5, "     📄 Non-image file — see original upload", ln=True)
+                        pdf.ln(3)
+                else:
+                    pdf.cell(0, 5, "     ⚠️ File not found on server", ln=True)
+                    pdf.ln(3)
+        else:
+            pdf.cell(0, 6, "- No files were attached to this request", ln=True)
+
+        # ─── SAVE & RETURN ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
         safe_date = datetime.now().strftime("%Y-%m-%d")
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
-        pdf_output = pdf.output()
-        pdf_bytes = bytes(pdf_output) if isinstance(pdf_output, (bytes, bytearray)) else pdf_output.encode("latin-1")
+
+        pdf_bytes = bytes(pdf.output())
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f:
             f.write(pdf_bytes)
+
         return True, pdf_bytes, filename
+
     except Exception as e:
-        return False, None, f"PDF Error: {str(e)}"
+        import traceback
+        return False, None, f"PDF Error: {str(e)} — {traceback.format_exc()}"
 
 # ============================================================
 # PANEL FUNCTIONS
@@ -939,7 +981,7 @@ def change_my_password_form():
     with st.sidebar.expander("🔑 Change My Password", expanded=False):
         USERS = load_users()
         current_username = st.session_state.user_info["username"]
-        with st.form("change_my_password", clear_on
+        with st.form("change_my_password", clear_on_submit=True):
             old_pass = st.text_input("🔑 Current Password", type="password")
             new_pass1 = st.text_input("🔑 New Password", type="password")
             new_pass2 = st.text_input("🔑 Confirm New Password", type="password")
@@ -1069,7 +1111,7 @@ def settings_management_panel():
                     with col1:
                         if st.form_submit_button("💾 Save"):
                             current_roles[i] = renamed.strip(); save_roles(current_roles)
-                            log_action("ROLE_EDITED", old_data={"role": old_role_data}, new_data={"role": renamed.strip()})
+                            log_action("ROLE_EDITED", old_data={"role": role}, new_data={"role": renamed.strip()})
                             st.session_state[f"editing_role_{i}"] = False
                             st.success(f"✅ Renamed to: {renamed}"); st.rerun()
                     with col2:
@@ -1597,11 +1639,8 @@ else:
                         st.divider()
                         st.subheader("📋 Previous Review History")
     
-                        # Show previous rejection reason
                         if prev_comments:
                         st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
-    
-                        # Show Old → New comparison
                         if old_data_json and old_data_json != "{}":
                         with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
                         show_old_new_comparison(old_data_json, req)
