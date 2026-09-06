@@ -1818,8 +1818,8 @@ else:
     
                         # Show Old → New comparison
                         if old_data_json and old_data_json != "{}":
-                                with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
-                        show_old_new_comparison(old_data_json, req)
+                              with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                              show_old_new_comparison(old_data_json, req)
                         st.divider()
                         
                         with st.form(f"change_status_approved_{req['id']}"):
