@@ -442,7 +442,173 @@ def save_record_to_excel(new_record):
     current = load_records_from_excel()
     current.append(new_record)
     save_all_records(current)
+# ============================================================
+# 📖 FULL AUDIT LOG SYSTEM — Track EVERY Change
+# ============================================================
+AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
+AUDIT_COLUMNS = [
+    "AuditID", "Timestamp", "User_Name", "User_Role",
+    "Action", "Request_ID", "Field_Changed",
+    "Old_Value", "New_Value", "IP_Address"
+]
 
+def init_audit_log():
+    """Create audit log file if it doesn't exist"""
+    if not os.path.exists(AUDIT_LOG_PATH):
+        pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
+
+def load_audit_log():
+    """Read all audit entries"""
+    init_audit_log()
+    try:
+        df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
+        return df.to_dict(orient="records")
+    except:
+        return []
+
+def save_audit_entry(entry):
+    """Save ONE audit entry (append-only — NEVER delete)"""
+    init_audit_log()
+    df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
+    new_row = pd.DataFrame([entry])
+    df = pd.concat([df, new_row], ignore_index=True)
+    df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
+
+def log_action(action, req_id, old_data=None, new_data=None, fields_changed=None):
+    """
+    ✅ MAIN AUDIT FUNCTION
+    Automatically logs WHO, WHAT, WHEN, OLD vs NEW
+    """
+    if not st.session_state.get("logged_in"):
+        return
+    user = st.session_state.user_info
+    username = user.get("full_name", user.get("username", "Unknown"))
+    role = user.get("role", "Unknown")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Determine what fields changed
+    if action in ["CREATED", "DELETED"]:
+        fields = "-"
+        old_val = "-"
+        new_val = "New Request Created" if action == "CREATED" else "Request Permanently Deleted"
+        save_audit_entry({
+            "AuditID": len(load_audit_log()) + 1,
+            "Timestamp": timestamp,
+            "User_Name": username,
+            "User_Role": role,
+            "Action": action,
+            "Request_ID": req_id,
+            "Field_Changed": fields,
+            "Old_Value": old_val,
+            "New_Value": new_val,
+            "IP_Address": "Auto-Logged"
+        })
+
+    elif action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
+        status_text = "Approved" if action == "APPROVED" else "Rejected"
+        save_audit_entry({
+            "AuditID": len(load_audit_log()) + 1,
+            "Timestamp": timestamp,
+            "User_Name": username,
+            "User_Role": role,
+            "Action": action,
+            "Request_ID": req_id,
+            "Field_Changed": "Status",
+            "Old_Value": "Pending",
+            "New_Value": status_text,
+            "IP_Address": "Auto-Logged"
+        })
+
+    elif action == "EDITED" and old_data and new_data:
+        # ✅ Compare OLD vs NEW — detect exactly what changed
+        field_labels = {
+            "emp_name": "Employee Name", "dept": "Department",
+            "type": "Transaction Type", "category": "Category",
+            "date": "Date", "amount": "Amount (£)",
+            "manager": "Line Manager", "desc": "Description",
+            "status": "Status"
+        }
+        any_change = False
+        for key, label in field_labels.items():
+            old = str(old_data.get(key, "")).strip()
+            new = str(new_data.get(key, "")).strip()
+            if old != new:
+                any_change = True
+                save_audit_entry({
+                    "AuditID": len(load_audit_log()) + 1,
+                    "Timestamp": timestamp,
+                    "User_Name": username,
+                    "User_Role": role,
+                    "Action": "EDITED",
+                    "Request_ID": req_id,
+                    "Field_Changed": label,
+                    "Old_Value": old,
+                    "New_Value": new,
+                    "IP_Address": "Auto-Logged"
+                })
+        if not any_change:
+            save_audit_entry({
+                "AuditID": len(load_audit_log()) + 1,
+                "Timestamp": timestamp,
+                "User_Name": username,
+                "User_Role": role,
+                "Action": "EDITED",
+                "Request_ID": req_id,
+                "Field_Changed": "No Changes",
+                "Old_Value": "-",
+                "New_Value": "-",
+                "IP_Address": "Auto-Logged"
+            })
+
+def display_audit_log_panel():
+    """✅ Show full history — Super Admin Only"""
+    st.subheader("📖 Full System Audit Log — Complete History")
+    st.info("🔒 Super Admin Only — Cannot be deleted or modified."); st.divider()
+    logs = load_audit_log()
+    if not logs:
+        st.info("📋 No activity recorded yet.")
+        return
+    # Filters
+    c1, c2, c3 = st.columns(3)
+    with c1: filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
+    with c2: filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
+    with c3: filter_req = st.multiselect("🆔 Filter by Request ID", sorted(set([str(l["Request_ID"]) for l in logs])))
+
+    filtered = logs
+    if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
+    if filter_action: filtered = [l for l in filtered if l["Action"] in filter_action]
+    if filter_req: filtered = [l for l in filtered if str(l["Request_ID"]) in filter_req]
+
+    st.metric(f"📄 Total Entries", len(filtered))
+    st.divider()
+    for entry in reversed(filtered):
+        aid = entry["AuditID"]
+        ts = entry["Timestamp"]
+        user = entry["User_Name"]
+        role = entry["User_Role"]
+        action = entry["Action"]
+        req_id = entry["Request_ID"]
+        field = entry["Field_Changed"]
+        old_val = entry["Old_Value"]
+        new_val = entry["New_Value"]
+
+        icon = {"CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌", "DELETED": "🗑️", "STATUS_CHANGED": "🔄"}.get(action, "ℹ️")
+        title = f"{icon} {action} — Request #{req_id} | {user} ({role}) | {ts}"
+        with st.expander(title):
+            st.write(f"**🕐 Time:** {ts}")
+            st.write(f"**👤 User:** {user} — *{role}*")
+            st.write(f"**🆔 Request ID:** #{req_id}")
+            if field != "-" and field != "No Changes":
+                st.write(f"**📝 Field Changed:** {field}")
+                st.markdown(f"**⬅️ Old:** `{old_val}`")
+                st.markdown(f"**➡️ New:** `{new_val}`")
+            else:
+                st.write(f"**📋 Details:** {new_val}")
+    st.divider()
+    # Download full log
+    df_export = pd.DataFrame(filtered)
+    csv = df_export.to_csv(index=False).encode("utf-8")
+    st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
 # ============================================================
 # PDF GENERATION
 # ============================================================
