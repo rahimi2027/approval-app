@@ -1751,16 +1751,14 @@ else:
                         st.divider()
                         display_pdf_button(req, can_generate=True)
 
-    # ─── ✅ UPGRADED SUPER ADMIN PORTAL ───
+    # ─── ✅ UPGRADED SUPER ADMIN PORTAL (Edit Option Removed) ───
     elif user["role"] == "Super Admin":
-        st.subheader("🛡️ Super Admin — All Requests (View & Edit)")
-        st.info("✅ View ALL requests across ALL departments. Can Edit & Download PDFs. **Approval → Director only.**")
+        st.subheader("🛡️ Super Admin — All Requests")
+        st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
         st.divider()
-
         tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs([
             "⏳ All Pending", "✅ All Approved", "❌ All Rejected", "🔧 System Management"
         ])
-
         with tab_pending:
             pending = [r for r in all_live_requests if r["status"] == "pending"]
             if not pending:
@@ -1780,10 +1778,9 @@ else:
                             st.info(f"💬 Director Comments: {req['director_comments']}")
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-                        if st.button(f"✏️ Edit Request #{req['id']}", key=f"sa_edit_pend_{req['id']}"):
-                            st.session_state.editing_request_id = req["id"]
-                            st.rerun()
-
+                        
+                        # ❌ EDIT BUTTON REMOVED — No one can edit pending requests
+                        
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
             if not approved:
@@ -1799,7 +1796,6 @@ else:
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-
         with tab_rejected:
             rejected = [r for r in all_live_requests if r["status"] == "rejected"]
             if not rejected:
@@ -1815,7 +1811,6 @@ else:
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-
         with tab_manage:
             tab_settings, tab_users, tab_audit = st.tabs([
                 "⚙️ System Settings", "👤 User Management", "📖 Audit History"
