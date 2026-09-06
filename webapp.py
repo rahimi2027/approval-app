@@ -1038,6 +1038,7 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
 # ============================================================
+# ============================================================
 # MAIN APPLICATION — ROLE-BASED PORTALS
 # ============================================================
 else:
@@ -1120,9 +1121,7 @@ else:
                         st.divider()
                         display_pdf_button(req, can_generate=True)
 
-    # ========================================================
-    # MANAGER PORTAL
-    # ========================================================
+    # ─── MANAGER / STAFF PORTAL ───
     elif user["role"] in ["Manager", "Staff","Team Member"]:
         if st.session_state.editing_request_id:
             eid = st.session_state.editing_request_id
@@ -1145,7 +1144,7 @@ else:
                         mgr = st.text_input("👔 Line Manager", rec["manager"])
                         desc = st.text_area("📝 Description / Justification", rec["desc"])
                         files = st.file_uploader("📎 Add Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-
+                        
                         if st.form_submit_button("✅ Submit Edit"):
                             old = str({"emp_name": rec["emp_name"], "dept": rec["dept"], "type": rec["type"], "category": rec["category"], "date": rec["date"], "amount": rec["amount"], "manager": rec["manager"], "desc": rec["desc"]})
                             records = load_records_from_excel()
@@ -1163,6 +1162,7 @@ else:
                                     r["director_comments"] = ""
                                     r["decision_date"] = ""
                                     r["decision_by"] = ""
+                                    
                                     if files:
                                         att_list = []
                                         if r["attachment_name"] and r["attachment_name"] != "None":
@@ -1173,7 +1173,7 @@ else:
                                                 out.write(f.getbuffer())
                                             att_list.append(fn)
                                         r["attachment_name"] = ", ".join(att_list) if att_list else "None"
-                                                        # ✅ AUDIT LOG: Capture OLD vs NEW values
+                            
                             old_full = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
                             old_data_dict = {
                                 "emp_name": old_full["emp_name"], "dept": old_full["dept"],
@@ -1211,29 +1211,29 @@ else:
                 mgr = st.text_input("👔 Line Manager")
                 files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
                 desc = st.text_area("📝 Description / Justification")
-                if st.form_submit_button("📤 Send to Director", type="primary"):
-                    if en.strip() and mgr.strip() and desc.strip():
-                        att_list = []
-                        if files:
-                            for i, f in enumerate(files):
-                                fn = f"ID_{nid}_F{i+1}_{f.name}"
-                                with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
-                                    out.write(f.getbuffer())
-                                att_list.append(fn)
-                        payload = {
-                            "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
-                            "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
-                            "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
-                            "status": "pending", "director_comments": "", "decision_date": "",
-                            "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
-                        }
-                        save_record_to_excel(payload)
-                        log_action("CREATED", nid)  # ✅ ADD THIS LINE
-                        st.success(f"✅ Request #{nid} sent for approval!")
-                        st.success(f"✅ Request #{nid} sent for approval!")
-                        st.rerun()
-                    else:
-                        st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+            
+            if st.form_submit_button("📤 Send to Director", type="primary"):
+                if en.strip() and mgr.strip() and desc.strip():
+                    att_list = []
+                    if files:
+                        for i, f in enumerate(files):
+                            fn = f"ID_{nid}_F{i+1}_{f.name}"
+                            with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
+                                out.write(f.getbuffer())
+                            att_list.append(fn)
+                    payload = {
+                        "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+                        "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
+                        "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
+                        "status": "pending", "director_comments": "", "decision_date": "",
+                        "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
+                    }
+                    save_record_to_excel(payload)
+                    log_action("CREATED", nid)
+                    st.success(f"✅ Request #{nid} sent for approval!")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
         
         st.divider()
         st.subheader(f"📋 My Department Requests")
@@ -1258,9 +1258,7 @@ else:
                             st.session_state.editing_request_id = req["id"]
                             st.rerun()
 
-        # ========================================================
-    # 🎛️ DIRECTOR PORTAL — WITH CHANGE STATUS CONTROLS
-    # ========================================================
+    # ─── DIRECTOR PORTAL ───
     elif user["role"] == "Director":
         st.subheader("🎛️ Director Approval Portal — Andy Acoole")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -1292,7 +1290,6 @@ else:
                         display_attachments(req)
                         st.divider()
                         
-                        # ✅ CHANGE STATUS — PENDING → APPROVE / REJECT
                         with st.form(f"change_status_pending_{req['id']}"):
                             st.subheader("🔧 Change Status")
                             comments = st.text_area("💬 Director Comments (Optional)")
@@ -1304,12 +1301,12 @@ else:
                             
                             if approve_btn:
                                 update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
-                                log_action("APPROVED", req["id"])  # ✅ ADD THIS LINE
+                                log_action("APPROVED", req["id"])
                                 st.success(f"✅ Request #{req['id']} APPROVED! Status updated.")
                                 st.rerun()
                             if reject_btn:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
-                                log_action("REJECTED", req["id"])  # ✅ ADD THIS LINE
+                                log_action("REJECTED", req["id"])
                                 st.warning(f"❌ Request #{req['id']} REJECTED! Status updated.")
                                 st.rerun()
                         
@@ -1337,7 +1334,6 @@ else:
                         display_attachments(req)
                         st.divider()
                         
-                        # ✅ CHANGE STATUS — APPROVED → PENDING / REJECTED
                         with st.form(f"change_status_approved_{req['id']}"):
                             st.subheader("🔧 Change Status")
                             comments = st.text_area("💬 Updated Comments (Optional)")
@@ -1354,8 +1350,8 @@ else:
                                 st.rerun()
                             if reject_btn:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
-                                st.warning(f"❌ Request #{req['id']} changed to REJECTED!")
                                 log_action("REJECTED", req["id"])
+                                st.warning(f"❌ Request #{req['id']} changed to REJECTED!")
                                 st.rerun()
                         
                         st.divider()
@@ -1382,7 +1378,6 @@ else:
                         display_attachments(req)
                         st.divider()
                         
-                        # ✅ CHANGE STATUS — REJECTED → PENDING / APPROVED
                         with st.form(f"change_status_rejected_{req['id']}"):
                             st.subheader("🔧 Change Status")
                             comments = st.text_area("💬 Updated Comments (Optional)")
@@ -1394,132 +1389,63 @@ else:
                             
                             if pending_btn:
                                 update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
-                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
                                 log_action("STATUS_CHANGED", req["id"])
+                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
                                 st.rerun()
                             if approve_btn:
                                 update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
-                                st.success(f"✅ Request #{req['id']} changed to APPROVED!")
                                 log_action("APPROVED", req["id"])
+                                st.success(f"✅ Request #{req['id']} changed to APPROVED!")
                                 st.rerun()
                         
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-        # ========================================================
-# ========================================================
-# 👤 STAFF / TEAM MEMBER PORTAL
-# ========================================================
-elif user["role"] == "Staff":
-    st.subheader("👤 My Requests Portal")
-    st.info("✅ Submit and view your own requests."); st.divider()
-    # ─── NEW REQUEST FORM ───
-    st.subheader("➕ Submit New Request")
-    nid = get_next_id(all_live_requests)
-    st.markdown(f"**🆔 Request ID:** `#{nid}`")
-    with st.form("staff_new_req", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            en = st.text_input("👤 Employee Name", value=FULL_NAME, disabled=True)
-            rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
-            ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
-            amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
-        with c2:
-            from datetime import datetime as dt
-            dt_val = st.date_input("📅 Date", value=dt.today())
-            mgr = st.text_input("👔 Line Manager")
-            files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-            desc = st.text_area("📝 Description / Justification")
-            if st.form_submit_button("📤 Submit for Approval", type="primary"):
-                if mgr.strip() and desc.strip():
-                    att_list = []
-                    if files:
-                        for i, f in enumerate(files):
-                            fn = f"ID_{nid}_F{i+1}_{f.name}"
-                            with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
-                                out.write(f.getbuffer())
-                            att_list.append(fn)
-                    payload = {
-                        "id": nid, "emp_name": FULL_NAME, "dept": user["dept"], "type": rt,
-                        "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
-                        "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
-                        "status": "pending", "director_comments": "", "decision_date": "",
-                        "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
-                    }
-                    save_record_to_excel(payload)
-                    st.success(f"✅ Request #{nid} submitted for approval!")
-                    st.rerun()
-                else:
-                    st.error("⚠️ Please fill in: Line Manager and Description")
-    # ─── VIEW MY OWN REQUESTS ───
-    st.divider()
-    st.subheader("📋 My Requests")
-    my_reqs = [r for r in all_live_requests if r["emp_name"].strip().lower() == FULL_NAME.strip().lower()]
-    if not my_reqs:
-        st.info("📋 You haven't submitted any requests yet.")
-    else:
-        for req in reversed(my_reqs):
-            icon = "🟡" if req["status"] == "pending" else ("🟢" if req["status"] == "approved" else "🔴")
-            title = f"{icon} ID #{req['id']} | {req['status'].upper()} | £{req['amount']:.2f} | 📅 {format_date(req['date'])}"
-            with st.expander(title):
-                st.write(f"🏢 **Department:** {req['dept']}")
-                st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
-                st.write(f"💷 **Amount:** £{req['amount']:.2f}")
-                st.write(f"👔 **Line Manager:** {req['manager']}")
-                st.info(f"📝 **Description:** {req['desc']}")
-                display_attachments(req)
-                if req["director_comments"]:
-                    st.info(f"💬 Director Comments: {req['director_comments']}")
-                if req["status"] == "approved":
-                    display_pdf_button(req, can_generate=True)
 
-# ========================================================
-# 🛡️ SUPER ADMIN PORTAL
-# ========================================================
-elif user["role"] == "Super Admin":
-    st.subheader("🛡️ Super Admin Control Panel")
-    tab_settings, tab_users, tab_audit = st.tabs([
-        "⚙️ System Settings",
-        "👤 User Management",
-        "📖 Audit History"
-    ])
-    with tab_settings:
-        settings_management_panel()
-    with tab_users:
-        user_management_panel()
-    with tab_audit:
-        display_audit_log_panel()
-
-    st.divider()
-    st.subheader("📥 Download Data Backups")
-    backup_col1, backup_col2, backup_col3 = st.columns(3)
-    with backup_col1:
-        if os.path.exists(EXCEL_PATH):
-            with open(EXCEL_PATH, "rb") as f:
-                st.download_button(
-                    "📥 Download Requests",
-                    f.read(),
-                    file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                    type="primary"
-                )
-    with backup_col2:
-        if os.path.exists(USER_DB_PATH):
-            with open(USER_DB_PATH, "rb") as f:
-                st.download_button(
-                    "📥 Download Users",
-                    f.read(),
-                    file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                    type="primary"
-                )
-    with backup_col3:
-        if os.path.exists(SETTINGS_PATH):
-            with open(SETTINGS_PATH, "rb") as f:
-                st.download_button(
-                    "📥 Download Settings",
-                    f.read(),
-                    file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                    type="primary"
-                )
-    st.caption("💾 Save these files to your computer for backup")
+    # ─── SUPER ADMIN PORTAL ───
+    elif user["role"] == "Super Admin":
+        st.subheader("🛡️ Super Admin Control Panel")
+        tab_settings, tab_users, tab_audit = st.tabs([
+            "⚙️ System Settings",
+            "👤 User Management",
+            "📖 Audit History"
+        ])
+        with tab_settings:
+            settings_management_panel()
+        with tab_users:
+            user_management_panel()
+        with tab_audit:
+            display_audit_log_panel()
+        st.divider()
+        st.subheader("📥 Download Data Backups")
+        backup_col1, backup_col2, backup_col3 = st.columns(3)
+        with backup_col1:
+            if os.path.exists(EXCEL_PATH):
+                with open(EXCEL_PATH, "rb") as f:
+                    st.download_button(
+                        "📥 Download Requests",
+                        f.read(),
+                        file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                        type="primary"
+                    )
+        with backup_col2:
+            if os.path.exists(USER_DB_PATH):
+                with open(USER_DB_PATH, "rb") as f:
+                    st.download_button(
+                        "📥 Download Users",
+                        f.read(),
+                        file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                        type="primary"
+                    )
+        with backup_col3:
+            if os.path.exists(SETTINGS_PATH):
+                with open(SETTINGS_PATH, "rb") as f:
+                    st.download_button(
+                        "📥 Download Settings",
+                        f.read(),
+                        file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                        type="primary"
+                    )
+        st.caption("💾 Save these files to your computer for backup")
 
 # ========================================================
 # ✅ END OF ROLE-BASED PORTALS
@@ -1527,7 +1453,7 @@ elif user["role"] == "Super Admin":
 
 # Auto-save to GitHub after every page load
 github_auto_save()
+
 # ============================================================
 # ✅ END OF FILE — NOTHING AFTER THIS!
-# ============================================================
 # ============================================================
