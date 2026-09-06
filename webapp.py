@@ -1707,26 +1707,7 @@ else:
                                     show_old_new_comparison(old_data_json, req)
                             st.divider()
                         
-                        with st.form(f"change_status_approved_{req['id']}"):
-                            st.subheader("🔧 Change Status")
-                            comments = st.text_area("💬 Updated Comments (Optional)")
-                            col_pending, col_reject = st.columns(2)
-                            with col_pending:
-                                pending_btn = st.form_submit_button("⏳ Move to Pending")
-                            with col_reject:
-                                reject_btn = st.form_submit_button("❌ Change to REJECTED", type="secondary")
-                            
-                            if pending_btn:
-                                update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
-                                log_action("STATUS_CHANGED", req["id"])
-                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
-                                st.rerun()
-                            if reject_btn:
-                                update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
-                                log_action("REJECTED", req["id"])
-                                st.warning(f"❌ Request #{req['id']} changed to REJECTED!")
-                                st.rerun()
-                        
+                       
                         st.divider()
                         display_pdf_button(req, can_generate=True)
         
@@ -1822,7 +1803,7 @@ else:
                                    show_old_new_comparison(old_data_json, req)
                         st.divider()
                         
-                        with st.form(f"change_status_approved_{req['id']}"):
+                        with st.form(f"change_status_approved_{req['id']}_pending"):
                             st.subheader("🔧 Change Status")
                             comments = st.text_area("💬 Updated Comments (Optional)")
                             col_pending, col_reject = st.columns(2)
