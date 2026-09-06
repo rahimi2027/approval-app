@@ -1,11 +1,13 @@
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.1 (FIXED)
+# ============================================================
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.1 (FULLY FIXED)
 # ============================================================
 # ✅ Silent missing-file warnings
 # ✅ Standardized all expander titles
 # ✅ Dashboard landing page with stats
 # ✅ Staff role = full Manager access
 # ✅ Clean status audit display
-# ✅ FIXED: Super Admin tabs, indentation & syntax errors
+# ✅ FIXED: Indentation, syntax & missing variables
+# ✅ PDF attachments on Page 2 — confirmed
 # ============================================================
 import streamlit as st
 import os
@@ -26,8 +28,9 @@ except ImportError:
         PDF_AVAILABLE = True
     except ImportError:
         PDF_AVAILABLE = False
+
 # ============================================================
-# 🔐 EXTRA PERMISSION CHECKBOXES — ROLE DEFAULTS PRESERVED
+# 🔐 PERMISSION DEFAULTS
 # ============================================================
 PERMISSION_DEFAULTS = {
     "Staff": {
@@ -74,6 +77,7 @@ PERMISSION_LABELS = {
     "can_download_data": "📥 Download Data Backups",
     "can_approve_requests": "✅ Approve/Reject Requests"
 }
+
 # ============================================================
 # GITHUB AUTO-SAVE
 # ============================================================
@@ -121,7 +125,7 @@ def github_auto_save():
         print(f"⚠️ Auto-save error: {str(e)}")
 
 # ============================================================
-# HELPER FUNCTIONS — IMPROVED
+# HELPER FUNCTIONS
 # ============================================================
 def format_date(d):
     if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
@@ -129,7 +133,7 @@ def format_date(d):
     return str(d).strip()[:10]
 
 def display_attachments(req):
-    """✅ IMPROVED: Silently skips missing files — NO yellow warnings!"""
+    """Silently skips missing files — NO yellow warnings!"""
     att = req.get("attachment_name", "None")
     if not att or str(att).strip() == "" or str(att).strip().lower() == "none":
         st.info("📎 No attachments.")
@@ -227,7 +231,7 @@ def refresh_data_button():
 # 📊 STANDARDIZED TITLE HELPER
 # ============================================================
 def make_request_title(req):
-    """✅ Standard format: [ICON] ID #X | Name | STATUS | £0.00 | Date/Decision"""
+    """Standard format: [ICON] ID #X | Name | STATUS | £0.00 | Date/Decision"""
     status = req["status"].upper()
     amount = f"£{req['amount']:.2f}"
     dt = format_date(req.get("date", ""))
@@ -378,6 +382,7 @@ def save_roles(roles_list):
 def init_user_db():
     if not os.path.exists(USER_DB_PATH):
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+
 def save_users(users_dict):
     rows = []
     for username, u in users_dict.items():
@@ -393,7 +398,7 @@ def save_users(users_dict):
             "can_approve_requests": u.get("can_approve_requests", False),
         })
     pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-        
+
 def load_users():
     init_user_db()
     try:
@@ -405,7 +410,6 @@ def load_users():
                 "password": str(r["password"]),
                 "role": str(r["role"]),
                 "dept": str(r["dept"]),
-                # ✅ Load extra permissions (default False if missing)
                 "can_view_all_dept": str(r.get("can_view_all_dept", "False")).lower() == "true",
                 "can_generate_pdf": str(r.get("can_generate_pdf", "False")).lower() == "true",
                 "can_download_data": str(r.get("can_download_data", "False")).lower() == "true",
@@ -503,17 +507,8 @@ def save_record_to_excel(new_record):
     save_all_records(current)
 
 # ============================================================
-# 📖 FULL AUDIT LOG SYSTEM — COMPLETE WORKING VERSION
-# Logs: Requests | Categories | Departments | Roles | Users
+# 📖 FULL AUDIT LOG SYSTEM
 # ============================================================
-import streamlit as st
-import pandas as pd
-import os
-from datetime import datetime
-import json
-
-# ─── CONFIGURATION ─────────────────────────────────────────
-BASE_DIR = os.path.dirname(__file__)
 AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
 AUDIT_COLUMNS = [
     "AuditID", "Timestamp", "User_Name", "User_Role",
@@ -522,12 +517,10 @@ AUDIT_COLUMNS = [
     "Old_Value", "New_Value", "IP_Address"
 ]
 
-# ─── INITIALISE AUDIT LOG ──────────────────────────────────
 def init_audit_log():
     if not os.path.exists(AUDIT_LOG_PATH):
         pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
 
-# ─── LOAD AUDIT LOG ────────────────────────────────────────
 def load_audit_log():
     init_audit_log()
     try:
@@ -537,7 +530,6 @@ def load_audit_log():
         print(f"⚠️ Failed to load audit log: {e}")
         return []
 
-# ─── SAVE SINGLE AUDIT ENTRY ──────────────────────────────
 def save_audit_entry(entry):
     init_audit_log()
     try:
@@ -548,15 +540,13 @@ def save_audit_entry(entry):
     except Exception as e:
         print(f"⚠️ Failed to save audit entry: {e}")
 
-# ─── HELPER: GET REQUEST DETAILS ──────────────────────────
 def get_request_details(req_id):
-    """Fetch Department, Amount, Decision Info from request"""
     dept = "-"
     amount = "-"
     decision_by = "-"
     decision_date = "-"
     try:
-        all_recs = load_records_from_excel()  # Ensure this function exists in your main code
+        all_recs = load_records_from_excel()
         req = next((r for r in all_recs if str(r.get("id")) == str(req_id)), None)
         if req:
             dept = req.get("dept", "-")
@@ -568,32 +558,19 @@ def get_request_details(req_id):
         print(f"⚠️ Audit lookup failed: {e}")
     return dept, amount, decision_by, decision_date
 
-# ─── MAIN LOG ACTION — ALL ACTIONS HANDLED ─────────────────
 def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=None, decision_by=None, decision_date=None):
     if not st.session_state.get("logged_in"):
         return
-
     user = st.session_state.user_info
     username = user.get("full_name", user.get("username", "Unknown"))
     role = user.get("role", "Unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Default values for settings/user actions (no request involved)
-    dept = "-"
-    amount = "-"
-    final_decision_by = "-"
-    final_decision_date = "-"
-
-    # ═══════════════════════════════════════════════════════════
-    # ✅ SETTINGS & USER MANAGEMENT ACTIONS — NEWLY ADDED
-    # ═══════════════════════════════════════════════════════════
     SETTING_ACTIONS = [
         "CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
         "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED",
         "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED",
         "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET"
     ]
-
     if action in SETTING_ACTIONS:
         action_labels = {
             "CATEGORY_ADDED": "🏷️ Category Added",
@@ -612,11 +589,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "PASSWORD_RESET": "🔑 Password Reset"
         }
         display_action = action_labels.get(action, action)
-
         old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
         new_val = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
-        field_changed = "System Configuration"
-
         save_audit_entry({
             "AuditID": len(load_audit_log()) + 1,
             "Timestamp": timestamp,
@@ -624,29 +598,22 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "User_Role": role,
             "Action": display_action,
             "Request_ID": str(req_id),
-            "Department": dept,
-            "Amount": amount,
-            "Decision_By": final_decision_by,
-            "Decision_Date": final_decision_date,
-            "Field_Changed": field_changed,
+            "Department": "-",
+            "Amount": "-",
+            "Decision_By": "-",
+            "Decision_Date": "-",
+            "Field_Changed": "System Configuration",
             "Old_Value": old_val,
             "New_Value": new_val,
             "IP_Address": "Auto-Logged"
         })
-        return  # Exit early — no request lookup needed
+        return
 
-    # ═══════════════════════════════════════════════════════════
-    # ✅ REQUEST ACTIONS — ORIGINAL FUNCTIONALITY
-    # ═══════════════════════════════════════════════════════════
     dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
     final_decision_by = decision_by or saved_decision_by
     final_decision_date = decision_date or saved_decision_date
 
-    # ─── CREATED / DELETED ───
     if action in ["CREATED", "DELETED"]:
-        fields = "-"
-        old_val = "-"
-        new_val_text = "New Request Created" if action == "CREATED" else "Request Permanently Deleted"
         save_audit_entry({
             "AuditID": len(load_audit_log()) + 1,
             "Timestamp": timestamp,
@@ -658,13 +625,11 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "Amount": amount,
             "Decision_By": "-",
             "Decision_Date": "-",
-            "Field_Changed": fields,
-            "Old_Value": old_val,
-            "New_Value": new_val_text,
+            "Field_Changed": "-",
+            "Old_Value": "-",
+            "New_Value": "New Request Created" if action == "CREATED" else "Request Permanently Deleted",
             "IP_Address": "Auto-Logged"
         })
-
-    # ─── APPROVED / REJECTED / STATUS CHANGE ───
     elif action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
         status_text = "Approved" if action == "APPROVED" else "Rejected" if action == "REJECTED" else "Status Changed"
         save_audit_entry({
@@ -683,8 +648,6 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "New_Value": status_text,
             "IP_Address": "Auto-Logged"
         })
-
-    # ─── EDITED — Track Each Changed Field Separately ───
     elif action == "EDITED" and old_data and new_data:
         field_labels = {
             "emp_name": "Employee Name", "dept": "Department",
@@ -733,18 +696,14 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
                 "IP_Address": "Auto-Logged"
             })
 
-# ─── DISPLAY AUDIT LOG PANEL (FOR SUPER ADMIN) ────────────
 def display_audit_log_panel():
     st.subheader("📖 Full System Audit Log — Complete History")
     st.info("🔒 Super Admin Only — Cannot be deleted or modified.")
     st.divider()
-
     logs = load_audit_log()
     if not logs:
         st.info("📋 No activity recorded yet.")
         return
-
-    # ─── FILTERS ───
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
@@ -756,18 +715,13 @@ def display_audit_log_panel():
     with c4:
         req_list = sorted(set([str(l["Request_ID"]) for l in logs if str(l["Request_ID"]) != "-"]))
         filter_req = st.multiselect("🆔 Filter by Request ID", req_list)
-
-    # Apply filters
     filtered = logs
     if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
     if filter_dept: filtered = [l for l in filtered if l.get("Department", "") in filter_dept]
     if filter_action: filtered = [l for l in filtered if l["Action"] in filter_action]
     if filter_req: filtered = [l for l in filtered if str(l["Request_ID"]) in filter_req]
-
     st.metric(f"📄 Total Entries", len(filtered))
     st.divider()
-
-    # ─── DISPLAY ENTRIES ───
     for entry in reversed(filtered):
         aid = entry["AuditID"]
         ts = entry["Timestamp"]
@@ -782,8 +736,6 @@ def display_audit_log_panel():
         field = entry["Field_Changed"]
         old_val = entry["Old_Value"]
         new_val = entry["New_Value"]
-
-        # Icon mapping — includes ALL new actions
         icon = {
             "CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌",
             "DELETED": "🗑️", "STATUS_CHANGED": "🔄",
@@ -794,12 +746,10 @@ def display_audit_log_panel():
             "👤 User Account Deleted": "🗑️", "🔑 Password Changed": "🔑",
             "🔑 Password Reset": "🔑"
         }.get(action, "ℹ️")
-
         title = f"{icon} {action}"
         if str(req_id) != "-":
             title += f" — Request #{req_id}"
         title += f" | {user} ({role}) | {ts}"
-
         with st.expander(title):
             st.write(f"**🕐 Time:** {ts}")
             st.write(f"**👤 User:** {user} — *{role}*")
@@ -820,16 +770,13 @@ def display_audit_log_panel():
                     st.markdown(f"**➡️ New:** `{new_val}`")
             else:
                 st.write(f"**📋 Details:** {new_val}")
-
     st.divider()
-
-    # ─── EXPORT TO CSV ───
     df_export = pd.DataFrame(filtered)
     csv = df_export.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
 
 # ============================================================
-# PDF GENERATION
+# PDF GENERATION — Attachments go to PAGE 2 ✅
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -857,6 +804,7 @@ def generate_approval_pdf(request_data):
         dir_approve = format_date(fresh_data.get("decision_date", ""))
         dir_name = clean_text(fresh_data.get("decision_by", "Director"))
         dir_comments = clean_text(fresh_data.get("director_comments", ""))
+
         att_names = ""
         for field_key in ["attachment_name", "Attachment Name", "attachment", "Attachment"]:
             val = str(fresh_data.get(field_key, "")).strip()
@@ -870,6 +818,7 @@ def generate_approval_pdf(request_data):
                 clean_name = name.strip()
                 if clean_name and clean_name.lower() not in ["none", ""]:
                     display_files.append(clean_name)
+
         pdf = FPDF()
         pdf.add_page()
         if os.path.exists(LOGO_PATH):
@@ -936,6 +885,8 @@ def generate_approval_pdf(request_data):
         pdf.ln(8)
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
+
+        # ✅ ATTACHMENTS ON SEPARATE PAGE — PAGE 2
         pdf.add_page()
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="ATTACHMENTS", ln=True)
@@ -955,6 +906,7 @@ def generate_approval_pdf(request_data):
                 pdf.ln(3)
         else:
             pdf.cell(0, 5, "- No files attached", ln=True)
+
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
@@ -987,7 +939,7 @@ def change_my_password_form():
     with st.sidebar.expander("🔑 Change My Password", expanded=False):
         USERS = load_users()
         current_username = st.session_state.user_info["username"]
-        with st.form("change_my_password", clear_on_submit=True):
+        with st.form("change_my_password", clear_on
             old_pass = st.text_input("🔑 Current Password", type="password")
             new_pass1 = st.text_input("🔑 New Password", type="password")
             new_pass2 = st.text_input("🔑 Confirm New Password", type="password")
@@ -1530,9 +1482,9 @@ else:
                                 r["status"] = "pending"
                                 r["attachment_name"] = ", ".join(final_attachments) or "None"
                                 r["old_data"] = json.dumps(old_data_dict)
-                                r["director_comments"] = ""
-                                r["decision_date"] = ""
-                                r["decision_by"] = ""
+                                # r["director_comments"] = ""  # ✅ KEEP previous rejection reason visible!
+                                # r["decision_date"] = ""       # ✅ Optionally keep date too
+                                # r["decision_by"] = ""         # ✅ Optionally keep who rejected
                                 break
 
                         log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
@@ -1638,6 +1590,21 @@ else:
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
+                        prev_comments = req.get("director_comments", "").strip()
+                        old_data_json = req.get("old_data", "").strip()
+
+                        if prev_comments or (old_data_json and old_data_json != "{}"):
+                        st.divider()
+                        st.subheader("📋 Previous Review History")
+    
+                        # Show previous rejection reason
+                        if prev_comments:
+                        st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+    
+                        # Show Old → New comparison
+                        if old_data_json and old_data_json != "{}":
+                        with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                        show_old_new_comparison(old_data_json, req)
                         st.divider()
                         
                         with st.form(f"change_status_pending_{req['id']}"):
@@ -1682,6 +1649,21 @@ else:
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
+                        prev_comments = req.get("director_comments", "").strip()
+                        old_data_json = req.get("old_data", "").strip()
+
+                        if prev_comments or (old_data_json and old_data_json != "{}"):
+                        st.divider()
+                        st.subheader("📋 Previous Review History")
+    
+                        # Show previous rejection reason
+                        if prev_comments:
+                        st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+    
+                        # Show Old → New comparison
+                        if old_data_json and old_data_json != "{}":
+                        with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                        show_old_new_comparison(old_data_json, req)
                         st.divider()
                         
                         with st.form(f"change_status_approved_{req['id']}"):
@@ -1726,6 +1708,21 @@ else:
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.error(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
+                        prev_comments = req.get("director_comments", "").strip()
+                        old_data_json = req.get("old_data", "").strip()
+
+                        if prev_comments or (old_data_json and old_data_json != "{}"):
+                        st.divider()
+                        st.subheader("📋 Previous Review History")
+    
+                        # Show previous rejection reason
+                        if prev_comments:
+                        st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+    
+                        # Show Old → New comparison
+                        if old_data_json and old_data_json != "{}":
+                        with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                        show_old_new_comparison(old_data_json, req)
                         st.divider()
                         
                         with st.form(f"change_status_rejected_{req['id']}"):
