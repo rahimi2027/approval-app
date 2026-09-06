@@ -1636,19 +1636,20 @@ else:
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
+                        
+                        # ✅ FIXED: Proper indentation starting at line 1642
                         prev_comments = req.get("director_comments", "").strip()
                         old_data_json = req.get("old_data", "").strip()
-
-          if prev_comments or (old_data_json and old_data_json != "{}"):
-              st.divider()
-              st.subheader("📋 Previous Review History")
-    
-                        if prev_comments:
-                        st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
-                        if old_data_json and old_data_json != "{}":
-                        with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
-                        show_old_new_comparison(old_data_json, req)
-                        st.divider()
+                        if prev_comments or (old_data_json and old_data_json != "{}"):
+                            st.divider()
+                            st.subheader("📋 Previous Review History")
+                            
+                            if prev_comments:
+                                st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+                            if old_data_json and old_data_json != "{}":
+                                with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                                    show_old_new_comparison(old_data_json, req)
+                            st.divider()
                         
                         with st.form(f"change_status_pending_{req['id']}"):
                             st.subheader("🔧 Change Status")
@@ -1668,6 +1669,118 @@ else:
                                 update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
                                 log_action("REJECTED", req["id"])
                                 st.warning(f"❌ Request #{req['id']} REJECTED! Status updated.")
+                                st.rerun()
+                        
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+        
+        with tab_approved:
+            approved = [r for r in all_live_requests if r["status"] == "approved"]
+            if not approved:
+                st.info("📋 No approved requests yet.")
+            else:
+                st.metric("✅ Total Approved", len(approved))
+                st.divider()
+                for req in reversed(approved):
+                    approved_by_line = f"✅ Approved by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {approved_by_line}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        
+                        prev_comments = req.get("director_comments", "").strip()
+                        old_data_json = req.get("old_data", "").strip()
+                        if prev_comments or (old_data_json and old_data_json != "{}"):
+                            st.divider()
+                            st.subheader("📋 Previous Review History")
+                            
+                            if prev_comments:
+                                st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+                            if old_data_json and old_data_json != "{}":
+                                with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                                    show_old_new_comparison(old_data_json, req)
+                            st.divider()
+                        
+                        with st.form(f"change_status_approved_{req['id']}"):
+                            st.subheader("🔧 Change Status")
+                            comments = st.text_area("💬 Updated Comments (Optional)")
+                            col_pending, col_reject = st.columns(2)
+                            with col_pending:
+                                pending_btn = st.form_submit_button("⏳ Move to Pending")
+                            with col_reject:
+                                reject_btn = st.form_submit_button("❌ Change to REJECTED", type="secondary")
+                            
+                            if pending_btn:
+                                update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
+                                log_action("STATUS_CHANGED", req["id"])
+                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
+                                st.rerun()
+                            if reject_btn:
+                                update_record_status_in_excel(req["id"], "rejected", comments, FULL_NAME)
+                                log_action("REJECTED", req["id"])
+                                st.warning(f"❌ Request #{req['id']} changed to REJECTED!")
+                                st.rerun()
+                        
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+        
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+            if not rejected:
+                st.info("📋 No rejected requests yet.")
+            else:
+                st.metric("❌ Total Rejected", len(rejected))
+                st.divider()
+                for req in reversed(rejected):
+                    rejected_by_line = f"❌ Rejected by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
+                    title = f"🔴 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {rejected_by_line}"
+                    with st.expander(title):
+                        st.write(f"👤 **Employee:** {req['emp_name']}")
+                        st.write(f"🏢 **Department:** {req['dept']}")
+                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
+                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Request Date:** {req['date']}")
+                        st.error(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        
+                        prev_comments = req.get("director_comments", "").strip()
+                        old_data_json = req.get("old_data", "").strip()
+                        if prev_comments or (old_data_json and old_data_json != "{}"):
+                            st.divider()
+                            st.subheader("📋 Previous Review History")
+                            
+                            if prev_comments:
+                                st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+                            if old_data_json and old_data_json != "{}":
+                                with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                                    show_old_new_comparison(old_data_json, req)
+                            st.divider()
+                        
+                        with st.form(f"change_status_rejected_{req['id']}"):
+                            st.subheader("🔧 Change Status")
+                            comments = st.text_area("💬 Updated Comments (Optional)")
+                            col_pending, col_approve = st.columns(2)
+                            with col_pending:
+                                pending_btn = st.form_submit_button("⏳ Move to Pending")
+                            with col_approve:
+                                approve_btn = st.form_submit_button("✅ Change to APPROVED", type="primary")
+                            
+                            if pending_btn:
+                                update_record_status_in_excel(req["id"], "pending", comments, FULL_NAME)
+                                log_action("STATUS_CHANGED", req["id"])
+                                st.info(f"⏳ Request #{req['id']} moved back to PENDING!")
+                                st.rerun()
+                            if approve_btn:
+                                update_record_status_in_excel(req["id"], "approved", comments, FULL_NAME)
+                                log_action("APPROVED", req["id"])
+                                st.success(f"✅ Request #{req['id']} changed to APPROVED!")
                                 st.rerun()
                         
                         st.divider()
