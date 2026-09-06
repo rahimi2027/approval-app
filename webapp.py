@@ -1293,46 +1293,55 @@ else:
                 st.subheader(f"✏️ Edit Request #{eid}")
                 show_old_new_comparison("{}", rec)
 
-                # ─── ✅ ATTACHMENT MANAGEMENT: Show existing + Allow Remove ───
+                # ─────────────────────────────────────────
+                # ✅ FIXED: Show ALL existing attachments clearly
+                # ─────────────────────────────────────────
                 st.markdown("### 📎 Manage Attachments")
-                existing_files = []
                 att_name_raw = rec.get("attachment_name", "None")
-                if att_name_raw and att_name_raw.lower() != "none":
-                    existing_files = [n.strip() for n in att_name_raw.split(",") if n.strip()]
+                existing_files = []
+                if att_name_raw and str(att_name_raw).strip().lower() != "none":
+                    existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
 
                 files_to_keep = []
-                files_removed = False
+                files_to_remove = []
 
                 if existing_files:
-                    st.info(f"📋 {len(existing_files)} attachment(s) currently attached:")
+                    st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
                     for fname in existing_files:
                         file_path = os.path.join(UPLOAD_DIR, fname)
                         col_check, col_name, col_dl = st.columns([1, 5, 2])
-                        keep = col_check.checkbox(f"Keep", value=True, key=f"keep_att_{eid}_{fname}")
-                        col_name.markdown(f"• `{fname}`")
+                        # ✅ Unique & stable key using request ID + filename
+                        safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
+                        keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
+                        col_name.markdown(f"📄 `{fname}`")
                         if os.path.exists(file_path):
                             with open(file_path, "rb") as f:
-                                col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_att_{eid}_{fname}")
+                                col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
+                        else:
+                            col_dl.caption("⚠️ Missing")
+
                         if keep:
                             files_to_keep.append(fname)
                         else:
-                            files_removed = True
-                            # Optionally delete file from disk
-                            # if os.path.exists(file_path): os.remove(file_path)
-                else:
-                    st.info("📋 No existing attachments.")
+                            files_to_remove.append(fname)
 
-                st.markdown("#### ➕ Add New Attachments")
+                    if files_to_remove:
+                        st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
+                else:
+                    st.info("📋 No attachments currently attached.")
+
+                # ─── Add New Attachments ───
+                st.markdown("#### ➕ Attach New Files")
                 new_files_upload = st.file_uploader(
-                    "Upload replacement or additional files",
+                    "Upload additional files",
                     type=["pdf", "png", "jpg", "jpeg"],
                     accept_multiple_files=True,
-                    key=f"edit_upload_{eid}"
+                    key=f"new_upload_{eid}"
                 )
 
-                if files_removed or new_files_upload:
-                    st.info(f"✅ Will keep {len(files_to_keep)} existing + add {len(new_files_upload)} new file(s)")
+                st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload)} new** = {len(files_to_keep)+len(new_files_upload)} total files")
 
+                # ─── Edit Form ───
                 with st.form("edit_form"):
                     c1, c2 = st.columns(2)
                     with c1:
@@ -1342,65 +1351,60 @@ else:
                         amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec["amount"]))
                     with c2:
                         from datetime import datetime as dt
-                        try: d = dt.strptime(rec["date"][:10], "%Y-%m-%d")
+                        try: d = dt.strptime(str(rec["date"])[:10], "%Y-%m-%d")
                         except: d = dt.today()
                         dt_val = st.date_input("📅 Date", d)
                         mgr = st.text_input("👔 Line Manager", rec["manager"])
                         desc = st.text_area("📝 Description / Justification", rec["desc"])
 
-                        if st.form_submit_button("✅ Submit Edit", type="primary"):
-                            old = str({"emp_name": rec["emp_name"], "dept": rec["dept"], "type": rec["type"], "category": rec["category"], "date": rec["date"], "amount": rec["amount"], "manager": rec["manager"], "desc": rec["desc"]})
-                            records = load_records_from_excel()
+                    if st.form_submit_button("✅ Submit Edit", type="primary"):
+                        # ✅ Build final attachment list
+                        final_attachments = list(files_to_keep)  # Keep checked files
 
-                            for r in records:
-                                if int(r["id"]) == int(eid):
-                                    r["emp_name"] = en.strip()
-                                    r["type"] = rt
-                                    r["category"] = ct
-                                    r["amount"] = amt
-                                    r["date"] = str(dt_val)
-                                    r["manager"] = mgr.strip()
-                                    r["desc"] = desc.strip()
-                                    r["status"] = "pending"
-                                    r["old_data"] = old
-                                    r["director_comments"] = ""
-                                    r["decision_date"] = ""
-                                    r["decision_by"] = ""
+                        # ✅ Save newly uploaded files
+                        if new_files_upload:
+                            for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
+                                fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
+                                with open(os.path.join(UPLOAD_DIR, fn), "wb") as outfile:
+                                    outfile.write(f.getbuffer())
+                                final_attachments.append(fn)
 
-                                    # ─── ✅ BUILD FINAL ATTACHMENT LIST ───
-                                    final_attachments = list(files_to_keep)  # Keep checked ones
+                        # ✅ Update record
+                        records = load_records_from_excel()
+                        old_data_dict = {
+                            "emp_name": rec["emp_name"], "dept": rec["dept"],
+                            "type": rec["type"], "category": rec["category"],
+                            "date": rec["date"], "amount": rec["amount"],
+                            "manager": rec["manager"], "desc": rec["desc"]
+                        }
+                        new_data_dict = {
+                            "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+                            "category": ct, "date": str(dt_val), "amount": amt,
+                            "manager": mgr.strip(), "desc": desc.strip()
+                        }
 
-                                    # Save newly uploaded files
-                                    if new_files_upload:
-                                        for i, f in enumerate(new_files_upload):
-                                            fn = f"ID_{eid}_EDIT_F{len(final_attachments)+1}_{f.name}"
-                                            with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
-                                                out.write(f.getbuffer())
-                                            final_attachments.append(fn)
+                        for r in records:
+                            if int(r["id"]) == int(eid):
+                                r["emp_name"] = en.strip()
+                                r["type"] = rt
+                                r["category"] = ct
+                                r["amount"] = amt
+                                r["date"] = str(dt_val)
+                                r["manager"] = mgr.strip()
+                                r["desc"] = desc.strip()
+                                r["status"] = "pending"
+                                r["attachment_name"] = ", ".join(final_attachments) or "None"
+                                r["old_data"] = json.dumps(old_data_dict)
+                                r["director_comments"] = ""
+                                r["decision_date"] = ""
+                                r["decision_by"] = ""
+                                break
 
-                                    # Update record
-                                    if final_attachments:
-                                        r["attachment_name"] = ", ".join(final_attachments)
-                                    else:
-                                        r["attachment_name"] = "None"
-
-                            old_full = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
-                            old_data_dict = {
-                                "emp_name": old_full["emp_name"], "dept": old_full["dept"],
-                                "type": old_full["type"], "category": old_full["category"],
-                                "date": old_full["date"], "amount": old_full["amount"],
-                                "manager": old_full["manager"], "desc": old_full["desc"]
-                            }
-                            new_data_dict = {
-                                "emp_name": en.strip(), "dept": user["dept"], "type": rt,
-                                "category": ct, "date": str(dt_val), "amount": amt,
-                                "manager": mgr.strip(), "desc": desc.strip()
-                            }
-                            log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
-                            save_all_records(records)
-                            st.success(f"✅ Updated & sent for approval! Attachments updated.")
-                            st.session_state.editing_request_id = None
-                            st.rerun()
+                        log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
+                        save_all_records(records)
+                        st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload)}")
+                        st.session_state.editing_request_id = None
+                        st.rerun()
 
                 if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
                     st.session_state.editing_request_id = None
