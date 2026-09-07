@@ -572,6 +572,9 @@ AUDIT_COLUMNS = [
     "Decision_By", "Decision_Date", "Field_Changed",
     "Old_Value", "New_Value", "IP_Address"
 ]
+ALLOWED_CLEAR_ROLES = ["Super Admin"]
+ARCHIVE_FOLDER = "audit_archives/"
+]
 
 def init_audit_log():
     if not os.path.exists(AUDIT_LOG_PATH):
