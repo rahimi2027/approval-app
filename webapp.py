@@ -121,13 +121,77 @@ PERMISSION_DEFAULTS = {
         "can_approve_requests": True
     }
 }
-
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
     "can_generate_pdf": "📄 Generate & Download PDFs",
     "can_download_data": "📥 Download Data Backups",
     "can_approve_requests": "✅ Approve/Reject Requests"
 }
+
+# ============================================================
+# PDF LIBRARY
+# ============================================================
+try:
+    from fpdf2 import FPDF
+    PDF_AVAILABLE = True
+except ImportError:
+    try:
+        from fpdf import FPDF
+        PDF_AVAILABLE = True
+    except ImportError:
+        PDF_AVAILABLE = False
+
+# ============================================================
+# HELPER: Archive existing logs BEFORE clearing
+# ============================================================
+def archive_audit_log():
+    """Save current log to a timestamped read-only file"""
+    os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_path = os.path.join(ARCHIVE_FOLDER, f"audit_log_archive_{ts}.xlsx")
+    if os.path.exists(AUDIT_LOG_FILE):
+        df = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
+        df.to_excel(archive_path, index=False, engine="openpyxl")
+        return archive_path, len(df)
+    return None, 0
+
+# ============================================================
+# HELPER: Clear the log
+# ============================================================
+def clear_audit_log_file():
+    """Truncate/reset the audit log file"""
+    if os.path.exists(AUDIT_LOG_FILE):
+        os.remove(AUDIT_LOG_FILE)
+    pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
+
+# ============================================================
+# HELPER: Log the clearance event
+# ============================================================
+def log_new_entry(user, role, action, details):
+    """Write ONE entry — the clearance record"""
+    entry = pd.DataFrame([{
+        "AuditID": 1,
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "User_Name": user,
+        "User_Role": role,
+        "Action": action,
+        "Request_ID": "-",
+        "Department": "-",
+        "Amount": "-",
+        "Decision_By": "-",
+        "Decision_Date": "-",
+        "Field_Changed": "System Administration",
+        "Old_Value": "All Previous Entries Archived",
+        "New_Value": details,
+        "IP_Address": "Auto-Logged"
+    }])
+    if os.path.exists(AUDIT_LOG_FILE):
+        existing = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
+        combined = pd.concat([existing, entry], ignore_index=True)
+        combined["AuditID"] = range(1, len(combined) + 1)
+        combined.to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
+    else:
+        entry.to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
 
 # ============================================================
 # GITHUB AUTO-SAVE
@@ -296,61 +360,6 @@ def make_request_title(req):
         return f"🔴 ID #{req['id']} | {req['emp_name']} | REJECTED | {amount} | ❌ Rejected by {dec_by} on {decision_dt}"
     else:
         return f"⚪ ID #{req['id']} | {req['emp_name']} | {status} | {amount} | 📅 {dt}"
-
-# ============================================================
-# PAGE CONFIG & PATHS
-# ============================================================
-st.set_page_config(page_title="Acoole Electrical Ltd - Portal", layout="wide")
-if "win32" in sys.platform:
-    BASE_DIR = r"D:\Acoole_portal"
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# ✅ ADD THIS HERE — NOW BASE_DIR EXISTS!
-AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
-AUDIT_COLUMNS = [
-    "AuditID", "Timestamp", "User_Name", "User_Role",
-    "Action", "Request_ID", "Department", "Amount",
-    "Decision_By", "Decision_Date", "Field_Changed",
-    "Old_Value", "New_Value", "IP_Address"
-]
-ALLOWED_CLEAR_ROLES = ["Super Admin"]
-ARCHIVE_FOLDER = os.path.join(BASE_DIR, "audit_archives/")
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
-PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
-LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
-APPROVED_STAMP_PATH = os.path.join(BASE_DIR, "approved_stamp.png")
-REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
-EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
-USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
-SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
-
-os.makedirs(BASE_DIR, exist_ok=True)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(PDF_DIR, exist_ok=True)
-
-# ============================================================
-# DEFAULTS
-# ============================================================
-DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
-DEFAULT_ROLES = ["Manager", "Staff", "Director", "Payroll", "Super Admin"]
-DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
-
-EXCEL_COLUMNS = [
-    "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
-    "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name",
-    "Status", "Director Comments", "Decision Date", "Decision By",
-    "PDF File Path", "Edited From ID", "Old Data"
-]
-
-DEFAULT_USERS = [
-    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid"},
-    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator"},
-    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project"},
-    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts"},
-    {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd"},
-    {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration"},
-    {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department"}
-]
 
 # ============================================================
 # SETTINGS FUNCTIONS
@@ -569,16 +578,6 @@ def save_record_to_excel(new_record):
 # ============================================================
 # 📖 FULL AUDIT LOG SYSTEM
 # ============================================================
-AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
-AUDIT_COLUMNS = [
-    "AuditID", "Timestamp", "User_Name", "User_Role",
-    "Action", "Request_ID", "Department", "Amount",
-    "Decision_By", "Decision_Date", "Field_Changed",
-    "Old_Value", "New_Value", "IP_Address"
-]
-ALLOWED_CLEAR_ROLES = ["Super Admin"]
-ARCHIVE_FOLDER = "audit_archives/"
-
 def init_audit_log():
     if not os.path.exists(AUDIT_LOG_PATH):
         pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
@@ -627,14 +626,12 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
     username = user.get("full_name", user.get("username", "Unknown"))
     role = user.get("role", "Unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     SETTING_ACTIONS = [
         "CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
         "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED",
         "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED",
         "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET"
     ]
-
     if action in SETTING_ACTIONS:
         action_labels = {
             "CATEGORY_ADDED": "🏷️ Category Added",
@@ -672,11 +669,9 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "IP_Address": "Auto-Logged"
         })
         return
-
     dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
     final_decision_by = decision_by or saved_decision_by
     final_decision_date = decision_date or saved_decision_date
-
     if action in ["CREATED", "DELETED"]:
         save_audit_entry({
             "AuditID": len(load_audit_log()) + 1,
@@ -768,7 +763,6 @@ def display_audit_log_panel():
     if not logs:
         st.info("📋 No activity recorded yet.")
         return
-
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
@@ -780,16 +774,13 @@ def display_audit_log_panel():
     with c4:
         req_list = sorted(set([str(l["Request_ID"]) for l in logs if str(l["Request_ID"]) != "-"]))
         filter_req = st.multiselect("🆔 Filter by Request ID", req_list)
-
     filtered = logs
     if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
     if filter_dept: filtered = [l for l in filtered if l.get("Department", "") in filter_dept]
     if filter_action: filtered = [l for l in filtered if l["Action"] in filter_action]
     if filter_req: filtered = [l for l in filtered if str(l["Request_ID"]) in filter_req]
-
     st.metric(f"📄 Total Entries", len(filtered))
     st.divider()
-
     for entry in reversed(filtered):
         aid = entry["AuditID"]
         ts = entry["Timestamp"]
@@ -804,7 +795,6 @@ def display_audit_log_panel():
         field = entry["Field_Changed"]
         old_val = entry["Old_Value"]
         new_val = entry["New_Value"]
-
         icon = {
             "CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌",
             "DELETED": "🗑️", "STATUS_CHANGED": "🔄",
@@ -815,12 +805,10 @@ def display_audit_log_panel():
             "👤 User Account Deleted": "🗑️", "🔑 Password Changed": "🔑",
             "🔑 Password Reset": "🔑"
         }.get(action, "ℹ️")
-
         title = f"{icon} {action}"
         if str(req_id) != "-":
             title += f" — Request #{req_id}"
         title += f" | {user} ({role}) | {ts}"
-
         with st.expander(title):
             st.write(f"**🕐 Time:** {ts}")
             st.write(f"**👤 User:** {user} — *{role}*")
@@ -841,56 +829,10 @@ def display_audit_log_panel():
                     st.markdown(f"**➡️ New:** `{new_val}`")
             else:
                 st.write(f"**📋 Details:** {new_val}")
-
     st.divider()
     df_export = pd.DataFrame(filtered)
     csv = df_export.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
-# ─── AUDIT LOG CLEAR BUTTON (Super Admin ONLY) ──────
-st.subheader("🛡️ Audit Log Management")
-
-# Check permission FIRST
-user_role = st.session_state.get("role", "")
-username = st.session_state.get("username", "Unknown")
-
-if user_role in ALLOWED_CLEAR_ROLES:
-    st.warning("⚠️ **Danger Zone:** Clearing archives current logs first, then starts fresh.")
-
-    with st.expander("🗑️ Clear Audit Log (Super Admin Only)"):
-        st.info("Before clearing:\n1. Current logs will be archived automatically\n2. Clearance is logged as Entry #1\n3. Archived copy remains secure")
-
-        confirm1 = st.checkbox("✅ I have written approval to clear these logs")
-        confirm2 = st.checkbox("✅ I have reviewed and accept archival responsibility")
-
-        if st.button("🗑️ CLEAR ALL AUDIT LOGS", type="secondary"):
-            if not (confirm1 and confirm2):
-                st.error("❌ Please tick BOTH confirmation boxes first")
-                st.stop()
-
-            # 1 — Archive FIRST
-            archive_path, record_count = archive_audit_log()
-
-            # 2 — Clear the active log
-            clear_audit_log_file()
-
-            # 3 — Write clearance event → FIRST entry in new log
-            log_new_entry(
-                user=username,
-                role=user_role,
-                action="AUDIT_LOG_CLEARED",
-                details=f"Archived {record_count} records → {archive_path}"
-            )
-
-            st.success(f"""
-            ✅ **Audit Log Cleared Successfully**
-            - Archived **{record_count}** records
-            - Archive saved to: `{archive_path}`
-            - New log started with clearance record
-            """)
-            st.balloons()
-            st.rerun()
-else:
-    st.info("🔒 Audit log clearance: **Super Admin access required**")
 # ============================================================
 # PDF GENERATION — Attachments go to PAGE 2 ✅ FULLY FIXED
 # ============================================================
