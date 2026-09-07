@@ -1010,25 +1010,28 @@ def generate_approval_pdf(request_data):
         # ✅ PAGE 2: ATTACHMENTS — SEPARATE PAGE ✅ FULL FIX
         # ═══════════════════════════════════════════════════
         pdf.add_page()
-    #    pdf.set_font("Courier", "B", 12)
-    #    pdf.cell(0, 8, txt="ATTACHMENTS", ln=True)
-    #    pdf.ln(6)
-    #    pdf.set_font("Courier", "", 9)
-   #     if len(display_files) > 0:
-   #         pdf.cell(0, 6, f"Total Attachments: {len(display_files)}", ln=True)
-   #         pdf.ln(3)
-   #         for idx, fname in enumerate(display_files, 1):
-    #            fname_safe = clean_text(fname)
-    #            pdf.set_font("Courier", "B", 9)
-     #           pdf.cell(0, 6, f"{idx}. {fname_safe}", ln=True)
-     #           pdf.set_font("Courier", "", 9)
+        pdf.set_font("Courier", "B", 12)
+        pdf.cell(0, 8, txt="ATTACHMENTS", ln=True)
+        pdf.ln(6)
+        pdf.set_font("Courier", "", 9)
+
+        if len(display_files) > 0:
+            pdf.cell(0, 6, f"Total Attachments: {len(display_files)}", ln=True)
+            pdf.ln(3)
+
+            for idx, fname in enumerate(display_files, 1):
+                fname_safe = clean_text(fname)
+                pdf.set_font("Courier", "B", 9)
+                pdf.cell(0, 6, f"{idx}. {fname_safe}", ln=True)
+                pdf.set_font("Courier", "", 9)
+
                 file_path = os.path.join(UPLOAD_DIR, fname)
                 if os.path.exists(file_path):
                     if fname.lower().endswith((".png", ".jpg", ".jpeg")):
                         pdf.ln(2)
                         try:
                             pdf.image(file_path, x=10, w=190)
-                            pdf.ln(70)
+                            pdf.ln(70)  # Space for image
                         except Exception as img_err:
                             pdf.cell(0, 5, "     Warning: Preview could not be displayed", ln=True)
                             pdf.ln(3)
@@ -1038,9 +1041,12 @@ def generate_approval_pdf(request_data):
                 else:
                     pdf.cell(0, 5, "     Warning: File not found on server", ln=True)
                     pdf.ln(3)
-     #   else:
+        else:
             # ✅ SAFE ASCII-ONLY MESSAGE — no special characters
-            #pdf.cell(0, 6, "- No files were attached to this request", ln=True)
+            pdf.cell(0, 6, "- No files were attached to this request", ln=True)
+
+        # ✅ CLOSE THE BLOCK — ADD THIS LINE
+        # (your code was missing the proper indentation closure)
         # ─── SAVE & RETURN ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
