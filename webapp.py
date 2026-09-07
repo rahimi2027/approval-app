@@ -574,7 +574,6 @@ AUDIT_COLUMNS = [
 ]
 ALLOWED_CLEAR_ROLES = ["Super Admin"]
 ARCHIVE_FOLDER = "audit_archives/"
-]
 
 def init_audit_log():
     if not os.path.exists(AUDIT_LOG_PATH):
