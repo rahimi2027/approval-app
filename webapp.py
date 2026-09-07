@@ -21,6 +21,49 @@ import subprocess
 import pandas as pd
 from datetime import datetime, date
 
+
+# Ensure audit log file exists with correct columns
+def init_audit_log():
+    """Create empty audit_log.xlsx if missing"""
+    if not os.path.exists(AUDIT_LOG_FILE):
+        cols = [
+            "Timestamp", "User", "Role", "Action",
+            "Request_ID", "Description", "IP_Address"
+        ]
+        df = pd.DataFrame(columns=cols)
+        df.to_excel(AUDIT_LOG_FILE, index=False)
+        print(f"✅ Created {AUDIT_LOG_FILE}")
+
+def write_audit_log(user, role, action, request_id="", description="", ip=""):
+    """Append one entry to the audit log (append-only)"""
+    init_audit_log()  # Auto-create if missing
+    new_entry = {
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "User": user,
+        "Role": role,
+        "Action": action,
+        "Request_ID": request_id,
+        "Description": description,
+        "IP_Address": ip
+    }
+    try:
+        df = pd.read_excel(AUDIT_LOG_FILE)
+        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+        df.to_excel(AUDIT_LOG_FILE, index=False)
+        return True
+    except Exception as e:
+        print(f"❌ Audit log write failed: {e}")
+        return False
+
+def read_audit_log(limit=200):
+    """Read latest N audit log entries"""
+    if not os.path.exists(AUDIT_LOG_FILE):
+        return pd.DataFrame()
+    try:
+        df = pd.read_excel(AUDIT_LOG_FILE)
+        return df.tail(limit).sort_values("Timestamp", ascending=False)
+    except:
+        return pd.DataFrame()
 # ============================================================
 # ✅ PAGE CONFIG & ALL PATHS — DEFINED FIRST!
 # ============================================================
