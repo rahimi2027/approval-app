@@ -787,7 +787,7 @@ def display_audit_log_panel():
     st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
 
 # ============================================================
-# PDF GENERATION — Attachments go to PAGE 2 ✅ FULLY UPDATED
+# PDF GENERATION — Attachments go to PAGE 2 ✅ FULLY FIXED
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -799,14 +799,24 @@ def generate_approval_pdf(request_data):
             (r for r in all_recs if int(str(r.get("id", "0"))) == int(str(req_id))),
             request_data
         )
-
-        # ─── TEXT CLEANING HELPER ───
+        # ─── ✅ STRENGTHENED TEXT CLEANING HELPER ───
         def clean_text(t):
-            t = str(t).replace("\u2013", "-").replace("\u2014", "-").replace("\u2212", "-").replace("—", "-").replace("–", "-")
+            if t is None:
+                return ""
+            t = str(t)
+            # Replace common problematic Unicode dashes & symbols
+            t = t.replace("\u2013", "-")  # en-dash
+            t = t.replace("\u2014", "-")  # em-dash
+            t = t.replace("\u2212", "-")  # minus sign
+            t = t.replace("\u25b3", "(triangle)")  # △ symbol
+            t = t.replace("—", "-")
+            t = t.replace("–", "-")
+            # Remove ANY character outside Latin-1 range (0–255)
+            t = t.encode("latin-1", "ignore").decode("latin-1")
+            # Remove unsafe filename characters
             for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
                 t = t.replace(char, " ")
             return t.strip()
-
         # ─── EXTRACT FIELDS ───
         emp_name = clean_text(fresh_data.get("emp_name", "Unknown"))
         dept = clean_text(fresh_data.get("dept", ""))
@@ -820,7 +830,6 @@ def generate_approval_pdf(request_data):
         dir_approve = format_date(fresh_data.get("decision_date", ""))
         dir_name = clean_text(fresh_data.get("decision_by", "Director"))
         dir_comments = clean_text(fresh_data.get("director_comments", ""))
-
         # ─── ATTACHMENT DETECTION ───
         att_names = ""
         for field_key in ["attachment_name", "Attachment Name", "attachment", "Attachment"]:
@@ -835,11 +844,9 @@ def generate_approval_pdf(request_data):
                 clean_name = name.strip()
                 if clean_name and clean_name.lower() not in ["none", ""]:
                     display_files.append(clean_name)
-
         # ─── BUILD PDF ───
         pdf = FPDF()
         pdf.add_page()
-
         # ─── PAGE 1: HEADER & LOGO ───
         if os.path.exists(LOGO_PATH):
             pdf.image(LOGO_PATH, x=75, y=10, w=60)
@@ -851,7 +858,6 @@ def generate_approval_pdf(request_data):
         pdf.line(10, line_y, 200, line_y)
         pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
         pdf.ln(12)
-
         # ─── PAGE 1: REQUEST DETAILS ───
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True)
@@ -866,7 +872,6 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
         pdf.ln(6)
-
         # ─── PAGE 1: DESCRIPTION ───
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True)
@@ -874,7 +879,6 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Courier", "", 9)
         pdf.multi_cell(0, 5, desc)
         pdf.ln(8)
-
         # ─── PAGE 1: DIRECTOR APPROVAL ───
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
@@ -900,7 +904,6 @@ def generate_approval_pdf(request_data):
                 pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
         else:
             pdf.cell(52, 5, "Decision:", 0, 0); pdf.cell(0, 5, "Pending", ln=True)
-
         # ─── PAGE 1: SIGNATURE & STAMP ───
         pdf.ln(12)
         dash_y = pdf.get_y()
@@ -913,22 +916,21 @@ def generate_approval_pdf(request_data):
         pdf.ln(8)
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
-
         # ═══════════════════════════════════════════════════
-        # ✅ PAGE 2: ATTACHMENTS — SEPARATE PAGE ✅
+        # ✅ PAGE 2: ATTACHMENTS — SEPARATE PAGE ✅ FULL FIX
         # ═══════════════════════════════════════════════════
         pdf.add_page()
         pdf.set_font("Courier", "B", 12)
         pdf.cell(0, 8, txt="ATTACHMENTS", ln=True)
         pdf.ln(6)
         pdf.set_font("Courier", "", 9)
-
         if len(display_files) > 0:
             pdf.cell(0, 6, f"Total Attachments: {len(display_files)}", ln=True)
             pdf.ln(3)
             for idx, fname in enumerate(display_files, 1):
+                fname_safe = clean_text(fname)
                 pdf.set_font("Courier", "B", 9)
-                pdf.cell(0, 6, f"{idx}. {fname}", ln=True)
+                pdf.cell(0, 6, f"{idx}. {fname_safe}", ln=True)
                 pdf.set_font("Courier", "", 9)
                 file_path = os.path.join(UPLOAD_DIR, fname)
                 if os.path.exists(file_path):
@@ -938,35 +940,32 @@ def generate_approval_pdf(request_data):
                             pdf.image(file_path, x=10, w=190)
                             pdf.ln(70)
                         except Exception as img_err:
-                            pdf.cell(0, 5, f"     ⚠️ Preview could not be displayed: {str(img_err)}", ln=True)
+                            pdf.cell(0, 5, "     Warning: Preview could not be displayed", ln=True)
                             pdf.ln(3)
                     else:
-                        pdf.cell(0, 5, "     📄 Non-image file — see original upload", ln=True)
+                        pdf.cell(0, 5, "     Non-image file - see original upload", ln=True)
                         pdf.ln(3)
                 else:
-                    pdf.cell(0, 5, "     ⚠️ File not found on server", ln=True)
+                    pdf.cell(0, 5, "     Warning: File not found on server", ln=True)
                     pdf.ln(3)
         else:
+            # ✅ SAFE ASCII-ONLY MESSAGE — no special characters
             pdf.cell(0, 6, "- No files were attached to this request", ln=True)
-
         # ─── SAVE & RETURN ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
         safe_date = datetime.now().strftime("%Y-%m-%d")
         filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
-
         pdf_bytes = bytes(pdf.output())
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f:
             f.write(pdf_bytes)
-
         return True, pdf_bytes, filename
-
     except Exception as e:
         import traceback
-        return False, None, f"PDF Error: {str(e)} — {traceback.format_exc()}"
+        return False, None, f"PDF Error: {str(e)}"
 
 # ============================================================
 # PANEL FUNCTIONS
