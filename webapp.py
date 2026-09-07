@@ -19,10 +19,9 @@ import subprocess
 import pandas as pd
 from datetime import datetime, date
 # ─── CONFIG ──────────────────────────────────────────
-# ─── CONFIG ──────────────────────────────────────────
-AUDIT_LOG_FILE = os.path.join(BASE_DIR, "audit_log.xlsx")  # ✅ MATCHES MAIN SYSTEM
+AUDIT_LOG_FILE = os.path.join(BASE_DIR, "audit_log.xlsx")  # ❌ BASE_DIR doesn't exist yet!
 ARCHIVE_FOLDER = "audit_archives/"
-ALLOWED_CLEAR_ROLES = ["Super Admin"]  # ONLY these roles
+ALLOWED_CLEAR_ROLES = ["Super Admin"]
 
 # ─── HELPER: Archive existing logs BEFORE clearing ──
 # ─── HELPER: Archive existing logs BEFORE clearing ──
@@ -310,7 +309,16 @@ if "win32" in sys.platform:
     BASE_DIR = r"D:\Acoole_portal"
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
+# ✅ ADD THIS HERE — NOW BASE_DIR EXISTS!
+AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
+AUDIT_COLUMNS = [
+    "AuditID", "Timestamp", "User_Name", "User_Role",
+    "Action", "Request_ID", "Department", "Amount",
+    "Decision_By", "Decision_Date", "Field_Changed",
+    "Old_Value", "New_Value", "IP_Address"
+]
+ALLOWED_CLEAR_ROLES = ["Super Admin"]
+ARCHIVE_FOLDER = os.path.join(BASE_DIR, "audit_archives/")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
