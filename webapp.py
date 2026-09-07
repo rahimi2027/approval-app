@@ -1020,7 +1020,7 @@ def generate_approval_pdf(request_data):
             pdf.ln(3)
 
             for idx, fname in enumerate(display_files, 1):
-                fname_safe = clean_text(fname)
+          #      fname_safe = clean_text(fname)
                 pdf.set_font("Courier", "B", 9)
                 pdf.cell(0, 6, f"{idx}. {fname_safe}", ln=True)
                 pdf.set_font("Courier", "", 9)
