@@ -18,6 +18,61 @@ import shutil
 import subprocess
 import pandas as pd
 from datetime import datetime, date
+# ─── CONFIG ──────────────────────────────────────────
+# ─── CONFIG ──────────────────────────────────────────
+AUDIT_LOG_FILE = os.path.join(BASE_DIR, "audit_log.xlsx")  # ✅ MATCHES MAIN SYSTEM
+ARCHIVE_FOLDER = "audit_archives/"
+ALLOWED_CLEAR_ROLES = ["Super Admin"]  # ONLY these roles
+
+# ─── HELPER: Archive existing logs BEFORE clearing ──
+# ─── HELPER: Archive existing logs BEFORE clearing ──
+def archive_audit_log():
+    """Save current log to a timestamped read-only file"""
+    os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_path = os.path.join(ARCHIVE_FOLDER, f"audit_log_archive_{ts}.xlsx")
+
+    if os.path.exists(AUDIT_LOG_FILE):
+        df = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
+        df.to_excel(archive_path, index=False, engine="openpyxl")
+        return archive_path, len(df)
+    return None, 0
+
+# ─── HELPER: Clear the log ──────────────────────────
+def clear_audit_log_file():
+    """Truncate/reset the audit log file"""
+    if os.path.exists(AUDIT_LOG_FILE):
+        os.remove(AUDIT_LOG_FILE)
+    # Create fresh empty log with SAME columns as your system
+    pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
+
+# ─── HELPER: Log the clearance event ───────────────
+def log_new_entry(user, role, action, details):
+    """Write ONE entry — the clearance record"""
+    entry = pd.DataFrame([{
+        "AuditID": 1,
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "User_Name": user,
+        "User_Role": role,
+        "Action": action,
+        "Request_ID": "-",
+        "Department": "-",
+        "Amount": "-",
+        "Decision_By": "-",
+        "Decision_Date": "-",
+        "Field_Changed": "System Administration",
+        "Old_Value": "All Previous Entries Archived",
+        "New_Value": details,
+        "IP_Address": "Auto-Logged"
+    }])
+    if os.path.exists(AUDIT_LOG_FILE):
+        existing = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
+        combined = pd.concat([existing, entry], ignore_index=True)
+        # Renumber AuditID sequentially
+        combined["AuditID"] = range(1, len(combined) + 1)
+        combined.to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
+    else:
+        entry.to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
 
 # ─── PDF LIBRARY ───
 try:
@@ -785,7 +840,51 @@ def display_audit_log_panel():
     df_export = pd.DataFrame(filtered)
     csv = df_export.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
+# ─── AUDIT LOG CLEAR BUTTON (Super Admin ONLY) ──────
+st.subheader("🛡️ Audit Log Management")
 
+# Check permission FIRST
+user_role = st.session_state.get("role", "")
+username = st.session_state.get("username", "Unknown")
+
+if user_role in ALLOWED_CLEAR_ROLES:
+    st.warning("⚠️ **Danger Zone:** Clearing archives current logs first, then starts fresh.")
+
+    with st.expander("🗑️ Clear Audit Log (Super Admin Only)"):
+        st.info("Before clearing:\n1. Current logs will be archived automatically\n2. Clearance is logged as Entry #1\n3. Archived copy remains secure")
+
+        confirm1 = st.checkbox("✅ I have written approval to clear these logs")
+        confirm2 = st.checkbox("✅ I have reviewed and accept archival responsibility")
+
+        if st.button("🗑️ CLEAR ALL AUDIT LOGS", type="secondary"):
+            if not (confirm1 and confirm2):
+                st.error("❌ Please tick BOTH confirmation boxes first")
+                st.stop()
+
+            # 1 — Archive FIRST
+            archive_path, record_count = archive_audit_log()
+
+            # 2 — Clear the active log
+            clear_audit_log_file()
+
+            # 3 — Write clearance event → FIRST entry in new log
+            log_new_entry(
+                user=username,
+                role=user_role,
+                action="AUDIT_LOG_CLEARED",
+                details=f"Archived {record_count} records → {archive_path}"
+            )
+
+            st.success(f"""
+            ✅ **Audit Log Cleared Successfully**
+            - Archived **{record_count}** records
+            - Archive saved to: `{archive_path}`
+            - New log started with clearance record
+            """)
+            st.balloons()
+            st.rerun()
+else:
+    st.info("🔒 Audit log clearance: **Super Admin access required**")
 # ============================================================
 # PDF GENERATION — Attachments go to PAGE 2 ✅ FULLY FIXED
 # ============================================================
