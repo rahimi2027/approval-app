@@ -1,14 +1,16 @@
 # ============================================================
 # 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.1 (FULLY FIXED)
 # ============================================================
+# ✅ BASE_DIR defined FIRST — no more NameError!
+# ✅ Removed duplicate definitions
+# ✅ All variables exist before use
 # ✅ Silent missing-file warnings
 # ✅ Standardized all expander titles
 # ✅ Dashboard landing page with stats
 # ✅ Staff role = full Manager access
 # ✅ Clean status audit display
-# ✅ FIXED: Indentation, syntax & missing variables
 # ✅ PDF attachments on Page 2 — confirmed
-# ✅ FIXED: ALL Director portal indentation errors
+# ✅ ALL Director portal indentation errors fixed
 # ============================================================
 import streamlit as st
 import os
@@ -18,71 +20,65 @@ import shutil
 import subprocess
 import pandas as pd
 from datetime import datetime, date
-# ─── CONFIG ──────────────────────────────────────────
-AUDIT_LOG_FILE = os.path.join(BASE_DIR, "audit_log.xlsx")  # ❌ BASE_DIR doesn't exist yet!
-ARCHIVE_FOLDER = "audit_archives/"
+
+# ============================================================
+# ✅ PAGE CONFIG & ALL PATHS — DEFINED FIRST!
+# ============================================================
+st.set_page_config(page_title="Acoole Electrical Ltd - Portal", layout="wide")
+
+# ✅ DEFINE BASE_DIR BEFORE ANYTHING THAT USES IT
+if "win32" in sys.platform:
+    BASE_DIR = r"D:\Acoole_portal"
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ✅ ALL AUDIT & SYSTEM PATHS — NOW BASE_DIR EXISTS ✅
+AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
+AUDIT_LOG_FILE = AUDIT_LOG_PATH  # ✅ FIXED: Now BASE_DIR exists!
+AUDIT_COLUMNS = [
+    "AuditID", "Timestamp", "User_Name", "User_Role",
+    "Action", "Request_ID", "Department", "Amount",
+    "Decision_By", "Decision_Date", "Field_Changed",
+    "Old_Value", "New_Value", "IP_Address"
+]
 ALLOWED_CLEAR_ROLES = ["Super Admin"]
+ARCHIVE_FOLDER = os.path.join(BASE_DIR, "audit_archives/")
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
+PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
+LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
+APPROVED_STAMP_PATH = os.path.join(BASE_DIR, "approved_stamp.png")
+REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
+EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
+USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
+SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
 
-# ─── HELPER: Archive existing logs BEFORE clearing ──
-# ─── HELPER: Archive existing logs BEFORE clearing ──
-def archive_audit_log():
-    """Save current log to a timestamped read-only file"""
-    os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    archive_path = os.path.join(ARCHIVE_FOLDER, f"audit_log_archive_{ts}.xlsx")
+# ✅ Create folders if missing
+os.makedirs(BASE_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(PDF_DIR, exist_ok=True)
+os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 
-    if os.path.exists(AUDIT_LOG_FILE):
-        df = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
-        df.to_excel(archive_path, index=False, engine="openpyxl")
-        return archive_path, len(df)
-    return None, 0
-
-# ─── HELPER: Clear the log ──────────────────────────
-def clear_audit_log_file():
-    """Truncate/reset the audit log file"""
-    if os.path.exists(AUDIT_LOG_FILE):
-        os.remove(AUDIT_LOG_FILE)
-    # Create fresh empty log with SAME columns as your system
-    pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
-
-# ─── HELPER: Log the clearance event ───────────────
-def log_new_entry(user, role, action, details):
-    """Write ONE entry — the clearance record"""
-    entry = pd.DataFrame([{
-        "AuditID": 1,
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "User_Name": user,
-        "User_Role": role,
-        "Action": action,
-        "Request_ID": "-",
-        "Department": "-",
-        "Amount": "-",
-        "Decision_By": "-",
-        "Decision_Date": "-",
-        "Field_Changed": "System Administration",
-        "Old_Value": "All Previous Entries Archived",
-        "New_Value": details,
-        "IP_Address": "Auto-Logged"
-    }])
-    if os.path.exists(AUDIT_LOG_FILE):
-        existing = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
-        combined = pd.concat([existing, entry], ignore_index=True)
-        # Renumber AuditID sequentially
-        combined["AuditID"] = range(1, len(combined) + 1)
-        combined.to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
-    else:
-        entry.to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
-
-# ─── PDF LIBRARY ───
-try:
-    from fpdf2 import FPDF
-    PDF_AVAILABLE = True
-except ImportError:
-    try:
-        from fpdf import FPDF
-        PDF_AVAILABLE = True
-    except ImportError:
-        PDF_AVAILABLE = False
+# ============================================================
+# DEFAULTS
+# ============================================================
+DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
+DEFAULT_ROLES = ["Manager", "Staff", "Director", "Payroll", "Super Admin"]
+DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
+EXCEL_COLUMNS = [
+    "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
+    "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name",
+    "Status", "Director Comments", "Decision Date", "Decision By",
+    "PDF File Path", "Edited From ID", "Old Data"
+]
+DEFAULT_USERS = [
+    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid"},
+    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator"},
+    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project"},
+    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts"},
+    {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd"},
+    {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration"},
+    {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department"}
+]
 
 # ============================================================
 # 🔐 PERMISSION DEFAULTS
