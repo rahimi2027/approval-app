@@ -72,12 +72,16 @@ st.set_page_config(page_title="Acoole Electrical Ltd - Portal", layout="wide")
 # ✅ DEFINE BASE_DIR BEFORE ANYTHING THAT USES IT
 if "win32" in sys.platform:
     BASE_DIR = r"D:\Acoole_portal"
+    # ✅ On YOUR Windows PC — Attachments go to C: drive (extra space!)
+    UPLOAD_DIR = r"C:\acooleadditionbackup"
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    # ✅ On Streamlit Cloud / Linux — Use project folder
+    UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 
 # ✅ ALL AUDIT & SYSTEM PATHS — NOW BASE_DIR EXISTS ✅
 AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
-AUDIT_LOG_FILE = AUDIT_LOG_PATH  # ✅ FIXED: Now BASE_DIR exists!
+AUDIT_LOG_FILE = AUDIT_LOG_PATH
 AUDIT_COLUMNS = [
     "AuditID", "Timestamp", "User_Name", "User_Role",
     "Action", "Request_ID", "Department", "Amount",
@@ -86,7 +90,6 @@ AUDIT_COLUMNS = [
 ]
 ALLOWED_CLEAR_ROLES = ["Super Admin"]
 ARCHIVE_FOLDER = os.path.join(BASE_DIR, "audit_archives/")
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
 APPROVED_STAMP_PATH = os.path.join(BASE_DIR, "approved_stamp.png")
@@ -95,9 +98,9 @@ EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
 USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
 
-# ✅ Create folders if missing
+# ✅ Auto-create ALL required folders (no errors!)
 os.makedirs(BASE_DIR, exist_ok=True)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)  # Creates C:\acooleadditionbackup if missing
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 
