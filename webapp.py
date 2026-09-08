@@ -11,6 +11,7 @@
 # ✅ Clean status audit display
 # ✅ PDF attachments on Page 2 — confirmed
 # ✅ ALL Director portal indentation errors fixed
+# ✅ ✅ ✅ CREDENTIALS LOAD FROM FILE — NO MORE SECRETS BUG!
 # ============================================================
 import streamlit as st
 import os
@@ -31,21 +32,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ─── YOUR FOLDER ID ────────────────────────────────────────
 GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
 
-# ─── LOAD GOOGLE CREDENTIALS ───
-if "gcp_service_account" in st.secrets:
-    try:
-        raw = st.secrets["gcp_service_account"]
-        # ⭐ THIS LINE FIXES THE ERROR — Convert \n BEFORE parsing
-        fixed = raw.replace("\\\\n", "\\n")
-        SERVICE_ACCOUNT_INFO = json.loads(fixed)
-        st.success("✅ Credentials loaded successfully!")
-    except Exception as e:
-        st.error(f"⚠️ Error: {str(e)[:200]}")
-        SERVICE_ACCOUNT_INFO = {}
-else:
-    SERVICE_ACCOUNT_INFO = {}
+# ============================================================
+# ✅ LOAD GOOGLE CREDENTIALS FROM FILE — NO MORE SECRETS BUG!
+# ============================================================
+SERVICE_ACCOUNT_INFO = {}
+KEY_FILE = os.path.join(BASE_DIR, "service_account_key.json")
 
-# ✅ END OF FILE — DO NOT ADD ANY SERVICE_ACCOUNT_INFO BELOW HERE!
+if os.path.exists(KEY_FILE):
+    try:
+        with open(KEY_FILE, "r", encoding="utf-8") as f:
+            SERVICE_ACCOUNT_INFO = json.load(f)
+        st.success("✅ Google Drive credentials loaded successfully!")
+    except Exception as e:
+        st.error(f"⚠️ Failed to load credentials: {str(e)[:200]}")
+else:
+    st.warning("⚠️ Credentials file not found — uploads use local storage only")
 
 # ─── UPLOAD FUNCTIONS ────────────────────────────────────────
 def get_drive_service():
@@ -64,7 +65,6 @@ def upload_to_google_drive(local_file_path, display_filename):
     """Upload file → Returns Google Drive File ID"""
     service = get_drive_service()
     if not service: return None
-
     file_metadata = {
         "name": display_filename,
         "parents": [GOOGLE_DRIVE_FOLDER_ID]
@@ -75,13 +75,11 @@ def upload_to_google_drive(local_file_path, display_filename):
         media_body=media,
         fields="id, name"
     ).execute()
-
     # Make file accessible via link
     service.permissions().create(
         fileId=file.get("id"),
         body={"role": "reader", "type": "anyone"}
     ).execute()
-
     return file.get("id")
 
 def get_drive_link(file_id):
