@@ -23,13 +23,36 @@ import subprocess
 import pandas as pd
 from datetime import datetime, date
 
-# ─── PAGE CONFIG — FULL WIDTH ───
+# ============================================================
+# ─── PAGE CONFIG — FULL WIDTH (PERFECTED) ───
+# ============================================================
 st.set_page_config(
     page_title="Acoole Electrical Portal",
     page_icon="⚡",
-    layout="wide",  # ✅ THIS IS THE KEY — "wide" = full screen
+    layout="wide",  # ✅ FULL SCREEN WIDTH
     initial_sidebar_state="expanded"
 )
+
+# ─── STYLING — CLEAN & BALANCED ───
+st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 1.5rem;
+        padding-left: 2.5rem;
+        padding-right: 2.5rem;
+        max-width: 98% !important;
+    }
+    div[data-testid="stForm"] {
+        background-color: #f8f9fa;
+        padding: 1.5rem;
+        border-radius: 0.6rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ============================================================
+# ✅ KEEP YOUR EXISTING CODE BELOW THIS LINE
+# ============================================================
 
 # ─── OPTIONAL: FORCE MAX WIDTH ───
 st.markdown("""
