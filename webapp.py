@@ -707,6 +707,7 @@ def save_record_to_excel(new_record):
 # 📖 FULL AUDIT LOG SYSTEM
 # ============================================================
 def init_audit_log():
+    """Create empty audit_log.xlsx with ALL required columns"""
     if not os.path.exists(AUDIT_LOG_PATH):
         pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
 
@@ -1735,33 +1736,33 @@ else:
                 files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
                 desc = st.text_area("📝 Description / Justification")
             
-            if st.form_submit_button("📤 Send to Director", type="primary"):
-                if en.strip() and mgr.strip() and desc.strip():
-            att_list = []
-            if files:
-                for i, f in enumerate(files):
-                    fn = f"ID_{nid}_F{i+1}_{f.name}"
-                    file_path = os.path.join(UPLOAD_DIR, fn)
-                    with open(file_path, "wb") as out:
-                        out.write(f.getbuffer())
-                    att_list.append(fn)
-                    # ✅ Upload each file to Google Drive
-                    file_id = upload_to_google_drive(file_path, fn)
-                    if file_id:
-                        st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
-                    payload = {
-                        "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
-                        "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
-                        "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
-                        "status": "pending", "director_comments": "", "decision_date": "",
-                        "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
-                    }
-                    save_record_to_excel(payload)
-                    log_action("CREATED", nid)
-                    st.success(f"✅ Request #{nid} sent for approval!")
-                    st.rerun()
-                else:
-                    st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+if st.form_submit_button("📤 Send to Director", type="primary"):
+    if en.strip() and mgr.strip() and desc.strip():
+        att_list = []
+        if files:
+            for i, f in enumerate(files):
+                fn = f"ID_{nid}_F{i+1}_{f.name}"
+                file_path = os.path.join(UPLOAD_DIR, fn)
+                with open(file_path, "wb") as out:
+                    out.write(f.getbuffer())
+                att_list.append(fn)
+                # ✅ Upload each file to Google Drive
+                file_id = upload_to_google_drive(file_path, fn)
+                if file_id:
+                    st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
+        payload = {
+            "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+            "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
+            "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
+            "status": "pending", "director_comments": "", "decision_date": "",
+            "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
+        }
+        save_record_to_excel(payload)
+        log_action("CREATED", nid)
+        st.success(f"✅ Request #{nid} sent for approval!")
+        st.rerun()
+    else:
+        st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
         
         st.divider()
         st.subheader(f"📋 My Department Requests")
