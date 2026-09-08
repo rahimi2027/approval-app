@@ -1613,7 +1613,7 @@ else:
 # ✅ END OF ROLE-BASED PORTALS
 # ========================================================
 # Auto-save to GitHub after every page load
-github_auto_save()
+#github_auto_save()
 # ============================================================
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
