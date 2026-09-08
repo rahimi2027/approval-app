@@ -1083,9 +1083,7 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
 # ============================================================
-# ============================================================
-# ============================================================
-# MAIN APPLICATION — ROLE-BASED PORTALS
+# MAIN APPLICATION — ROLE-BASED PORTALS (✅ ORDER FIXED)
 # ============================================================
 else:
     user = st.session_state.user_info
@@ -1105,7 +1103,8 @@ else:
             st.rerun()
     st.divider()
 
-    # ─── PAYROLL PORTAL ───
+    # ✅ CORRECT ORDER: if → elif → elif → elif → elif → else
+    # ─── 1️⃣ PAYROLL PORTAL ───
     if user["role"] == "Payroll":
         st.subheader("🧾 Payroll Portal")
         st.info("✅ View all requests and Download PDFs."); st.divider()
@@ -1167,33 +1166,26 @@ else:
                         st.divider()
                         display_pdf_button(req, can_generate=True)
 
-    # ─── MANAGER / STAFF PORTAL ───
-    elif user["role"] in ["Manager", "Staff","Team Member"]:
+    # ─── 2️⃣ MANAGER / STAFF PORTAL ───
+    elif user["role"] in ["Manager", "Staff", "Team Member"]:
         if st.session_state.editing_request_id:
             eid = st.session_state.editing_request_id
             rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
             if rec:
                 st.subheader(f"✏️ Edit Request #{eid}")
                 show_old_new_comparison("{}", rec)
-
-                # ─────────────────────────────────────────
-                # ✅ FIXED: Show ALL existing attachments clearly
-                # ─────────────────────────────────────────
                 st.markdown("### 📎 Manage Attachments")
                 att_name_raw = rec.get("attachment_name", "None")
                 existing_files = []
                 if att_name_raw and str(att_name_raw).strip().lower() != "none":
                     existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
-
                 files_to_keep = []
                 files_to_remove = []
-
                 if existing_files:
                     st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
                     for fname in existing_files:
                         file_path = os.path.join(UPLOAD_DIR, fname)
                         col_check, col_name, col_dl = st.columns([1, 5, 2])
-                        # ✅ Unique & stable key using request ID + filename
                         safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
                         keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
                         col_name.markdown(f"📄 `{fname}`")
@@ -1202,18 +1194,14 @@ else:
                                 col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
                         else:
                             col_dl.caption("⚠️ Missing")
-
                         if keep:
                             files_to_keep.append(fname)
                         else:
                             files_to_remove.append(fname)
-
                     if files_to_remove:
                         st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
                 else:
                     st.info("📋 No attachments currently attached.")
-
-                # ─── Add New Attachments ───
                 st.markdown("#### ➕ Attach New Files")
                 new_files_upload = st.file_uploader(
                     "Upload additional files",
@@ -1221,10 +1209,7 @@ else:
                     accept_multiple_files=True,
                     key=f"new_upload_{eid}"
                 )
-
                 st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload)} new** = {len(files_to_keep)+len(new_files_upload)} total files")
-
-                # ─── Edit Form ───
                 with st.form("edit_form"):
                     c1, c2 = st.columns(2)
                     with c1:
@@ -1239,20 +1224,14 @@ else:
                         dt_val = st.date_input("📅 Date", d)
                         mgr = st.text_input("👔 Line Manager", rec["manager"])
                         desc = st.text_area("📝 Description / Justification", rec["desc"])
-
                     if st.form_submit_button("✅ Submit Edit", type="primary"):
-                        # ✅ Build final attachment list
-                        final_attachments = list(files_to_keep)  # Keep checked files
-
-                        # ✅ Save newly uploaded files
+                        final_attachments = list(files_to_keep)
                         if new_files_upload:
                             for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
                                 fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
                                 with open(os.path.join(UPLOAD_DIR, fn), "wb") as outfile:
                                     outfile.write(f.getbuffer())
                                 final_attachments.append(fn)
-
-                        # ✅ Update record
                         records = load_records_from_excel()
                         old_data_dict = {
                             "emp_name": rec["emp_name"], "dept": rec["dept"],
@@ -1265,7 +1244,6 @@ else:
                             "category": ct, "date": str(dt_val), "amount": amt,
                             "manager": mgr.strip(), "desc": desc.strip()
                         }
-
                         for r in records:
                             if int(r["id"]) == int(eid):
                                 r["emp_name"] = en.strip()
@@ -1278,17 +1256,12 @@ else:
                                 r["status"] = "pending"
                                 r["attachment_name"] = ", ".join(final_attachments) or "None"
                                 r["old_data"] = json.dumps(old_data_dict)
-                                # r["director_comments"] = ""  # ✅ KEEP previous rejection reason visible!
-                                # r["decision_date"] = ""       # ✅ Optionally keep date too
-                                # r["decision_by"] = ""         # ✅ Optionally keep who rejected
                                 break
-
                         log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
                         save_all_records(records)
                         st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload)}")
                         st.session_state.editing_request_id = None
                         st.rerun()
-
                 if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
                     st.session_state.editing_request_id = None
                     st.rerun()
@@ -1310,33 +1283,32 @@ else:
                 files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
                 desc = st.text_area("📝 Description / Justification")
             
-if st.form_submit_button("📤 Send to Director", type="primary"):
-    if en.strip() and mgr.strip() and desc.strip():
-        att_list = []
-        if files:
-            for i, f in enumerate(files):
-                fn = f"ID_{nid}_F{i+1}_{f.name}"
-                file_path = os.path.join(UPLOAD_DIR, fn)
-                with open(file_path, "wb") as out:
-                    out.write(f.getbuffer())
-                att_list.append(fn)
-                # ✅ Upload each file to Google Drive
-                file_id = upload_to_google_drive(file_path, fn)
-                if file_id:
-                    st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
-        payload = {
-            "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
-            "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
-            "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
-            "status": "pending", "director_comments": "", "decision_date": "",
-            "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
-        }
-        save_record_to_excel(payload)
-        log_action("CREATED", nid)
-        st.success(f"✅ Request #{nid} sent for approval!")
-        st.rerun()
-    else:
-        st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+            if st.form_submit_button("📤 Send to Director", type="primary"):
+                if en.strip() and mgr.strip() and desc.strip():
+                    att_list = []
+                    if files:
+                        for i, f in enumerate(files):
+                            fn = f"ID_{nid}_F{i+1}_{f.name}"
+                            file_path = os.path.join(UPLOAD_DIR, fn)
+                            with open(file_path, "wb") as out:
+                                out.write(f.getbuffer())
+                            att_list.append(fn)
+                            file_id = upload_to_google_drive(file_path, fn)
+                            if file_id:
+                                st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
+                    payload = {
+                        "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+                        "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
+                        "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
+                        "status": "pending", "director_comments": "", "decision_date": "",
+                        "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
+                    }
+                    save_record_to_excel(payload)
+                    log_action("CREATED", nid)
+                    st.success(f"✅ Request #{nid} sent for approval!")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
         
         st.divider()
         st.subheader(f"📋 My Department Requests")
@@ -1361,15 +1333,13 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                             st.session_state.editing_request_id = req["id"]
                             st.rerun()
 
-    # ─── DIRECTOR PORTAL ───
+    # ─── 3️⃣ DIRECTOR PORTAL ───
     elif user["role"] == "Director":
         st.subheader("🎛️ Director Approval Portal — Andy Acoole")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
         st.divider()
         tab_pending, tab_approved, tab_rejected = st.tabs([
-            "⏳ Pending Requests",
-            "✅ Approved Requests",
-            "❌ Rejected Requests"
+            "⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"
         ])
         
         with tab_pending:
@@ -1377,8 +1347,7 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
             if not pending:
                 st.success("✅ No pending requests — all reviewed!")
             else:
-                st.metric("⏳ Pending Approval", len(pending))
-                st.divider()
+                st.metric("⏳ Pending Approval", len(pending)); st.divider()
                 for req in reversed(pending):
                     title = f"🟡 ID #{req['id']} | {req['emp_name']} | PENDING | £{req['amount']:.2f} | 📅 {format_date(req['date'])} | {req['dept']}"
                     with st.expander(title):
@@ -1397,7 +1366,6 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         if prev_comments or (old_data_json and old_data_json != "{}"):
                             st.divider()
                             st.subheader("📋 Previous Review History")
-                            
                             if prev_comments:
                                 st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
                             if old_data_json and old_data_json != "{}":
@@ -1424,7 +1392,6 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                                 log_action("REJECTED", req["id"])
                                 st.warning(f"❌ Request #{req['id']} REJECTED! Status updated.")
                                 st.rerun()
-                        
                         st.divider()
                         display_pdf_button(req, can_generate=True)
         
@@ -1433,8 +1400,7 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
             if not approved:
                 st.info("📋 No approved requests yet.")
             else:
-                st.metric("✅ Total Approved", len(approved))
-                st.divider()
+                st.metric("✅ Total Approved", len(approved)); st.divider()
                 for req in reversed(approved):
                     approved_by_line = f"✅ Approved by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
                     title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {approved_by_line}"
@@ -1453,7 +1419,6 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         if prev_comments or (old_data_json and old_data_json != "{}"):
                             st.divider()
                             st.subheader("📋 Previous Review History")
-                            
                             if prev_comments:
                                 st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
                             if old_data_json and old_data_json != "{}":
@@ -1480,7 +1445,6 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                                 log_action("REJECTED", req["id"])
                                 st.warning(f"❌ Request #{req['id']} changed to REJECTED!")
                                 st.rerun()
-                        
                         st.divider()
                         display_pdf_button(req, can_generate=True, key_suffix="approved")
         
@@ -1489,8 +1453,7 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
             if not rejected:
                 st.info("📋 No rejected requests yet.")
             else:
-                st.metric("❌ Total Rejected", len(rejected))
-                st.divider()
+                st.metric("❌ Total Rejected", len(rejected)); st.divider()
                 for req in reversed(rejected):
                     rejected_by_line = f"❌ Rejected by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
                     title = f"🔴 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {rejected_by_line}"
@@ -1509,7 +1472,6 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         if prev_comments or (old_data_json and old_data_json != "{}"):
                             st.divider()
                             st.subheader("📋 Previous Review History")
-                            
                             if prev_comments:
                                 st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
                             if old_data_json and old_data_json != "{}":
@@ -1536,11 +1498,10 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                                 log_action("APPROVED", req["id"])
                                 st.success(f"✅ Request #{req['id']} changed to APPROVED!")
                                 st.rerun()
-                        
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-    
-    # ─── ✅ UPGRADED SUPER ADMIN PORTAL ───
+
+    # ─── 4️⃣ SUPER ADMIN PORTAL ───
     elif user["role"] == "Super Admin":
         st.subheader("🛡️ Super Admin — All Requests")
         st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
@@ -1642,6 +1603,11 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                             type="primary"
                         )
             st.caption("💾 Save these files to your computer for backup")
+
+    # ─── ✅ DEFAULT / FALLBACK (else = ALWAYS LAST!) ───
+    else:
+        st.subheader("🔐 Access Restricted")
+        st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
 
 # ========================================================
 # ✅ END OF ROLE-BASED PORTALS
