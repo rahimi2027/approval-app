@@ -1,6 +1,10 @@
-streamlit>=1.35.0
-pandas>=2.0.0
-openpyxl>=3.1.0
-xlsxwriter>=3.1.0
-python-dotenv>=1.0.0
-fpdf2>=2.7.0
+streamlit==1.35.0
+pandas==2.0.0
+openpyxl==3.1.0
+xlswriter==3.1.0
+python-dotenv==1.0.0
+fpdf2==2.7.0
+google-api-python-client==2.134.0
+google-auth==2.32.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0
