@@ -11,6 +11,7 @@
 # ✅ Clean status audit display
 # ✅ PDF attachments on Page 2 — confirmed
 # ✅ ALL Director portal indentation errors fixed
+# ✅ FIXED: elif-after-else SyntaxError
 # ✅ ✅ ✅ CREDENTIALS LOAD FROM FILE — NO MORE SECRETS BUG!
 # ============================================================
 import streamlit as st
@@ -26,141 +27,13 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 
-# ✅ DEFINE BASE_DIR FIRST (as promised in header)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ✅ ADD THIS LINE — UPLOAD_DIR was missing!
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
-
-# ─── YOUR FOLDER ID ────────────────────────────────────────
-GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
-
 # ============================================================
-# ✅ LOAD GOOGLE CREDENTIALS FROM FILE — NO MORE SECRETS BUG!
+# ✅ ALL CONFIGURATION IN ONE PLACE — DEFINED FIRST!
 # ============================================================
-SERVICE_ACCOUNT_INFO = {}
-KEY_FILE = os.path.join(BASE_DIR, "service_account_key.json")
-
-if os.path.exists(KEY_FILE):
-    try:
-        with open(KEY_FILE, "r", encoding="utf-8") as f:
-            SERVICE_ACCOUNT_INFO = json.load(f)
-        st.success("✅ Google Drive credentials loaded successfully!")
-    except Exception as e:
-        st.error(f"⚠️ Failed to load credentials: {str(e)[:200]}")
-else:
-    st.warning("⚠️ Credentials file not found — uploads use local storage only")
-
-# ─── UPLOAD FUNCTIONS ────────────────────────────────────────
-def get_drive_service():
-    """Authenticate and return Google Drive service"""
-    try:
-        credentials = service_account.Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO,
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build("drive", "v3", credentials=credentials)
-    except Exception as e:
-        st.error(f"❌ Google Drive Error: {e}")
-        return None
-
-def upload_to_google_drive(local_file_path, display_filename):
-    """Upload file → Returns Google Drive File ID"""
-    service = get_drive_service()
-    if not service:
-        st.error("❌ No Google Drive connection")
-        return None
-    
-    try:
-        st.info(f"📤 Uploading: {display_filename}")
-        st.info(f"📂 Target Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
-        
-        file_metadata = {
-            "name": display_filename,
-            "parents": [GOOGLE_DRIVE_FOLDER_ID]
-        }
-        media = MediaFileUpload(local_file_path, resumable=True)
-        
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id, name, parents"
-        ).execute()
-        
-        file_id = file.get("id")
-        parents = file.get("parents")
-        
-        # Set permissions
-        service.permissions().create(
-            fileId=file_id,
-            body={"role": "reader", "type": "anyone"}
-        ).execute()
-        
-        st.success(f"""
-        ✅ UPLOAD SUCCESSFUL!
-        📄 File ID: {file_id}
-        📁 Parent Folder: {parents}
-        🔗 Open File: https://drive.google.com/file/d/{file_id}/view
-        """)
-        return file_id
-        
-    except Exception as e:
-        st.error(f"""
-        ❌ UPLOAD FAILED!
-        Error: {str(e)}
-        💡 Check: Folder ID correct? Folder shared with service account?
-        """)
-        return None
-    #---------------------------------
-
-# Ensure audit log file exists with correct columns
-def init_audit_log():
-    """Create empty audit_log.xlsx if missing"""
-    if not os.path.exists(AUDIT_LOG_FILE):
-        cols = [
-            "Timestamp", "User", "Role", "Action",
-            "Request_ID", "Description", "IP_Address"
-        ]
-        df = pd.DataFrame(columns=cols)
-        df.to_excel(AUDIT_LOG_FILE, index=False)
-        print(f"✅ Created {AUDIT_LOG_FILE}")
-
-def write_audit_log(user, role, action, request_id="", description="", ip=""):
-    """Append one entry to the audit log (append-only)"""
-    init_audit_log()  # Auto-create if missing
-    new_entry = {
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "User": user,
-        "Role": role,
-        "Action": action,
-        "Request_ID": request_id,
-        "Description": description,
-        "IP_Address": ip
-    }
-    try:
-        df = pd.read_excel(AUDIT_LOG_FILE)
-        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-        df.to_excel(AUDIT_LOG_FILE, index=False)
-        return True
-    except Exception as e:
-        print(f"❌ Audit log write failed: {e}")
-        return False
-
-def read_audit_log(limit=200):
-    """Read latest N audit log entries"""
-    if not os.path.exists(AUDIT_LOG_FILE):
-        return pd.DataFrame()
-    try:
-        df = pd.read_excel(AUDIT_LOG_FILE)
-        return df.tail(limit).sort_values("Timestamp", ascending=False)
-    except:
-        return pd.DataFrame()
-# ============================================================
-# ─── CONFIG ──────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
-AUDIT_LOG_FILE = AUDIT_LOG_PATH   # ✅ ADDED — was missing!
+AUDIT_LOG_FILE = AUDIT_LOG_PATH
 AUDIT_COLUMNS = [
     "AuditID", "Timestamp", "User_Name", "User_Role",
     "Action", "Request_ID", "Department", "Amount",
@@ -176,12 +49,28 @@ REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
 EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
 USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
+GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
 
-# ✅ Auto-create ALL required folders (no errors!)
+# ✅ Auto-create ALL required folders
 os.makedirs(BASE_DIR, exist_ok=True)
-os.makedirs(UPLOAD_DIR, exist_ok=True)  # Creates C:\acooleadditionbackup if missing
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
+
+# ============================================================
+# ✅ LOAD GOOGLE CREDENTIALS FROM FILE — NO MORE SECRETS BUG!
+# ============================================================
+SERVICE_ACCOUNT_INFO = {}
+KEY_FILE = os.path.join(BASE_DIR, "service_account_key.json")
+if os.path.exists(KEY_FILE):
+    try:
+        with open(KEY_FILE, "r", encoding="utf-8") as f:
+            SERVICE_ACCOUNT_INFO = json.load(f)
+        st.success("✅ Google Drive credentials loaded successfully!")
+    except Exception as e:
+        st.error(f"⚠️ Failed to load credentials: {str(e)[:200]}")
+else:
+    st.warning("⚠️ Credentials file not found — uploads use local storage only")
 
 # ============================================================
 # DEFAULTS
@@ -205,46 +94,13 @@ DEFAULT_USERS = [
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department"}
 ]
 
-# ============================================================
-# 🔐 PERMISSION DEFAULTS
-# ============================================================
 PERMISSION_DEFAULTS = {
-    "Staff": {
-        "can_view_all_dept": False,
-        "can_generate_pdf": False,
-        "can_download_data": False,
-        "can_approve_requests": False
-    },
-    "Team Member": {
-        "can_view_all_dept": True,
-        "can_generate_pdf": False,
-        "can_download_data": False,
-        "can_approve_requests": False
-    },
-    "Manager": {
-        "can_view_all_dept": True,
-        "can_generate_pdf": True,
-        "can_download_data": False,
-        "can_approve_requests": False
-    },
-    "Director": {
-        "can_view_all_dept": True,
-        "can_generate_pdf": True,
-        "can_download_data": True,
-        "can_approve_requests": True
-    },
-    "Payroll": {
-        "can_view_all_dept": True,
-        "can_generate_pdf": True,
-        "can_download_data": True,
-        "can_approve_requests": False
-    },
-    "Super Admin": {
-        "can_view_all_dept": True,
-        "can_generate_pdf": True,
-        "can_download_data": True,
-        "can_approve_requests": True
-    }
+    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
+    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
+    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
+    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False},
+    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True}
 }
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
@@ -267,444 +123,40 @@ except ImportError:
         PDF_AVAILABLE = False
 
 # ============================================================
-# HELPER: Archive existing logs BEFORE clearing
+# UPLOAD FUNCTIONS
 # ============================================================
-def archive_audit_log():
-    """Save current log to a timestamped read-only file"""
-    os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    archive_path = os.path.join(ARCHIVE_FOLDER, f"audit_log_archive_{ts}.xlsx")
-    if os.path.exists(AUDIT_LOG_FILE):
-        df = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
-        df.to_excel(archive_path, index=False, engine="openpyxl")
-        return archive_path, len(df)
-    return None, 0
-
-# ============================================================
-# HELPER: Clear the log
-# ============================================================
-def clear_audit_log_file():
-    """Truncate/reset the audit log file"""
-    if os.path.exists(AUDIT_LOG_FILE):
-        os.remove(AUDIT_LOG_FILE)
-    pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
-
-# ============================================================
-# HELPER: Log the clearance event
-# ============================================================
-def log_new_entry(user, role, action, details):
-    """Write ONE entry — the clearance record"""
-    entry = pd.DataFrame([{
-        "AuditID": 1,
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "User_Name": user,
-        "User_Role": role,
-        "Action": action,
-        "Request_ID": "-",
-        "Department": "-",
-        "Amount": "-",
-        "Decision_By": "-",
-        "Decision_Date": "-",
-        "Field_Changed": "System Administration",
-        "Old_Value": "All Previous Entries Archived",
-        "New_Value": details,
-        "IP_Address": "Auto-Logged"
-    }])
-    if os.path.exists(AUDIT_LOG_FILE):
-        existing = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
-        combined = pd.concat([existing, entry], ignore_index=True)
-        combined["AuditID"] = range(1, len(combined) + 1)
-        combined.to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
-    else:
-        entry.to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
-
-# ============================================================
-# GITHUB AUTO-SAVE
-# ============================================================
-def github_auto_save():
-    """Push changed Excel files to GitHub automatically — Streamlit Cloud only"""
-    if not os.path.exists("/mount/src/"):
-        return
+def get_drive_service():
     try:
-        GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "").strip().strip('"').strip("'")
-        GITHUB_REPO = st.secrets.get("GITHUB_REPO", "").strip().strip('"').strip("'")
-        GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main").strip().strip('"').strip("'")
-        if not GITHUB_TOKEN or not GITHUB_REPO:
-            print("⚠️ Secrets missing — cannot auto-save")
-            return
-        os.system("git config --global user.name 'Streamlit Auto-Save'")
-        os.system("git config --global user.email 'rahimi2027@users.noreply.github.com'")
-        subprocess.run(["git", "checkout", GITHUB_BRANCH], capture_output=True)
-        data_files = ["requests.xlsx", "user_database.xlsx", "settings.xlsx"]
-        files_added = False
-        for f in data_files:
-            if os.path.exists(f):
-                subprocess.run(["git", "add", f], capture_output=True)
-                print(f"✅ Added file: {f}")
-                files_added = True
-        if not files_added:
-            return
-        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
-        if not status.stdout.strip():
-            print("ℹ️ No changes to save")
-            return
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        commit_msg = f"Auto-save: data updated {timestamp}"
-        subprocess.run(["git", "commit", "-m", commit_msg], capture_output=True, text=True)
-        remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
-        push_result = subprocess.run(
-            ["git", "push", remote_url, GITHUB_BRANCH],
-            capture_output=True, text=True,
-            env={**os.environ, "GIT_ASKPASS": "/bin/true"}
+        credentials = service_account.Credentials.from_service_account_info(
+            SERVICE_ACCOUNT_INFO, scopes=["https://www.googleapis.com/auth/drive"]
         )
-        if push_result.returncode == 0:
-            print("✅ SUCCESS: All data saved to GitHub!")
-        else:
-            print(f"⚠️ Push failed: {push_result.stderr}")
+        return build("drive", "v3", credentials=credentials)
     except Exception as e:
-        print(f"⚠️ Auto-save error: {str(e)}")
+        st.error(f"❌ Google Drive Error: {e}")
+        return None
 
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-def format_date(d):
-    if not d or str(d).strip() == "" or str(d).strip().lower() in ["none", "nan"]:
-        return "-"
-    return str(d).strip()[:10]
-
-def display_attachments(req):
-    """Silently skips missing files — NO yellow warnings!"""
-    att = req.get("attachment_name", "None")
-    if not att or str(att).strip() == "" or str(att).strip().lower() == "none":
-        st.info("📎 No attachments.")
-        return
+def upload_to_google_drive(local_file_path, display_filename):
+    service = get_drive_service()
+    if not service:
+        st.error("❌ No Google Drive connection")
+        return None
     try:
-        attached_files = [n.strip() for n in str(att).split(",")]
-        found_any = False
-        for idx, name in enumerate(attached_files):
-            path = os.path.join(UPLOAD_DIR, name)
-            if os.path.exists(path):
-                found_any = True
-                with open(path, "rb") as f:
-                    st.download_button(
-                        f"⬇️ Download {name}", f.read(),
-                        file_name=name, key=f"att_{req.get('id', idx)}_{idx}"
-                    )
-        if not found_any:
-            st.info("📎 Attachments referenced but files not available.")
+        st.info(f"📤 Uploading: {display_filename}")
+        file_metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
+        media = MediaFileUpload(local_file_path, resumable=True)
+        file = service.files().create(body=file_metadata, media_body=media, fields="id, name, parents").execute()
+        file_id = file.get("id")
+        service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
+        st.success(f"✅ UPLOAD SUCCESSFUL! File ID: {file_id}")
+        return file_id
     except Exception as e:
-        st.info(f"📎 Attachments: {att}")
-
-def display_pdf_button(req, can_generate=False, key_suffix=""):
-    req_id = req["id"]
-    unique_key = f"genpdf_{req_id}_{key_suffix}"
-    if can_generate and PDF_AVAILABLE:
-        st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=unique_key)
-        ok, pdf_bytes, name = generate_approval_pdf(req)
-        if ok:
-            st.success(f"✅ Generated! Ready to download ⬇")
-            st.download_button(
-                f"📥 Download: {name}", data=pdf_bytes, file_name=name,
-                mime="application/pdf", type="primary", key=f"dl_{unique_key}"
-            )
-        else:
-            st.error(f"❌ {name}")
-    return False
-
-def get_next_id(all_records):
-    if not all_records:
-        return 1
-    return max(int(r.get("id", 0)) for r in all_records) + 1
-
-def update_record_status_in_excel(req_id, new_status, comments, approved_by):
-    records = load_records_from_excel()
-    decision_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for r in records:
-        if int(r["id"]) == int(req_id):
-            r["status"] = new_status.lower()
-            r["decision_date"] = decision_datetime
-            r["decision_by"] = approved_by
-            if comments.strip():
-                ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-                r["director_comments"] = f"[{ts}] {comments.strip()}"
-            r["pdf_path"] = ""
-            break
-    save_all_records(records)
-
-def delete_record_by_id(req_id):
-    records = load_records_from_excel()
-    records = [r for r in records if int(r["id"]) != int(req_id)]
-    save_all_records(records)
-    log_action("DELETED", req_id)
-
-def show_old_new_comparison(old_json, new_rec):
-    try:
-        old = json.loads(old_json) if old_json and old_json != "{}" else {}
-    except:
-        old = {}
-    if not old:
-        st.info("📋 New request — no previous version.")
-        return
-    st.markdown("#### 🔄 Changes (Previous → New)")
-    fields = [
-        ("emp_name", "Employee Name"), ("dept", "Department"),
-        ("type", "Transaction Type"), ("category", "Category"),
-        ("date", "Date"), ("amount", "Amount (£)"),
-        ("manager", "Line Manager"), ("desc", "Description")
-    ]
-    changed = False
-    for key, label in fields:
-        o = str(old.get(key, "")).strip()
-        n = str(new_rec.get(key, "")).strip()
-        if o != n:
-            changed = True
-            st.markdown(f"**{label}**: ~~`{o}`~~ → **`{n}`**")
-    if not changed:
-        st.info("✅ No changes detected.")
-
-def refresh_data_button():
-    if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
-        st.session_state["_last_refresh"] = datetime.now().isoformat()
-        st.rerun()
+        st.error(f"❌ UPLOAD FAILED! Error: {str(e)}")
+        return None
 
 # ============================================================
-# 📊 STANDARDIZED TITLE HELPER
-# ============================================================
-def make_request_title(req):
-    """Standard format: [ICON] ID #X | Name | STATUS | £0.00 | Date/Decision"""
-    status = req["status"].upper()
-    amount = f"£{req['amount']:.2f}"
-    dt = format_date(req.get("date", ""))
-    decision_dt = format_date(req.get("decision_date", ""))
-    dec_by = req.get("decision_by", "")
-    if req["status"] == "pending":
-        return f"🟡 ID #{req['id']} | {req['emp_name']} | PENDING | {amount} | 📅 {dt}"
-    elif req["status"] == "approved":
-        return f"🟢 ID #{req['id']} | {req['emp_name']} | APPROVED | {amount} | ✅ Approved by {dec_by} on {decision_dt}"
-    elif req["status"] == "rejected":
-        return f"🔴 ID #{req['id']} | {req['emp_name']} | REJECTED | {amount} | ❌ Rejected by {dec_by} on {decision_dt}"
-    else:
-        return f"⚪ ID #{req['id']} | {req['emp_name']} | {status} | {amount} | 📅 {dt}"
-
-# ============================================================
-# SETTINGS FUNCTIONS
-# ============================================================
-def init_settings():
-    if not os.path.exists(SETTINGS_PATH):
-        pd.DataFrame([
-            {"setting": "categories", "value": "|".join(DEFAULT_CATEGORIES)},
-            {"setting": "roles", "value": "|".join(DEFAULT_ROLES)},
-            {"setting": "departments", "value": "|".join(DEFAULT_DEPARTMENTS)}
-        ]).to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
-def load_departments():
-    init_settings()
-    try:
-        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-        for _, r in df.iterrows():
-            if r["setting"] == "departments":
-                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
-                return vals if vals else DEFAULT_DEPARTMENTS.copy()
-        return DEFAULT_DEPARTMENTS.copy()
-    except Exception as e:
-        print(f"Load depts error: {e}")
-        return DEFAULT_DEPARTMENTS.copy()
-
-def save_departments(dept_list):
-    init_settings()
-    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-    found = False
-    for idx, r in df.iterrows():
-        if r["setting"] == "departments":
-            df.at[idx, "value"] = "|".join(dept_list)
-            found = True
-    if not found:
-        df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
-    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
-def load_categories():
-    init_settings()
-    try:
-        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-        for _, r in df.iterrows():
-            if r["setting"] == "categories":
-                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
-                return vals if vals else DEFAULT_CATEGORIES
-        return DEFAULT_CATEGORIES
-    except:
-        return DEFAULT_CATEGORIES
-
-def save_categories(cat_list):
-    init_settings()
-    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-    found = False
-    for idx, r in df.iterrows():
-        if r["setting"] == "categories":
-            df.at[idx, "value"] = "|".join(cat_list)
-            found = True
-    if not found:
-        df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(cat_list)}])], ignore_index=True)
-    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
-def load_roles():
-    init_settings()
-    try:
-        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-        for _, r in df.iterrows():
-            if r["setting"] == "roles":
-                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
-                return vals if vals else DEFAULT_ROLES
-        return DEFAULT_ROLES
-    except:
-        return DEFAULT_ROLES
-
-def save_roles(roles_list):
-    init_settings()
-    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-    found = False
-    for idx, r in df.iterrows():
-        if r["setting"] == "roles":
-            df.at[idx, "value"] = "|".join(roles_list)
-            found = True
-    if not found:
-        df = pd.concat([df, pd.DataFrame([{"setting": "roles", "value": "|".join(roles_list)}])], ignore_index=True)
-    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
-# ============================================================
-# USER DATABASE
-# ============================================================
-def init_user_db():
-    if not os.path.exists(USER_DB_PATH):
-        pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-
-def save_users(users_dict):
-    rows = []
-    for username, u in users_dict.items():
-        rows.append({
-            "full_name": u.get("full_name", username),
-            "username": username,
-            "password": u.get("password", ""),
-            "role": u.get("role", "Staff"),
-            "dept": u.get("dept", ""),
-            "can_view_all_dept": u.get("can_view_all_dept", False),
-            "can_generate_pdf": u.get("can_generate_pdf", False),
-            "can_download_data": u.get("can_download_data", False),
-            "can_approve_requests": u.get("can_approve_requests", False),
-        })
-    pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-
-def load_users():
-    init_user_db()
-    try:
-        df = pd.read_excel(USER_DB_PATH, engine="openpyxl").fillna("")
-        users = {}
-        for _, r in df.iterrows():
-            users[r["username"]] = {
-                "full_name": str(r.get("full_name", r["username"])).strip(),
-                "password": str(r["password"]),
-                "role": str(r["role"]),
-                "dept": str(r["dept"]),
-                "can_view_all_dept": str(r.get("can_view_all_dept", "False")).lower() == "true",
-                "can_generate_pdf": str(r.get("can_generate_pdf", "False")).lower() == "true",
-                "can_download_data": str(r.get("can_download_data", "False")).lower() == "true",
-                "can_approve_requests": str(r.get("can_approve_requests", "False")).lower() == "true"
-            }
-        return users
-    except Exception as e:
-        st.error(f"User DB Load Error: {e}")
-        return {}
-
-# ============================================================
-# REQUESTS EXCEL
-# ============================================================
-def initialise_excel():
-    if not os.path.exists(EXCEL_PATH):
-        pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-    else:
-        df = pd.read_excel(EXCEL_PATH, engine="openpyxl")
-        for col in EXCEL_COLUMNS:
-            if col not in df.columns:
-                df[col] = ""
-        df.to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-
-initialise_excel()
-
-def load_records_from_excel():
-    try:
-        if not os.path.exists(EXCEL_PATH):
-            return []
-        df = pd.read_excel(EXCEL_PATH, engine="openpyxl").fillna("")
-        if df.empty:
-            return []
-        records = df.to_dict(orient="records")
-        parsed = []
-        for r in records:
-            try:
-                record_id = int(r.get("ID", 0))
-            except:
-                record_id = 0
-            try:
-                amount = float(r.get("Amount (£)", 0))
-            except:
-                amount = 0.0
-            parsed.append({
-                "id": record_id,
-                "emp_name": str(r.get("Employee Name", "Not Specified")).strip(),
-                "dept": str(r.get("Department", "Not Specified")).strip(),
-                "type": str(r.get("Transaction Type", "Not Specified")).strip(),
-                "category": str(r.get("Category Reason", "Not Specified")).strip(),
-                "date": str(r.get("Date", "")).strip(),
-                "amount": amount,
-                "manager": str(r.get("Line Manager", "Not Specified")).strip(),
-                "desc": str(r.get("Description", "")).strip(),
-                "attachment_name": str(r.get("Attachment Name", "None")).strip(),
-                "status": str(r.get("Status", "pending")).strip().lower(),
-                "director_comments": str(r.get("Director Comments", "")).strip(),
-                "decision_date": str(r.get("Decision Date", "")).strip(),
-                "decision_by": str(r.get("Decision By", "")).strip(),
-                "pdf_path": str(r.get("PDF File Path", "")).strip(),
-                "edited_from_id": str(r.get("Edited From ID", "")).strip(),
-                "old_data": str(r.get("Old Data", "")).strip()
-            })
-        return parsed
-    except Exception as e:
-        st.error(f"Load Error: {e}")
-        return []
-
-def save_all_records(records):
-    export = []
-    for r in records:
-        export.append({
-            "ID": int(r.get("id", 0)),
-            "Employee Name": str(r.get("emp_name", "")),
-            "Department": str(r.get("dept", "")),
-            "Transaction Type": str(r.get("type", "")),
-            "Category Reason": str(r.get("category", "")),
-            "Date": str(r.get("date", "")),
-            "Amount (£)": float(r.get("amount", 0.0)),
-            "Line Manager": str(r.get("manager", "")),
-            "Description": str(r.get("desc", "")),
-            "Attachment Name": str(r.get("attachment_name", "None")),
-            "Status": str(r.get("status", "pending")).lower(),
-            "Director Comments": str(r.get("director_comments", "")),
-            "Decision Date": str(r.get("decision_date", "")),
-            "Decision By": str(r.get("decision_by", "")),
-            "PDF File Path": str(r.get("pdf_path", "")),
-            "Edited From ID": str(r.get("edited_from_id", "")),
-            "Old Data": str(r.get("old_data", ""))
-        })
-    pd.DataFrame(export, columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-
-def save_record_to_excel(new_record):
-    current = load_records_from_excel()
-    current.append(new_record)
-    save_all_records(current)
-
-# ============================================================
-# 📖 FULL AUDIT LOG SYSTEM
+# AUDIT LOG FUNCTIONS
 # ============================================================
 def init_audit_log():
-    """Create empty audit_log.xlsx with ALL required columns"""
     if not os.path.exists(AUDIT_LOG_PATH):
         pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
 
@@ -721,17 +173,28 @@ def save_audit_entry(entry):
     init_audit_log()
     try:
         df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
-        new_row = pd.DataFrame([entry])
-        df = pd.concat([df, new_row], ignore_index=True)
+        df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
         df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
     except Exception as e:
         print(f"⚠️ Failed to save audit entry: {e}")
 
+def archive_audit_log():
+    os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_path = os.path.join(ARCHIVE_FOLDER, f"audit_log_archive_{ts}.xlsx")
+    if os.path.exists(AUDIT_LOG_FILE):
+        df = pd.read_excel(AUDIT_LOG_FILE, engine="openpyxl")
+        df.to_excel(archive_path, index=False, engine="openpyxl")
+        return archive_path, len(df)
+    return None, 0
+
+def clear_audit_log_file():
+    if os.path.exists(AUDIT_LOG_FILE):
+        os.remove(AUDIT_LOG_FILE)
+    pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
+
 def get_request_details(req_id):
-    dept = "-"
-    amount = "-"
-    decision_by = "-"
-    decision_date = "-"
+    dept, amount, decision_by, decision_date = "-", "-", "-", "-"
     try:
         all_recs = load_records_from_excel()
         req = next((r for r in all_recs if str(r.get("id")) == str(req_id)), None)
@@ -752,134 +215,56 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
     username = user.get("full_name", user.get("username", "Unknown"))
     role = user.get("role", "Unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    SETTING_ACTIONS = [
-        "CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
+    SETTING_ACTIONS = ["CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
         "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED",
         "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED",
-        "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET"
-    ]
+        "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET"]
     if action in SETTING_ACTIONS:
         action_labels = {
-            "CATEGORY_ADDED": "🏷️ Category Added",
-            "CATEGORY_EDITED": "🏷️ Category Edited",
-            "CATEGORY_DELETED": "🏷️ Category Deleted",
-            "DEPARTMENT_ADDED": "🏢 Department Added",
-            "DEPARTMENT_EDITED": "🏢 Department Edited",
-            "DEPARTMENT_DELETED": "🏢 Department Deleted",
-            "ROLE_ADDED": "🎖️ Role Added",
-            "ROLE_EDITED": "🎖️ Role/Permissions Edited",
-            "ROLE_DELETED": "🎖️ Role Deleted",
-            "USER_CREATED": "👤 User Account Created",
-            "USER_EDITED": "👤 User Account Edited",
-            "USER_DELETED": "👤 User Account Deleted",
-            "PASSWORD_CHANGED": "🔑 Password Changed",
-            "PASSWORD_RESET": "🔑 Password Reset"
+            "CATEGORY_ADDED": "🏷️ Category Added", "CATEGORY_EDITED": "🏷️ Category Edited", "CATEGORY_DELETED": "🏷️ Category Deleted",
+            "DEPARTMENT_ADDED": "🏢 Department Added", "DEPARTMENT_EDITED": "🏢 Department Edited", "DEPARTMENT_DELETED": "🏢 Department Deleted",
+            "ROLE_ADDED": "🎖️ Role Added", "ROLE_EDITED": "🎖️ Role/Permissions Edited", "ROLE_DELETED": "🎖️ Role Deleted",
+            "USER_CREATED": "👤 User Account Created", "USER_EDITED": "👤 User Account Edited",
+            "USER_DELETED": "👤 User Account Deleted", "PASSWORD_CHANGED": "🔑 Password Changed", "PASSWORD_RESET": "🔑 Password Reset"
         }
         display_action = action_labels.get(action, action)
         old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
         new_val = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
-        save_audit_entry({
-            "AuditID": len(load_audit_log()) + 1,
-            "Timestamp": timestamp,
-            "User_Name": username,
-            "User_Role": role,
-            "Action": display_action,
-            "Request_ID": str(req_id),
-            "Department": "-",
-            "Amount": "-",
-            "Decision_By": "-",
-            "Decision_Date": "-",
-            "Field_Changed": "System Configuration",
-            "Old_Value": old_val,
-            "New_Value": new_val,
-            "IP_Address": "Auto-Logged"
-        })
+        save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+            "User_Name": username, "User_Role": role, "Action": display_action,
+            "Request_ID": str(req_id), "Department": "-", "Amount": "-",
+            "Decision_By": "-", "Decision_Date": "-", "Field_Changed": "System Configuration",
+            "Old_Value": old_val, "New_Value": new_val, "IP_Address": "Auto-Logged"})
         return
     dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
     final_decision_by = decision_by or saved_decision_by
     final_decision_date = decision_date or saved_decision_date
     if action in ["CREATED", "DELETED"]:
-        save_audit_entry({
-            "AuditID": len(load_audit_log()) + 1,
-            "Timestamp": timestamp,
-            "User_Name": username,
-            "User_Role": role,
-            "Action": action,
-            "Request_ID": str(req_id),
-            "Department": dept,
-            "Amount": amount,
-            "Decision_By": "-",
-            "Decision_Date": "-",
-            "Field_Changed": "-",
-            "Old_Value": "-",
+        save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+            "User_Name": username, "User_Role": role, "Action": action, "Request_ID": str(req_id),
+            "Department": dept, "Amount": amount, "Decision_By": "-", "Decision_Date": "-",
+            "Field_Changed": "-", "Old_Value": "-",
             "New_Value": "New Request Created" if action == "CREATED" else "Request Permanently Deleted",
-            "IP_Address": "Auto-Logged"
-        })
+            "IP_Address": "Auto-Logged"})
     elif action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
         status_text = "Approved" if action == "APPROVED" else "Rejected" if action == "REJECTED" else "Status Changed"
-        save_audit_entry({
-            "AuditID": len(load_audit_log()) + 1,
-            "Timestamp": timestamp,
-            "User_Name": username,
-            "User_Role": role,
-            "Action": action,
-            "Request_ID": str(req_id),
-            "Department": dept,
-            "Amount": amount,
-            "Decision_By": final_decision_by,
-            "Decision_Date": final_decision_date,
-            "Field_Changed": "Status",
-            "Old_Value": "Pending",
-            "New_Value": status_text,
-            "IP_Address": "Auto-Logged"
-        })
+        save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+            "User_Name": username, "User_Role": role, "Action": action, "Request_ID": str(req_id),
+            "Department": dept, "Amount": amount, "Decision_By": final_decision_by,
+            "Decision_Date": final_decision_date, "Field_Changed": "Status",
+            "Old_Value": "Pending", "New_Value": status_text, "IP_Address": "Auto-Logged"})
     elif action == "EDITED" and old_data and new_data:
-        field_labels = {
-            "emp_name": "Employee Name", "dept": "Department",
-            "type": "Transaction Type", "category": "Category",
-            "date": "Date", "amount": "Amount (£)",
-            "manager": "Line Manager", "desc": "Description",
-            "status": "Status", "attachment_name": "Attachments"
-        }
-        any_change = False
+        field_labels = {"emp_name": "Employee Name", "dept": "Department", "type": "Transaction Type",
+            "category": "Category", "date": "Date", "amount": "Amount (£)",
+            "manager": "Line Manager", "desc": "Description", "status": "Status", "attachment_name": "Attachments"}
         for key, label in field_labels.items():
             old = str(old_data.get(key, "")).strip()
             new = str(new_data.get(key, "")).strip()
             if old != new:
-                any_change = True
-                save_audit_entry({
-                    "AuditID": len(load_audit_log()) + 1,
-                    "Timestamp": timestamp,
-                    "User_Name": username,
-                    "User_Role": role,
-                    "Action": "EDITED",
-                    "Request_ID": str(req_id),
-                    "Department": dept,
-                    "Amount": amount,
-                    "Decision_By": "-",
-                    "Decision_Date": "-",
-                    "Field_Changed": label,
-                    "Old_Value": old,
-                    "New_Value": new,
-                    "IP_Address": "Auto-Logged"
-                })
-        if not any_change:
-            save_audit_entry({
-                "AuditID": len(load_audit_log()) + 1,
-                "Timestamp": timestamp,
-                "User_Name": username,
-                "User_Role": role,
-                "Action": "EDITED",
-                "Request_ID": str(req_id),
-                "Department": dept,
-                "Amount": amount,
-                "Decision_By": "-",
-                "Decision_Date": "-",
-                "Field_Changed": "No Changes",
-                "Old_Value": "-",
-                "New_Value": "-",
-                "IP_Address": "Auto-Logged"
-            })
+                save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+                    "User_Name": username, "User_Role": role, "Action": "EDITED", "Request_ID": str(req_id),
+                    "Department": dept, "Amount": amount, "Decision_By": "-", "Decision_Date": "-",
+                    "Field_Changed": label, "Old_Value": old, "New_Value": new, "IP_Address": "Auto-Logged"})
 
 def display_audit_log_panel():
     st.subheader("📖 Full System Audit Log — Complete History")
@@ -890,16 +275,12 @@ def display_audit_log_panel():
         st.info("📋 No activity recorded yet.")
         return
     c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
-    with c2:
-        dept_list = sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"]))
-        filter_dept = st.multiselect("🏢 Filter by Department", dept_list)
-    with c3:
-        filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
-    with c4:
-        req_list = sorted(set([str(l["Request_ID"]) for l in logs if str(l["Request_ID"]) != "-"]))
-        filter_req = st.multiselect("🆔 Filter by Request ID", req_list)
+    with c1: filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
+    with c2: dept_list = sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"]))
+    filter_dept = st.multiselect("🏢 Filter by Department", dept_list)
+    with c3: filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
+    with c4: req_list = sorted(set([str(l["Request_ID"]) for l in logs if str(l["Request_ID"]) != "-"]))
+    filter_req = st.multiselect("🆔 Filter by Request ID", req_list)
     filtered = logs
     if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
     if filter_dept: filtered = [l for l in filtered if l.get("Department", "") in filter_dept]
@@ -908,59 +289,297 @@ def display_audit_log_panel():
     st.metric(f"📄 Total Entries", len(filtered))
     st.divider()
     for entry in reversed(filtered):
-        aid = entry["AuditID"]
-        ts = entry["Timestamp"]
-        user = entry["User_Name"]
-        role = entry["User_Role"]
-        action = entry["Action"]
-        req_id = entry["Request_ID"]
-        dept = entry.get("Department", "-")
-        amount = entry.get("Amount", "-")
-        dec_by = entry.get("Decision_By", "-")
-        dec_date = entry.get("Decision_Date", "-")
-        field = entry["Field_Changed"]
-        old_val = entry["Old_Value"]
-        new_val = entry["New_Value"]
-        icon = {
-            "CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌",
-            "DELETED": "🗑️", "STATUS_CHANGED": "🔄",
+        aid, ts, user, role, action, req_id = entry["AuditID"], entry["Timestamp"], entry["User_Name"], entry["User_Role"], entry["Action"], entry["Request_ID"]
+        dept, amount, dec_by, dec_date = entry.get("Department", "-"), entry.get("Amount", "-"), entry.get("Decision_By", "-"), entry.get("Decision_Date", "-")
+        field, old_val, new_val = entry["Field_Changed"], entry["Old_Value"], entry["New_Value"]
+        icon = {"CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌", "DELETED": "🗑️", "STATUS_CHANGED": "🔄",
             "🏷️ Category Added": "🏷️", "🏷️ Category Edited": "🏷️", "🏷️ Category Deleted": "🏷️",
             "🏢 Department Added": "🏢", "🏢 Department Edited": "🏢", "🏢 Department Deleted": "🏢",
             "🎖️ Role Added": "🎖️", "🎖️ Role/Permissions Edited": "🎖️", "🎖️ Role Deleted": "🎖️",
-            "👤 User Account Created": "👤", "👤 User Account Edited": "✏️",
-            "👤 User Account Deleted": "🗑️", "🔑 Password Changed": "🔑",
-            "🔑 Password Reset": "🔑"
-        }.get(action, "ℹ️")
-        title = f"{icon} {action}"
-        if str(req_id) != "-":
-            title += f" — Request #{req_id}"
-        title += f" | {user} ({role}) | {ts}"
+            "👤 User Account Created": "👤", "👤 User Account Edited": "✏️", "👤 User Account Deleted": "🗑️",
+            "🔑 Password Changed": "🔑", "🔑 Password Reset": "🔑"}.get(action, "ℹ️")
+        title = f"{icon} {action}" + (f" — Request #{req_id}" if str(req_id) != "-" else "") + f" | {user} ({role}) | {ts}"
         with st.expander(title):
             st.write(f"**🕐 Time:** {ts}")
             st.write(f"**👤 User:** {user} — *{role}*")
-            if str(req_id) != "-":
-                st.write(f"**🆔 Request ID:** #{req_id}")
-            if dept != "-":
-                st.write(f"**🏢 Department:** {dept}")
-            if amount != "-":
-                st.write(f"**💷 Amount:** {amount}")
+            if str(req_id) != "-": st.write(f"**🆔 Request ID:** #{req_id}")
+            if dept != "-": st.write(f"**🏢 Department:** {dept}")
+            if amount != "-": st.write(f"**💷 Amount:** {amount}")
             if action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
                 st.write(f"**🎯 Decision By:** {dec_by}")
                 st.write(f"**📅 Decision Date:** {dec_date}")
             if field and field != "-" and field != "No Changes":
                 st.write(f"**📝 Field Changed:** {field}")
-                if old_val and old_val != "-":
-                    st.markdown(f"**⬅️ Old:** `{old_val}`")
-                if new_val and new_val != "-":
-                    st.markdown(f"**➡️ New:** `{new_val}`")
+                if old_val and old_val != "-": st.markdown(f"**⬅️ Old:** `{old_val}`")
+                if new_val and new_val != "-": st.markdown(f"**➡️ New:** `{new_val}`")
             else:
                 st.write(f"**📋 Details:** {new_val}")
     st.divider()
     df_export = pd.DataFrame(filtered)
-    csv = df_export.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Download Full Audit Log (CSV)", csv, "Acoole_Audit_Log.csv", type="primary")
+    st.download_button("📥 Download Full Audit Log (CSV)", df_export.to_csv(index=False).encode("utf-8"), "Acoole_Audit_Log.csv", type="primary")
+
 # ============================================================
-# PDF GENERATION — Attachments go to PAGE 2 ✅ FULLY FIXED
+# HELPER FUNCTIONS
+# ============================================================
+def format_date(d):
+    if not d or str(d).strip() in ["", "none", "nan"]: return "-"
+    return str(d).strip()[:10]
+
+def display_attachments(req):
+    att = req.get("attachment_name", "None")
+    if not att or str(att).strip().lower() in ["none", "nan", ""]:
+        st.info("📎 No attachments.")
+        return
+    try:
+        attached_files = [n.strip() for n in str(att).split(",")]
+        found_any = False
+        for idx, name in enumerate(attached_files):
+            path = os.path.join(UPLOAD_DIR, name)
+            if os.path.exists(path):
+                found_any = True
+                with open(path, "rb") as f:
+                    st.download_button(f"⬇️ Download {name}", f.read(), file_name=name, key=f"att_{req.get('id', idx)}_{idx}")
+        if not found_any:
+            st.info("📎 Attachments referenced but files not available.")
+    except Exception as e:
+        st.info(f"📎 Attachments: {att}")
+
+def get_next_id(all_records):
+    if not all_records: return 1
+    return max(int(r.get("id", 0)) for r in all_records) + 1
+
+def update_record_status_in_excel(req_id, new_status, comments, approved_by):
+    records = load_records_from_excel()
+    decision_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for r in records:
+        if int(r["id"]) == int(req_id):
+            r["status"] = new_status.lower()
+            r["decision_date"] = decision_datetime
+            r["decision_by"] = approved_by
+            if comments.strip():
+                r["director_comments"] = f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {comments.strip()}"
+            r["pdf_path"] = ""
+            break
+    save_all_records(records)
+
+def delete_record_by_id(req_id):
+    records = load_records_from_excel()
+    records = [r for r in records if int(r["id"]) != int(req_id)]
+    save_all_records(records)
+    log_action("DELETED", req_id)
+
+def show_old_new_comparison(old_json, new_rec):
+    try: old = json.loads(old_json) if old_json and old_json != "{}" else {}
+    except: old = {}
+    if not old:
+        st.info("📋 New request — no previous version.")
+        return
+    st.markdown("#### 🔄 Changes (Previous → New)")
+    fields = [("emp_name", "Employee Name"), ("dept", "Department"), ("type", "Transaction Type"),
+        ("category", "Category"), ("date", "Date"), ("amount", "Amount (£)"),
+        ("manager", "Line Manager"), ("desc", "Description")]
+    changed = False
+    for key, label in fields:
+        o, n = str(old.get(key, "")).strip(), str(new_rec.get(key, "")).strip()
+        if o != n:
+            changed = True
+            st.markdown(f"**{label}**: ~~`{o}`~~ → **`{n}`**")
+    if not changed:
+        st.info("✅ No changes detected.")
+
+def refresh_data_button():
+    if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
+        st.session_state["_last_refresh"] = datetime.now().isoformat()
+        st.rerun()
+
+def make_request_title(req):
+    status, amount, dt, dec_by, decision_dt = req["status"].upper(), f"£{req['amount']:.2f}", format_date(req.get("date", "")), req.get("decision_by", ""), format_date(req.get("decision_date", ""))
+    if req["status"] == "pending": return f"🟡 ID #{req['id']} | {req['emp_name']} | PENDING | {amount} | 📅 {dt}"
+    elif req["status"] == "approved": return f"🟢 ID #{req['id']} | {req['emp_name']} | APPROVED | {amount} | ✅ Approved by {dec_by} on {decision_dt}"
+    elif req["status"] == "rejected": return f"🔴 ID #{req['id']} | {req['emp_name']} | REJECTED | {amount} | ❌ Rejected by {dec_by} on {decision_dt}"
+    else: return f"⚪ ID #{req['id']} | {req['emp_name']} | {status} | {amount} | 📅 {dt}"
+
+# ============================================================
+# SETTINGS FUNCTIONS
+# ============================================================
+def init_settings():
+    if not os.path.exists(SETTINGS_PATH):
+        pd.DataFrame([{"setting": "categories", "value": "|".join(DEFAULT_CATEGORIES)},
+            {"setting": "roles", "value": "|".join(DEFAULT_ROLES)},
+            {"setting": "departments", "value": "|".join(DEFAULT_DEPARTMENTS)}]).to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+
+def load_departments():
+    init_settings()
+    try:
+        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+        for _, r in df.iterrows():
+            if r["setting"] == "departments":
+                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
+                return vals if vals else DEFAULT_DEPARTMENTS.copy()
+        return DEFAULT_DEPARTMENTS.copy()
+    except: return DEFAULT_DEPARTMENTS.copy()
+
+def save_departments(dept_list):
+    init_settings()
+    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+    found = False
+    for idx, r in df.iterrows():
+        if r["setting"] == "departments":
+            df.at[idx, "value"] = "|".join(dept_list); found = True
+    if not found:
+        df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
+    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+
+def load_categories():
+    init_settings()
+    try:
+        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+        for _, r in df.iterrows():
+            if r["setting"] == "categories":
+                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
+                return vals if vals else DEFAULT_CATEGORIES
+        return DEFAULT_CATEGORIES
+    except: return DEFAULT_CATEGORIES
+
+def save_categories(cat_list):
+    init_settings()
+    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+    found = False
+    for idx, r in df.iterrows():
+        if r["setting"] == "categories":
+            df.at[idx, "value"] = "|".join(cat_list); found = True
+    if not found:
+        df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(cat_list)}])], ignore_index=True)
+    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+
+def load_roles():
+    init_settings()
+    try:
+        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+        for _, r in df.iterrows():
+            if r["setting"] == "roles":
+                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
+                return vals if vals else DEFAULT_ROLES
+        return DEFAULT_ROLES
+    except: return DEFAULT_ROLES
+
+def save_roles(roles_list):
+    init_settings()
+    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+    found = False
+    for idx, r in df.iterrows():
+        if r["setting"] == "roles":
+            df.at[idx, "value"] = "|".join(roles_list); found = True
+    if not found:
+        df = pd.concat([df, pd.DataFrame([{"setting": "roles", "value": "|".join(roles_list)}])], ignore_index=True)
+    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+
+# ============================================================
+# USER DATABASE
+# ============================================================
+def init_user_db():
+    if not os.path.exists(USER_DB_PATH):
+        pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+
+def save_users(users_dict):
+    rows = []
+    for username, u in users_dict.items():
+        rows.append({"full_name": u.get("full_name", username), "username": username,
+            "password": u.get("password", ""), "role": u.get("role", "Staff"),
+            "dept": u.get("dept", ""), "can_view_all_dept": u.get("can_view_all_dept", False),
+            "can_generate_pdf": u.get("can_generate_pdf", False),
+            "can_download_data": u.get("can_download_data", False),
+            "can_approve_requests": u.get("can_approve_requests", False)})
+    pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+
+def load_users():
+    init_user_db()
+    try:
+        df = pd.read_excel(USER_DB_PATH, engine="openpyxl").fillna("")
+        users = {}
+        for _, r in df.iterrows():
+            users[r["username"]] = {
+                "full_name": str(r.get("full_name", r["username"])).strip(),
+                "password": str(r["password"]), "role": str(r["role"]), "dept": str(r["dept"]),
+                "can_view_all_dept": str(r.get("can_view_all_dept", "False")).lower() == "true",
+                "can_generate_pdf": str(r.get("can_generate_pdf", "False")).lower() == "true",
+                "can_download_data": str(r.get("can_download_data", "False")).lower() == "true",
+                "can_approve_requests": str(r.get("can_approve_requests", "False")).lower() == "true"}
+        return users
+    except Exception as e:
+        st.error(f"User DB Load Error: {e}")
+        return {}
+
+# ============================================================
+# REQUESTS EXCEL
+# ============================================================
+def initialise_excel():
+    if not os.path.exists(EXCEL_PATH):
+        pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+    else:
+        df = pd.read_excel(EXCEL_PATH, engine="openpyxl")
+        for col in EXCEL_COLUMNS:
+            if col not in df.columns: df[col] = ""
+        df.to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+initialise_excel()
+
+def load_records_from_excel():
+    try:
+        if not os.path.exists(EXCEL_PATH): return []
+        df = pd.read_excel(EXCEL_PATH, engine="openpyxl").fillna("")
+        if df.empty: return []
+        records = df.to_dict(orient="records")
+        parsed = []
+        for r in records:
+            try: record_id = int(r.get("ID", 0))
+            except: record_id = 0
+            try: amount = float(r.get("Amount (£)", 0))
+            except: amount = 0.0
+            parsed.append({
+                "id": record_id, "emp_name": str(r.get("Employee Name", "Not Specified")).strip(),
+                "dept": str(r.get("Department", "Not Specified")).strip(),
+                "type": str(r.get("Transaction Type", "Not Specified")).strip(),
+                "category": str(r.get("Category Reason", "Not Specified")).strip(),
+                "date": str(r.get("Date", "")).strip(), "amount": amount,
+                "manager": str(r.get("Line Manager", "Not Specified")).strip(),
+                "desc": str(r.get("Description", "")).strip(),
+                "attachment_name": str(r.get("Attachment Name", "None")).strip(),
+                "status": str(r.get("Status", "pending")).strip().lower(),
+                "director_comments": str(r.get("Director Comments", "")).strip(),
+                "decision_date": str(r.get("Decision Date", "")).strip(),
+                "decision_by": str(r.get("Decision By", "")).strip(),
+                "pdf_path": str(r.get("PDF File Path", "")).strip(),
+                "edited_from_id": str(r.get("Edited From ID", "")).strip(),
+                "old_data": str(r.get("Old Data", "")).strip()})
+        return parsed
+    except Exception as e:
+        st.error(f"Load Error: {e}")
+        return []
+
+def save_all_records(records):
+    export = []
+    for r in records:
+        export.append({"ID": int(r.get("id", 0)), "Employee Name": str(r.get("emp_name", "")),
+            "Department": str(r.get("dept", "")), "Transaction Type": str(r.get("type", "")),
+            "Category Reason": str(r.get("category", "")), "Date": str(r.get("date", "")),
+            "Amount (£)": float(r.get("amount", 0.0)), "Line Manager": str(r.get("manager", "")),
+            "Description": str(r.get("desc", "")), "Attachment Name": str(r.get("attachment_name", "None")),
+            "Status": str(r.get("status", "pending")).lower(),
+            "Director Comments": str(r.get("director_comments", "")),
+            "Decision Date": str(r.get("decision_date", "")),
+            "Decision By": str(r.get("decision_by", "")),
+            "PDF File Path": str(r.get("pdf_path", "")),
+            "Edited From ID": str(r.get("edited_from_id", "")),
+            "Old Data": str(r.get("old_data", ""))})
+    pd.DataFrame(export, columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+
+def save_record_to_excel(new_record):
+    current = load_records_from_excel()
+    current.append(new_record)
+    save_all_records(current)
+
+# ============================================================
+# PDF GENERATION
 # ============================================================
 def generate_approval_pdf(request_data):
     if not PDF_AVAILABLE:
@@ -968,29 +587,13 @@ def generate_approval_pdf(request_data):
     try:
         req_id = request_data.get("id")
         all_recs = load_records_from_excel()
-        fresh_data = next(
-            (r for r in all_recs if int(str(r.get("id", "0"))) == int(str(req_id))),
-            request_data
-        )
-        # ─── ✅ STRENGTHENED TEXT CLEANING HELPER ───
+        fresh_data = next((r for r in all_recs if int(str(r.get("id", "0"))) == int(str(req_id))), request_data)
         def clean_text(t):
-            if t is None:
-                return ""
-            t = str(t)
-            # Replace common problematic Unicode dashes & symbols
-            t = t.replace("\u2013", "-")  # en-dash
-            t = t.replace("\u2014", "-")  # em-dash
-            t = t.replace("\u2212", "-")  # minus sign
-            t = t.replace("\u25b3", "(triangle)")  # △ symbol
-            t = t.replace("—", "-")
-            t = t.replace("–", "-")
-            # Remove ANY character outside Latin-1 range (0–255)
+            if t is None: return ""
+            t = str(t).replace("\u2013", "-").replace("\u2014", "-").replace("\u2212", "-").replace("\u25b3", "(triangle)")
             t = t.encode("latin-1", "ignore").decode("latin-1")
-            # Remove unsafe filename characters
-            for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
-                t = t.replace(char, " ")
+            for c in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']: t = t.replace(c, " ")
             return t.strip()
-        # ─── EXTRACT FIELDS ───
         emp_name = clean_text(fresh_data.get("emp_name", "Unknown"))
         dept = clean_text(fresh_data.get("dept", ""))
         category = clean_text(fresh_data.get("category", ""))
@@ -1003,26 +606,20 @@ def generate_approval_pdf(request_data):
         dir_approve = format_date(fresh_data.get("decision_date", ""))
         dir_name = clean_text(fresh_data.get("decision_by", "Director"))
         dir_comments = clean_text(fresh_data.get("director_comments", ""))
-        # ─── ATTACHMENT DETECTION ───
         att_names = ""
-        for field_key in ["attachment_name", "Attachment Name", "attachment", "Attachment"]:
-            val = str(fresh_data.get(field_key, "")).strip()
+        for key in ["attachment_name", "Attachment Name", "attachment", "Attachment"]:
+            val = str(fresh_data.get(key, "")).strip()
             if val and val.lower() not in ["none", "nan", ""]:
-                att_names = val
-                break
+                att_names = val; break
         att_names = clean_text(att_names)
         display_files = []
         if att_names:
             for name in att_names.split(","):
-                clean_name = name.strip()
-                if clean_name and clean_name.lower() not in ["none", ""]:
-                    display_files.append(clean_name)
-        # ─── BUILD PDF ───
+                n = name.strip()
+                if n and n.lower() not in ["none", ""]: display_files.append(n)
         pdf = FPDF()
         pdf.add_page()
-        # ─── PAGE 1: HEADER & LOGO ───
-        if os.path.exists(LOGO_PATH):
-            pdf.image(LOGO_PATH, x=75, y=10, w=60)
+        if os.path.exists(LOGO_PATH): pdf.image(LOGO_PATH, x=75, y=10, w=60)
         pdf.ln(22)
         pdf.set_font("Courier", "", 11)
         pdf.cell(0, 5, txt="Addition & Deduction Approval Form", ln=True, align="C")
@@ -1031,10 +628,8 @@ def generate_approval_pdf(request_data):
         pdf.line(10, line_y, 200, line_y)
         pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
         pdf.ln(12)
-        # ─── PAGE 1: REQUEST DETAILS ───
         pdf.set_font("Courier", "B", 10)
-        pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True)
-        pdf.ln(2)
+        pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True); pdf.ln(2)
         pdf.set_font("Courier", "", 9)
         pdf.cell(52, 5, "Request ID:", 0, 0); pdf.cell(0, 5, str(fresh_data.get("id", "")), ln=True)
         pdf.cell(52, 5, "Employee Name:", 0, 0); pdf.cell(0, 5, emp_name, ln=True)
@@ -1045,17 +640,12 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
         pdf.ln(6)
-        # ─── PAGE 1: DESCRIPTION ───
         pdf.set_font("Courier", "B", 10)
-        pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True)
-        pdf.ln(2)
+        pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True); pdf.ln(2)
         pdf.set_font("Courier", "", 9)
-        pdf.multi_cell(0, 5, desc)
-        pdf.ln(8)
-        # ─── PAGE 1: DIRECTOR APPROVAL ───
+        pdf.multi_cell(0, 5, desc); pdf.ln(8)
         pdf.set_font("Courier", "B", 10)
-        pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True)
-        pdf.ln(2)
+        pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True); pdf.ln(2)
         pdf.set_font("Courier", "", 9)
         if status == "approved":
             pdf.cell(52, 5, "Decision:", 0, 0)
@@ -1063,7 +653,7 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, "APPROVED", ln=True); pdf.set_text_color(0, 0, 0); pdf.set_font("Courier", "", 9)
             pdf.cell(52, 5, "Approved By:", 0, 0); pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Approval Date / Time:", 0, 0); pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
-            if dir_comments and dir_comments != "None" and dir_comments != "":
+            if dir_comments and dir_comments not in ["None", ""]:
                 pdf.ln(2); pdf.set_font("Courier", "B", 9); pdf.cell(52, 5, "Director Comments:", 0, 0)
                 pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
         elif status == "rejected":
@@ -1072,60 +662,37 @@ def generate_approval_pdf(request_data):
             pdf.cell(0, 5, "REJECTED", ln=True); pdf.set_text_color(0, 0, 0); pdf.set_font("Courier", "", 9)
             pdf.cell(52, 5, "Rejected By:", 0, 0); pdf.cell(0, 5, dir_name, ln=True)
             pdf.cell(52, 5, "Rejection Date / Time:", 0, 0); pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
-            if dir_comments and dir_comments != "None" and dir_comments != "":
+            if dir_comments and dir_comments not in ["None", ""]:
                 pdf.ln(2); pdf.set_font("Courier", "B", 9); pdf.cell(52, 5, "Reason for Rejection:", 0, 0)
                 pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
         else:
             pdf.cell(52, 5, "Decision:", 0, 0); pdf.cell(0, 5, "Pending", ln=True)
-        # ─── PAGE 1: SIGNATURE & STAMP ───
         pdf.ln(12)
         dash_y = pdf.get_y()
-        for x in range(10, 200, 4):
-            pdf.line(x, dash_y, x + 2, dash_y)
-        if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
-            pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
-        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
-            pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
+        for x in range(10, 200, 4): pdf.line(x, dash_y, x + 2, dash_y)
+        if status == "approved" and os.path.exists(APPROVED_STAMP_PATH): pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
+        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH): pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         pdf.ln(8)
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
-        # ═══════════════════════════════════════════════════
-        # ✅ PAGE 2: ATTACHMENTS — ONLY IMAGES, NO NAMES ✅
-        # ═══════════════════════════════════════════════════
         pdf.add_page()
         pdf.set_font("Courier", "B", 12)
-        pdf.cell(0, 8, txt="ATTACHMENTS", ln=True)
-        pdf.ln(6)
+        pdf.cell(0, 8, txt="ATTACHMENTS", ln=True); pdf.ln(6)
         pdf.set_font("Courier", "", 9)
-
         if len(display_files) > 0:
-            # ❌ REMOVED: Total Attachments count line
             for idx, fname in enumerate(display_files, 1):
-                fname_safe = clean_text(fname)  # Kept for safety, but NOT printed
-                # ❌ REMOVED: Filename header line
-
                 file_path = os.path.join(UPLOAD_DIR, fname)
                 if os.path.exists(file_path):
                     if fname.lower().endswith((".png", ".jpg", ".jpeg")):
                         pdf.ln(2)
-                        try:
-                            pdf.image(file_path, x=10, w=190)
-                            pdf.ln(70)  # Space for image
-                        except Exception as img_err:
-                            pdf.cell(0, 5, "     Warning: Preview could not be displayed", ln=True)
-                            pdf.ln(3)
+                        try: pdf.image(file_path, x=10, w=190); pdf.ln(70)
+                        except: pdf.cell(0, 5, "     Warning: Preview could not be displayed", ln=True); pdf.ln(3)
                     else:
-                        pdf.cell(0, 5, "     Non-image file - see original upload", ln=True)
-                        pdf.ln(3)
+                        pdf.cell(0, 5, "     Non-image file - see original upload", ln=True); pdf.ln(3)
                 else:
-                    pdf.cell(0, 5, "     Warning: File not found on server", ln=True)
-                    pdf.ln(3)
+                    pdf.cell(0, 5, "     Warning: File not found on server", ln=True); pdf.ln(3)
         else:
             pdf.cell(0, 6, "- No files were attached to this request", ln=True)
-
-        # ✅ CLOSE THE BLOCK — ADD THIS LINE
-        # (your code was missing the proper indentation closure)
-        # ─── SAVE & RETURN ───
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
@@ -1134,12 +701,24 @@ def generate_approval_pdf(request_data):
         pdf_bytes = bytes(pdf.output())
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
-        with open(full_pdf_path, "wb") as f:
-            f.write(pdf_bytes)
+        with open(full_pdf_path, "wb") as f: f.write(pdf_bytes)
         return True, pdf_bytes, filename
     except Exception as e:
-        import traceback
         return False, None, f"PDF Error: {str(e)}"
+
+def display_pdf_button(req, can_generate=False, key_suffix=""):
+    req_id = req["id"]
+    unique_key = f"genpdf_{req_id}_{key_suffix}"
+    if can_generate and PDF_AVAILABLE:
+        st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=unique_key)
+        ok, pdf_bytes, name = generate_approval_pdf(req)
+        if ok:
+            st.success(f"✅ Generated! Ready to download ⬇")
+            st.download_button(f"📥 Download: {name}", data=pdf_bytes, file_name=name,
+                mime="application/pdf", type="primary", key=f"dl_{unique_key}")
+        else:
+            st.error(f"❌ {name}")
+    return False
 
 # ============================================================
 # PANEL FUNCTIONS
@@ -1147,10 +726,8 @@ def generate_approval_pdf(request_data):
 def display_company_header():
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, width=300)
-        else:
-            st.title("⚡ ACOOLE ELECTRICAL LTD")
+        if os.path.exists(LOGO_PATH): st.image(LOGO_PATH, width=300)
+        else: st.title("⚡ ACOOLE ELECTRICAL LTD")
         st.caption("Addition & Deduction Approval Platform")
         st.divider()
 
