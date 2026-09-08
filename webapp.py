@@ -21,6 +21,88 @@ import subprocess
 import pandas as pd
 from datetime import datetime, date
 
+# ✅ Read secret from environment FIRST
+SERVICE_ACCOUNT_KEY = os.getenv("GCP_SERVICE_ACCOUNT_KEY")
+
+# ✅ Now safely use the variable
+if SERVICE_ACCOUNT_KEY:
+    SERVICE_ACCOUNT_INFO = json.loads(SERVICE_ACCOUNT_KEY)
+else:
+    # Fallback: read from local file (only on your PC — NOT committed to GitHub)
+    try:
+        with open(r"D:\Acoole_portal\service_account_key.json", "r") as f:
+            SERVICE_ACCOUNT_INFO = json.load(f)
+    except:
+        SERVICE_ACCOUNT_INFO = {}
+        st.error("⚠️ No Google Drive credentials found — uploads will use local storage only")
+# ============================================================
+# ✅ GOOGLE DRIVE INTEGRATION — Ready to Use!
+# ============================================================
+import io
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.oauth2 import service_account
+
+
+# ─── YOUR FOLDER ID (ALREADY CONFIGURED!) ──────────────────
+GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
+
+# ─── YOUR SERVICE ACCOUNT KEY ────────────────────────────────
+SERVICE_ACCOUNT_INFO = {
+  "type": "service_account",
+  "project_id": "acoole-attachments",
+  "private_key_id": "ac8eaeb0a10f9e3b75f5f5ff806629c84178cf75",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDA65MAx6tfIuCR\nCW0mbGEUvChLHHeTxoLigCtBeIUMbgk7hGW5hfLoeNRiMQfW1kkQMp/k4yckZzh2\nbkcRQagS0I1iZNlRb7lkZmQKWEXdjA81XdUddVhSH7zDF+G7Uj36EbwGljgGmQUP\nifyF+rZVqaT5r3zHbIh15v26YkAO9pwGUbBXqy+wSRHaThkXcFid3uX2+iAsFuv/\nzkBjJW6hX0VpFcyLT5Ckxs8ZZ7S3D7n6Ioj9hl7iW1UehjZN3X1nIbCPn4N8XmVm\nbo5hqd72ojX8SVvZEpZoGO2Sl03RtM2OWvVZQklCRdH4kKZ15qZbhRi9yVh9tFFj\n0BKI+g+1AgMBAAECggEAFYIOBQ+9tOEUDUdyQk7h8ehaS6l0UWbXz72/VNDFcJHR\n+K81kh3za2SRNRNHTvXb9nDWb7O9eOsDGf0Ick2SGerjYF1i9xfQIPfjXl3iCCWl\nymrYKC0deCZuqod+lJ5CJ5+TiV51B5NGw6k8HInLizhbGrUsYaVhf1eN4Ro0DxbQ\n17axNBzSUOdTfvMBpyw/wOzjoJ1n8LLmmq2XtPcT4E/RD08jd3F9Zw+CrOGYC9pa\n7kGjSzpXZNtMZZouFaZ1yYWGoyllA5XHTHx67IDcQKvJzhc9cnvS1ZrdIb/BJ+pq\nvsYeHyW16mfF7e9oAhsdUK5EITlF6IqqA7AdPgOQAQKBgQDe4YSeaFcQgrL84pyn\nS6x9gt4x7+1hr1BZgIHOykt1ozr8Yf6+bYuzNNq4lPQEbDPuWaM3AlZ9fxpc5qxA\njXDSB21Tom6Vz4xkJarATPK2PwqB1ZE+k/871gl6Mii00HlG1+J4qNclM61s65hy\nDd7xKQ+aRPZ9o0cP/waJFqqntQKBgQDdllaTqtRuTUo/SG+++hH92zrYhMwmodDP\nXy4Wg/6KI3wX3a/BarDlzzERcNbPyvVYXitaAmrhA0wjOtymuyHd82kq2gZMpPYz\n1mq5z/rXllLAS8CFnt3gMBJVPZvi/2P4nMIRrQsVejkm0S8lKire2JpcIsIISRto\nBwpbvGLIAQKBgA1DZlz24Jd+75/U7HWYLz+Y1hgqqvmxMRriZtcjerIZcJ0sR7iV\nVEbp0kpBsvPAbKa2dtwDK5p0QeFdaMq+oAQfpQXhGKuZmkUraKng6mCmB74KM4aB\n0CKDbjTzXzDDZzQsDLIZehQgqyVcL8o5wRag1ujbSb/YQ5ZUGtN1odoxAoGBALoK\nr0Xr989kNSJMvwWpD9IDbrS7SmxlD9wMHbXpvJxejqG7DwVlfoB0JM5v3us3jCZV\najB4NyQUkKhDk16pXxXqeDHyO7e+CLgdHh5D8GdxXqj08P8/EypXMg0/XNKJenYR\npx8QGm494B4nI14guT3Avlj9Fcu/FbORtbCvyoABAoGBAL0cM8Y3Qpo7waiW33po\nCtBXhXIEhABniUmt24Y1+IMkqjlV2DjN4NXrxSFLVNeXe4M2dJaQAcqkw3Ny0bH5\njtU20h7Mz4eAM7h2lEJzJt3ZcJr5TtzNbhrs9AjvKI67u752apn4K5fz6gi5EkAR\nI50j9KtxQf7mWJbV08rx7sQ+\n-----END PRIVATE KEY-----\n",
+  "client_email": "drive-upload-bot@acoole-attachments.iam.gserviceaccount.com",
+  "client_id": "107352340026935671078",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/drive-upload-bot%40acoole-attachments.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
+
+# ─── UPLOAD FUNCTIONS ────────────────────────────────────────
+def get_drive_service():
+    """Authenticate and return Google Drive service"""
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            SERVICE_ACCOUNT_INFO,
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        return build("drive", "v3", credentials=credentials)
+    except Exception as e:
+        st.error(f"❌ Google Drive Error: {e}")
+        return None
+
+def upload_to_google_drive(local_file_path, display_filename):
+    """Upload file → Returns Google Drive File ID"""
+    service = get_drive_service()
+    if not service: return None
+
+    file_metadata = {
+        "name": display_filename,
+        "parents": [GOOGLE_DRIVE_FOLDER_ID]
+    }
+    media = MediaFileUpload(local_file_path, resumable=True)
+    file = service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields="id, name"
+    ).execute()
+
+    # Make file accessible via link
+    service.permissions().create(
+        fileId=file.get("id"),
+        body={"role": "reader", "type": "anyone"}
+    ).execute()
+
+    return file.get("id")
+
+def get_drive_link(file_id):
+    """Return direct download link"""
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+    #---------------------------------
 
 # Ensure audit log file exists with correct columns
 def init_audit_log():
