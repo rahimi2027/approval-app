@@ -1392,7 +1392,6 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         st.info(f"📝 **Description:** {req['desc']}")
                         display_attachments(req)
                         
-                        # ✅ FIXED: Proper indentation starting at line 1642
                         prev_comments = req.get("director_comments", "").strip()
                         old_data_json = req.get("old_data", "").strip()
                         if prev_comments or (old_data_json and old_data_json != "{}"):
@@ -1448,22 +1447,19 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
+                        
                         prev_comments = req.get("director_comments", "").strip()
                         old_data_json = req.get("old_data", "").strip()
-
                         if prev_comments or (old_data_json and old_data_json != "{}"):
                             st.divider()
-                        st.subheader("📋 Previous Review History")
-    
-                        # Show previous rejection reason
-                        if prev_comments:
-                            st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
-    
-                        # Show Old → New comparison
-                        if old_data_json and old_data_json != "{}":
-                               with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
-                                   show_old_new_comparison(old_data_json, req)
-                        st.divider()
+                            st.subheader("📋 Previous Review History")
+                            
+                            if prev_comments:
+                                st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+                            if old_data_json and old_data_json != "{}":
+                                with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                                    show_old_new_comparison(old_data_json, req)
+                            st.divider()
                         
                         with st.form(f"change_status_approved_{req['id']}_pending"):
                             st.subheader("🔧 Change Status")
@@ -1507,22 +1503,19 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         st.write(f"📅 **Request Date:** {req['date']}")
                         st.error(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
                         display_attachments(req)
+                        
                         prev_comments = req.get("director_comments", "").strip()
                         old_data_json = req.get("old_data", "").strip()
-
                         if prev_comments or (old_data_json and old_data_json != "{}"):
                             st.divider()
-                        st.subheader("📋 Previous Review History")
-    
-                        # Show previous rejection reason
-                        if prev_comments:
-                            st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
-    
-                        # Show Old → New comparison
-                        if old_data_json and old_data_json != "{}":          # ← Level 1
-                            with st.expander("...", expanded=True):         # ← Level 2 (+4)
-                                show_old_new_comparison(old_data_json, req)  # ← Level 3 (+4 more)
-                        st.divider()
+                            st.subheader("📋 Previous Review History")
+                            
+                            if prev_comments:
+                                st.warning(f"💬 Previous Director Comments: **{prev_comments}**")
+                            if old_data_json and old_data_json != "{}":
+                                with st.expander("✏️ View Changes (Old vs New Values)", expanded=True):
+                                    show_old_new_comparison(old_data_json, req)
+                            st.divider()
                         
                         with st.form(f"change_status_rejected_{req['id']}"):
                             st.subheader("🔧 Change Status")
@@ -1546,8 +1539,8 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-
-    # ─── ✅ UPGRADED SUPER ADMIN PORTAL (Edit Option Removed) ───
+    
+    # ─── ✅ UPGRADED SUPER ADMIN PORTAL ───
     elif user["role"] == "Super Admin":
         st.subheader("🛡️ Super Admin — All Requests")
         st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
@@ -1574,9 +1567,7 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                             st.info(f"💬 Director Comments: {req['director_comments']}")
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-                        
-                        # ❌ EDIT BUTTON REMOVED — No one can edit pending requests
-                        
+        
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
             if not approved:
@@ -1592,6 +1583,7 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
+        
         with tab_rejected:
             rejected = [r for r in all_live_requests if r["status"] == "rejected"]
             if not rejected:
@@ -1607,6 +1599,7 @@ if st.form_submit_button("📤 Send to Director", type="primary"):
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
+        
         with tab_manage:
             tab_settings, tab_users, tab_audit = st.tabs([
                 "⚙️ System Settings", "👤 User Management", "📖 Audit History"
