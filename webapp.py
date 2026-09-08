@@ -41,15 +41,20 @@ if "gcp_service_account" in st.secrets:
     try:
         key_text = st.secrets["gcp_service_account"]
         
-        # ✅ FIX: Convert BOTH \\n and \n → real newlines
-        key_fixed = key_text.replace("\\\\n", "\n").replace("\\n", "\n").replace("\\r", "")
+        # ✅ FINAL FIX: Handle ALL forms of escaped newlines properly
+        # First decode double-escaped \\n, then single-escaped \n
+        import codecs
+        key_fixed = key_text.replace("\\\\", "\\")  # Fix double-backslashes first
+        key_fixed = key_fixed.replace("\\n", "\n")  # Convert \n → real newline
+        key_fixed = key_fixed.replace("\\r", "")   # Remove carriage returns
         
         SERVICE_ACCOUNT_INFO = json.loads(key_fixed)
         st.success("✅ Google Drive credentials loaded successfully!")
     except Exception as e:
         st.error(f"⚠️ Failed to parse credentials: {str(e)[:150]}...")
-        # DEBUG: Show first 80 chars so we can see what's happening
-        st.info(f"🔍 Key preview: {repr(key_text[:80])}")
+        # DEBUG: Show exactly what we received
+        st.info(f"🔍 Raw preview: {repr(key_text[:100])}")
+        st.info(f"🔍 Fixed preview: {repr(key_fixed[:100])}")
         SERVICE_ACCOUNT_INFO = {}
 
 # --- 🔹 Option B: Fallback to local file (your PC only) ---
