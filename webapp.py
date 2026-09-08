@@ -83,7 +83,7 @@ ONEDRIVE_CLIENT_ID = ""         # ← Fill later when ready
 ONEDRIVE_CLIENT_SECRET = ""     # ← Fill later when ready
 ONEDRIVE_TENANT_ID = "common"
 ONEDRIVE_FOLDER = "Acoole_App_Uploads/"  # ✅ MATCHES YOUR FOLDER!
-USE_ONEDRIVE = False  # ✅ Set = True to SWITCH from Google → OneDrive
+USE_ONEDRIVE = True  # ✅ Set = True to SWITCH from Google → OneDrive
 
 # ✅ Auto-create ALL required folders
 os.makedirs(UPLOAD_DIR, exist_ok=True)
