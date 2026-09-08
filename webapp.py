@@ -20,9 +20,16 @@ import shutil
 import subprocess
 import pandas as pd
 from datetime import datetime, date
+import io
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.oauth2 import service_account
 
 # ✅ DEFINE BASE_DIR FIRST (as promised in header)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ─── YOUR FOLDER ID ────────────────────────────────────────
+GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
 
 # ============================================================
 # ✅ LOAD GOOGLE SERVICE ACCOUNT KEY — Secrets + Local Fallback
@@ -33,12 +40,16 @@ SERVICE_ACCOUNT_INFO = {}
 if "gcp_service_account" in st.secrets:
     try:
         key_text = st.secrets["gcp_service_account"]
-        # ✅ Fix: Convert escaped \n → real newlines BEFORE parsing
-        key_fixed = key_text.replace("\\n", "\n").replace("\\r", "")
+        
+        # ✅ FIX: Convert BOTH \\n and \n → real newlines
+        key_fixed = key_text.replace("\\\\n", "\n").replace("\\n", "\n").replace("\\r", "")
+        
         SERVICE_ACCOUNT_INFO = json.loads(key_fixed)
         st.success("✅ Google Drive credentials loaded successfully!")
     except Exception as e:
-        st.error(f"⚠️ Failed to parse credentials: {str(e)[:100]}...")
+        st.error(f"⚠️ Failed to parse credentials: {str(e)[:150]}...")
+        # DEBUG: Show first 80 chars so we can see what's happening
+        st.info(f"🔍 Key preview: {repr(key_text[:80])}")
         SERVICE_ACCOUNT_INFO = {}
 
 # --- 🔹 Option B: Fallback to local file (your PC only) ---
@@ -51,60 +62,7 @@ else:
         SERVICE_ACCOUNT_INFO = {}
         st.warning("⚠️ No Google Drive credentials found — uploads will use local storage only")
 
-# ============================================================
-# ✅ GOOGLE DRIVE INTEGRATION — Ready to Use!
-# ============================================================
-import io
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.oauth2 import service_account
-
-# ─── YOUR FOLDER ID ────────────────────────────────────────
-GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
-
-# ✅ DO NOT hard-code SERVICE_ACCOUNT_INFO below here!
-
-# ─── YOUR SERVICE ACCOUNT KEY ────────────────────────────────
-SERVICE_ACCOUNT_INFO = {
-  "type": "service_account",
-  "project_id": "acoole-attachments",
-  "private_key_id": "fe3b474253c5d162669b3fff09aede5cbe915dc7",
-  "private_key": """-----BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDIsYqnNcwfTWfZ
-poD9F8/WtZFaUzc2ok8SGnnJ7k/SdqkOliPvJeGAU3kf+zwJzLfpKcxo4qABlHmu
-TGgBp9Jo90kPYn09KpbgW7D6AsOuw5SaANR5/fEOL+1uEep/k3iIXdp/NeFoag+9
-9J+RZ/+OWWykkiWUkhNTma6tQyJo01PEigjkHHNt+njJz9zmaG/muySdvJ25XZ6H
-xNnf7W7U9qc1bSajFlY9h4Asu+q6CX5mDxqezPFHfSZTK2FD4bg258cS6OTPrfUO
-oukCdeN6T4xo8bXrCASXiT6le2LA2NXHVr83nBs/q1Q2YR4hSaPE/vVbb4PeTPhM
-Pdv/68OVAgMBAAECggEAJxlvyePRQMfz05N8zdI1y77T8qUDvMEiZoSB9bVYF8jG
-ZvEZTx4yMK4SiwiHSeF4cxSRnl2IjsY+bpa0LJ5lf82tjjHB9Ii3nD5A3HRtaz7v
-VJGU06+Fpx3vQ+J5rSEt+mNOjjoRECaZqoheDhYU08bYQ7e1Wpya506pmVfa/FDW
-qu3sxCrBJR7G46JwlsYzKcOO4E+vHrmBdiMJfvMgMbL5DiCETH0xJWpYG9VYbEcl
-VRrr7FmosQWy0Jupt5LTmaGS1jp27vrTcbzkmgM5w5ZdNwSaWpKcWTouK6OnyW6I
-wA9wO8HyNmGZGZkTrghhCcs39dtFc88jz9YO8T6EAQKBgQD/rdrNuuoNJS7p6XW1
-CVMQ+TTXWOKGUM0+oE0/FG4VOui+UzwlE/KrUak7AJL+4EKTtcT4Vy0/yplXO/qe
-4aOWb0VEG5u/1leojImiPTwK+FzckPB6j/qjikNDe7xGbpf6PCB1l4vz68TLnV7Z
-Ikt67A2rVOUNyOlXIxkaxsD8jQKBgQDI8gVfXp65X+T7QlSeDgeyqGrcROF7NbRM
-++iIykgwcT+9O4DWT5c0LB568YEOdvqImS/OubenAg4T78Mop5rwxKTT+PWfVLr7
-aggllt+f6OxBODV+vZluScYnUSsm91by/ZL+VUXErK+v1PSHlJDI4lIi3bv1ddvH
-CS+vwOrVKQKBgQD4LksIjhnovqImPg6atz1haXVoX4gq9r3zv2icBXnBs9f9/w+P
-sihJMdBCTJFjRE570OIsaXqrxD5KVhc1KDNBsCqdLOtnMGkQW7KxwBzLTT/effZg
-Eegp3Ojj1XTxLSLqrHiZjIw2LjJtrwlFXavE2uN93r8kPVR617/jpO/pdQKBgA9I
-4YG8l8Qv+CHojLktBgbf6qjwkFon3pwQeUKWaGFO6/M/6G/kw/KS/IqLfi6UfEAR
-ruJBnCeW720yypx4C0APJR5+jGhfMI3ZJd9+F2p5dCcN2HvYfig2cl0hPnALVlDL
-Wvf/knwASqjMQQFjGpQ9KtQ+G4LzQRFlsHvk57fpAoGBALhJQfi2cbjKyWtsyfUH
-H2eaXTv0cy0ubW7aQDCPjoQK8J98Xuoo8nhWySjmWnpYVdwzyhBJLhEev2XsbgUi
-cGVNMfSXU0Vj2QT/VEbsu1r7isycWQpp6ODiNJ6kki9w71KG8cK96dFfBbJviQaL
-vH701ce3JcD+9AgqhfA1DRxU
------END PRIVATE KEY-----""",
-  "client_email": "drive-upload-bot@acoole-attachments.iam.gserviceaccount.com",
-  "client_id": "107352340026935671078",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/drive-upload-bot%40acoole-attachments.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
+# ✅ END OF FILE — DO NOT ADD ANY SERVICE_ACCOUNT_INFO BELOW HERE!
 
 # ─── UPLOAD FUNCTIONS ────────────────────────────────────────
 def get_drive_service():
