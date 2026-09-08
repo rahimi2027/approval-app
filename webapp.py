@@ -21,14 +21,19 @@ import subprocess
 import pandas as pd
 from datetime import datetime, date
 
-# ✅ Read secret from Streamlit Secrets FIRST
+# ✅ DEFINE BASE_DIR FIRST (as promised in header)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ============================================================
+# ✅ LOAD GOOGLE SERVICE ACCOUNT KEY — Secrets + Local Fallback
+# ============================================================
 SERVICE_ACCOUNT_INFO = {}
 
-# Try loading from Streamlit Secrets (Cloud deployment)
+# --- 🔹 Option A: Load from Streamlit Secrets (Cloud) ---
 if "gcp_service_account" in st.secrets:
     try:
         key_text = st.secrets["gcp_service_account"]
-        # ✅ Fix: Replace escaped \n with actual newlines BEFORE parsing
+        # ✅ Fix: Convert escaped \n → real newlines BEFORE parsing
         key_fixed = key_text.replace("\\n", "\n").replace("\\r", "")
         SERVICE_ACCOUNT_INFO = json.loads(key_fixed)
         st.success("✅ Google Drive credentials loaded successfully!")
@@ -36,10 +41,10 @@ if "gcp_service_account" in st.secrets:
         st.error(f"⚠️ Failed to parse credentials: {str(e)[:100]}...")
         SERVICE_ACCOUNT_INFO = {}
 
-# Fallback: read from local file (ONLY on your PC — NOT committed to GitHub)
+# --- 🔹 Option B: Fallback to local file (your PC only) ---
 else:
     try:
-        with open(r"D:\Acoole_portal\service_account_key.json", "r", encoding="utf-8") as f:
+        with open(os.path.join(BASE_DIR, "service_account_key.json"), "r", encoding="utf-8") as f:
             SERVICE_ACCOUNT_INFO = json.load(f)
         st.info("✅ Using local credentials file")
     except Exception as e:
