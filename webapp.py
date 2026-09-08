@@ -1,16 +1,10 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.2
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.2 (UPDATED)
 # ============================================================
 # ✅ BASE_DIR defined FIRST — no more NameError!
-# ✅ Removed duplicate CSS / page config
-# ✅ All variables exist before use
-# ✅ Silent missing-file warnings
-# ✅ Dashboard landing page with stats
-# ✅ Staff role = full Manager access
-# ✅ PDF attachments confirmed working
-# ✅ ALL syntax & indentation errors fixed
-# ✅ CREDENTIALS LOAD FROM FILE
-# ✅ ✅ ✅ ONEDRIVE READY — SWITCH ANYTIME!
+# ✅ All files save to ONE unified folder: Acoole_App_Uploads
+# ✅ OneDrive folder name MATCHES your created folder
+# ✅ Google Drive active by default — switch anytime
 # ============================================================
 import streamlit as st
 import os
@@ -36,7 +30,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ─── STYLING — CLEAN & BALANCED ───
+# ─── STYLING ───
 st.markdown("""
     <style>
     .block-container {
@@ -54,11 +48,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# ✅ ALL CONFIGURATION IN ONE PLACE — DEFINED FIRST!
+# ✅ ALL CONFIGURATION — DEFINED FIRST!
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
-AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
+
+# ✅ UNIFIED FOLDER — ALL FILES SAVE TOGETHER
+APP_FOLDER = os.path.join(BASE_DIR, "Acoole_App_Uploads")
+os.makedirs(APP_FOLDER, exist_ok=True)
+
+UPLOAD_DIR = os.path.join(APP_FOLDER, "uploaded_attachments")
+AUDIT_LOG_PATH = os.path.join(APP_FOLDER, "audit_log.xlsx")
 AUDIT_LOG_FILE = AUDIT_LOG_PATH
 AUDIT_COLUMNS = [
     "AuditID", "Timestamp", "User_Name", "User_Role",
@@ -67,27 +66,26 @@ AUDIT_COLUMNS = [
     "Old_Value", "New_Value", "IP_Address"
 ]
 ALLOWED_CLEAR_ROLES = ["Super Admin"]
-ARCHIVE_FOLDER = os.path.join(BASE_DIR, "audit_archives/")
-PDF_DIR = os.path.join(BASE_DIR, "approved_pdfs")
+ARCHIVE_FOLDER = os.path.join(APP_FOLDER, "audit_archives/")
+PDF_DIR = os.path.join(APP_FOLDER, "approved_pdfs")
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
 APPROVED_STAMP_PATH = os.path.join(BASE_DIR, "approved_stamp.png")
 REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
-EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
-USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
-SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
+EXCEL_PATH = os.path.join(APP_FOLDER, "requests.xlsx")
+USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
+SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
 
 # ─── GOOGLE DRIVE ───
 GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
 
 # ─── ONEDRIVE / MICROSOFT GRAPH ───
-ONEDRIVE_CLIENT_ID = ""         # ← Fill when ready
-ONEDRIVE_CLIENT_SECRET = ""     # ← Fill when ready
+ONEDRIVE_CLIENT_ID = ""         # ← Fill later when ready
+ONEDRIVE_CLIENT_SECRET = ""     # ← Fill later when ready
 ONEDRIVE_TENANT_ID = "common"
-ONEDRIVE_FOLDER = "AcoolePortalData/"
+ONEDRIVE_FOLDER = "Acoole_App_Uploads/"  # ✅ MATCHES YOUR FOLDER!
 USE_ONEDRIVE = False  # ✅ Set = True to SWITCH from Google → OneDrive
 
 # ✅ Auto-create ALL required folders
-os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
@@ -106,6 +104,41 @@ if os.path.exists(KEY_FILE):
         st.error(f"⚠️ Failed to load credentials: {str(e)[:200]}")
 else:
     st.warning("⚠️ Credentials file not found — using local storage only")
+
+# ============================================================
+# ✅ GOOGLE DRIVE UPLOAD FUNCTION
+# ============================================================
+def get_drive_service():
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            SERVICE_ACCOUNT_INFO, 
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        return build("drive", "v3", credentials=credentials)
+    except Exception as e:
+        st.error(f"❌ Google Drive Error: {e}")
+        return None
+
+def upload_to_google_drive(local_file_path, display_filename):
+    service = get_drive_service()
+    if not service:
+        st.error("❌ No Google Drive connection")
+        return None
+    try:
+        st.info(f"📤 Uploading: {display_filename}")
+        file_metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
+        media = MediaFileUpload(local_file_path, resumable=True)
+        file = service.files().create(
+            body=file_metadata, 
+            media_body=media, 
+            fields="id, name"
+        ).execute()
+        file_id = file.get("id")
+        st.success(f"✅ UPLOAD SUCCESSFUL! File ID: {file_id}")
+        return file_id
+    except Exception as e:
+        st.error(f"❌ UPLOAD FAILED! Error: {str(e)}")
+        return None
 
 # ============================================================
 # ✅ ONEDRIVE UPLOAD FUNCTIONS
@@ -127,7 +160,6 @@ def get_onedrive_token():
     except Exception as e:
         st.warning(f"⚠️ OneDrive connection: {e}")
     return None
-
 
 def upload_to_onedrive(local_file_path, remote_filename=None):
     if not USE_ONEDRIVE:
@@ -154,7 +186,6 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
     except Exception as e:
         st.warning(f"⚠️ Could not sync to OneDrive: {str(e)}")
     return False
-
 
 def sync_all_files_to_onedrive():
     """Call this after every file save"""
