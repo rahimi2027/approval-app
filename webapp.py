@@ -226,21 +226,38 @@ def get_drive_service():
         return None
 
 def upload_to_google_drive(local_file_path, display_filename):
-    service = get_drive_service()
-    if not service:
-        st.error("❌ No Google Drive connection")
-        return None
     try:
-        st.info(f"📤 Uploading: {display_filename}")
-        file_metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
+        st.info(f"📤 Uploading to Google Drive: {display_filename}")
+        
+        # ✅ Load credentials from file (SCOPES already set correctly)
+        credentials = service_account.Credentials.from_service_account_info(
+            SERVICE_ACCOUNT_INFO, 
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        
+        # ✅ Connect to Drive
+        service = build("drive", "v3", credentials=credentials)
+        
+        # ✅ Upload file
+        file_metadata = {
+            "name": display_filename,
+            "parents": [GOOGLE_DRIVE_FOLDER_ID]
+        }
         media = MediaFileUpload(local_file_path, resumable=True)
-        file = service.files().create(body=file_metadata, media_body=media, fields="id, name, parents").execute()
+        
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id, name"
+        ).execute()
+        
         file_id = file.get("id")
-        service.permissions().create(fileId=file_id, body={"role": "reader", "type": "anyone"}).execute()
-        st.success(f"✅ UPLOAD SUCCESSFUL! File ID: {file_id}")
+        st.success(f"✅ ✅ UPLOAD SUCCESSFUL! File ID: {file_id}")
         return file_id
+
     except Exception as e:
         st.error(f"❌ UPLOAD FAILED! Error: {str(e)}")
+        st.info("📋 Tell me this error message!")
         return None
 
 # ============================================================
