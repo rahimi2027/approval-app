@@ -120,22 +120,54 @@ def get_drive_service():
         return None
 
 def upload_to_google_drive(local_file_path, display_filename):
-    service = get_drive_service()
-    if not service:
-        st.error("❌ No Google Drive connection")
-        return None
     try:
-        st.info(f"📤 Uploading: {display_filename}")
-        file_metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
+        st.info(f"📤 Uploading to Google Drive: {display_filename}")
+        
+        # ✅ Load credentials
+        credentials = service_account.Credentials.from_service_account_info(
+            SERVICE_ACCOUNT_INFO, 
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        
+        # ✅ Connect to Drive
+        service = build("drive", "v3", credentials=credentials)
+        
+        # ✅ FIRST: Verify folder exists and bot can access it
+        try:
+            folder = service.files().get(
+                fileId=GOOGLE_DRIVE_FOLDER_ID, 
+                fields="id, name, permissions"
+            ).execute()
+            st.success(f"✅ Folder FOUND: {folder.get('name')}")
+        except Exception as folder_err:
+            st.error(f"❌ CANNOT ACCESS FOLDER! Error: {str(folder_err)}")
+            st.info("👉 Check: Did you share folder with bot email and set to EDITOR?")
+            return None
+        
+        # ✅ UPLOAD — explicitly place INSIDE your folder
+        file_metadata = {
+            "name": display_filename,
+            "parents": [GOOGLE_DRIVE_FOLDER_ID]  # ← CRITICAL: MUST go HERE!
+        }
         media = MediaFileUpload(local_file_path, resumable=True)
+        
         file = service.files().create(
-            body=file_metadata, 
-            media_body=media, 
-            fields="id, name"
+            body=file_metadata,
+            media_body=media,
+            fields="id, name, parents"
         ).execute()
+        
         file_id = file.get("id")
-        st.success(f"✅ UPLOAD SUCCESSFUL! File ID: {file_id}")
+        parents = file.get("parents", [])
+        
+        if GOOGLE_DRIVE_FOLDER_ID in parents:
+            st.success(f"✅ ✅ UPLOAD SUCCESSFUL! File IS IN YOUR FOLDER! ID: {file_id}")
+        else:
+            st.warning(f"⚠️ Uploaded but NOT IN FOLDER! ID: {file_id}")
+            st.info("👉 File is in bot's storage — check folder sharing!")
+        
         return file_id
+
     except Exception as e:
         st.error(f"❌ UPLOAD FAILED! Error: {str(e)}")
         return None
