@@ -31,29 +31,19 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ─── YOUR FOLDER ID ────────────────────────────────────────
 GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
 
-# ============================================================
-# ✅ LOAD GOOGLE SERVICE ACCOUNT KEY — Secrets + Local Fallback
-# ============================================================
-SERVICE_ACCOUNT_INFO = {}
-
+# ─── LOAD GOOGLE CREDENTIALS ───
 if "gcp_service_account" in st.secrets:
     try:
-        key_text = st.secrets["gcp_service_account"]
-        # Convert escaped newlines BEFORE parsing
-        key_fixed = key_text.replace("\\n", "\n").replace("\\r", "")
-        SERVICE_ACCOUNT_INFO = json.loads(key_fixed)
-        st.success("✅ Google Drive credentials loaded successfully!")
+        raw = st.secrets["gcp_service_account"]
+        # ⭐ THIS LINE FIXES THE ERROR — Convert \n BEFORE parsing
+        fixed = raw.replace("\\\\n", "\\n")
+        SERVICE_ACCOUNT_INFO = json.loads(fixed)
+        st.success("✅ Credentials loaded successfully!")
     except Exception as e:
-        st.error(f"⚠️ Failed to parse credentials: {str(e)[:150]}...")
+        st.error(f"⚠️ Error: {str(e)[:200]}")
         SERVICE_ACCOUNT_INFO = {}
 else:
-    try:
-        with open(os.path.join(BASE_DIR, "service_account_key.json"), "r", encoding="utf-8") as f:
-            SERVICE_ACCOUNT_INFO = json.load(f)
-        st.info("✅ Using local credentials file")
-    except Exception as e:
-        SERVICE_ACCOUNT_INFO = {}
-        st.warning("⚠️ No Google Drive credentials found — uploads will use local storage only")
+    SERVICE_ACCOUNT_INFO = {}
 
 # ✅ END OF FILE — DO NOT ADD ANY SERVICE_ACCOUNT_INFO BELOW HERE!
 
