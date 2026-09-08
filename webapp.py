@@ -156,14 +156,11 @@ def read_audit_log(limit=200):
     except:
         return pd.DataFrame()
 # ============================================================
-# ✅ PAGE CONFIG & ALL PATHS — DEFINED FIRST!
-# ============================================================
-st.set_page_config(page_title="Acoole Electrical Ltd - Portal", layout="wide")
-
-
-# ✅ ALL AUDIT & SYSTEM PATHS — NOW BASE_DIR EXISTS ✅
+# ─── CONFIG ──────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
-AUDIT_LOG_FILE = AUDIT_LOG_PATH
+AUDIT_LOG_FILE = AUDIT_LOG_PATH   # ✅ ADDED — was missing!
 AUDIT_COLUMNS = [
     "AuditID", "Timestamp", "User_Name", "User_Role",
     "Action", "Request_ID", "Department", "Amount",
