@@ -29,6 +29,9 @@ from google.oauth2 import service_account
 # ✅ DEFINE BASE_DIR FIRST (as promised in header)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# ✅ ADD THIS LINE — UPLOAD_DIR was missing!
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
+
 # ─── YOUR FOLDER ID ────────────────────────────────────────
 GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
 
@@ -64,27 +67,50 @@ def get_drive_service():
 def upload_to_google_drive(local_file_path, display_filename):
     """Upload file → Returns Google Drive File ID"""
     service = get_drive_service()
-    if not service: return None
-    file_metadata = {
-        "name": display_filename,
-        "parents": [GOOGLE_DRIVE_FOLDER_ID]
-    }
-    media = MediaFileUpload(local_file_path, resumable=True)
-    file = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields="id, name"
-    ).execute()
-    # Make file accessible via link
-    service.permissions().create(
-        fileId=file.get("id"),
-        body={"role": "reader", "type": "anyone"}
-    ).execute()
-    return file.get("id")
-
-def get_drive_link(file_id):
-    """Return direct download link"""
-    return f"https://drive.google.com/uc?export=download&id={file_id}"
+    if not service:
+        st.error("❌ No Google Drive connection")
+        return None
+    
+    try:
+        st.info(f"📤 Uploading: {display_filename}")
+        st.info(f"📂 Target Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
+        
+        file_metadata = {
+            "name": display_filename,
+            "parents": [GOOGLE_DRIVE_FOLDER_ID]
+        }
+        media = MediaFileUpload(local_file_path, resumable=True)
+        
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id, name, parents"
+        ).execute()
+        
+        file_id = file.get("id")
+        parents = file.get("parents")
+        
+        # Set permissions
+        service.permissions().create(
+            fileId=file_id,
+            body={"role": "reader", "type": "anyone"}
+        ).execute()
+        
+        st.success(f"""
+        ✅ UPLOAD SUCCESSFUL!
+        📄 File ID: {file_id}
+        📁 Parent Folder: {parents}
+        🔗 Open File: https://drive.google.com/file/d/{file_id}/view
+        """)
+        return file_id
+        
+    except Exception as e:
+        st.error(f"""
+        ❌ UPLOAD FAILED!
+        Error: {str(e)}
+        💡 Check: Folder ID correct? Folder shared with service account?
+        """)
+        return None
     #---------------------------------
 
 # Ensure audit log file exists with correct columns
@@ -134,15 +160,6 @@ def read_audit_log(limit=200):
 # ============================================================
 st.set_page_config(page_title="Acoole Electrical Ltd - Portal", layout="wide")
 
-# ✅ DEFINE BASE_DIR BEFORE ANYTHING THAT USES IT
-if "win32" in sys.platform:
-    BASE_DIR = r"D:\Acoole_portal"
-    # ✅ On YOUR Windows PC — Attachments go to C: drive (extra space!)
-    UPLOAD_DIR = r"C:\acooleadditionbackup"
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    # ✅ On Streamlit Cloud / Linux — Use project folder
-    UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_attachments")
 
 # ✅ ALL AUDIT & SYSTEM PATHS — NOW BASE_DIR EXISTS ✅
 AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit_log.xlsx")
@@ -1720,13 +1737,18 @@ else:
             
             if st.form_submit_button("📤 Send to Director", type="primary"):
                 if en.strip() and mgr.strip() and desc.strip():
-                    att_list = []
-                    if files:
-                        for i, f in enumerate(files):
-                            fn = f"ID_{nid}_F{i+1}_{f.name}"
-                            with open(os.path.join(UPLOAD_DIR, fn), "wb") as out:
-                                out.write(f.getbuffer())
-                            att_list.append(fn)
+            att_list = []
+            if files:
+                for i, f in enumerate(files):
+                    fn = f"ID_{nid}_F{i+1}_{f.name}"
+                    file_path = os.path.join(UPLOAD_DIR, fn)
+                    with open(file_path, "wb") as out:
+                        out.write(f.getbuffer())
+                    att_list.append(fn)
+                    # ✅ Upload each file to Google Drive
+                    file_id = upload_to_google_drive(file_path, fn)
+                    if file_id:
+                        st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
                     payload = {
                         "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
