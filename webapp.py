@@ -22,6 +22,28 @@ import shutil
 import subprocess
 import pandas as pd
 from datetime import datetime, date
+
+# ─── PAGE CONFIG — FULL WIDTH ───
+st.set_page_config(
+    page_title="Acoole Electrical Portal",
+    page_icon="⚡",
+    layout="wide",  # ✅ THIS IS THE KEY — "wide" = full screen
+    initial_sidebar_state="expanded"
+)
+
+# ─── OPTIONAL: FORCE MAX WIDTH ───
+st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
+        max-width: 100% !important;  /* ✅ Remove width limit */
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 import io
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
