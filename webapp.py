@@ -121,30 +121,29 @@ def get_drive_service():
 
 def upload_to_google_drive(local_file_path, display_filename):
     try:
-        st.info(f"📤 Uploading to Google Drive: {display_filename}")
+        st.info(f"📤 Uploading: {display_filename}")
         
-        # ✅ Load credentials
+        # Load credentials
         credentials = service_account.Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO, 
+            SERVICE_ACCOUNT_INFO,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
         
-        # ✅ Connect to Drive
         service = build("drive", "v3", credentials=credentials)
         
-        # ✅ FIRST: Verify folder exists and bot can access it
+        # ✅ STEP 1: Verify folder exists and bot can access it
         try:
             folder = service.files().get(
                 fileId=GOOGLE_DRIVE_FOLDER_ID, 
-                fields="id, name, permissions"
+                fields="id, name"
             ).execute()
             st.success(f"✅ Folder FOUND: {folder.get('name')}")
-        except Exception as folder_err:
-            st.error(f"❌ CANNOT ACCESS FOLDER! Error: {str(folder_err)}")
-            st.info("👉 Check: Did you share folder with bot email and set to EDITOR?")
+        except Exception as fe:
+            st.error(f"❌ CANNOT ACCESS FOLDER! Error: {str(fe)}")
+            st.info("👉 SHARE folder with bot email: drive-upload-bot@acoole-attachments.iam.gserviceaccount.com")
             return None
         
-        # ✅ UPLOAD — explicitly place INSIDE your folder
+        # ✅ STEP 2: Upload file EXPLICITLY into YOUR folder
         file_metadata = {
             "name": display_filename,
             "parents": [GOOGLE_DRIVE_FOLDER_ID]  # ← CRITICAL: MUST go HERE!
@@ -160,11 +159,13 @@ def upload_to_google_drive(local_file_path, display_filename):
         file_id = file.get("id")
         parents = file.get("parents", [])
         
+        # ✅ STEP 3: VERIFY file is IN your folder
         if GOOGLE_DRIVE_FOLDER_ID in parents:
-            st.success(f"✅ ✅ UPLOAD SUCCESSFUL! File IS IN YOUR FOLDER! ID: {file_id}")
+            st.success(f"✅ ✅ SUCCESS! File IS IN YOUR FOLDER! 🎉 ID: {file_id[:12]}...")
+            st.info("👉 REFRESH your Google Drive folder → FILE IS THERE!")
         else:
-            st.warning(f"⚠️ Uploaded but NOT IN FOLDER! ID: {file_id}")
-            st.info("👉 File is in bot's storage — check folder sharing!")
+            st.warning(f"⚠️ Uploaded but NOT in your folder! Parents: {parents}")
+            st.info("👉 File went to bot's storage — check folder sharing!")
         
         return file_id
 
