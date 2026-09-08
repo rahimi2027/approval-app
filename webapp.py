@@ -36,28 +36,16 @@ GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
 # ============================================================
 SERVICE_ACCOUNT_INFO = {}
 
-# --- 🔹 Option A: Load from Streamlit Secrets (Cloud) ---
 if "gcp_service_account" in st.secrets:
     try:
         key_text = st.secrets["gcp_service_account"]
-        
-        # ✅ FINAL FIX: Handle ALL forms of escaped newlines properly
-        # First decode double-escaped \\n, then single-escaped \n
-        import codecs
-        key_fixed = key_text.replace("\\\\", "\\")  # Fix double-backslashes first
-        key_fixed = key_fixed.replace("\\n", "\n")  # Convert \n → real newline
-        key_fixed = key_fixed.replace("\\r", "")   # Remove carriage returns
-        
+        # Convert escaped newlines BEFORE parsing
+        key_fixed = key_text.replace("\\n", "\n").replace("\\r", "")
         SERVICE_ACCOUNT_INFO = json.loads(key_fixed)
         st.success("✅ Google Drive credentials loaded successfully!")
     except Exception as e:
         st.error(f"⚠️ Failed to parse credentials: {str(e)[:150]}...")
-        # DEBUG: Show exactly what we received
-        st.info(f"🔍 Raw preview: {repr(key_text[:100])}")
-        st.info(f"🔍 Fixed preview: {repr(key_fixed[:100])}")
         SERVICE_ACCOUNT_INFO = {}
-
-# --- 🔹 Option B: Fallback to local file (your PC only) ---
 else:
     try:
         with open(os.path.join(BASE_DIR, "service_account_key.json"), "r", encoding="utf-8") as f:
