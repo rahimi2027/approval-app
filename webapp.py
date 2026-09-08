@@ -277,54 +277,6 @@ except ImportError:
         PDF_AVAILABLE = False
 
 # ============================================================
-# UPLOAD FUNCTIONS
-# ============================================================
-def get_drive_service():
-    try:
-        credentials = service_account.Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO, scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build("drive", "v3", credentials=credentials)
-    except Exception as e:
-        st.error(f"❌ Google Drive Error: {e}")
-        return None
-
-def upload_to_google_drive(local_file_path, display_filename):
-    try:
-        st.info(f"📤 Uploading to Google Drive: {display_filename}")
-        
-        # ✅ Load credentials from file (SCOPES already set correctly)
-        credentials = service_account.Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO, 
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        
-        # ✅ Connect to Drive
-        service = build("drive", "v3", credentials=credentials)
-        
-        # ✅ Upload file
-        file_metadata = {
-            "name": display_filename,
-            "parents": [GOOGLE_DRIVE_FOLDER_ID]
-        }
-        media = MediaFileUpload(local_file_path, resumable=True)
-        
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id, name"
-        ).execute()
-        
-        file_id = file.get("id")
-        st.success(f"✅ ✅ UPLOAD SUCCESSFUL! File ID: {file_id}")
-        return file_id
-
-    except Exception as e:
-        st.error(f"❌ UPLOAD FAILED! Error: {str(e)}")
-        st.info("📋 Tell me this error message!")
-        return None
-
-# ============================================================
 # AUDIT LOG FUNCTIONS
 # ============================================================
 def init_audit_log():
