@@ -23,18 +23,27 @@ from datetime import datetime, date
 
 # ✅ Read secret from environment FIRST
 SERVICE_ACCOUNT_KEY = os.getenv("GCP_SERVICE_ACCOUNT_KEY")
+SERVICE_ACCOUNT_INFO = {}
 
-# ✅ Now safely use the variable
-if SERVICE_ACCOUNT_KEY:
-    SERVICE_ACCOUNT_INFO = json.loads(SERVICE_ACCOUNT_KEY)
-else:
-    # Fallback: read from local file (only on your PC — NOT committed to GitHub)
+if SERVICE_ACCOUNT_KEY and SERVICE_ACCOUNT_KEY.strip():
     try:
-        with open(r"D:\Acoole_portal\service_account_key.json", "r") as f:
-            SERVICE_ACCOUNT_INFO = json.load(f)
-    except:
+        # ✅ Fix: Replace escaped \n with actual newlines BEFORE parsing
+        key_fixed = SERVICE_ACCOUNT_KEY.replace("\\n", "\n").replace("\\r", "")
+        SERVICE_ACCOUNT_INFO = json.loads(key_fixed)
+        st.success("✅ Google Drive credentials loaded successfully!")
+    except Exception as e:
+        st.error(f"⚠️ Failed to parse credentials: {str(e)[:100]}...")
         SERVICE_ACCOUNT_INFO = {}
-        st.error("⚠️ No Google Drive credentials found — uploads will use local storage only")
+else:
+    # Fallback: read from local file (ONLY on your PC — NOT committed to GitHub)
+    try:
+        with open(r"D:\Acoole_portal\service_account_key.json", "r", encoding="utf-8") as f:
+            SERVICE_ACCOUNT_INFO = json.load(f)
+        st.info("✅ Using local credentials file")
+    except Exception as e:
+        SERVICE_ACCOUNT_INFO = {}
+        st.warning("⚠️ No Google Drive credentials found — uploads will use local storage only")
+
 # ============================================================
 # ✅ GOOGLE DRIVE INTEGRATION — Ready to Use!
 # ============================================================
@@ -43,9 +52,10 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 
-
-# ─── YOUR FOLDER ID (ALREADY CONFIGURED!) ──────────────────
+# ─── YOUR FOLDER ID ────────────────────────────────────────
 GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
+
+# ✅ DO NOT hard-code SERVICE_ACCOUNT_INFO below here!
 
 # ─── YOUR SERVICE ACCOUNT KEY ────────────────────────────────
 SERVICE_ACCOUNT_INFO = {
