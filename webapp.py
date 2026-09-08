@@ -1,18 +1,16 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.1 (FULLY FIXED)
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.2
 # ============================================================
 # ✅ BASE_DIR defined FIRST — no more NameError!
-# ✅ Removed duplicate definitions
+# ✅ Removed duplicate CSS / page config
 # ✅ All variables exist before use
 # ✅ Silent missing-file warnings
-# ✅ Standardized all expander titles
 # ✅ Dashboard landing page with stats
 # ✅ Staff role = full Manager access
-# ✅ Clean status audit display
-# ✅ PDF attachments on Page 2 — confirmed
-# ✅ ALL Director portal indentation errors fixed
-# ✅ FIXED: elif-after-else SyntaxError
-# ✅ ✅ ✅ CREDENTIALS LOAD FROM FILE — NO MORE SECRETS BUG!
+# ✅ PDF attachments confirmed working
+# ✅ ALL syntax & indentation errors fixed
+# ✅ CREDENTIALS LOAD FROM FILE
+# ✅ ✅ ✅ ONEDRIVE READY — SWITCH ANYTIME!
 # ============================================================
 import streamlit as st
 import os
@@ -21,7 +19,12 @@ import json
 import shutil
 import subprocess
 import pandas as pd
+import io
+import requests
 from datetime import datetime, date
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.oauth2 import service_account
 
 # ============================================================
 # ─── PAGE CONFIG — FULL WIDTH (PERFECTED) ───
@@ -29,7 +32,7 @@ from datetime import datetime, date
 st.set_page_config(
     page_title="Acoole Electrical Portal",
     page_icon="⚡",
-    layout="wide",  # ✅ FULL SCREEN WIDTH
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
@@ -49,28 +52,6 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
-# ============================================================
-# ✅ KEEP YOUR EXISTING CODE BELOW THIS LINE
-# ============================================================
-
-# ─── OPTIONAL: FORCE MAX WIDTH ───
-st.markdown("""
-    <style>
-    .block-container {
-        padding-top: 1rem;
-        padding-bottom: 0rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
-        max-width: 100% !important;  /* ✅ Remove width limit */
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-import io
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.oauth2 import service_account
 
 # ============================================================
 # ✅ ALL CONFIGURATION IN ONE PLACE — DEFINED FIRST!
@@ -94,7 +75,16 @@ REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
 EXCEL_PATH = os.path.join(BASE_DIR, "requests.xlsx")
 USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.xlsx")
+
+# ─── GOOGLE DRIVE ───
 GOOGLE_DRIVE_FOLDER_ID = "1YxWsEYbkYdEh09q7LNXJgezC7dU7PRXk"
+
+# ─── ONEDRIVE / MICROSOFT GRAPH ───
+ONEDRIVE_CLIENT_ID = ""         # ← Fill when ready
+ONEDRIVE_CLIENT_SECRET = ""     # ← Fill when ready
+ONEDRIVE_TENANT_ID = "common"
+ONEDRIVE_FOLDER = "AcoolePortalData/"
+USE_ONEDRIVE = False  # ✅ Set = True to SWITCH from Google → OneDrive
 
 # ✅ Auto-create ALL required folders
 os.makedirs(BASE_DIR, exist_ok=True)
@@ -103,7 +93,7 @@ os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 
 # ============================================================
-# ✅ LOAD GOOGLE CREDENTIALS FROM FILE — NO MORE SECRETS BUG!
+# ✅ LOAD GOOGLE CREDENTIALS FROM FILE
 # ============================================================
 SERVICE_ACCOUNT_INFO = {}
 KEY_FILE = os.path.join(BASE_DIR, "service_account_key.json")
@@ -115,10 +105,66 @@ if os.path.exists(KEY_FILE):
     except Exception as e:
         st.error(f"⚠️ Failed to load credentials: {str(e)[:200]}")
 else:
-    st.warning("⚠️ Credentials file not found — uploads use local storage only")
+    st.warning("⚠️ Credentials file not found — using local storage only")
 
 # ============================================================
-# DEFAULTS
+# ✅ ONEDRIVE UPLOAD FUNCTIONS
+# ============================================================
+def get_onedrive_token():
+    if not ONEDRIVE_CLIENT_ID or not ONEDRIVE_CLIENT_SECRET:
+        return None
+    try:
+        url = f"https://login.microsoftonline.com/{ONEDRIVE_TENANT_ID}/oauth2/v2.0/token"
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": ONEDRIVE_CLIENT_ID,
+            "client_secret": ONEDRIVE_CLIENT_SECRET,
+            "scope": "https://graph.microsoft.com/.default"
+        }
+        res = requests.post(url, data=data, timeout=30)
+        if res.status_code == 200:
+            return res.json().get("access_token")
+    except Exception as e:
+        st.warning(f"⚠️ OneDrive connection: {e}")
+    return None
+
+
+def upload_to_onedrive(local_file_path, remote_filename=None):
+    if not USE_ONEDRIVE:
+        return False
+    token = get_onedrive_token()
+    if not token:
+        return False
+    filename = remote_filename or os.path.basename(local_file_path)
+    remote_path = f"{ONEDRIVE_FOLDER}{filename}"
+    try:
+        with open(local_file_path, 'rb') as f:
+            file_content = f.read()
+        url = f"https://graph.microsoft.com/v1.0/drives/me/items/root:/{remote_path}:/content"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/octet-stream"
+        }
+        res = requests.put(url, data=file_content, headers=headers, timeout=60)
+        if res.status_code in (200, 201):
+            st.info(f"✅ Synced to OneDrive: {filename}")
+            return True
+        else:
+            st.warning(f"⚠️ OneDrive sync: {res.status_code}")
+    except Exception as e:
+        st.warning(f"⚠️ Could not sync to OneDrive: {str(e)}")
+    return False
+
+
+def sync_all_files_to_onedrive():
+    """Call this after every file save"""
+    files_to_sync = [EXCEL_PATH, AUDIT_LOG_PATH, USER_DB_PATH]
+    for f in files_to_sync:
+        if os.path.exists(f):
+            upload_to_onedrive(f)
+
+# ============================================================
+# DEFAULTS — ROLES, DEPARTMENTS, USERS, PERMISSIONS
 # ============================================================
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
 DEFAULT_ROLES = ["Manager", "Staff", "Director", "Payroll", "Super Admin"]
@@ -138,7 +184,6 @@ DEFAULT_USERS = [
     {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration"},
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department"}
 ]
-
 PERMISSION_DEFAULTS = {
     "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
     "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
