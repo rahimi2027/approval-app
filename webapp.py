@@ -1488,22 +1488,29 @@ with st.sidebar:
     st.divider()
 
     # ↓ REST OF YOUR PORTAL CODE STARTS HERE (keep indented!) ↓
-    user = st.session_state.user_info
-    FULL_NAME = user.get("full_name") or user.get("username", "Unknown User")
-    CATEGORIES = load_categories()
-    refresh_data_button()
-    change_my_password_form()
-    all_live_requests = load_records_from_excel()
-    display_company_header()
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(f"🟢 **Welcome:** {FULL_NAME} | {user['dept']} | **{user['role']}**")
-    with c2:
-        if st.button("🚪 Secure Logout"):
-            st.session_state.logged_in = False
-            st.session_state.user_info = None
-            st.rerun()
-    st.divider()
+# ✅ Safely get user info — default to empty dict if not logged in yet
+user = st.session_state.get("user_info") or {}
+
+# ✅ Safe fallback chain — never crashes
+FULL_NAME = user.get("full_name") or user.get("username", "Unknown User")
+USER_DEPT = user.get("dept", "—")
+USER_ROLE = user.get("role", "—")
+
+CATEGORIES = load_categories()
+refresh_data_button()
+change_my_password_form()
+all_live_requests = load_records_from_excel()
+display_company_header()
+
+c1, c2 = st.columns(2)
+with c1:
+    st.markdown(f"🟢 **Welcome:** {FULL_NAME} | {USER_DEPT} | **{USER_ROLE}**")
+with c2:
+    if st.button("🚪 Secure Logout"):
+        st.session_state.logged_in = False
+        st.session_state.user_info = None
+        st.rerun()
+st.divider()
 
     # ✅ KEEP ALL YOUR ROLE PORTAL CODE BELOW THIS — INDENTED BY 4 SPACES!
     # ─── Payroll Portal, Manager Portal, Director Portal, Super Admin Portal etc. ───
