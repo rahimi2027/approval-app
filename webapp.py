@@ -409,13 +409,7 @@ with tab_audit:
         display_audit_log_panel()
     else:
         st.info("📖 Audit log panel not defined — skipping")
-# --- CLEAR HISTORY LOG BUTTON ---
-# Only show button if user is Super Admin
-if st.session_state.get("user_role") == "super_admin":
-    if st.button("🗑️ Clear History Log"):
-        # add confirmation dialog too!
-        confirm = st.warning("⚠️ This cannot be undone. Continue?")
-        # then clear...
+
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
