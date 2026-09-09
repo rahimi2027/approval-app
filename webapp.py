@@ -1512,14 +1512,12 @@ with c2:
         st.rerun()
 st.divider()
 
-# ✅ KEEP ALL YOUR ROLE PORTAL CODE BELOW THIS — NO LEADING SPACES!
-# ─── Payroll Portal, Manager Portal, Director Portal, Super Admin Portal etc. ───
-# ✅ CORRECT ORDER: if → elif → elif → elif → elif → else
 # ─── 1️⃣ PAYROLL PORTAL ───
 if user["role"] == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs."); st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+
     with tab_pending:
         pending = [r for r in all_live_requests if r["status"] == "pending"]
         if not pending: st.success("✅ No pending requests!")
@@ -1536,19 +1534,14 @@ if user["role"] == "Payroll":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-# ─── ALL elif BLOCKS FOLLOW — ALSO NO LEADING SPACES ───
-elif user["role"] in ["Manager", "Staff", "Team Member"]:
-    # ... rest of Manager portal code ...
-    pass  # ← REQUIRED: placeholder until you add real code
-elif user["role"] == "Director":
-    # ... Director portal code ...
-    pass  # ← THIS WAS MISSING — caused your error!
-elif user["role"] == "Super Admin":
-    # ... Super Admin portal code ...
-    pass
-else:
-    # ... fallback / unknown role code ...
-    pass
+
+    with tab_approved:  # ✅ SAME indentation as with tab_pending:
+        # your approved code here
+        pass
+
+    with tab_rejected:  # ✅ SAME indentation — NO extra spaces!
+        # your rejected code here
+        pass
     
     st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
