@@ -1220,26 +1220,78 @@ else:
     # ============================================================
     # ✅ LOGGED-IN PORTAL CONTENT
     # ============================================================
-    
+
+    # ─── LOGO AT TOP ───
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, use_container_width=False, width=250)
+        st.markdown("---")
+
     st.subheader("📄 Generate Approved PDFs")
     st.markdown("### 📅 Filter by Date Range")
-    
+
     col1, col2 = st.columns(2)
     with col1:
         from_date = st.date_input("From Date", value=None, help="Leave blank for all time")
     with col2:
         to_date = st.date_input("To Date", value=None, help="Leave blank for all time")
-    
+
     col_a, col_b = st.columns(2)
     with col_a:
         if st.button("📥 Generate & Download (This Range)", type="primary"):
             st.success("✅ Generating PDFs for selected date range...")
+            # --- ACTUAL PDF GENERATION BY DATE RANGE ---
+            records = load_records_from_excel()
+            generated_files = []
+            for req in records:
+                if req.get("status") != "approved":
+                    continue
+                # Parse request date
+                try:
+                    req_date = datetime.strptime(str(req.get("date", ""))[:10], "%Y-%m-%d").date()
+                except:
+                    continue
+                # Check date range
+                if from_date and req_date < from_date:
+                    continue
+                if to_date and req_date > to_date:
+                    continue
+                # Generate PDF
+                pdf_path = generate_approval_pdf(req)
+                if pdf_path and os.path.exists(pdf_path):
+                    generated_files.append(pdf_path)
+            # --- RESULTS ---
+            if generated_files:
+                st.success(f"✅ Generated {len(generated_files)} PDF(s)")
+                for fpath in generated_files:
+                    with open(fpath, "rb") as f:
+                        fname = os.path.basename(fpath)
+                        st.download_button(f"⬇️ Download {fname}", f.read(), file_name=fname)
+            else:
+                st.info("ℹ️ No approved requests found in this date range.")
+
     with col_b:
         if st.button("📄 Generate ALL Approved PDFs"):
             st.success("✅ Generating ALL approved PDFs...")
-    
+            # --- GENERATE ALL APPROVED ---
+            records = load_records_from_excel()
+            generated_files = []
+            for req in records:
+                if req.get("status") == "approved":
+                    pdf_path = generate_approval_pdf(req)
+                    if pdf_path and os.path.exists(pdf_path):
+                        generated_files.append(pdf_path)
+            # --- RESULTS ---
+            if generated_files:
+                st.success(f"✅ Generated {len(generated_files)} PDF(s)")
+                for fpath in generated_files:
+                    with open(fpath, "rb") as f:
+                        fname = os.path.basename(fpath)
+                        st.download_button(f"⬇️ Download {fname}", f.read(), file_name=fname)
+            else:
+                st.info("ℹ️ No approved requests found.")
+
     st.divider()
-    
+
     # ← REST OF YOUR PORTAL CODE (Welcome, Requests, etc.) GOES HERE ←
 
     user = st.session_state.user_info
