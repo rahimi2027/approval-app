@@ -226,10 +226,8 @@ def get_onedrive_token():
     try:
         url = f"https://login.microsoftonline.com/{ONEDRIVE_TENANT_ID}/oauth2/v2.0/token"
         data = {
-            "grant_type": "client_credentials",
-            "client_id": ONEDRIVE_CLIENT_ID,
-            "client_secret": ONEDRIVE_CLIENT_SECRET,
-            "scope": "https://graph.microsoft.com/.default"
+            "grant_type": "client_credentials", "client_id": ONEDRIVE_CLIENT_ID,
+            "client_secret": ONEDRIVE_CLIENT_SECRET, "scope": "https://graph.microsoft.com/.default"
         }
         res = requests.post(url, data=data, timeout=30)
         if res.status_code == 200:
@@ -239,43 +237,27 @@ def get_onedrive_token():
     return None
 
 def upload_to_onedrive(local_file_path, remote_filename=None):
-    if not USE_ONEDRIVE:
-        return False
+    if not USE_ONEDRIVE: return False
     token = get_onedrive_token()
-    if not token:
-        return False
+    if not token: return False
     filename = remote_filename or os.path.basename(local_file_path)
     remote_path = f"{ONEDRIVE_FOLDER}{filename}"
     try:
-        with open(local_file_path, 'rb') as f:
-            file_content = f.read()
+        with open(local_file_path, 'rb') as f: file_content = f.read()
         url = f"https://graph.microsoft.com/v1.0/drives/me/items/root:/{remote_path}:/content"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/octet-stream"
-        }
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"}
         res = requests.put(url, data=file_content, headers=headers, timeout=60)
         if res.status_code in (200, 201):
-            st.info(f"✅ Synced to OneDrive: {filename}")
-            return True
-        else:
-            st.warning(f"⚠️ OneDrive sync: {res.status_code}")
-    except Exception as e:
-        st.warning(f"⚠️ Could not sync to OneDrive: {str(e)}")
+            st.info(f"✅ Synced to OneDrive: {filename}"); return True
+        else: st.warning(f"⚠️ OneDrive sync: {res.status_code}")
+    except Exception as e: st.warning(f"⚠️ Could not sync to OneDrive: {str(e)}")
     return False
-
-def sync_all_files_to_onedrive():
-    """Call this after every file save"""
-    files_to_sync = [EXCEL_PATH, AUDIT_LOG_PATH, USER_DB_PATH]
-    for f in files_to_sync:
-        if os.path.exists(f):
-            upload_to_onedrive(f)
 
 # ============================================================
 # DEFAULTS — ROLES, DEPARTMENTS, USERS, PERMISSIONS
 # ============================================================
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
-DEFAULT_ROLES = ["Manager", "Staff", "Director", "Payroll", "Super Admin"]
+DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Director", "Payroll", "Super Admin"]
 DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
 EXCEL_COLUMNS = [
     "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
@@ -321,11 +303,26 @@ except ImportError:
         PDF_AVAILABLE = False
 
 # ============================================================
+# ✅ SAFE EXCEL INIT — FIXES "File is not a zip file"
+# ============================================================
+def safe_init_excel(path, columns):
+    """Create empty Excel if missing or corrupted"""
+    if not os.path.exists(path):
+        pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
+        return True
+    try:
+        pd.read_excel(path, engine="openpyxl")
+        return True
+    except Exception:
+        os.remove(path)
+        pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
+        return True
+
+# ============================================================
 # AUDIT LOG FUNCTIONS
 # ============================================================
 def init_audit_log():
-    if not os.path.exists(AUDIT_LOG_PATH):
-        pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
+    safe_init_excel(AUDIT_LOG_PATH, AUDIT_COLUMNS)
 
 def load_audit_log():
     init_audit_log()
@@ -333,8 +330,7 @@ def load_audit_log():
         df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
         return df.to_dict(orient="records")
     except Exception as e:
-        print(f"⚠️ Failed to load audit log: {e}")
-        return []
+        print(f"⚠️ Failed to load audit log: {e}"); return []
 
 def save_audit_entry(entry):
     init_audit_log()
@@ -356,8 +352,7 @@ def archive_audit_log():
     return None, 0
 
 def clear_audit_log_file():
-    if os.path.exists(AUDIT_LOG_FILE):
-        os.remove(AUDIT_LOG_FILE)
+    if os.path.exists(AUDIT_LOG_FILE): os.remove(AUDIT_LOG_FILE)
     pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
 
 def get_request_details(req_id):
@@ -376,8 +371,7 @@ def get_request_details(req_id):
     return dept, amount, decision_by, decision_date
 
 def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=None, decision_by=None, decision_date=None):
-    if not st.session_state.get("logged_in"):
-        return
+    if not st.session_state.get("logged_in"): return
     user = st.session_state.user_info
     username = user.get("full_name", user.get("username", "Unknown"))
     role = user.get("role", "Unknown")
@@ -435,20 +429,9 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
 
 def display_audit_log_panel():
     st.subheader("📖 Full System Audit Log — Complete History")
-    st.info("🔒 Super Admin Only — Cannot be deleted or modified.")
-    
-    # ✅ TEMPORARY: CLEAR TEST DATA BEFORE GOING LIVE
-    #if st.session_state.user_info.get("role") == "Super Admin":
-    #    if st.button("🗑️ CLEAR ALL TEST HISTORY", type="secondary"):
-     #       clear_audit_log_file()
-     #       st.success("✅ Audit history CLEARED! Ready for LIVE use 🚀")
-    #        st.rerun()
-    # ======================================
-    st.divider()
+    st.info("🔒 Super Admin Only — Cannot be deleted or modified."); st.divider()
     logs = load_audit_log()
-    if not logs:
-        st.info("📋 No activity recorded yet.")
-        return
+    if not logs: st.info("📋 No activity recorded yet."); return
     c1, c2, c3, c4 = st.columns(4)
     with c1: filter_user = st.multiselect("👤 Filter by User", sorted(set([l["User_Name"] for l in logs])))
     with c2: dept_list = sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"]))
@@ -461,8 +444,7 @@ def display_audit_log_panel():
     if filter_dept: filtered = [l for l in filtered if l.get("Department", "") in filter_dept]
     if filter_action: filtered = [l for l in filtered if l["Action"] in filter_action]
     if filter_req: filtered = [l for l in filtered if str(l["Request_ID"]) in filter_req]
-    st.metric(f"📄 Total Entries", len(filtered))
-    st.divider()
+    st.metric(f"📄 Total Entries", len(filtered)); st.divider()
     for entry in reversed(filtered):
         aid, ts, user, role, action, req_id = entry["AuditID"], entry["Timestamp"], entry["User_Name"], entry["User_Role"], entry["Action"], entry["Request_ID"]
         dept, amount, dec_by, dec_date = entry.get("Department", "-"), entry.get("Amount", "-"), entry.get("Decision_By", "-"), entry.get("Decision_Date", "-")
@@ -503,8 +485,7 @@ def format_date(d):
 def display_attachments(req):
     att = req.get("attachment_name", "None")
     if not att or str(att).strip().lower() in ["none", "nan", ""]:
-        st.info("📎 No attachments.")
-        return
+        st.info("📎 No attachments."); return
     try:
         attached_files = [n.strip() for n in str(att).split(",")]
         found_any = False
@@ -514,10 +495,8 @@ def display_attachments(req):
                 found_any = True
                 with open(path, "rb") as f:
                     st.download_button(f"⬇️ Download {name}", f.read(), file_name=name, key=f"att_{req.get('id', idx)}_{idx}")
-        if not found_any:
-            st.info("📎 Attachments referenced but files not available.")
-    except Exception as e:
-        st.info(f"📎 Attachments: {att}")
+        if not found_any: st.info("📎 Attachments referenced but files not available.")
+    except Exception as e: st.info(f"📎 Attachments: {att}")
 
 def get_next_id(all_records):
     if not all_records: return 1
@@ -546,9 +525,7 @@ def delete_record_by_id(req_id):
 def show_old_new_comparison(old_json, new_rec):
     try: old = json.loads(old_json) if old_json and old_json != "{}" else {}
     except: old = {}
-    if not old:
-        st.info("📋 New request — no previous version.")
-        return
+    if not old: st.info("📋 New request — no previous version."); return
     st.markdown("#### 🔄 Changes (Previous → New)")
     fields = [("emp_name", "Employee Name"), ("dept", "Department"), ("type", "Transaction Type"),
         ("category", "Category"), ("date", "Date"), ("amount", "Amount (£)"),
@@ -559,8 +536,7 @@ def show_old_new_comparison(old_json, new_rec):
         if o != n:
             changed = True
             st.markdown(f"**{label}**: ~~`{o}`~~ → **`{n}`**")
-    if not changed:
-        st.info("✅ No changes detected.")
+    if not changed: st.info("✅ No changes detected.")
 
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
@@ -653,7 +629,9 @@ def save_roles(roles_list):
 # USER DATABASE
 # ============================================================
 def init_user_db():
-    if not os.path.exists(USER_DB_PATH):
+    safe_init_excel(USER_DB_PATH, ["full_name","username","password","role","dept",
+        "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"])
+    if os.path.getsize(USER_DB_PATH) < 500:
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
 
 def save_users(users_dict):
@@ -682,20 +660,13 @@ def load_users():
                 "can_approve_requests": str(r.get("can_approve_requests", "False")).lower() == "true"}
         return users
     except Exception as e:
-        st.error(f"User DB Load Error: {e}")
-        return {}
+        st.error(f"User DB Load Error: {e}"); return {}
 
 # ============================================================
 # REQUESTS EXCEL
 # ============================================================
 def initialise_excel():
-    if not os.path.exists(EXCEL_PATH):
-        pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-    else:
-        df = pd.read_excel(EXCEL_PATH, engine="openpyxl")
-        for col in EXCEL_COLUMNS:
-            if col not in df.columns: df[col] = ""
-        df.to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+    safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
 initialise_excel()
 
 def load_records_from_excel():
@@ -728,8 +699,7 @@ def load_records_from_excel():
                 "old_data": str(r.get("Old Data", "")).strip()})
         return parsed
     except Exception as e:
-        st.error(f"Load Error: {e}")
-        return []
+        st.error(f"Load Error: {e}"); return []
 
 def save_all_records(records):
     export = []
