@@ -45,7 +45,7 @@ st.markdown("""
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
-        padding: 0.5rem 0.3rem !important; /* 👈 Minimal padding */
+        padding: 0.3rem 0.0rem !important; /* 👈 Minimal padding */
         margin: 0 !important;
         overflow: hidden !important;
         text-align: left !important;
