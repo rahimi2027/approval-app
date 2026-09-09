@@ -26,61 +26,35 @@ from google.oauth2 import service_account
 st.markdown("""
     <style>
     /* ========================================
-       🔥 THE MAIN FIX — Remove sidebar container's 
-       default left padding (the invisible wall!)
+       🔥 MAIN FIX: Align CENTER content to LEFT
        ======================================== */
-    section[data-testid="stSidebar"] > div:first-child > div {
-        padding-left: 0rem !important;
-        padding-right: 0rem !important;
+    .block-container {
+        padding-top: 2rem !important;
+        padding-left: 2rem !important;   /* 👈 Content away from edge nicely */
+        padding-right: 2rem !important;
+        max-width: 100% !important;      /* 👈 Remove max-width restriction */
     }
 
-    /* Sidebar content alignment */
+    /* ========================================
+       Optional: If you want even CLOSER to edge
+       change padding-left to: 0.5rem or 0rem
+       ======================================== */
+
+    /* Keep sidebar fixes as well */
+    section[data-testid="stSidebar"] > div:first-child > div {
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+    }
     section[data-testid="stSidebar"] > div:first-child {
         align-items: flex-start !important;
     }
-
-    /* Expander — full width, no margins */
-    .streamlit-expander {
-        width: 100% !important;
-        margin: 0 !important;
-        padding-left: 0 !important;
-    }
-    .streamlit-expanderHeader {
-        justify-content: flex-start !important;
-        padding-left: 0.5rem !important;
-    }
-
-    /* Expander content — ZERO left padding */
     .streamlit-expanderContent {
         width: 100% !important;
         box-sizing: border-box !important;
-        padding: 0.5rem 0.4rem !important;
-        padding-left: 0.25rem !important;
-        margin: 0 !important;
+        padding: 0.5rem !important;
         text-align: left !important;
-    }
-
-    /* Form — full width, flush left */
-    .streamlit-expanderContent form {
-        width: 100% !important;
-        box-sizing: border-box !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }
-
-    /* Labels & Inputs */
-    .streamlit-expanderContent label {
-        text-align: left !important;
-        justify-content: flex-start !important;
-        padding-left: 0.2rem !important;
     }
     .streamlit-expanderContent input {
-        width: 100% !important;
-        box-sizing: border-box !important;
-    }
-
-    /* Buttons in sidebar */
-    .stButton > button {
         width: 100% !important;
         box-sizing: border-box !important;
     }
