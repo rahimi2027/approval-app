@@ -1940,10 +1940,26 @@ else:
             else:
                 st.metric("✅ All Approved", len(approved)); st.divider()
                 for req in reversed(approved):
-                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}"
+                    # ✅ Get approver name and date
+                    dec_by = req.get('decision_by', 'Director')
+                    dec_date = req.get('decision_date', '')
+                    
+                    # ✅ Build extra info text
+                    if dec_date and len(dec_date) >= 10:
+                        display_date = dec_date[:10]
+                        extra_text = f" | ✅ Approved by {dec_by} on {display_date}"
+                    else:
+                        extra_text = f" | ✅ Approved by {dec_by}"
+                    
+                    # ✅ Updated title with approver info
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}{extra_text}"
+                    
                     with st.expander(title):
                         st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
                         st.write(f"💷 Amount: £{req['amount']:.2f}")
+                        st.write(f"🎯 **Approved By:** {dec_by}")
+                        if dec_date and len(dec_date) >= 10:
+                            st.write(f"📅 **Approval Date:** {dec_date[:10]}")
                         st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider()
