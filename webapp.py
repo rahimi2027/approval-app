@@ -1238,78 +1238,136 @@ else:
     with col2:
         to_date = st.date_input("To Date", value=None, help="Leave blank for all time")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        if st.button("📥 Generate & Download (This Range)", type="primary"):
-            st.success("✅ Generating PDFs for selected date range...")
-            records = load_records_from_excel()
-            
-            st.info(f"📋 Total records loaded: {len(records)}")
-            approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
-            st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
+# ─── PDF GENERATION HELPER (BUILT-IN — NO EXTERNAL FUNCTION NEEDED) ───
+def create_pdf_from_request(req):
+    """Generate PDF and return the full file path — works in loops!"""
+    try:
+        from fpdf import FPDF
+        # Use UNIQUE filename per request to avoid overwriting!
+        req_id = str(req.get("id", "unknown"))
+        filename = f"Approved_Request_{req_id}.pdf"
+        filepath = os.path.join(PDF_DIR, filename)
 
-            matched_records = []
-            for req in approved_records:
-                req_date = None
-                date_str = str(req.get("date", "")).strip()
-                date_str = date_str.replace("/", "-").replace(".", "-")[:10]
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 12, f"Approval Request #{req_id}", ln=True, align="C")
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "", 12)
+        
+        # Write all available fields
+        for label, key in [
+            ("Employee Name", "emp_name"),
+            ("Department", "dept"),
+            ("Date", "date"),
+            ("Amount (£)", "amount"),
+            ("Status", "status")
+        ]:
+            value = req.get(key, "")
+            if key == "amount" and value:
+                value = f"£{float(value):.2f}"
+            pdf.cell(50, 8, f"{label}: {value}", ln=True)
 
-                for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%m-%d-%Y"):
-                    try:
-                        req_date = datetime.strptime(date_str, fmt).date()
-                        break
-                    except:
-                        continue
+        pdf.output(filepath)
+        return filepath  # ← CRITICAL: Must return the full path!
+    except Exception as e:
+        st.warning(f"⚠️ PDF Error for #{req.get('id', '?')}: {str(e)}")
+        return None
 
-                include = True
-                if from_date and req_date and req_date < from_date:
-                    include = False
-                if to_date and req_date and req_date > to_date:
-                    include = False
 
-                if include:
-                    matched_records.append(req)
+# ============================================================
+# BUTTONS — GENERATE & DOWNLOAD
+# ============================================================
 
-            st.info(f"📅 Records matched by date range: {len(matched_records)}")
+col_a, col_b = st.columns(2)
+with col_a:
+    if st.button("📥 Generate & Download (This Range)", type="primary"):
+        st.success("✅ Generating PDFs for selected date range...")
+        records = load_records_from_excel()
+        
+        st.info(f"📋 Total records loaded: {len(records)}")
+        approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+        st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
 
-            # --- GENERATE PDFs & BUNDLE INTO ZIP ---
-            if matched_records:
-                zip_buffer = io.BytesIO()
-                pdf_count = 0
-                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-                    for req in matched_records:
-                        pdf_path = generate_approval_pdf(req)
-                        
-                        # ✅ MORE ROBUST CHECK
-                        if pdf_path and isinstance(pdf_path, str) and len(pdf_path.strip()) > 0:
-                            if os.path.exists(pdf_path):
-                                try:
-                                    with open(pdf_path, "rb") as f:
-                                        fname = os.path.basename(pdf_path)
-                                        zipf.writestr(fname, f.read())
-                                        pdf_count += 1
-                                except Exception as e:
-                                    st.warning(f"⚠️ Could not read PDF #{req.get('id', '?')}: {e}")
-                            else:
-                                st.warning(f"⚠️ PDF path returned but file missing for #{req.get('id', '?')}: {pdf_path}")
-                        else:
-                            st.warning(f"⚠️ PDF generation returned empty/None for request #{req.get('id', '?')}")
+        matched_records = []
+        for req in approved_records:
+            req_date = None
+            date_str = str(req.get("date", "")).strip()
+            date_str = date_str.replace("/", "-").replace(".", "-")[:10]
+            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%m-%d-%Y"):
+                try:
+                    req_date = datetime.strptime(date_str, fmt).date()
+                    break
+                except:
+                    continue
+            include = True
+            if from_date and req_date and req_date < from_date: include = False
+            if to_date and req_date and req_date > to_date: include = False
+            if include: matched_records.append(req)
 
-                zip_buffer.seek(0)
-                if pdf_count > 0:
-                    st.success(f"✅ Successfully generated {pdf_count} PDF(s) — Download below!")
-                    st.download_button(
-                        f"📦 Download ALL {pdf_count} PDFs (ZIP)",
-                        data=zip_buffer,
-                        file_name=f"Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                        mime="application/zip",
-                        type="primary",
-                        use_container_width=True
-                    )
-                else:
-                    st.error("❌ No PDFs were generated successfully. Check your generate_approval_pdf() function.")
+        st.info(f"📅 Records matched by date range: {len(matched_records)}")
+
+        # --- GENERATE & ZIP ---
+        if matched_records:
+            import zipfile, io
+            zip_buffer = io.BytesIO()
+            pdf_count = 0
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for req in matched_records:
+                    pdf_path = create_pdf_from_request(req)  # ← Built-in function!
+                    if pdf_path and os.path.exists(pdf_path):
+                        with open(pdf_path, "rb") as f:
+                            zipf.writestr(os.path.basename(pdf_path), f.read())
+                            pdf_count += 1
+
+            zip_buffer.seek(0)
+            if pdf_count > 0:
+                st.success(f"✅ Generated {pdf_count} PDFs!")
+                st.download_button(
+                    f"📦 Download {pdf_count} PDFs (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                    type="primary", use_container_width=True
+                )
             else:
-                st.info("ℹ️ No approved requests found in this date range.")
+                st.error("❌ PDF generation failed. Check PDF_DIR path.")
+        else:
+            st.info("ℹ️ No records matched.")
+
+
+with col_b:
+    if st.button("📄 Generate ALL Approved PDFs"):
+        st.success("✅ Generating ALL approved PDFs...")
+        records = load_records_from_excel()
+        approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+
+        if approved_records:
+            import zipfile, io
+            zip_buffer = io.BytesIO()
+            pdf_count = 0
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for req in approved_records:
+                    pdf_path = create_pdf_from_request(req)
+                    if pdf_path and os.path.exists(pdf_path):
+                        with open(pdf_path, "rb") as f:
+                            zipf.writestr(os.path.basename(pdf_path), f.read())
+                            pdf_count += 1
+
+            zip_buffer.seek(0)
+            if pdf_count > 0:
+                st.success(f"✅ Generated {pdf_count} PDFs!")
+                st.download_button(
+                    f"📦 Download ALL {pdf_count} PDFs (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"All_Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                    type="primary", use_container_width=True
+                )
+            else:
+                st.error("❌ PDF generation failed.")
+        else:
+            st.info("ℹ️ No approved requests found.")
 
     with col_b:
         if st.button("📄 Generate ALL Approved PDFs"):
