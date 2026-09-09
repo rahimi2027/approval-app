@@ -1319,82 +1319,88 @@ with st.sidebar:
                 key="dl_sb_all"
             )
 
-    # ============================================================
-    # 📊 MAIN PAGE — STATUS MESSAGES ONLY
-    # ============================================================
-    if gen_range:
-        st.success("✅ Generating PDFs for selected date range...")
-        records = load_records_from_excel()
-        st.info(f"📋 Total records loaded: {len(records)}")
-        approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
-        st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
-        matched_records = []
-        for req in approved_records:
-            req_date = None
-            date_str = str(req.get("date", "")).strip()
-            date_str = date_str.replace("/", "-").replace(".", "-")[:10]
-            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%m-%d-%Y"):
-                try:
-                    req_date = datetime.strptime(date_str, fmt).date()
-                    break
-                except:
-                    continue
-            include = True
-            if from_date and req_date and req_date < from_date: include = False
-            if to_date and req_date and req_date > to_date: include = False
-            if include: matched_records.append(req)
-        st.info(f"📅 Records matched by date range: {len(matched_records)}")
-        if matched_records:
-            import zipfile, io
-            zip_buffer = io.BytesIO()
-            pdf_count = 0
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-                for req in matched_records:
-                    pdf_path = create_pdf_from_request(req)
-                    if pdf_path and os.path.exists(pdf_path):
-                        with open(pdf_path, "rb") as f:
-                            zipf.writestr(os.path.basename(pdf_path), f.read())
-                            pdf_count += 1
-            zip_buffer.seek(0)
-            if pdf_count > 0:
-                st.success(f"✅ Generated {pdf_count} PDFs! ⬅️ Go to sidebar to download")
-                st.session_state.zip_range_data = zip_buffer.getvalue()
-                st.session_state.zip_range_name = f"Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-            else:
-                st.error("❌ PDF generation failed. Check PDF_DIR path.")
-                st.session_state.zip_range_data = None
+  # ============================================================
+# 📊 MAIN PAGE — STATUS MESSAGES ONLY
+# ============================================================
+
+# ✅ SAFETY: Ensure user exists BEFORE any role checks — PREVENTS NameError!
+user = st.session_state.get("user") or {}
+if not isinstance(user, dict):
+    user = {}
+
+if gen_range:
+    st.success("✅ Generating PDFs for selected date range...")
+    records = load_records_from_excel()
+    st.info(f"📋 Total records loaded: {len(records)}")
+    approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+    st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
+    matched_records = []
+    for req in approved_records:
+        req_date = None
+        date_str = str(req.get("date", "")).strip()
+        date_str = date_str.replace("/", "-").replace(".", "-")[:10]
+        for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%m-%d-%Y"):
+            try:
+                req_date = datetime.strptime(date_str, fmt).date()
+                break
+            except:
+                continue
+        include = True
+        if from_date and req_date and req_date < from_date: include = False
+        if to_date and req_date and req_date > to_date: include = False
+        if include: matched_records.append(req)
+    st.info(f"📅 Records matched by date range: {len(matched_records)}")
+    if matched_records:
+        import zipfile, io
+        zip_buffer = io.BytesIO()
+        pdf_count = 0
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for req in matched_records:
+                pdf_path = create_pdf_from_request(req)
+                if pdf_path and os.path.exists(pdf_path):
+                    with open(pdf_path, "rb") as f:
+                        zipf.writestr(os.path.basename(pdf_path), f.read())
+                        pdf_count += 1
+        zip_buffer.seek(0)
+        if pdf_count > 0:
+            st.success(f"✅ Generated {pdf_count} PDFs! ⬅️ Go to sidebar to download")
+            st.session_state.zip_range_data = zip_buffer.getvalue()
+            st.session_state.zip_range_name = f"Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
         else:
-            st.info("ℹ️ No records matched.")
+            st.error("❌ PDF generation failed. Check PDF_DIR path.")
             st.session_state.zip_range_data = None
+    else:
+        st.info("ℹ️ No records matched.")
+        st.session_state.zip_range_data = None
 
-    if gen_all:
-        st.success("✅ Generating ALL approved PDFs...")
-        records = load_records_from_excel()
-        approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
-        if approved_records:
-            import zipfile, io
-            zip_buffer = io.BytesIO()
-            pdf_count = 0
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-                for req in approved_records:
-                    pdf_path = create_pdf_from_request(req)
-                    if pdf_path and os.path.exists(pdf_path):
-                        with open(pdf_path, "rb") as f:
-                            zipf.writestr(os.path.basename(pdf_path), f.read())
-                            pdf_count += 1
-            zip_buffer.seek(0)
-            if pdf_count > 0:
-                st.success(f"✅ Generated {pdf_count} PDFs! ⬅️ Go to sidebar to download")
-                st.session_state.zip_all_data = zip_buffer.getvalue()
-                st.session_state.zip_all_name = f"All_Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-            else:
-                st.error("❌ PDF generation failed.")
-                st.session_state.zip_all_data = None
+if gen_all:
+    st.success("✅ Generating ALL approved PDFs...")
+    records = load_records_from_excel()
+    approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+    if approved_records:
+        import zipfile, io
+        zip_buffer = io.BytesIO()
+        pdf_count = 0
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for req in approved_records:
+                pdf_path = create_pdf_from_request(req)
+                if pdf_path and os.path.exists(pdf_path):
+                    with open(pdf_path, "rb") as f:
+                        zipf.writestr(os.path.basename(pdf_path), f.read())
+                        pdf_count += 1
+        zip_buffer.seek(0)
+        if pdf_count > 0:
+            st.success(f"✅ Generated {pdf_count} PDFs! ⬅️ Go to sidebar to download")
+            st.session_state.zip_all_data = zip_buffer.getvalue()
+            st.session_state.zip_all_name = f"All_Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
         else:
-            st.info("ℹ️ No approved requests found.")
+            st.error("❌ PDF generation failed.")
             st.session_state.zip_all_data = None
+    else:
+        st.info("ℹ️ No approved requests found.")
+        st.session_state.zip_all_data = None
 
-    st.divider()
+st.divider()
 
 # ─── 1️⃣ PAYROLL PORTAL ───
 if user.get("role") == "Payroll":
@@ -1403,74 +1409,75 @@ if user.get("role") == "Payroll":
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
     
     with tab_pending:
-        pending = [r for r in all_live_requests if r["status"] == "pending"]
+        pending = [r for r in all_live_requests if r.get("status") == "pending"]
         if not pending:
             st.success("✅ No pending requests!")
         else:
             st.metric("⏳ Pending", len(pending)); st.divider()
             for req in reversed(pending):
-                with st.expander(f"🟡 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"):
-                    st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
-                    st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                    st.write(f"💷 Amount: £{req['amount']:.2f}")
-                    st.write(f"👔 **Line Manager:** {req['manager']}")
-                    st.write(f"📅 **Date:** {req['date']}")
-                    st.info(f"📝 **Description:** {req['desc']}")
+                with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                    st.write(f"👔 **Line Manager:** {req.get('manager')}")
+                    st.write(f"📅 **Date:** {req.get('date')}")
+                    st.info(f"📝 **Description:** {req.get('desc')}")
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
 
-with tab_approved:
-    approved = [r for r in all_live_requests if r["status"] == "approved"]
-    if not approved:
-        st.info("📋 No approved requests.")
-    else:
-        st.metric("✅ Approved", len(approved)); st.divider()
-        for req in reversed(approved):
-            dec_by = req.get('decision_by', 'Director')
-            dec_date = req.get('decision_date', '')
-
-            if dec_date and len(dec_date) >= 10:
-                display_date = dec_date[:10]
-                extra_text = f" | ✅ Approved by {dec_by} on {display_date}"
-            else:
-                extra_text = f" | ✅ Approved by {dec_by}"
-
-            title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}{extra_text}"
-            with st.expander(title):
-                st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req.get('dept', '')}")
-                st.write(f"💷 Amount: £{req['amount']:.2f}")
-                st.write(f"🎯 **Approved By:** {dec_by}")
+    # ✅ FIXED INDENTATION — was outside the Payroll block before!
+    with tab_approved:
+        approved = [r for r in all_live_requests if r.get("status") == "approved"]
+        if not approved:
+            st.info("📋 No approved requests.")
+        else:
+            st.metric("✅ Approved", len(approved)); st.divider()
+            for req in reversed(approved):
+                dec_by = req.get('decision_by', 'Director')
+                dec_date = req.get('decision_date', '')
                 if dec_date and len(dec_date) >= 10:
-                    st.write(f"📅 **Approval Date:** {dec_date[:10]}")
-                st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
-                display_attachments(req)
-                st.divider()
-                display_pdf_button(req, can_generate=True)
+                    display_date = dec_date[:10]
+                    extra_text = f" | ✅ Approved by {dec_by} on {display_date}"
+                else:
+                    extra_text = f" | ✅ Approved by {dec_by}"
+                title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}{extra_text}"
+                with st.expander(title):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
+                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                    st.write(f"🎯 **Approved By:** {dec_by}")
+                    if dec_date and len(dec_date) >= 10:
+                        st.write(f"📅 **Approval Date:** {dec_date[:10]}")
+                    st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
+                    display_attachments(req)
+                    st.divider()
+                    display_pdf_button(req, can_generate=True)
 
     with tab_rejected:
-        rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+        rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
         if not rejected:
             st.success("✅ No rejected requests!")
         else:
             st.metric("❌ Rejected", len(rejected)); st.divider()
             for req in reversed(rejected):
-                with st.expander(f"🔴 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"):
-                    st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
-                    st.write(f"💷 Amount: £{req['amount']:.2f}")
+                with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
 
+
 # ─── 2️⃣ MANAGER / STAFF PORTAL ───
 if user.get("role") == "Admin":
     ...
 elif user.get("role") in ["Manager", "Staff", "Team Member"]:
-    if st.session_state.editing_request_id:
+    dept = user.get("dept", "")  # ✅ Safe lookup
+    if st.session_state.get("editing_request_id"):
         eid = st.session_state.editing_request_id
-        rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
+        rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
         if rec:
             st.subheader(f"✏️ Edit Request #{eid}")
             show_old_new_comparison("{}", rec)
@@ -1502,6 +1509,7 @@ elif user.get("role") in ["Manager", "Staff", "Team Member"]:
                     st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
             else:
                 st.info("📋 No attachments currently attached.")
+
             st.markdown("#### ➕ Attach New Files")
             new_files_upload = st.file_uploader(
                 "Upload additional files",
@@ -1509,21 +1517,24 @@ elif user.get("role") in ["Manager", "Staff", "Team Member"]:
                 accept_multiple_files=True,
                 key=f"new_upload_{eid}"
             )
-            st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload)} new** = {len(files_to_keep)+len(new_files_upload)} total files")
+            st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload or [])} new** = {len(files_to_keep)+len(new_files_upload or [])} total files")
+
             with st.form("edit_form"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    en = st.text_input("👤 Employee Name", rec["emp_name"])
-                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec["type"]))
-                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=CATEGORIES.index(rec["category"]) if rec["category"] in CATEGORIES else 0)
-                    amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec["amount"]))
+                    en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
+                    cat_idx = CATEGORIES.index(rec["category"]) if rec.get("category") in CATEGORIES else 0
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                    amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
                 with c2:
                     from datetime import datetime as dt
-                    try: d = dt.strptime(str(rec["date"])[:10], "%Y-%m-%d")
+                    try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
                     except: d = dt.today()
                     dt_val = st.date_input("📅 Date", d)
-                    mgr = st.text_input("👔 Line Manager", rec["manager"])
-                    desc = st.text_area("📝 Description / Justification", rec["desc"])
+                    mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
+                    desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
+
                 if st.form_submit_button("✅ Submit Edit", type="primary"):
                     final_attachments = list(files_to_keep)
                     if new_files_upload:
@@ -1532,20 +1543,22 @@ elif user.get("role") in ["Manager", "Staff", "Team Member"]:
                             with open(os.path.join(UPLOAD_DIR, fn), "wb") as outfile:
                                 outfile.write(f.getbuffer())
                             final_attachments.append(fn)
+
                     records = load_records_from_excel()
                     old_data_dict = {
-                        "emp_name": rec["emp_name"], "dept": rec["dept"],
-                        "type": rec["type"], "category": rec["category"],
-                        "date": rec["date"], "amount": rec["amount"],
-                        "manager": rec["manager"], "desc": rec["desc"]
+                        "emp_name": rec.get("emp_name"), "dept": rec.get("dept"),
+                        "type": rec.get("type"), "category": rec.get("category"),
+                        "date": rec.get("date"), "amount": rec.get("amount"),
+                        "manager": rec.get("manager"), "desc": rec.get("desc")
                     }
                     new_data_dict = {
-                        "emp_name": en.strip(), "dept": user.get("dept", ""), "type": rt,
+                        "emp_name": en.strip(), "dept": dept, "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt,
                         "manager": mgr.strip(), "desc": desc.strip()
                     }
+
                     for r in records:
-                        if int(r["id"]) == int(eid):
+                        if int(r.get("id", 0)) == int(eid):
                             r["emp_name"] = en.strip()
                             r["type"] = rt
                             r["category"] = ct
@@ -1557,18 +1570,21 @@ elif user.get("role") in ["Manager", "Staff", "Team Member"]:
                             r["attachment_name"] = ", ".join(final_attachments) or "None"
                             r["old_data"] = json.dumps(old_data_dict)
                             break
+
                     log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
                     save_all_records(records)
-                    st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload)}")
+                    st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload or [])}")
                     st.session_state.editing_request_id = None
                     st.rerun()
+
             if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
                 st.session_state.editing_request_id = None
                 st.rerun()
 
-    st.subheader(f"➕ New Request — {user['dept']}")
+    st.subheader(f"➕ New Request — {dept}")
     nid = get_next_id(all_live_requests)
     st.markdown(f"**🆔 Request ID:** `#{nid}`")
+
     with st.form("new_req", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
@@ -1587,8 +1603,8 @@ elif user.get("role") in ["Manager", "Staff", "Team Member"]:
             if en.strip() and mgr.strip() and desc.strip():
                 att_list = []
                 if files:
-                    for i, f in enumerate(files):
-                        fn = f"ID_{nid}_F{i+1}_{f.name}"
+                    for i, f in enumerate(files, 1):
+                        fn = f"ID_{nid}_F{i}_{f.name}"
                         file_path = os.path.join(UPLOAD_DIR, fn)
                         with open(file_path, "wb") as out:
                             out.write(f.getbuffer())
@@ -1596,8 +1612,9 @@ elif user.get("role") in ["Manager", "Staff", "Team Member"]:
                         file_id = upload_to_google_drive(file_path, fn)
                         if file_id:
                             st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
+
                 payload = {
-                    "id": nid, "emp_name": en.strip(), "dept": user.get("dept", ""), "type": rt,
+                    "id": nid, "emp_name": en.strip(), "dept": dept, "type": rt,
                     "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
                     "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
                     "status": "pending", "director_comments": "", "decision_date": "",
@@ -1612,27 +1629,27 @@ elif user.get("role") in ["Manager", "Staff", "Team Member"]:
 
     st.divider()
     st.subheader(f"📋 My Department Requests")
-    my_reqs = [r for r in all_live_requests if r["dept"] == user["dept"]]
+    my_reqs = [r for r in all_live_requests if r.get("dept") == dept]
     if not my_reqs:
         st.info("📋 No requests yet.")
     else:
         for req in reversed(my_reqs):
-            icon = "🟡" if req["status"] == "pending" else ("🟢" if req["status"] == "approved" else "🔴")
-            title = f"{icon} ID #{req['id']} | {req['emp_name']} | {req['status'].upper()} | £{req['amount']:.2f} | 📅 {format_date(req['date'])}"
+            status = req.get("status", "pending").lower()
+            icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+            title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
             with st.expander(title):
-                st.write(f"👤 Employee: {req['emp_name']} | 👔 Manager: {req['manager']}")
-                st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                st.info(f"📝 Description: {req['desc']}")
+                st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+                st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                st.info(f"📝 Description: {req.get('desc')}")
                 display_attachments(req)
-                if req["director_comments"]:
-                    st.info(f"💬 Director Comments: {req['director_comments']}")
-                if req["status"] == "approved":
+                if req.get("director_comments"):
+                    st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                if status == "approved":
                     display_pdf_button(req, can_generate=False)
-                if req["status"] in ["pending", "rejected"]:
-                    if st.button(f"✏️ Edit Request #{req['id']}", key=f"edit_{req['id']}"):
-                        st.session_state.editing_request_id = req["id"]
+                if status in ["pending", "rejected"]:
+                    if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                        st.session_state.editing_request_id = req.get("id")
                         st.rerun()
-
 # ─── 3️⃣ DIRECTOR PORTAL ───
 elif user.get("role") == "Director":
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
