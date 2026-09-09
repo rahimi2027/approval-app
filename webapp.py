@@ -384,6 +384,18 @@ def display_audit_log_panel():
     st.divider()
     df_export = pd.DataFrame(filtered)
     st.download_button("📥 Download Full Audit Log (CSV)", df_export.to_csv(index=False).encode("utf-8"), "Acoole_Audit_Log.csv", type="primary")
+
+# --- CLEAR HISTORY LOG BUTTON ---
+col1, col2 = st.columns([4, 1])  # push button to right side
+with col2:
+    if st.button("🗑️ Clear Log", type="secondary"):
+        # Clear session
+        st.session_state.history_log = []
+        # Clear file
+        if os.path.exists(LOG_FILE_PATH):
+            open(LOG_FILE_PATH, "w").close()
+        st.success("✅ History cleared!")
+        st.rerun()
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
