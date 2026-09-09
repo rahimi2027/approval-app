@@ -438,11 +438,11 @@ def display_audit_log_panel():
     st.info("🔒 Super Admin Only — Cannot be deleted or modified.")
     
     # ✅ TEMPORARY: CLEAR TEST DATA BEFORE GOING LIVE
-    if st.session_state.user_info.get("role") == "Super Admin":
-        if st.button("🗑️ CLEAR ALL TEST HISTORY", type="secondary"):
-            clear_audit_log_file()
-            st.success("✅ Audit history CLEARED! Ready for LIVE use 🚀")
-            st.rerun()
+    #if st.session_state.user_info.get("role") == "Super Admin":
+    #    if st.button("🗑️ CLEAR ALL TEST HISTORY", type="secondary"):
+     #       clear_audit_log_file()
+     #       st.success("✅ Audit history CLEARED! Ready for LIVE use 🚀")
+    #        st.rerun()
     # ======================================
     st.divider()
     logs = load_audit_log()
