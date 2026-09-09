@@ -1195,6 +1195,12 @@ if "editing_request_id" not in st.session_state:
 # ============================================================
 # LOGIN PAGE
 # ============================================================
+# ─── INIT SESSION STATE ───
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_info" not in st.session_state:
+    st.session_state.user_info = {}
+
 if not st.session_state.logged_in:
     display_company_header()
     with st.form("login_form", border=True):
@@ -1236,10 +1242,6 @@ else:
     
     # ← REST OF YOUR PORTAL CODE (Welcome, Requests, etc.) GOES HERE ←
 
-# ============================================================
-# MAIN APPLICATION — ROLE-BASED PORTALS (✅ ORDER FIXED)
-# ============================================================
-else:
     user = st.session_state.user_info
     FULL_NAME = user.get("full_name", user["username"])
     CATEGORIES = load_categories()
