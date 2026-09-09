@@ -1328,7 +1328,7 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
 else:
-else:
+
     # ============================================================
     # ✅ LOGGED-IN ONLY — EVERYTHING GOES INSIDE HERE ✅
     # ============================================================
