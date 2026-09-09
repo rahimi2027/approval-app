@@ -26,30 +26,32 @@ from google.oauth2 import service_account
 st.markdown("""
     <style>
     /* ========================================
-       🔥 MAIN CONTENT: Align to LEFT & control width
+       🔥 MAIN CONTENT: Pull LEFT, close to sidebar
        ======================================== */
     .block-container {
         padding-top: 2rem !important;
-        padding-left: 2rem !important;
+        padding-left: 1.5rem !important;   /* ✅ Much closer to sidebar */
         padding-right: 2rem !important;
-        max-width: 1200px !important;  /* 👈 Adjust page width here! */
-        /* ↓ Use 100% for full width, or 700px / 900px / 1200px */
-        width: 95% !important;
+        max-width: 1400px !important;      /* ✅ Wide enough, no centering */
+        width: 90% !important;             /* ✅ Use most of screen */
     }
 
     /* ========================================
-       SIDEBAR: Remove centering & push left
+       SIDEBAR: Push all content tight LEFT
        ======================================== */
+    section[data-testid="stSidebar"] {
+        width: 320px !important;            /* ✅ Slightly narrower sidebar */
+    }
     section[data-testid="stSidebar"] > div:first-child > div {
-        padding-left: 0.3rem !important;   /* Closer to edge */
-        padding-right: 0.3rem !important;
+        padding-left: 0.2rem !important;   /* ✅ Tight to left edge */
+        padding-right: 0.2rem !important;
     }
     section[data-testid="stSidebar"] > div:first-child {
         align-items: flex-start !important;
     }
 
     /* ========================================
-       EXPANDER/FORM: Fit perfectly & flush left
+       EXPANDER/FORM: Fit perfectly
        ======================================== */
     .streamlit-expander {
         width: 100% !important;
@@ -64,7 +66,7 @@ st.markdown("""
         width: 100% !important;
         box-sizing: border-box !important;
         padding: 0.5rem !important;
-        padding-left: 0.25rem !important;  /* Tight to left edge */
+        padding-left: 0.3rem !important;
         text-align: left !important;
     }
     .streamlit-expanderContent form {
