@@ -20,25 +20,28 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 
-# Limit page width
+# ============================================================
+# ─── PAGE CONFIG — MUST BE FIRST! ───
+# ============================================================
+st.set_page_config(
+    page_title="Acoole Electrical Portal",
+    page_icon="⚡",
+    layout="centered",  # ✅ Use "centered" NOT "wide"!
+    initial_sidebar_state="expanded"
+)
+
+# ============================================================
+# ─── CUSTOM WIDTH STYLING ───
+# ============================================================
 st.markdown("""
     <style>
     .main .block-container {
-        max-width: 800px;  /* ✅ Adjust this number (800–1200 works best) */
+        max-width: 900px;  /* ✅ Try 900px or 1000px */
         padding-top: 2rem;
         padding-bottom: 2rem;
     }
     </style>
 """, unsafe_allow_html=True)
-# ============================================================
-# ─── PAGE CONFIG — FULL WIDTH (PERFECTED) ───
-# ============================================================
-st.set_page_config(
-    page_title="Acoole Electrical Portal",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # ─── STYLING ───
 st.markdown("""
