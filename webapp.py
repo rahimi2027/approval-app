@@ -35,75 +35,64 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    /* ===== Sidebar content: FULL LEFT, NO GAP ===== */
-    section[data-testid="stSidebar"] > div:first-child {
-        align-items: flex-start !important;
-        padding-left: 0 !important;
-    }
-    section[data-testid="stSidebar"] .block-container {
-        padding-left: 0 !important;
-        padding-right: 0 !important;
-        max-width: 100% !important;
+    /* ========================================
+       🔥 THE MAIN FIX — Remove sidebar container's 
+       default left padding (the invisible wall!)
+       ======================================== */
+    section[data-testid="stSidebar"] > div:first-child > div {
+        padding-left: 0rem !important;
+        padding-right: 0rem !important;
     }
 
-    /* ===== Expander WRAPPER: NO left margin/padding ===== */
+    /* Sidebar content alignment */
+    section[data-testid="stSidebar"] > div:first-child {
+        align-items: flex-start !important;
+    }
+
+    /* Expander — full width, no margins */
     .streamlit-expander {
         width: 100% !important;
         margin: 0 !important;
-        margin-left: 0 !important;
         padding-left: 0 !important;
     }
     .streamlit-expanderHeader {
         justify-content: flex-start !important;
         padding-left: 0.5rem !important;
-        margin-left: 0 !important;
     }
 
-    /* ===== Expander CONTENT: ZERO left padding ===== */
+    /* Expander content — ZERO left padding */
     .streamlit-expanderContent {
         width: 100% !important;
-        max-width: 100% !important;
         box-sizing: border-box !important;
-        padding: 0.5rem 0.2rem !important;
-        padding-left: 0 !important; /* 👈 ZERO left gap */
+        padding: 0.5rem 0.4rem !important;
+        padding-left: 0.25rem !important;
         margin: 0 !important;
-        margin-left: 0 !important;
-        overflow: hidden !important;
         text-align: left !important;
     }
 
-    /* ===== Form: ZERO left margin ===== */
+    /* Form — full width, flush left */
     .streamlit-expanderContent form {
         width: 100% !important;
-        max-width: 100% !important;
         box-sizing: border-box !important;
         padding: 0 !important;
-        padding-left: 0 !important;
         margin: 0 !important;
-        margin-left: 0 !important;
     }
 
-    /* ===== Labels: flush left ===== */
+    /* Labels & Inputs */
     .streamlit-expanderContent label {
         text-align: left !important;
         justify-content: flex-start !important;
-        padding-left: 0.3rem !important;
-        margin-left: 0 !important;
+        padding-left: 0.2rem !important;
     }
-
-    /* ===== Inputs: touch the left edge ===== */
     .streamlit-expanderContent input {
         width: 100% !important;
-        max-width: 100% !important;
         box-sizing: border-box !important;
-        margin-left: 0 !important;
     }
 
-    /* ===== Button: full width ===== */
-    .streamlit-expanderContent .stButton > button {
+    /* Buttons in sidebar */
+    .stButton > button {
         width: 100% !important;
         box-sizing: border-box !important;
-        margin-top: 0.5rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
