@@ -1557,26 +1557,6 @@ st.divider()
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-        
-        with tab_rejected:
-            rejected = [r for r in all_live_requests if r["status"] == "rejected"]
-            if not rejected:
-                st.info("📋 No rejected requests yet.")
-            else:
-                st.metric("❌ Rejected", len(rejected))
-                st.divider()
-                for req in reversed(rejected):
-                    rejected_by_line = f"by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
-                    title = f"🔴 ID #{req['id']} | {req['emp_name']} | REJECTED | £{req['amount']:.2f} | {rejected_by_line}"
-                    with st.expander(title):
-                        st.write(f"👤 **Employee:** {req['emp_name']}")
-                        st.write(f"🏢 **Department:** {req['dept']}")
-                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
-                        st.write(f"📅 **Date:** {req['date']}")
-                        st.error(f"💬 **Reason:** {req.get('director_comments', 'None')}")
-                        display_attachments(req)
-                        st.divider()
-                        display_pdf_button(req, can_generate=True)
 
     # ─── 2️⃣ MANAGER / STAFF PORTAL ───
     elif user["role"] in ["Manager", "Staff", "Team Member"]:
