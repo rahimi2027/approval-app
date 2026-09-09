@@ -475,24 +475,58 @@ def delete_record_by_id(req_id):
     save_all_records(records)
     log_action("DELETED", req_id)
 def show_old_new_comparison(old_json, new_rec):
-    try: old = json.loads(old_json) if old_json and old_json != "{}" else {}
-    except: old = {}
-    if not old: st.info("📋 New request — no previous version."); return
-    st.markdown("#### 🔄 Changes (Previous → New)")
-    fields = [("emp_name", "Employee Name"), ("dept", "Department"), ("type", "Transaction Type"),
-        ("category", "Category"), ("date", "Date"), ("amount", "Amount (£)"),
-        ("manager", "Line Manager"), ("desc", "Description")]
-    changed = False
+    """Display clear before/after changes — shown on resubmitted requests"""
+    try:
+        old = json.loads(old_json) if old_json and old_json != "{}" else {}
+    except Exception:
+        old = {}
+
+    if not old:
+        st.info("📋 New request — no previous version to compare.")
+        return True  # No changes possible
+
+    st.markdown("---")
+    st.markdown("### 🔄 WHAT CHANGED FROM PREVIOUS VERSION")
+
+    fields = [
+        ("emp_name", "Employee Name"),
+        ("dept", "Department"),
+        ("type", "Transaction Type"),
+        ("category", "Category / Reason"),
+        ("date", "Date"),
+        ("amount", "Amount (£)"),
+        ("manager", "Line Manager"),
+        ("desc", "Description / Justification")
+    ]
+
+    changed_any = False
+    changes_found = []
+
     for key, label in fields:
-        o, n = str(old.get(key, "")).strip(), str(new_rec.get(key, "")).strip()
+        o = str(old.get(key, "")).strip()
+        n = str(new_rec.get(key, "")).strip()
+
+        # Normalize amount comparison
+        if key == "amount":
+            try:
+                o = f"{float(o):.2f}" if o else ""
+                n = f"{float(n):.2f}" if n else ""
+            except:
+                pass
+
         if o != n:
-            changed = True
-            st.markdown(f"**{label}**: ~~`{o}`~~ → **`{n}`**")
-    if not changed: st.info("✅ No changes detected.")
-def refresh_data_button():
-    if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
-        st.session_state["_last_refresh"] = datetime.now().isoformat()
-        st.rerun()
+            changed_any = True
+            changes_found.append(f"• **{label}:** changed from `{o or '(empty)'}` → **`{n or '(cleared)'}`**")
+
+    if changed_any:
+        for line in changes_found:
+            st.markdown(line)
+        st.success(f"✅ {len(changes_found)} change(s) detected — ready for review.")
+    else:
+        st.info("⚠️ No field changes detected — request was resubmitted without amendments.")
+
+    st.markdown("---")
+    return changed_any
 def make_request_title(req):
     status, amount, dt, dec_by, decision_dt = req["status"].upper(), f"£{req['amount']:.2f}", format_date(req.get("date", "")), req.get("decision_by", ""), format_date(req.get("decision_date", ""))
     if req["status"] == "pending": return f"🟡 ID #{req['id']} | {req['emp_name']} | PENDING | {amount} | 📅 {dt}"
@@ -1398,6 +1432,11 @@ elif role in ["Manager", "Staff", "Team Member"]:
         rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
         if rec:
             st.subheader(f"✏️ Edit Request #{eid}")
+            # ===== SHOW PREVIOUS REJECTION REASON =====
+            prev_comments = rec.get("director_comments", "")
+            if prev_comments and req.get("status") == "rejected":
+            st.warning(f"⚠️ **Previous Rejection Reason:**\n{prev_comments}")
+            # =========================================
             show_old_new_comparison("{}", rec)
             st.markdown("### 📎 Manage Attachments")
             att_name_raw = rec.get("attachment_name", "None")
@@ -1595,6 +1634,12 @@ elif role == "Director":
                         st.write(f"📅 **Date:** {format_date(req.get('date',''))}")
                         st.info(f"📝 **Description / Justification:**\n{req.get('desc','')}")
                         display_attachments(req)
+                        # ===== SHOW WHAT CHANGED (AMENDED RESUBMISSION) =====
+                req_old_data = req.get("old_data", "")
+                    if req_old_data and req_old_data != "{}":
+                    with st.container():
+                    show_old_new_comparison(req_old_data, req)
+                        # ====================================================
                     with col_right:
                         st.markdown("### ✍️ Decision")
                         comments = st.text_area("Director Comments", key=f"comm_{req_id}")
