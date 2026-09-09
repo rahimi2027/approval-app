@@ -1203,42 +1203,97 @@ if "user_info" not in st.session_state:
 
 # ─── PDF GENERATION HELPER ───
 def create_pdf_from_request(req):
+    """Generate PDF matching the original approval form layout"""
     try:
         from fpdf import FPDF
         req_id = str(req.get("id", "unknown"))
+        
+        # ─── BETTER FILENAME: Employee_Date.pdf ───
         emp_name = str(req.get("emp_name", "Request")).replace(" ", "_")
-        date_str = str(req.get("date", "unknown"))[:10]
+        date_str = str(req.get("date", "unknown"))[:10].replace("-", "")
         filename = f"{emp_name}_{date_str}.pdf"
         filepath = os.path.join(PDF_DIR, filename)
         os.makedirs(PDF_DIR, exist_ok=True)
 
+        # ─── CREATE PDF ───
         pdf = FPDF()
         pdf.add_page()
-        # Add logo at top-left
-        if os.path.exists(LOGO_PATH):
-           pdf.image(LOGO_PATH, x=10, y=8, w=50)
-         # Move text down so it doesn't overlap logo
-        pdf.ln(25)
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 12, f"Approval Request #{req_id}", ln=True, align="C")
-        pdf.ln(6)
         pdf.set_font("Helvetica", "", 12)
 
-        for label, key in [
-            ("Employee Name", "emp_name"),
-            ("Department", "dept"),
-            ("Date", "date"),
-            ("Amount (£)", "amount"),
-            ("Status", "status")
-        ]:
-            value = req.get(key, "")
-            if key == "amount" and value:
-                try: value = f"£{float(value):,.2f}"
-                except: pass
-            pdf.cell(50, 8, f"{label}: {value}", ln=True)
+        # ─── COMPANY LOGO ───
+        if os.path.exists(LOGO_PATH):
+            pdf.image(LOGO_PATH, x=60, y=10, w=90)  # Centered logo
+        pdf.ln(35)  # Space below logo
 
+        # ─── FORM TITLE ───
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 10, "Addition & Deduction Approval Form", ln=True, align="C")
+        pdf.ln(5)
+
+        # ─── DIVIDER LINE ───
+        pdf.set_draw_color(0, 0, 0)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(8)
+
+        # ─── REQUEST DETAILS SECTION ───
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "REQUEST DETAILS", ln=True)
+        pdf.set_font("Helvetica", "", 11)
+
+        def row(label, value):
+            pdf.cell(55, 7, f"{label}:", 0, 0)
+            pdf.cell(0, 7, str(value), 0, 1)
+
+        row("Request ID", req_id)
+        row("Employee Name", req.get("emp_name", ""))
+        row("Department", req.get("dept", ""))
+        row("Transaction Type", req.get("trans_type", ""))
+        row("Category / Reason", req.get("reason", ""))
+        row("Request Date", str(req.get("date", ""))[:10])
+        
+        amount = req.get("amount", "")
+        try: amount = f"£{float(amount):,.2f}"
+        except: pass
+        row("Amount Approved", amount)
+        row("Line Manager", req.get("line_manager", ""))
+        pdf.ln(5)
+
+        # ─── DESCRIPTION / JUSTIFICATION ───
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
+        pdf.set_font("Helvetica", "", 11)
+        justification = str(req.get("justification", req.get("description", "")))
+        pdf.multi_cell(0, 7, justification)
+        pdf.ln(5)
+
+        # ─── DIRECTOR APPROVAL ───
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
+        pdf.set_font("Helvetica", "", 11)
+
+        row("Decision", "APPROVED")
+        row("Approved By", req.get("approved_by", "Andy Acoole"))
+        row("Approval Date / Time", str(req.get("approved_date", ""))[:16])
+        pdf.ln(10)
+
+        # ─── SIGNATURE LINE ───
+        pdf.set_draw_color(100, 100, 100)
+        pdf.dashed_line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(8)
+        pdf.cell(0, 7, "Authorised Signature / Director", ln=True)
+
+        # ─── APPROVED STAMP (text-based since we don't have image) ───
+        pdf.ln(15)
+        pdf.set_font("Helvetica", "B", 22)
+        pdf.set_text_color(0, 120, 0)
+        pdf.cell(0, 15, "✓ APPROVED", ln=True, align="C")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 7, "Acoole Electrical Ltd", ln=True, align="C")
+
+        # ─── SAVE PDF ───
         pdf.output(filepath)
         return filepath
+
     except Exception as e:
         st.warning(f"⚠️ PDF Error for #{req.get('id', '?')}: {str(e)}")
         return None
