@@ -1077,14 +1077,11 @@ FULL_NAME = full_name  # ✅ Fixed missing variable!
 all_live_requests = load_records_from_excel()  # ✅ Fixed missing variable!
 CATEGORIES = load_categories()  # ✅ Fixed missing variable!
 
-# ✅ CENTERED Welcome + Logout — above logo
-col_left, col_mid, col_right = st.columns([1, 7, 1])
-with col_mid:
-    st.success("✅ Google Drive credentials loaded successfully!")
-    st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
-    if st.button("🔒 Secure Logout"):
-        st.session_state.clear()
-        st.rerun()
+# ✅ Welcome + Logout
+st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
+if st.button("🔓 Secure Logout"):
+    st.session_state.clear()
+    st.rerun()
 display_company_header()
 change_my_password_form()
 refresh_data_button()  # ✅ REFRESH BUTTON NOW SHOWS
