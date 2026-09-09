@@ -35,47 +35,62 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    /* 👇 REMOVE DEFAULT CENTERING — PUSH ALL LEFT */
+    /* ===== Sidebar base: PUSH ALL LEFT ===== */
     section[data-testid="stSidebar"] > div:first-child {
         align-items: flex-start !important;
     }
+    section[data-testid="stSidebar"] .block-container {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        max-width: 100% !important;
+    }
 
-    /* 👇 Expander: FULL WIDTH, NO extra side padding — flush to edges */
+    /* ===== Expander WRAPPER: remove margins & centering ===== */
+    .streamlit-expander {
+        width: 100% !important;
+        margin: 0 !important;
+        padding-left: 0 !important;
+    }
+    .streamlit-expanderHeader {
+        justify-content: flex-start !important;
+        padding-left: 0.5rem !important;
+    }
+
+    /* ===== Expander CONTENT: flush to edges ===== */
     .streamlit-expanderContent {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
-        padding: 0.3rem 0.0rem !important; /* 👈 Minimal padding */
+        padding: 0.5rem 0.2rem !important;
         margin: 0 !important;
         overflow: hidden !important;
         text-align: left !important;
     }
 
-    /* 👇 Form: FULL WIDTH, zero margin, tight left */
+    /* ===== Form: full width, zero margins ===== */
     .streamlit-expanderContent form {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
         padding: 0 !important;
         margin: 0 !important;
-        align-items: flex-start !important;
     }
 
-    /* 👇 Labels: TIGHT to left */
+    /* ===== Labels: tight left ===== */
     .streamlit-expanderContent label {
         text-align: left !important;
         justify-content: flex-start !important;
-        padding-left: 0.2rem !important;
+        padding-left: 0.1rem !important;
     }
 
-    /* 👇 Inputs: PERFECT FIT — touch the left edge nicely */
+    /* ===== Inputs: fit perfectly ===== */
     .streamlit-expanderContent input {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
     }
 
-    /* 👇 Button: match inputs, full width */
+    /* ===== Button: full width ===== */
     .streamlit-expanderContent .stButton > button {
         width: 100% !important;
         box-sizing: border-box !important;
