@@ -751,98 +751,95 @@ def generate_approval_pdf(request_data):
             pdf.set_font("Courier", "B", 9); pdf.set_text_color(0, 128, 0)
             pdf.cell(0, 5, "APPROVED", ln=True); pdf.set_text_color(0, 0, 0); pdf.set_font("Courier", "", 9)
             pdf.cell(52, 5, "Approved By:", 0, 0); pdf.cell(0, 5, dir_name, ln=True)
-pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
-pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
-
-if dir_comments and dir_comments not in ["None", ""]:
-    pdf.ln(2)
-    pdf.set_font("Courier", "B", 9)
-    pdf.cell(52, 5, "Director Comments:", 0, 0)
-    pdf.set_font("Courier", "", 9)
-    pdf.ln(5)
-    pdf.multi_cell(0, 5, dir_comments)
-
-elif status == "rejected":
-    pdf.cell(52, 5, "Decision:", 0, 0)
-    pdf.set_font("Courier", "B", 9)
-    pdf.set_text_color(200, 0, 0)
-    pdf.cell(0, 5, "REJECTED", ln=True)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Courier", "", 9)
-    pdf.cell(52, 5, "Rejected By:", 0, 0)
-    pdf.cell(0, 5, dir_name, ln=True)
-    pdf.cell(52, 5, "Rejection Date / Time:", 0, 0)
-    pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
-
-    if dir_comments and dir_comments not in ["None", ""]:
-        pdf.ln(2)
-        pdf.set_font("Courier", "B", 9)
-        pdf.cell(52, 5, "Reason for Rejection:", 0, 0)
-        pdf.set_font("Courier", "", 9)
-        pdf.ln(5)
-        pdf.multi_cell(0, 5, dir_comments)
-
-else:
-    pdf.cell(52, 5, "Decision:", 0, 0)
-    pdf.cell(0, 5, "Pending", ln=True)
-
-pdf.ln(12)
-dash_y = pdf.get_y()
-for x in range(10, 200, 4):
-    pdf.line(x, dash_y, x + 2, dash_y)
-
-if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
-    pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
-elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
-    pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
-
-pdf.ln(8)
-pdf.set_font("Courier", "", 8)
-pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
-
-pdf.add_page()
-pdf.set_font("Courier", "B", 12)
-pdf.cell(0, 8, txt="ATTACHMENTS", ln=True)
-pdf.ln(6)
-pdf.set_font("Courier", "", 9)
-
-if len(display_files) > 0:
-    for idx, fname in enumerate(display_files, 1):
-        file_path = os.path.join(UPLOAD_DIR, fname)
-        if os.path.exists(file_path):
-            if fname.lower().endswith((".png", ".jpg", ".jpeg")):
+            pdf.cell(52, 5, "Approval Date / Time:", 0, 0)
+            pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
+            if dir_comments and dir_comments not in ["None", ""]:
                 pdf.ln(2)
-                try:
-                    pdf.image(file_path, x=10, w=190)
-                    pdf.ln(70)
-                except:
-                    pdf.cell(0, 5, " Warning: Preview could not be displayed", ln=True)
-                    pdf.ln(3)
-            else:
-                pdf.cell(0, 5, " Non-image file - see original upload", ln=True)
-                pdf.ln(3)
+                pdf.set_font("Courier", "B", 9)
+                pdf.cell(52, 5, "Director Comments:", 0, 0)
+                pdf.set_font("Courier", "", 9)
+                pdf.ln(5)
+                pdf.multi_cell(0, 5, dir_comments)
+
+        elif status == "rejected":
+            pdf.cell(52, 5, "Decision:", 0, 0)
+            pdf.set_font("Courier", "B", 9)
+            pdf.set_text_color(200, 0, 0)
+            pdf.cell(0, 5, "REJECTED", ln=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font("Courier", "", 9)
+            pdf.cell(52, 5, "Rejected By:", 0, 0)
+            pdf.cell(0, 5, dir_name, ln=True)
+            pdf.cell(52, 5, "Rejection Date / Time:", 0, 0)
+            pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
+            if dir_comments and dir_comments not in ["None", ""]:
+                pdf.ln(2)
+                pdf.set_font("Courier", "B", 9)
+                pdf.cell(52, 5, "Reason for Rejection:", 0, 0)
+                pdf.set_font("Courier", "", 9)
+                pdf.ln(5)
+                pdf.multi_cell(0, 5, dir_comments)
+
         else:
-            pdf.cell(0, 5, " Warning: File not found on server", ln=True)
-            pdf.ln(3)
-else:
-    pdf.cell(0, 6, "- No files were attached to this request", ln=True)
+            pdf.cell(52, 5, "Decision:", 0, 0)
+            pdf.cell(0, 5, "Pending", ln=True)
 
-safe_id = clean_text(str(req_id))
-safe_name = emp_name
-safe_category = category
-safe_date = datetime.now().strftime("%Y-%m-%d")
-filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
-pdf_bytes = bytes(pdf.output())
+        pdf.ln(12)
+        dash_y = pdf.get_y()
+        for x in range(10, 200, 4):
+            pdf.line(x, dash_y, x + 2, dash_y)
 
-os.makedirs(PDF_DIR, exist_ok=True)
-full_pdf_path = os.path.join(PDF_DIR, filename)
-with open(full_pdf_path, "wb") as f:
-    f.write(pdf_bytes)
+        if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
+            pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
+        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
+            pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
 
-return True, pdf_bytes, filename
+        pdf.ln(8)
+        pdf.set_font("Courier", "", 8)
+        pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
 
-except Exception as e:
-    return False, None, f"PDF Error: {str(e)}"
+        pdf.add_page()
+        pdf.set_font("Courier", "B", 12)
+        pdf.cell(0, 8, txt="ATTACHMENTS", ln=True)
+        pdf.ln(6)
+        pdf.set_font("Courier", "", 9)
+
+        if len(display_files) > 0:
+            for idx, fname in enumerate(display_files, 1):
+                file_path = os.path.join(UPLOAD_DIR, fname)
+                if os.path.exists(file_path):
+                    if fname.lower().endswith((".png", ".jpg", ".jpeg")):
+                        pdf.ln(2)
+                        try:
+                            pdf.image(file_path, x=10, w=190)
+                            pdf.ln(70)
+                        except Exception:
+                            pdf.cell(0, 5, " Warning: Preview could not be displayed", ln=True)
+                            pdf.ln(3)
+                    else:
+                        pdf.cell(0, 5, " Non-image file - see original upload", ln=True)
+                        pdf.ln(3)
+                else:
+                    pdf.cell(0, 5, " Warning: File not found on server", ln=True)
+                    pdf.ln(3)
+        else:
+            pdf.cell(0, 6, "- No files were attached to this request", ln=True)
+
+        safe_id = clean_text(str(req_id))
+        safe_name = emp_name
+        safe_category = category
+        safe_date = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{safe_id}# {safe_name} - {safe_category} - {safe_date}.pdf"
+        pdf_bytes = bytes(pdf.output())
+        os.makedirs(PDF_DIR, exist_ok=True)
+        full_pdf_path = os.path.join(PDF_DIR, filename)
+        with open(full_pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+
+        return True, pdf_bytes, filename
+
+    except Exception as e:
+        return False, None, f"PDF Error: {str(e)}"
 
 
 def display_pdf_button(req, can_generate=False, key_suffix=""):
@@ -864,7 +861,6 @@ def display_pdf_button(req, can_generate=False, key_suffix=""):
             else:
                 st.error(f"❌ {name}")
     return False
-
 
 # ============================================================
 # 📊 DASHBOARD COMPONENT
