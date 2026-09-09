@@ -1549,7 +1549,7 @@ if user.get("role") == "Payroll":
                     display_pdf_button(req, can_generate=True)
 
 # ─── 2️⃣ MANAGER / STAFF PORTAL ───
-elif user["role"] in ["Manager", "Staff", "Team Member"]:
+elif user.get("role") in ["Manager", "Staff", "Team Member"]:
     if st.session_state.editing_request_id:
         eid = st.session_state.editing_request_id
         rec = next((r for r in all_live_requests if int(r["id"]) == int(eid)), None)
@@ -1622,7 +1622,7 @@ elif user["role"] in ["Manager", "Staff", "Team Member"]:
                         "manager": rec["manager"], "desc": rec["desc"]
                     }
                     new_data_dict = {
-                        "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+                        "emp_name": en.strip(), "dept": user.get("dept", ""), "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt,
                         "manager": mgr.strip(), "desc": desc.strip()
                     }
@@ -1679,7 +1679,7 @@ elif user["role"] in ["Manager", "Staff", "Team Member"]:
                         if file_id:
                             st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
                 payload = {
-                    "id": nid, "emp_name": en.strip(), "dept": user["dept"], "type": rt,
+                    "id": nid, "emp_name": en.strip(), "dept": user.get("dept", ""), "type": rt,
                     "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
                     "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
                     "status": "pending", "director_comments": "", "decision_date": "",
