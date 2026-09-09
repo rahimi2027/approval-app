@@ -35,23 +35,21 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    /* Target ALL container versions */
     .stApp .block-container,
     .stMain .block-container,
     section.main > div {
-        max-width: 1000px !important;
-        width: 1000px !important;
+        max-width: 1100px !important;
+        width: 1100px !important;
         padding-left: 2rem !important;
         padding-right: 2rem !important;
-        margin-left: auto !important;
-        margin-right: auto !important;
+        margin-left: 2rem !important;     /* ✅ Pushes LEFT by ~32px */
+        margin-right: auto !important;     /* ✅ Keeps right side fluid */
     }
     
-    /* Also limit form/login containers */
     .stForm, div[data-testid="stForm"] {
-        max-width: 1000px !important;
-        width: 1000px !important;
-        margin-left: auto !important;
+        max-width: 1100px !important;
+        width: 1100px !important;
+        margin-left: 2rem !important;
         margin-right: auto !important;
     }
     </style>
