@@ -1512,47 +1512,40 @@ with c2:
         st.rerun()
 st.divider()
 
-# ✅ KEEP ALL YOUR ROLE PORTAL CODE BELOW THIS — INDENTED BY 4 SPACES!
-    # ─── Payroll Portal, Manager Portal, Director Portal, Super Admin Portal etc. ───
-    # ✅ CORRECT ORDER: if → elif → elif → elif → elif → else
-    # ─── 1️⃣ PAYROLL PORTAL ───
-    if user["role"] == "Payroll":
-        st.subheader("🧾 Payroll Portal")
-        st.info("✅ View all requests and Download PDFs."); st.divider()
-        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-        with tab_pending:
-            pending = [r for r in all_live_requests if r["status"] == "pending"]
-            if not pending: st.success("✅ No pending requests!")
-            else:
-                st.metric("⏳ Pending", len(pending)); st.divider()
-                for req in reversed(pending):
-                    with st.expander(f"🟡 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"):
-                        st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
-                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                        st.write(f"💷 Amount: £{req['amount']:.2f}")
-                        st.write(f"👔 **Line Manager:** {req['manager']}")
-                        st.write(f"📅 **Date:** {req['date']}")
-                        st.info(f"📝 **Description:** {req['desc']}")
-                        display_attachments(req)
-                        st.divider()
-                        display_pdf_button(req, can_generate=True)
-
-        with tab_approved:
-            approved = [r for r in all_live_requests if r["status"] == "approved"]
-            if not approved: st.success("✅ No approved requests yet!")
-            else:
-                st.metric("✅ Approved", len(approved)); st.divider()
-                for req in reversed(approved):
-                    with st.expander(f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"):
-                        st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
-                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                        st.write(f"💷 Amount: £{req['amount']:.2f}")
-                        st.write(f"👔 **Line Manager:** {req['manager']}")
-                        st.write(f"📅 **Date:** {req['date']}")
-                        st.info(f"📝 **Description:** {req['desc']}")
-                        display_attachments(req)
-                        st.divider()
-                        display_pdf_button(req, can_generate=True)
+# ✅ KEEP ALL YOUR ROLE PORTAL CODE BELOW THIS — NO LEADING SPACES!
+# ─── Payroll Portal, Manager Portal, Director Portal, Super Admin Portal etc. ───
+# ✅ CORRECT ORDER: if → elif → elif → elif → elif → else
+# ─── 1️⃣ PAYROLL PORTAL ───
+if user["role"] == "Payroll":
+    st.subheader("🧾 Payroll Portal")
+    st.info("✅ View all requests and Download PDFs."); st.divider()
+    tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+    with tab_pending:
+        pending = [r for r in all_live_requests if r["status"] == "pending"]
+        if not pending: st.success("✅ No pending requests!")
+        else:
+            st.metric("⏳ Pending", len(pending)); st.divider()
+            for req in reversed(pending):
+                with st.expander(f"🟡 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"):
+                    st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
+                    st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
+                    st.write(f"💷 Amount: £{req['amount']:.2f}")
+                    st.write(f"👔 **Line Manager:** {req['manager']}")
+                    st.write(f"📅 **Date:** {req['date']}")
+                    st.info(f"📝 **Description:** {req['desc']}")
+                    display_attachments(req)
+                    st.divider()
+                    display_pdf_button(req, can_generate=True)
+# ─── ALL elif BLOCKS FOLLOW — ALSO NO LEADING SPACES ───
+elif user["role"] in ["Manager", "Staff", "Team Member"]:
+    # ... rest of Manager portal code ...
+elif user["role"] == "Director":
+    # ... Director portal code ...
+elif user["role"] == "Super Admin":
+    # ... Super Admin portal code ...
+else:
+    st.subheader("🔐 Access Restricted")
+    st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
 
         with tab_rejected:
             rejected = [r for r in all_live_requests if r["status"] == "rejected"]
