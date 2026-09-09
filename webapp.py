@@ -1365,9 +1365,6 @@ else:
     role = user_info.get("role", "")
     st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 
-    # ============================================================
-    # 📋 SIDEBAR — PDF CONTROLS (below Change Password)
-    # ============================================================
 # ============================================================
 # 📋 SIDEBAR — PDF CONTROLS (below Change Password)
 # ============================================================
@@ -1376,6 +1373,10 @@ with st.sidebar:
     
     # ⛔ TEMPORARILY HIDDEN — Set True to show again
     SHOW_PDF_SECTION = False
+    
+    # ✅ Create EMPTY placeholders so code doesn't crash
+    gen_range = False
+    gen_all = False
     
     if SHOW_PDF_SECTION:
         st.subheader("📄 Generate Approved PDFs")
