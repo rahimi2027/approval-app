@@ -1539,11 +1539,17 @@ if user["role"] == "Payroll":
 # ─── ALL elif BLOCKS FOLLOW — ALSO NO LEADING SPACES ───
 elif user["role"] in ["Manager", "Staff", "Team Member"]:
     # ... rest of Manager portal code ...
+    pass  # ← REQUIRED: placeholder until you add real code
 elif user["role"] == "Director":
     # ... Director portal code ...
+    pass  # ← THIS WAS MISSING — caused your error!
 elif user["role"] == "Super Admin":
     # ... Super Admin portal code ...
+    pass
 else:
+    # ... fallback / unknown role code ...
+    pass
+    
     st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
 
