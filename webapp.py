@@ -1222,8 +1222,8 @@ def create_pdf_from_request(req):
 
         # ─── COMPANY LOGO ───
         if os.path.exists(LOGO_PATH):
-            pdf.image(LOGO_PATH, x=60, y=10, w=90)  # Centered logo
-        pdf.ln(35)  # Space below logo
+            pdf.image(LOGO_PATH, x=60, y=10, w=90)
+        pdf.ln(35)
 
         # ─── FORM TITLE ───
         pdf.set_font("Helvetica", "B", 14)
@@ -1282,13 +1282,14 @@ def create_pdf_from_request(req):
         pdf.ln(8)
         pdf.cell(0, 7, "Authorised Signature / Director", ln=True)
 
-        # ─── APPROVED STAMP (text-based since we don't have image) ───
+        # ─── APPROVED STAMP — NO SPECIAL SYMBOLS! ───
         pdf.ln(15)
         pdf.set_font("Helvetica", "B", 22)
         pdf.set_text_color(0, 120, 0)
-        pdf.cell(0, 15, "✓ APPROVED", ln=True, align="C")
+        pdf.cell(0, 15, "[ APPROVED ]", ln=True, align="C")
         pdf.set_font("Helvetica", "", 10)
         pdf.cell(0, 7, "Acoole Electrical Ltd", ln=True, align="C")
+        pdf.set_text_color(0, 0, 0)  # Reset color
 
         # ─── SAVE PDF ───
         pdf.output(filepath)
