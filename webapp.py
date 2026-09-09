@@ -1210,12 +1210,8 @@ if not st.session_state.logged_in:
                 st.rerun()
             else:
                 st.error("❌ Invalid Username or Password. Please try again.")
-
-# ============================================================
-# ✅ PASTE YOUR DATE FILTER + PDF CODE HERE ← RIGHT HERE!
-# ============================================================
 else:
-    # ✅ YOUR PDF CODE GOES HERE — INSIDE THE ELSE BLOCK! ✅
+    # ✅ PDF CODE — INSIDE LOGGED-IN SECTION ✅
     
     st.subheader("📄 Generate Approved PDFs")
     st.markdown("### 📅 Filter by Date Range")
@@ -1225,7 +1221,7 @@ else:
         from_date = st.date_input("From Date", value=None, help="Leave blank for all time")
     with col2:
         to_date = st.date_input("To Date", value=None, help="Leave blank for all time")
-
+    
     col_a, col_b = st.columns(2)
     with col_a:
         if st.button("📥 Generate & Download (This Range)", type="primary"):
@@ -1235,11 +1231,11 @@ else:
         if st.button("📄 Generate ALL Approved PDFs"):
             st.success("✅ Generating ALL approved PDFs...")
             # [Your original ALL PDF logic here]
-
+    
     st.divider()
-
+    
     # ============================================================
-    # REST OF YOUR PORTAL CONTENT GOES HERE (Welcome, Requests, etc.)
+    # REST OF YOUR PORTAL CONTENT (Welcome message, Requests, etc.)
     # ============================================================
 
 # ============================================================
