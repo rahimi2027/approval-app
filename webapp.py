@@ -35,41 +35,67 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    /* Lock expander content & align ALL items to LEFT */
+    /* ===== 1. Sidebar base & alignment ===== */
+    section[data-testid="stSidebar"] {
+        width: 400px !important;
+    }
+    /* Force ALL sidebar content to LEFT — THIS is what was missing */
+    section[data-testid="stSidebar"] > div:first-child {
+        align-items: flex-start !important;
+        text-align: left !important;
+    }
+    .block-container {
+        padding-top: 1rem !important;
+    }
+
+    /* ===== 2. Expander — fit to width & align left ===== */
     .streamlit-expanderContent {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
         padding: 1rem !important;
         overflow: hidden !important;
-        text-align: left !important;  /* 👈 Left-align everything */
+        text-align: left !important;
     }
 
-    /* Inputs fit perfectly & aligned left */
+    /* ===== 3. Form & inputs — fit perfectly, NO overflow ===== */
+    .stForm {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        text-align: left !important;
+    }
+    .stTextInput {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
     .stTextInput > div > div > input {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
-        text-align: left !important;  /* 👈 Text inside inputs also left */
+        text-align: left !important;
     }
 
-    /* Labels also aligned to LEFT */
+    /* ===== 4. Labels — left aligned ===== */
     .stTextInput label {
         text-align: left !important;
         justify-content: flex-start !important;
     }
 
-    /* Form container - remove centering */
-    .stForm {
+    /* ===== 5. Buttons — full width & left aligned ===== */
+    .stButton > button {
         width: 100% !important;
-        max-width: 100% !important;
         box-sizing: border-box !important;
     }
 
-    /* Submit button - align to left OR full width */
-    .stButton > button {
-        width: 100% !important;        /* Full width to match inputs */
-        justify-content: flex-start !important;
+    /* ===== 6. ALL sidebar elements — remove default centering ===== */
+    section[data-testid="stSidebar"] .element-container {
+        width: 100% !important;
+        text-align: left !important;
+    }
+    section[data-testid="stSidebar"] .stMarkdown {
+        text-align: left !important;
     }
     </style>
 """, unsafe_allow_html=True)
