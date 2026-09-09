@@ -1075,20 +1075,26 @@ def user_management_panel():
 # ============================================================
 def show_dashboard(user, all_requests):
     """✅ Professional dashboard with stats cards"""
-    role = user["role"]
-    dept = user["dept"]
-    full_name = user.get("full_name", user["username"])
+    # ✅ SAFE: use .get() so it never crashes
+    role = user.get("role", "")        # ← FIXED
+    dept = user.get("dept", "")         # ← FIXED
+    full_name = user.get("full_name", user.get("username", "User"))
+
+    # ✅ Guard: stop if no valid role yet
+    if not role:
+        return
 
     # Filter requests based on role
     if role in ["Director", "Payroll", "Super Admin"]:
         visible = all_requests
     else:
-        visible = [r for r in all_requests if r["dept"] == dept]
+        visible = [r for r in all_requests if r.get("dept", "") == dept]
 
-    pending = [r for r in visible if r["status"] == "pending"]
-    approved = [r for r in visible if r["status"] == "approved"]
-    rejected = [r for r in visible if r["status"] == "rejected"]
-    total_approved_value = sum(r["amount"] for r in approved)
+    pending = [r for r in visible if r.get("status", "") == "pending"]
+    approved = [r for r in visible if r.get("status", "") == "approved"]
+    rejected = [r for r in visible if r.get("status", "") == "rejected"]
+
+    total_approved_value = sum(r.get("amount", 0) for r in approved)
 
     st.subheader(f"👋 Welcome, {full_name}")
     st.markdown(f"**Role:** {role} | **Department:** {dept} | 📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -1105,7 +1111,6 @@ def show_dashboard(user, all_requests):
     with col4:
         st.metric("💰 Approved Total", f"£{total_approved_value:.2f}")
     st.divider()
-
 # ============================================================
 # SESSION STATE
 # ============================================================
@@ -1115,8 +1120,6 @@ if "user_info" not in st.session_state:
     st.session_state.user_info = None
 if "editing_request_id" not in st.session_state:
     st.session_state.editing_request_id = None
-
-
 # ============================================================
 # LOGIN PAGE
 # ============================================================
@@ -1132,7 +1135,7 @@ def create_pdf_from_request(req):
     try:
         from fpdf import FPDF
         req_id = str(req.get("id", "unknown"))
-        
+
         # ─── BETTER FILENAME: Employee_Date.pdf ───
         emp_name = str(req.get("emp_name", "Request")).replace(" ", "_")
         date_str = str(req.get("date", "unknown"))[:10].replace("-", "")
@@ -1164,18 +1167,16 @@ def create_pdf_from_request(req):
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "REQUEST DETAILS", ln=True)
         pdf.set_font("Helvetica", "", 11)
-
         def row(label, value):
             pdf.cell(55, 7, f"{label}:", 0, 0)
             pdf.cell(0, 7, str(value), 0, 1)
-
         row("Request ID", req_id)
         row("Employee Name", req.get("emp_name", ""))
         row("Department", req.get("dept", ""))
         row("Transaction Type", req.get("trans_type", ""))
         row("Category / Reason", req.get("reason", ""))
         row("Request Date", str(req.get("date", ""))[:10])
-        
+
         amount = req.get("amount", "")
         try: amount = f"£{float(amount):,.2f}"
         except: pass
@@ -1195,7 +1196,6 @@ def create_pdf_from_request(req):
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
         pdf.set_font("Helvetica", "", 11)
-
         row("Decision", "APPROVED")
         row("Approved By", req.get("approved_by", "Andy Acoole"))
         row("Approval Date / Time", str(req.get("approved_date", ""))[:16])
@@ -1205,7 +1205,7 @@ def create_pdf_from_request(req):
         pdf.set_draw_color(100, 100, 100)
         pdf.dashed_line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(8)
-        pdf.cell(0, 7, "Authorised Signature / Director", ln=True)
+        pdf.cell(0, 7, "Authorised Signature / Director", ln=True, align="C")
 
         # ─── APPROVED STAMP — NO SPECIAL SYMBOLS! ───
         pdf.ln(15)
@@ -1219,7 +1219,6 @@ def create_pdf_from_request(req):
         # ─── SAVE PDF ───
         pdf.output(filepath)
         return filepath
-
     except Exception as e:
         st.warning(f"⚠️ PDF Error for #{req.get('id', '?')}: {str(e)}")
         return None
@@ -1251,16 +1250,16 @@ if not st.session_state.logged_in:
                 st.rerun()
             else:
                 st.error("❌ Invalid Username or Password. Please try again.")
-
 else:
-
-
-    # ─── WELCOME MESSAGE — ON MAIN PAGE ✅ ───
-    user_info = st.session_state.user_info
+    # ─── ✅ ONLY SHOWS AFTER LOGIN — NEVER ON LOGIN PAGE ───
+    user_info = st.session_state.user_info or {}
     full_name = user_info.get("full_name", user_info.get("username", "User"))
     dept = user_info.get("dept", "")
     role = user_info.get("role", "")
     st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
+
+    # 👇 CALL YOUR DASHBOARD HERE — ONLY AFTER LOGIN
+    # show_dashboard(user_info, all_requests)
 
 # ============================================================
 # 📋 SIDEBAR — PDF CONTROLS (below Change Password)
