@@ -1528,14 +1528,13 @@ else:
             else:
                 st.metric("✅ All Approved", len(approved)); st.divider()
                 for req in reversed(approved):
-                    # ✅ SHOW WHO & WHEN approved — RIGHT IN THE TITLE
+                    # ✅ SHOW WHO & WHEN approved
                     dec_by = req.get('decision_by', 'Director')
                     dec_date = format_date(req.get('decision_date', ''))
                     title = f"🟢 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f} | ✅ Approved by {dec_by} on {dec_date}"
                     with st.expander(title):
                         st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
                         st.write(f"💷 Amount: £{req['amount']:.2f}")
-                        # ✅ Also show inside the expander
                         st.write(f"🎯 **Approved By:** {dec_by}")
                         st.write(f"📅 **Approval Date:** {dec_date}")
                         st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
