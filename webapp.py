@@ -1328,170 +1328,136 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
 else:
-# ============================================================
-# ✅ LOGGED-IN ONLY — EVERYTHING GOES INSIDE HERE ✅
-# ============================================================
+else:
+    # ============================================================
+    # ✅ LOGGED-IN ONLY — EVERYTHING GOES INSIDE HERE ✅
+    # ============================================================
+    # ─── LOGO — ONLY ONCE AT TOP ───
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, use_container_width=False, width=250)
+        st.markdown("---")
 
-# ─── LOGO — ONLY ONCE AT TOP ───
-if os.path.exists(LOGO_PATH):
-    st.image(LOGO_PATH, use_container_width=False, width=250)
-    st.markdown("---")
+    # ─── WELCOME MESSAGE — ON MAIN PAGE ✅ ───
+    user_info = st.session_state.user_info
+    full_name = user_info.get("full_name", user_info.get("username", "User"))
+    dept = user_info.get("dept", "")
+    role = user_info.get("role", "")
+    st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 
-# ─── WELCOME MESSAGE — ON MAIN PAGE ✅ ───
-user_info = st.session_state.user_info
-full_name = user_info.get("full_name", user_info.get("username", "User"))
-dept = user_info.get("dept", "")
-role = user_info.get("role", "")
-st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
+    # ============================================================
+    # 📋 SIDEBAR — PDF CONTROLS (below Change Password)
+    # ============================================================
+    with st.sidebar:
+        st.divider()
+        st.subheader("📄 Generate Approved PDFs")
+        st.caption("Filter by Date Range")
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            from_date = st.date_input("From Date", value=None, label_visibility="collapsed")
+        with col_s2:
+            to_date = st.date_input("To Date", value=None, label_visibility="collapsed")
+        st.divider()
+        gen_range = st.button("📥 Generate & Download (Range)", type="primary", key="sb_range")
+        gen_all = st.button("📄 Generate ALL Approved PDFs", key="sb_all")
+        if st.session_state.get("zip_range_data"):
+            st.download_button(
+                "📦 Download Range PDFs (ZIP)",
+                data=st.session_state.zip_range_data,
+                file_name=st.session_state.zip_range_name,
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+                key="dl_sb_range"
+            )
+        if st.session_state.get("zip_all_data"):
+            st.download_button(
+                "📦 Download ALL PDFs (ZIP)",
+                data=st.session_state.zip_all_data,
+                file_name=st.session_state.zip_all_name,
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+                key="dl_sb_all"
+            )
 
-# ============================================================
-# 📋 SIDEBAR — PDF CONTROLS (below Change Password)
-# ============================================================
-with st.sidebar:
-    # ─── YOUR EXISTING SIDEBAR ITEMS KEEP HERE ───
-    # (Keep your Dashboard, Change Password buttons here)
-
-    st.divider()
-    st.subheader("📄 Generate Approved PDFs")
-    st.caption("Filter by Date Range")
-
-    # Date inputs in sidebar
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        from_date = st.date_input("From Date", value=None, label_visibility="collapsed")
-    with col_s2:
-        to_date = st.date_input("To Date", value=None, label_visibility="collapsed")
-
-    st.divider()
-
-    # ─── BUTTONS IN SIDEBAR ───
-    gen_range = st.button("📥 Generate & Download (Range)", type="primary", key="sb_range")
-    gen_all = st.button("📄 Generate ALL Approved PDFs", key="sb_all")
-
-    # Download buttons appear HERE in sidebar after generation
-    if st.session_state.get("zip_range_data"):
-        st.download_button(
-            "📦 Download Range PDFs (ZIP)",
-            data=st.session_state.zip_range_data,
-            file_name=st.session_state.zip_range_name,
-            mime="application/zip",
-            type="primary",
-            use_container_width=True,
-            key="dl_sb_range"
-        )
-
-    if st.session_state.get("zip_all_data"):
-        st.download_button(
-            "📦 Download ALL PDFs (ZIP)",
-            data=st.session_state.zip_all_data,
-            file_name=st.session_state.zip_all_name,
-            mime="application/zip",
-            type="primary",
-            use_container_width=True,
-            key="dl_sb_all"
-        )
-
-# ============================================================
-# 📊 MAIN PAGE — STATUS MESSAGES ONLY
-# ============================================================
-
-# ─── GENERATE RANGE BUTTON LOGIC ───
-if gen_range:
-    st.success("✅ Generating PDFs for selected date range...")
-    records = load_records_from_excel()
-    st.info(f"📋 Total records loaded: {len(records)}")
-    approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
-    st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
-
-    matched_records = []
-    for req in approved_records:
-        req_date = None
-        date_str = str(req.get("date", "")).strip()
-        date_str = date_str.replace("/", "-").replace(".", "-")[:10]
-        for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%m-%d-%Y"):
-            try:
-                req_date = datetime.strptime(date_str, fmt).date()
-                break
-            except:
-                continue
-        include = True
-        if from_date and req_date and req_date < from_date: include = False
-        if to_date and req_date and req_date > to_date: include = False
-        if include: matched_records.append(req)
-
-    st.info(f"📅 Records matched by date range: {len(matched_records)}")
-
-    if matched_records:
-        import zipfile, io
-        zip_buffer = io.BytesIO()
-        pdf_count = 0
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for req in matched_records:
-                pdf_path = create_pdf_from_request(req)
-                if pdf_path and os.path.exists(pdf_path):
-                    with open(pdf_path, "rb") as f:
-                        zipf.writestr(os.path.basename(pdf_path), f.read())
-                        pdf_count += 1
-
-        zip_buffer.seek(0)
-        if pdf_count > 0:
-            st.success(f"✅ Generated {pdf_count} PDFs! ⬅️ Go to sidebar to download")
-            st.session_state.zip_range_data = zip_buffer.getvalue()
-            st.session_state.zip_range_name = f"Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    # ============================================================
+    # 📊 MAIN PAGE — STATUS MESSAGES ONLY
+    # ============================================================
+    if gen_range:
+        st.success("✅ Generating PDFs for selected date range...")
+        records = load_records_from_excel()
+        st.info(f"📋 Total records loaded: {len(records)}")
+        approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+        st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
+        matched_records = []
+        for req in approved_records:
+            req_date = None
+            date_str = str(req.get("date", "")).strip()
+            date_str = date_str.replace("/", "-").replace(".", "-")[:10]
+            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%m-%d-%Y"):
+                try:
+                    req_date = datetime.strptime(date_str, fmt).date()
+                    break
+                except:
+                    continue
+            include = True
+            if from_date and req_date and req_date < from_date: include = False
+            if to_date and req_date and req_date > to_date: include = False
+            if include: matched_records.append(req)
+        st.info(f"📅 Records matched by date range: {len(matched_records)}")
+        if matched_records:
+            import zipfile, io
+            zip_buffer = io.BytesIO()
+            pdf_count = 0
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for req in matched_records:
+                    pdf_path = create_pdf_from_request(req)
+                    if pdf_path and os.path.exists(pdf_path):
+                        with open(pdf_path, "rb") as f:
+                            zipf.writestr(os.path.basename(pdf_path), f.read())
+                            pdf_count += 1
+            zip_buffer.seek(0)
+            if pdf_count > 0:
+                st.success(f"✅ Generated {pdf_count} PDFs! ⬅️ Go to sidebar to download")
+                st.session_state.zip_range_data = zip_buffer.getvalue()
+                st.session_state.zip_range_name = f"Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            else:
+                st.error("❌ PDF generation failed. Check PDF_DIR path.")
+                st.session_state.zip_range_data = None
         else:
-            st.error("❌ PDF generation failed. Check PDF_DIR path.")
+            st.info("ℹ️ No records matched.")
             st.session_state.zip_range_data = None
-    else:
-        st.info("ℹ️ No records matched.")
-        st.session_state.zip_range_data = None
 
-
-# ─── GENERATE ALL BUTTON LOGIC ───
-if gen_all:
-    st.success("✅ Generating ALL approved PDFs...")
-    records = load_records_from_excel()
-    approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
-
-    if approved_records:
-        import zipfile, io
-        zip_buffer = io.BytesIO()
-        pdf_count = 0
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for req in approved_records:
-                pdf_path = create_pdf_from_request(req)
-                if pdf_path and os.path.exists(pdf_path):
-                    with open(pdf_path, "rb") as f:
-                        zipf.writestr(os.path.basename(pdf_path), f.read())
-                        pdf_count += 1
-
-        zip_buffer.seek(0)
-        if pdf_count > 0:
-            st.success(f"✅ Generated {pdf_count} PDFs! ⬅️ Go to sidebar to download")
-            st.session_state.zip_all_data = zip_buffer.getvalue()
-            st.session_state.zip_all_name = f"All_Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    if gen_all:
+        st.success("✅ Generating ALL approved PDFs...")
+        records = load_records_from_excel()
+        approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+        if approved_records:
+            import zipfile, io
+            zip_buffer = io.BytesIO()
+            pdf_count = 0
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for req in approved_records:
+                    pdf_path = create_pdf_from_request(req)
+                    if pdf_path and os.path.exists(pdf_path):
+                        with open(pdf_path, "rb") as f:
+                            zipf.writestr(os.path.basename(pdf_path), f.read())
+                            pdf_count += 1
+            zip_buffer.seek(0)
+            if pdf_count > 0:
+                st.success(f"✅ Generated {pdf_count} PDFs! ⬅️ Go to sidebar to download")
+                st.session_state.zip_all_data = zip_buffer.getvalue()
+                st.session_state.zip_all_name = f"All_Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            else:
+                st.error("❌ PDF generation failed.")
+                st.session_state.zip_all_data = None
         else:
-            st.error("❌ PDF generation failed.")
+            st.info("ℹ️ No approved requests found.")
             st.session_state.zip_all_data = None
-    else:
-        st.info("ℹ️ No approved requests found.")
-        st.session_state.zip_all_data = None
-
-    if st.session_state.zip_all_data:
-        st.download_button(
-            "📦 Download ALL PDFs (ZIP)",
-            data=st.session_state.zip_all_data,
-            file_name=st.session_state.zip_all_name,
-            mime="application/zip",
-            type="primary",
-            use_container_width=True,
-            key="dl_all"
-        )
 
     st.divider()
 
-    # ← REST OF YOUR PORTAL CODE HERE (Requests, Tabs, etc.) ←
-    # Make SURE the broken line `FULL_NAME = user.get(...)` is DELETED
-    
+    # ↓ REST OF YOUR PORTAL CODE STARTS HERE (keep indented!) ↓
     user = st.session_state.user_info
     FULL_NAME = user.get("full_name", user["username"])
     CATEGORIES = load_categories()
@@ -1509,6 +1475,8 @@ if gen_all:
             st.rerun()
     st.divider()
 
+    # ✅ KEEP ALL YOUR ROLE PORTAL CODE BELOW THIS — INDENTED BY 4 SPACES!
+    # ─── Payroll Portal, Manager Portal, Director Portal, Super Admin Portal etc. ───
     # ✅ CORRECT ORDER: if → elif → elif → elif → elif → else
     # ─── 1️⃣ PAYROLL PORTAL ───
     if user["role"] == "Payroll":
