@@ -1798,16 +1798,24 @@ else:
             else:
                 st.metric("✅ Total Approved", len(approved)); st.divider()
                 for req in reversed(approved):
-                    approved_by_line = f"✅ Approved by {req.get('decision_by', 'Director')} on {format_date(req.get('decision_date', ''))}"
-                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f} | {approved_by_line}"
+                    # Get approver name and approval date
+                    dec_by = req.get('decision_by', 'Director')
+                    dec_date = req.get('decision_date', '')
+                    # Format date nicely if exists
+                    if dec_date and len(dec_date) >= 10:
+                        display_date = dec_date[:10]
+                        extra_text = f" | ✅ Approved by {dec_by} on {display_date}"
+                    else:
+                        extra_text = f" | ✅ Approved by {dec_by}"
+                    
+                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}{extra_text}"
                     with st.expander(title):
-                        st.write(f"👤 **Employee:** {req['emp_name']}")
-                        st.write(f"🏢 **Department:** {req['dept']}")
-                        st.write(f"🔄 **Type:** {req['type']} | 🏷️ **Category:** {req['category']}")
-                        st.write(f"💷 **Amount:** £{req['amount']:.2f}")
-                        st.write(f"👔 **Line Manager:** {req['manager']}")
-                        st.write(f"📅 **Request Date:** {req['date']}")
-                        st.success(f"💬 **Director Comments:** {req.get('director_comments', 'None')}")
+                        st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
+                        st.write(f"💷 Amount: £{req['amount']:.2f}")
+                        st.write(f"🎯 **Approved By:** {dec_by}")
+                        if dec_date and len(dec_date) >= 10:
+                            st.write(f"📅 **Approval Date:** {dec_date[:10]}")
+                        st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         
                         prev_comments = req.get("director_comments", "").strip()
