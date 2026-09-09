@@ -1748,90 +1748,86 @@ elif role in ["Manager", "Staff", "Team Member"]:
         st.markdown(f"**🆔 Request ID:** `#{nid}`")
 
         with st.form("new_req", clear_on_submit=True):
-# === DEFINE COLUMNS FIRST — BEFORE using c1 or c2 ===
-c1, c2 = st.columns(2)  # ✅ THIS LINE WAS MISSING!
+            # === DEFINE COLUMNS FIRST — INSIDE THE FORM, PROPERLY INDENTED ===
+            c1, c2 = st.columns(2)
 
-# === FORM START ===
-with st.form("new_request_form", clear_on_submit=False):
-    # --- LEFT COLUMN (c1) — your existing fields go here ---
-    with c1:
-        en = st.text_input("👤 Employee Name")
-        dept_name = st.text_input("🏢 Department")
-        rt = st.selectbox("📋 Request Type", ["Expense", "Purchase", "Leave", "Other"])
-        ct = st.text_input("🏷️ Category")
-        amt = st.number_input("💷 Amount (£)", min_value=0.0, step=1.0)
+            # --- LEFT COLUMN (c1) ---
+            with c1:
+                en = st.text_input("👤 Employee Name")
+                dept_name = st.text_input("🏢 Department", value=dept)
+                rt = st.selectbox("📋 Request Type", ["Expense", "Purchase", "Leave", "Other"])
+                cat_idx = CATEGORIES.index(ct) if ct in CATEGORIES else 0
+                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                amt = st.number_input("💷 Amount (£)", min_value=0.0, step=1.0)
 
-    # --- RIGHT COLUMN (c2) — date, manager, description ---
-    with c2:
-        from datetime import datetime as dt
-        dt_val = st.date_input("📅 Date", value=dt.today())
-        mgr = st.text_input("👔 Line Manager")
-        desc = st.text_area("📝 Description / Justification")
+            # --- RIGHT COLUMN (c2) ---
+            with c2:
+                from datetime import datetime as dt
+                dt_val = st.date_input("📅 Date", value=dt.today())
+                mgr = st.text_input("👔 Line Manager")
+                desc = st.text_area("📝 Description / Justification")
 
-    # --- File Attachments ---
-    st.markdown("### 📎 Attachments (Optional)")
-    uploaded_files = st.file_uploader(
-        "Upload supporting documents",
-        type=["pdf", "png", "jpg", "jpeg"],
-        accept_multiple_files=True
-    )
+            # --- File Attachments ---
+            st.markdown("### 📎 Attachments (Optional)")
+            uploaded_files = st.file_uploader(
+                "Upload supporting documents",
+                type=["pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True
+            )
 
-    # --- Submit Button — MUST be INSIDE form ---
-    submitted = st.form_submit_button("✅ Submit Request", type="primary")
+            # --- Submit Button ---
+            submitted = st.form_submit_button("✅ Submit Request", type="primary")
 
-# === FORM END — validation & processing ===
-if submitted:
-    if not en.strip():
-        st.error("❌ Please enter Employee Name")
-        st.stop()
-    if amt <= 0:
-        st.error("❌ Amount must be greater than £0.00")
-        st.stop()
-    if not mgr.strip():
-        st.error("❌ Please enter Line Manager Name")
-        st.stop()
+        # === FORM ENDS HERE — validation & processing OUTSIDE ===
+        if submitted:
+            if not en.strip():
+                st.error("❌ Please enter Employee Name")
+                st.stop()
+            if amt <= 0:
+                st.error("❌ Amount must be greater than £0.00")
+                st.stop()
+            if not mgr.strip():
+                st.error("❌ Please enter Line Manager Name")
+                st.stop()
 
-    # Process attachments
-    saved_names = []
-    if uploaded_files:
-        for idx, f in enumerate(uploaded_files, 1):
-            safe_filename = f"ID_{nid}_F{idx}_{f.name}"
-            with open(os.path.join(UPLOAD_DIR, safe_filename), "wb") as outfile:
-                outfile.write(f.getbuffer())
-            saved_names.append(safe_filename)
-    attachment_str = ", ".join(saved_names) if saved_names else "None"
+            # Process attachments
+            saved_names = []
+            if uploaded_files:
+                for idx, f in enumerate(uploaded_files, 1):
+                    safe_filename = f"ID_{nid}_F{idx}_{f.name}"
+                    with open(os.path.join(UPLOAD_DIR, safe_filename), "wb") as outfile:
+                        outfile.write(f.getbuffer())
+                    saved_names.append(safe_filename)
+            attachment_str = ", ".join(saved_names) if saved_names else "None"
 
-    new_request = {
-        "id": nid,
-        "emp_name": en.strip(),
-        "dept": dept_name,
-        "type": rt,
-        "category": ct,
-        "date": str(dt_val),
-        "amount": amt,
-        "manager": mgr.strip(),
-        "desc": desc.strip(),
-        "status": "pending",
-        "attachment_name": attachment_str,
-        "decision_by": "",
-        "decision_date": "",
-        "director_comments": ""
-    }
+            new_request = {
+                "id": nid,
+                "emp_name": en.strip(),
+                "dept": dept_name,
+                "type": rt,
+                "category": ct,
+                "date": str(dt_val),
+                "amount": amt,
+                "manager": mgr.strip(),
+                "desc": desc.strip(),
+                "status": "pending",
+                "attachment_name": attachment_str,
+                "decision_by": "",
+                "decision_date": "",
+                "director_comments": ""
+            }
 
-    records = load_records_from_excel()
-    records.append(new_request)
-    save_all_records(records)
-
-    log_action(
-        "REQUEST_CREATED",
-        str(nid),
-        new_data={**new_request, "attachment_name": attachment_str}
-    )
-
-    st.success(f"✅ Request #{nid} submitted successfully!")
-    st.balloons()
-    st.rerun()
-
+            records = load_records_from_excel()
+            records.append(new_request)
+            save_all_records(records)
+            log_action(
+                "REQUEST_CREATED",
+                str(nid),
+                new_data={**new_request, "attachment_name": attachment_str}
+            )
+            st.success(f"✅ Request #{nid} submitted successfully!")
+            st.balloons()
+            st.rerun()
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
     st.subheader("🎬 Director Approval Portal")
