@@ -1512,7 +1512,7 @@ with c2:
         st.rerun()
 st.divider()
 
-    # ✅ KEEP ALL YOUR ROLE PORTAL CODE BELOW THIS — INDENTED BY 4 SPACES!
+# ✅ KEEP ALL YOUR ROLE PORTAL CODE BELOW THIS — INDENTED BY 4 SPACES!
     # ─── Payroll Portal, Manager Portal, Director Portal, Super Admin Portal etc. ───
     # ✅ CORRECT ORDER: if → elif → elif → elif → elif → else
     # ─── 1️⃣ PAYROLL PORTAL ───
@@ -1536,24 +1536,39 @@ st.divider()
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
-        
+
         with tab_approved:
             approved = [r for r in all_live_requests if r["status"] == "approved"]
-            if not approved:
-                st.info("📋 No approved requests.")
+            if not approved: st.success("✅ No approved requests yet!")
             else:
-                st.metric("✅ All Approved", len(approved)); st.divider()
+                st.metric("✅ Approved", len(approved)); st.divider()
                 for req in reversed(approved):
-                    # ✅ SHOW WHO & WHEN approved
-                    dec_by = req.get('decision_by', 'Director')
-                    dec_date = format_date(req.get('decision_date', ''))
-                    title = f"🟢 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f} | ✅ Approved by {dec_by} on {dec_date}"
-                    with st.expander(title):
+                    with st.expander(f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"):
                         st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
+                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
                         st.write(f"💷 Amount: £{req['amount']:.2f}")
-                        st.write(f"🎯 **Approved By:** {dec_by}")
-                        st.write(f"📅 **Approval Date:** {dec_date}")
-                        st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Date:** {req['date']}")
+                        st.info(f"📝 **Description:** {req['desc']}")
+                        display_attachments(req)
+                        st.divider()
+                        display_pdf_button(req, can_generate=True)
+
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+            if not rejected: st.success("✅ No rejected requests!")
+            else:
+                st.metric("❌ Rejected", len(rejected)); st.divider()
+                for req in reversed(rejected):
+                    with st.expander(f"🔴 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"):
+                        st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
+                        st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
+                        st.write(f"💷 Amount: £{req['amount']:.2f}")
+                        st.write(f"👔 **Line Manager:** {req['manager']}")
+                        st.write(f"📅 **Date:** {req['date']}")
+                        st.info(f"📝 **Description:** {req['desc']}")
+                        if req.get("reject_reason"):
+                            st.error(f"❌ Reason: {req['reject_reason']}")
                         display_attachments(req)
                         st.divider()
                         display_pdf_button(req, can_generate=True)
