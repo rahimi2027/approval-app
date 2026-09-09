@@ -1808,7 +1808,7 @@ elif user.get("role") == "Director":
                     display_pdf_button(req, can_generate=True)
 
 # ─── 4️⃣ SUPER ADMIN PORTAL ───
-elif user["role"] == "Super Admin":
+elif user and user.get("role") == "Super Admin":
     st.subheader("🛡️ Super Admin — All Requests")
     st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
     st.divider()
@@ -1834,7 +1834,6 @@ elif user["role"] == "Super Admin":
                         st.info(f"💬 Director Comments: {req['director_comments']}")
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_approved:
         approved = [r for r in all_live_requests if r["status"] == "approved"]
         if not approved:
@@ -1849,7 +1848,6 @@ elif user["role"] == "Super Admin":
                     extra_text = f" | ✅ Approved by {dec_by} on {display_date}"
                 else:
                     extra_text = f" | ✅ Approved by {dec_by}"
-
                 title = f"🟢 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}{extra_text}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
@@ -1861,7 +1859,6 @@ elif user["role"] == "Super Admin":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_rejected:
         rejected = [r for r in all_live_requests if r["status"] == "rejected"]
         if not rejected:
@@ -1877,7 +1874,6 @@ elif user["role"] == "Super Admin":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_manage:
         tab_settings, tab_users, tab_audit = st.tabs([
             "⚙️ System Settings", "👤 User Management", "📖 Audit History"
@@ -1888,7 +1884,6 @@ elif user["role"] == "Super Admin":
             user_management_panel()
         with tab_audit:
             display_audit_log_panel()
-
         st.divider()
         st.subheader("📥 Download Data Backups")
         backup_col1, backup_col2, backup_col3 = st.columns(3)
@@ -1920,9 +1915,8 @@ elif user["role"] == "Super Admin":
                         type="primary"
                     )
         st.caption("💾 Save these files to your computer for backup")
-
 # ─── ✅ DEFAULT / FALLBACK (else = ALWAYS LAST!) ───
-else:
+elif user:
     st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
 
