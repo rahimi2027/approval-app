@@ -1591,72 +1591,82 @@ elif role == "Director":
                     
 
 # ─── 4️⃣ SUPER ADMIN PORTAL ───
-elif user and user.get("role") == "Super Admin":
+elif role == "Super Admin":
     st.subheader("🛡️ Super Admin — All Requests")
     st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
     st.divider()
     tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs([
         "⏳ All Pending", "✅ All Approved", "❌ All Rejected", "🔧 System Management"
     ])
+
     with tab_pending:
-        pending = [r for r in all_live_requests if r["status"] == "pending"]
+        pending = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "pending"]
         if not pending:
             st.success("✅ No pending requests.")
         else:
             st.metric("⏳ All Pending", len(pending)); st.divider()
             for req in reversed(pending):
-                title = f"🟡 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}"
+                req_id = req.get("id")
+                amount = float(req.get("amount", 0))
+                title = f"🟡 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"
                 with st.expander(title):
-                    st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
-                    st.write(f"🔄 Type: {req['type']} | 🏷️ Category: {req['category']}")
-                    st.write(f"💷 Amount: £{req['amount']:.2f}")
-                    st.write(f"👔 Line Manager: {req['manager']} | 📅 Date: {req['date']}")
-                    st.info(f"📝 Description: {req['desc']}")
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                    st.write(f"💷 Amount: £{amount:.2f}")
+                    st.write(f"👔 Line Manager: {req.get('manager')} | 📅 Date: {format_date(req.get('date',''))}")
+                    st.info(f"📝 Description: {req.get('desc')}")
                     display_attachments(req)
-                    if req["director_comments"]:
-                        st.info(f"💬 Director Comments: {req['director_comments']}")
+                    if req.get("director_comments"):
+                        st.info(f"💬 Director Comments: {req.get('director_comments')}")
                     st.divider()
                     display_pdf_button(req, can_generate=True)
+
     with tab_approved:
-        approved = [r for r in all_live_requests if r["status"] == "approved"]
+        approved = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "approved"]
         if not approved:
             st.info("📋 No approved requests.")
         else:
             st.metric("✅ All Approved", len(approved)); st.divider()
             for req in reversed(approved):
+                req_id = req.get("id")
+                amount = float(req.get("amount", 0))
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = req.get('decision_date', '')
-                if dec_date and len(dec_date) >= 10:
-                    display_date = dec_date[:10]
-                    extra_text = f" | ✅ Approved by {dec_by} on {display_date}"
-                else:
-                    extra_text = f" | ✅ Approved by {dec_by}"
-                title = f"🟢 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}{extra_text}"
+                display_date = dec_date[:10] if dec_date and len(dec_date) >= 10 else ""
+                extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
+                title = f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}{extra_text}"
                 with st.expander(title):
-                    st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
-                    st.write(f"💷 Amount: £{req['amount']:.2f}")
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    st.write(f"💷 Amount: £{amount:.2f}")
                     st.write(f"🎯 **Approved By:** {dec_by}")
-                    if dec_date and len(dec_date) >= 10:
-                        st.write(f"📅 **Approval Date:** {dec_date[:10]}")
+                    if display_date:
+                        st.write(f"📅 **Approval Date:** {display_date}")
                     st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
+
     with tab_rejected:
-        rejected = [r for r in all_live_requests if r["status"] == "rejected"]
+        rejected = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "rejected"]
         if not rejected:
             st.info("📋 No rejected requests.")
         else:
             st.metric("❌ All Rejected", len(rejected)); st.divider()
             for req in reversed(rejected):
-                title = f"🔴 ID #{req['id']} | {req['emp_name']} | {req['dept']} | £{req['amount']:.2f}"
+                req_id = req.get("id")
+                amount = float(req.get("amount", 0))
+                dec_by = req.get('decision_by', 'Director')
+                dec_date = format_date(req.get('decision_date',''))
+                title = f"🔴 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"
                 with st.expander(title):
-                    st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
-                    st.write(f"💷 Amount: £{req['amount']:.2f}")
-                    st.error(f"💬 Director Comments: {req.get('director_comments', 'None')}")
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    st.write(f"💷 Amount: £{amount:.2f}")
+                    st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
+                    st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
+
     with tab_manage:
         tab_settings, tab_users, tab_audit = st.tabs([
             "⚙️ System Settings", "👤 User Management", "📖 Audit History"
@@ -1666,12 +1676,15 @@ elif user and user.get("role") == "Super Admin":
         with tab_users:
             user_management_panel()
         with tab_audit:
-            display_audit_log_panel()
+            if "display_audit_log_panel" in globals():
+                display_audit_log_panel()
+            else:
+                st.info("📖 Audit log panel not defined — skipping")
         st.divider()
         st.subheader("📥 Download Data Backups")
         backup_col1, backup_col2, backup_col3 = st.columns(3)
         with backup_col1:
-            if os.path.exists(EXCEL_PATH):
+            if "EXCEL_PATH" in globals() and os.path.exists(EXCEL_PATH):
                 with open(EXCEL_PATH, "rb") as f:
                     st.download_button(
                         "📥 Download Requests",
@@ -1680,7 +1693,7 @@ elif user and user.get("role") == "Super Admin":
                         type="primary"
                     )
         with backup_col2:
-            if os.path.exists(USER_DB_PATH):
+            if "USER_DB_PATH" in globals() and os.path.exists(USER_DB_PATH):
                 with open(USER_DB_PATH, "rb") as f:
                     st.download_button(
                         "📥 Download Users",
@@ -1689,7 +1702,7 @@ elif user and user.get("role") == "Super Admin":
                         type="primary"
                     )
         with backup_col3:
-            if os.path.exists(SETTINGS_PATH):
+            if "SETTINGS_PATH" in globals() and os.path.exists(SETTINGS_PATH):
                 with open(SETTINGS_PATH, "rb") as f:
                     st.download_button(
                         "📥 Download Settings",
@@ -1698,8 +1711,9 @@ elif user and user.get("role") == "Super Admin":
                         type="primary"
                     )
         st.caption("💾 Save these files to your computer for backup")
-# ─── ✅ DEFAULT / FALLBACK (else = ALWAYS LAST!) ───
-elif user:
+
+# ─── ✅ DEFAULT / FALLBACK (MUST BE LAST!) ───
+else:
     st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
 
