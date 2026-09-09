@@ -430,7 +430,7 @@ def display_audit_log_panel():
 #    if "display_audit_log_panel" in globals():
 #        display_audit_log_panel()
 #    else:
-        st.info("📖 Audit log panel not defined — skipping")
+#        st.info("📖 Audit log panel not defined — skipping")
 
 # ============================================================
 # HELPER FUNCTIONS
