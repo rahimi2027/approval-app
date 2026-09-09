@@ -73,7 +73,7 @@ st.markdown("""
     .streamlit-expanderContent {
         width: 100% !important;
         box-sizing: border-box !important;
-        padding: 0.5rem !important;
+        padding: 0.5rem 0.4rem !important;
         padding-left: 0.25rem !important;  /* Tight to left edge */
         text-align: left !important;
     }
@@ -95,7 +95,7 @@ st.markdown("""
     .streamlit-expanderContent .stButton > button {
         width: 100% !important;
         box-sizing: border-box !important;
-        margin-top: 0.5rem !important;
+      #  margin-top: 0.5rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
