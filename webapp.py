@@ -1329,13 +1329,6 @@ if not st.session_state.logged_in:
 
 else:
 
-    # ============================================================
-    # ✅ LOGGED-IN ONLY — EVERYTHING GOES INSIDE HERE ✅
-    # ============================================================
-    # ─── LOGO — ONLY ONCE AT TOP ───
-    if os.path.exists(LOGO_PATH):
-        st.image(LOGO_PATH, use_container_width=False, width=250)
-        st.markdown("---")
 
     # ─── WELCOME MESSAGE — ON MAIN PAGE ✅ ───
     user_info = st.session_state.user_info
