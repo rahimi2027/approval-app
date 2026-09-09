@@ -1465,6 +1465,7 @@ with tab_approved:
                     display_pdf_button(req, can_generate=True)
 
 # ─── 2️⃣ MANAGER / STAFF PORTAL ───
+if user.get("role") == "Admin"
 elif user.get("role") in ["Manager", "Staff", "Team Member"]:
     if st.session_state.editing_request_id:
         eid = st.session_state.editing_request_id
