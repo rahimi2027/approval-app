@@ -1218,10 +1218,10 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 else:
     # ============================================================
-    # ✅ LOGGED-IN PORTAL CONTENT
+    # ✅ LOGGED-IN PORTAL CONTENT — ONLY ONE LOGO AT TOP
     # ============================================================
 
-    # ─── LOGO AT TOP — ONLY ONCE ───
+    # ─── LOGO — ONLY DISPLAYED ONCE HERE ───
     if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, use_container_width=False, width=250)
         st.markdown("---")
@@ -1240,26 +1240,40 @@ else:
         if st.button("📥 Generate & Download (This Range)", type="primary"):
             st.success("✅ Generating PDFs for selected date range...")
             records = load_records_from_excel()
+            
+            # --- DEBUG: Show what we're loading ---
+            st.info(f"📋 Total records loaded: {len(records)}")
+            approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+            st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
+
             generated_files = []
-            for req in records:
-                if req.get("status") != "approved":
-                    continue
-                # Parse request date safely
-                try:
-                    date_str = str(req.get("date", "")).strip()[:10]
-                    req_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else None
-                except:
-                    continue
+            for req in approved_records:
+                # Parse request date — try multiple formats
+                req_date = None
+                date_str = str(req.get("date", "")).strip()
+                date_str = date_str.replace("/", "-")
+                date_str_short = date_str[:10]
+                
+                for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
+                    try:
+                        from datetime import datetime
+                        req_date = datetime.strptime(date_str_short, fmt).date()
+                        break
+                    except:
+                        continue
+
                 # Apply date range filter
+                include = True
                 if from_date and req_date and req_date < from_date:
-                    continue
+                    include = False
                 if to_date and req_date and req_date > to_date:
-                    continue
-                # Generate PDF
-                pdf_path = generate_approval_pdf(req)
-                # ✅ FIXED: Safe type check to avoid TypeError
-                if pdf_path and isinstance(pdf_path, (str, bytes)) and os.path.exists(pdf_path):
-                    generated_files.append(pdf_path)
+                    include = False
+
+                if include:
+                    pdf_path = generate_approval_pdf(req)
+                    if pdf_path and isinstance(pdf_path, (str, bytes)) and os.path.exists(pdf_path):
+                        generated_files.append(pdf_path)
+
             # Show results
             if generated_files:
                 st.success(f"✅ Generated {len(generated_files)} PDF(s)")
@@ -1276,12 +1290,11 @@ else:
             records = load_records_from_excel()
             generated_files = []
             for req in records:
-                if req.get("status") == "approved":
+                if str(req.get("status", "")).strip().lower() == "approved":
                     pdf_path = generate_approval_pdf(req)
-                    # ✅ SAME FIX: Safe type check
                     if pdf_path and isinstance(pdf_path, (str, bytes)) and os.path.exists(pdf_path):
                         generated_files.append(pdf_path)
-            # Show results
+
             if generated_files:
                 st.success(f"✅ Generated {len(generated_files)} PDF(s)")
                 for fpath in generated_files:
@@ -1293,8 +1306,8 @@ else:
 
     st.divider()
 
-    # ← REST OF YOUR PORTAL CODE — REMOVE THE DUPLICATE LOGO FROM HERE ←
-
+    # ⚠️ SCROLL DOWN — DELETE ANY DUPLICATE LOGO CODE HERE ⚠️
+    
     user = st.session_state.user_info
     FULL_NAME = user.get("full_name", user["username"])
     CATEGORIES = load_categories()
