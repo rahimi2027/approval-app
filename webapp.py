@@ -1234,9 +1234,11 @@ if "zip_all_name" not in st.session_state:
     st.session_state.zip_all_name = None
 
 # ============================================================
+# ✅ PAGE LAYOUT — LOGIN vs LOGGED-IN VIEW
+# ============================================================
 if not st.session_state.logged_in:
-    # ─── LOGIN SCREEN ONLY — NO PDF BUTTONS HERE ───
-    display_company_header()
+    # ─── 🔒 LOGIN PAGE ONLY — NOTHING ELSE SHOWS ───
+    display_company_header()   # ← ONLY ONE logo here
     with st.form("login_form", border=True):
         st.markdown("### 🔒 Secure Gateway Login")
         st.caption("Enter your credentials to access the system"); st.divider()
@@ -1250,16 +1252,27 @@ if not st.session_state.logged_in:
                 st.rerun()
             else:
                 st.error("❌ Invalid Username or Password. Please try again.")
-else:
-    # ─── ✅ ONLY SHOWS AFTER LOGIN — NEVER ON LOGIN PAGE ───
-    user_info = st.session_state.user_info or {}
-    full_name = user_info.get("full_name", user_info.get("username", "User"))
-    dept = user_info.get("dept", "")
-    role = user_info.get("role", "")
-    st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
+    # ✅ LOGIN PAGE ENDS HERE — NO EXTRA CONTENT BELOW THIS LINE!
+    st.stop()  # 🔴 CRITICAL — HALTS EXECUTION SO NOTHING ELSE SHOWS!
 
-    # 👇 CALL YOUR DASHBOARD HERE — ONLY AFTER LOGIN
-    # show_dashboard(user_info, all_requests)
+# ─── ✅ EVERYTHING BELOW ONLY SHOWS AFTER SUCCESSFUL LOGIN ───
+user_info = st.session_state.user_info or {}
+full_name = user_info.get("full_name", user_info.get("username", "User"))
+dept = user_info.get("dept", "")
+role = user_info.get("role", "")
+
+# ✅ Welcome + Logout — ONLY SHOWS AFTER LOGIN
+st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
+if st.button("🔓 Secure Logout"):
+    st.session_state.clear()
+    st.rerun()
+
+# ✅ Secondary header/logo — ONLY SHOWS AFTER LOGIN
+display_company_header()
+
+# ✅ Call dashboard & role portals here
+# show_dashboard(user_info, all_requests)
+# ─── your role-based portals (Super Admin / Director etc.) here ───
 
 # ============================================================
 # 📋 SIDEBAR — PDF CONTROLS (below Change Password)
