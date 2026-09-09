@@ -1396,31 +1396,6 @@ with st.sidebar:
 
     st.divider()
 
-    # ↓ REST OF YOUR PORTAL CODE STARTS HERE (keep indented!) ↓
-# ✅ Safely get user info — default to empty dict if not logged in yet
-user = st.session_state.get("user_info") or {}
-
-# ✅ Safe fallback chain — never crashes
-FULL_NAME = user.get("full_name") or user.get("username", "Unknown User")
-USER_DEPT = user.get("dept", "—")
-USER_ROLE = user.get("role", "—")
-
-CATEGORIES = load_categories()
-refresh_data_button()
-change_my_password_form()
-all_live_requests = load_records_from_excel()
-display_company_header()
-
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown(f"🟢 **Welcome:** {FULL_NAME} | {USER_DEPT} | **{USER_ROLE}**")
-with c2:
-    if st.button("🚪 Secure Logout"):
-        st.session_state.logged_in = False
-        st.session_state.user_info = None
-        st.rerun()
-st.divider()
-
 # ─── 1️⃣ PAYROLL PORTAL ───
 if user.get("role") == "Payroll":
     st.subheader("🧾 Payroll Portal")
@@ -1445,22 +1420,33 @@ if user.get("role") == "Payroll":
                     st.divider()
                     display_pdf_button(req, can_generate=True)
 
-    with tab_approved:
-        approved = [r for r in all_live_requests if r["status"] == "approved"]
-        if not approved:
-            st.success("✅ No approved requests!")
-        else:
-            st.metric("✅ Approved", len(approved)); st.divider()
-            for req in reversed(approved):
-                with st.expander(f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}"):
-                    st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req['dept']}")
-                    st.write(f"💷 Amount: £{req['amount']:.2f}")
-                    st.write(f"🎯 Approved By: {req.get('decision_by', '—')}")
-                    st.write(f"📅 Approval Date: {format_date(req.get('decision_date', ''))}")
-                    st.success(f"💬 Comments: {req.get('director_comments', 'None')}")
-                    display_attachments(req)
-                    st.divider()
-                    display_pdf_button(req, can_generate=True)
+with tab_approved:
+    approved = [r for r in all_live_requests if r["status"] == "approved"]
+    if not approved:
+        st.info("📋 No approved requests.")
+    else:
+        st.metric("✅ Approved", len(approved)); st.divider()
+        for req in reversed(approved):
+            dec_by = req.get('decision_by', 'Director')
+            dec_date = req.get('decision_date', '')
+
+            if dec_date and len(dec_date) >= 10:
+                display_date = dec_date[:10]
+                extra_text = f" | ✅ Approved by {dec_by} on {display_date}"
+            else:
+                extra_text = f" | ✅ Approved by {dec_by}"
+
+            title = f"🟢 ID #{req['id']} | {req['emp_name']} | £{req['amount']:.2f}{extra_text}"
+            with st.expander(title):
+                st.write(f"👤 Employee: {req['emp_name']} | 🏢 Department: {req.get('dept', '')}")
+                st.write(f"💷 Amount: £{req['amount']:.2f}")
+                st.write(f"🎯 **Approved By:** {dec_by}")
+                if dec_date and len(dec_date) >= 10:
+                    st.write(f"📅 **Approval Date:** {dec_date[:10]}")
+                st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
+                display_attachments(req)
+                st.divider()
+                display_pdf_button(req, can_generate=True)
 
     with tab_rejected:
         rejected = [r for r in all_live_requests if r["status"] == "rejected"]
