@@ -1212,31 +1212,35 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 
 # ============================================================
-# ─── PDF GENERATION WITH DATE RANGE FILTER ───
+# ✅ PASTE YOUR DATE FILTER + PDF CODE HERE ← RIGHT HERE!
 # ============================================================
+else:
+    # ✅ YOUR PDF CODE GOES HERE — INSIDE THE ELSE BLOCK! ✅
+    
+    st.subheader("📄 Generate Approved PDFs")
+    st.markdown("### 📅 Filter by Date Range")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        from_date = st.date_input("From Date", value=None, help="Leave blank for all time")
+    with col2:
+        to_date = st.date_input("To Date", value=None, help="Leave blank for all time")
 
-st.subheader("📄 Generate Approved PDFs")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("📥 Generate & Download (This Range)", type="primary"):
+            st.success("✅ Generating PDFs for selected date range...")
+            # [Your date-filtered PDF logic here]
+    with col_b:
+        if st.button("📄 Generate ALL Approved PDFs"):
+            st.success("✅ Generating ALL approved PDFs...")
+            # [Your original ALL PDF logic here]
 
-# 📅 DATE RANGE FILTER
-st.markdown("### 📅 Filter by Date Range")
-col1, col2 = st.columns(2)
-with col1:
-    from_date = st.date_input("From Date", value=None, help="Leave blank for all time")
-with col2:
-    to_date = st.date_input("To Date", value=None, help="Leave blank for all time")
+    st.divider()
 
-# 📦 BUTTONS
-col_a, col_b = st.columns(2)
-with col_a:
-    if st.button("📥 Generate & Download (This Range)", type="primary"):
-        st.success("✅ Generating PDFs for selected date range...")
-        # Your date-filtered PDF logic will run here
-with col_b:
-    if st.button("📄 Generate ALL Approved PDFs"):
-        st.success("✅ Generating ALL approved PDFs...")
-        # Your original "all" PDF logic stays here
-
-st.divider()
+    # ============================================================
+    # REST OF YOUR PORTAL CONTENT GOES HERE (Welcome, Requests, etc.)
+    # ============================================================
 
 # ============================================================
 # MAIN APPLICATION — ROLE-BASED PORTALS (✅ ORDER FIXED)
