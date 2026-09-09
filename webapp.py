@@ -35,28 +35,41 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    /* 👇 Lock expander & all content inside its boundaries */
+    /* Lock expander content & align ALL items to LEFT */
     .streamlit-expanderContent {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+        padding: 1rem !important;
         overflow: hidden !important;
+        text-align: left !important;  /* 👈 Left-align everything */
     }
 
-    /* 👇 Force ALL inputs to fit perfectly — NO overflow */
+    /* Inputs fit perfectly & aligned left */
     .stTextInput > div > div > input {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
+        text-align: left !important;  /* 👈 Text inside inputs also left */
     }
 
-    /* 👇 Also fix the form container itself */
-    form[data-testid="change_my_password"] {
+    /* Labels also aligned to LEFT */
+    .stTextInput label {
+        text-align: left !important;
+        justify-content: flex-start !important;
+    }
+
+    /* Form container - remove centering */
+    .stForm {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
+    }
+
+    /* Submit button - align to left OR full width */
+    .stButton > button {
+        width: 100% !important;        /* Full width to match inputs */
+        justify-content: flex-start !important;
     }
     </style>
 """, unsafe_allow_html=True)
