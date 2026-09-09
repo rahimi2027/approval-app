@@ -38,8 +38,8 @@ st.markdown("""
     .stApp .block-container,
     .stMain .block-container,
     section.main > div {
-        max-width: 1100px !important;
-        width: 1100px !important;
+        max-width: 1400px !important;
+        width: 1400px !important;
         padding-left: 2rem !important;
         padding-right: 2rem !important;
         margin-left: 2rem !important;     /* ✅ Pushes LEFT by ~32px */
@@ -47,8 +47,8 @@ st.markdown("""
     }
     
     .stForm, div[data-testid="stForm"] {
-        max-width: 1100px !important;
-        width: 1100px !important;
+        max-width: 1400px !important;
+        width: 1400px !important;
         margin-left: 2rem !important;
         margin-right: auto !important;
     }
