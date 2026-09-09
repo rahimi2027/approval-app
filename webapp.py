@@ -1662,8 +1662,13 @@ elif role == "Super Admin":
                 dec_date = req.get('decision_date', '')
                 display_date = dec_date[:10] if dec_date and len(dec_date) >= 10 else ""
                 extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
-                title = f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}{extra_text}"
-                with st.expander(title):
+                display_date = dec_date[:10] if dec_date and len(dec_date) >= 10 else "—"
+                full_dt = dec_date if dec_date else "—"
+                label = (
+                f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f} | 📅 {display_date} "
+                f"| ✅ Approved by: {dec_by} | ⏰ {full_dt}"
+                )
+                with st.expander(label):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
                     st.write(f"💷 Amount: £{amount:.2f}")
                     st.write(f"🎯 **Approved By:** {dec_by}")
