@@ -1522,11 +1522,11 @@ with c2:
 st.divider()
 
 # ─── 1️⃣ PAYROLL PORTAL ───
-if user["role"] == "Payroll":
+if user.get("role") == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs."); st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-
+    
     with tab_pending:
         pending = [r for r in all_live_requests if r["status"] == "pending"]
         if not pending:
