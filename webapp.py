@@ -1206,12 +1206,19 @@ def create_pdf_from_request(req):
     try:
         from fpdf import FPDF
         req_id = str(req.get("id", "unknown"))
-        filename = f"Approved_Request_{req_id}.pdf"
+        emp_name = str(req.get("emp_name", "Request")).replace(" ", "_")
+        date_str = str(req.get("date", "unknown"))[:10]
+        filename = f"{emp_name}_{date_str}.pdf"
         filepath = os.path.join(PDF_DIR, filename)
         os.makedirs(PDF_DIR, exist_ok=True)
 
         pdf = FPDF()
         pdf.add_page()
+        # Add logo at top-left
+        if os.path.exists(LOGO_PATH):
+           pdf.image(LOGO_PATH, x=10, y=8, w=50)
+         # Move text down so it doesn't overlap logo
+        pdf.ln(25)
         pdf.set_font("Helvetica", "B", 16)
         pdf.cell(0, 12, f"Approval Request #{req_id}", ln=True, align="C")
         pdf.ln(6)
@@ -1226,7 +1233,7 @@ def create_pdf_from_request(req):
         ]:
             value = req.get(key, "")
             if key == "amount" and value:
-                try: value = f"£{float(value):.2f}"
+                try: value = f"£{float(value):,.2f}"
                 except: pass
             pdf.cell(50, 8, f"{label}: {value}", ln=True)
 
