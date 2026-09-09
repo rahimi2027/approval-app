@@ -24,7 +24,7 @@ from google.oauth2 import service_account
 st.markdown("""
     <style>
     .main .block-container {
-        max-width: 1000px;  /* ✅ Adjust this number (800–1200 works best) */
+        max-width: 800px;  /* ✅ Adjust this number (800–1200 works best) */
         padding-top: 2rem;
         padding-bottom: 2rem;
     }
