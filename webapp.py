@@ -1191,6 +1191,26 @@ if "user_info" not in st.session_state:
 if "editing_request_id" not in st.session_state:
     st.session_state.editing_request_id = None
 
+
+# ============================================================
+# LOGIN PAGE
+# ============================================================
+if not st.session_state.logged_in:
+    display_company_header()
+    with st.form("login_form", border=True):
+        st.markdown("### 🔒 Secure Gateway Login")
+        st.caption("Enter your credentials to access the system"); st.divider()
+        username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
+        password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
+        if st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True):
+            USERS = load_users()
+            if username in USERS and USERS[username]["password"] == password:
+                st.session_state.logged_in = True
+                st.session_state.user_info = {**USERS[username], "username": username}
+                st.rerun()
+            else:
+                st.error("❌ Invalid Username or Password. Please try again.")
+
 # ============================================================
 # ─── PDF GENERATION WITH DATE RANGE FILTER ───
 # ============================================================
@@ -1217,25 +1237,6 @@ with col_b:
         # Your original "all" PDF logic stays here
 
 st.divider()
-
-# ============================================================
-# LOGIN PAGE
-# ============================================================
-if not st.session_state.logged_in:
-    display_company_header()
-    with st.form("login_form", border=True):
-        st.markdown("### 🔒 Secure Gateway Login")
-        st.caption("Enter your credentials to access the system"); st.divider()
-        username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
-        password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
-        if st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True):
-            USERS = load_users()
-            if username in USERS and USERS[username]["password"] == password:
-                st.session_state.logged_in = True
-                st.session_state.user_info = {**USERS[username], "username": username}
-                st.rerun()
-            else:
-                st.error("❌ Invalid Username or Password. Please try again.")
 
 # ============================================================
 # MAIN APPLICATION — ROLE-BASED PORTALS (✅ ORDER FIXED)
