@@ -26,19 +26,33 @@ from google.oauth2 import service_account
 st.set_page_config(
     page_title="Acoole Electrical Portal",
     page_icon="⚡",
-    layout="centered",  # ✅ Use "centered" NOT "wide"!
+    layout="centered",
     initial_sidebar_state="expanded"
 )
 
 # ============================================================
-# ─── CUSTOM WIDTH STYLING ───
+# ─── LOCK WIDTH — NEWEST WORKING VERSION ───
 # ============================================================
 st.markdown("""
     <style>
-    .main .block-container {
-        max-width: 900px;  /* ✅ Try 900px or 1000px */
-        padding-top: 2rem;
-        padding-bottom: 2rem;
+    /* Target ALL container versions */
+    .stApp .block-container,
+    .stMain .block-container,
+    section.main > div {
+        max-width: 900px !important;
+        width: 900px !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    
+    /* Also limit form/login containers */
+    .stForm, div[data-testid="stForm"] {
+        max-width: 900px !important;
+        width: 900px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
     }
     </style>
 """, unsafe_allow_html=True)
