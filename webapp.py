@@ -1466,12 +1466,13 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 else:
                     st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
         st.divider()
-        st.subheader(f"📋 My Department Requests")
-        my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
-        if not my_reqs:
-            st.info("📋 No requests yet.")
-        else:
-            for req in reversed(my_reqs):
+        
+st.subheader(f"📋 My Department Requests")
+my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+if not my_reqs:
+    st.info("📋 No requests yet.")
+else:
+    for req in reversed(my_reqs):
         status = req.get("status", "pending").lower()
         icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
         
@@ -1484,19 +1485,19 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 approver_line += f" | 📅 {dec_date}"
         
         title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f}{approver_line}"
-                    with st.expander(title):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
-                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                    st.info(f"📝 Description: {req.get('desc')}")
-                    display_attachments(req)
-                    if req.get("director_comments"):
-                        st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                    if status == "approved":
-                        display_pdf_button(req, can_generate=False)
-                    if status in ["pending", "rejected"]:
-                        if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
-                            st.session_state.editing_request_id = req.get("id")
-                            st.rerun()# 
+        with st.expander(title):
+            st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+            st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+            st.info(f"📝 Description: {req.get('desc')}")
+            display_attachments(req)
+            if req.get("director_comments"):
+                st.info(f"💬 Director Comments: {req.get('director_comments')}")
+            if status == "approved":
+                display_pdf_button(req, can_generate=False)
+            if status in ["pending", "rejected"]:
+                if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                    st.session_state.editing_request_id = req.get("id")
+                    st.rerun()
                             
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
