@@ -1748,17 +1748,25 @@ elif role in ["Manager", "Staff", "Team Member"]:
         st.markdown(f"**🆔 Request ID:** `#{nid}`")
 
         with st.form("new_req", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                en = st.text_input("👤 Employee Name")
-                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
-                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
-                amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
-with c2:
-    from datetime import datetime as dt
-    dt_val = st.date_input("📅 Date", value=dt.today())
-    mgr = st.text_input("👔 Line Manager")
-    desc = st.text_area("📝 Description / Justification")
+# === DEFINE COLUMNS FIRST — BEFORE using c1 or c2 ===
+c1, c2 = st.columns(2)  # ✅ THIS LINE WAS MISSING!
+
+# === FORM START ===
+with st.form("new_request_form", clear_on_submit=False):
+    # --- LEFT COLUMN (c1) — your existing fields go here ---
+    with c1:
+        en = st.text_input("👤 Employee Name")
+        dept_name = st.text_input("🏢 Department")
+        rt = st.selectbox("📋 Request Type", ["Expense", "Purchase", "Leave", "Other"])
+        ct = st.text_input("🏷️ Category")
+        amt = st.number_input("💷 Amount (£)", min_value=0.0, step=1.0)
+
+    # --- RIGHT COLUMN (c2) — date, manager, description ---
+    with c2:
+        from datetime import datetime as dt
+        dt_val = st.date_input("📅 Date", value=dt.today())
+        mgr = st.text_input("👔 Line Manager")
+        desc = st.text_area("📝 Description / Justification")
 
     # --- File Attachments ---
     st.markdown("### 📎 Attachments (Optional)")
@@ -1768,12 +1776,11 @@ with c2:
         accept_multiple_files=True
     )
 
-    # --- Submit Button — MUST be INSIDE the form block! ---
+    # --- Submit Button — MUST be INSIDE form ---
     submitted = st.form_submit_button("✅ Submit Request", type="primary")
 
-# === FORM END — validation & processing OUTSIDE the `with` block ===
+# === FORM END — validation & processing ===
 if submitted:
-    # Validate required fields
     if not en.strip():
         st.error("❌ Please enter Employee Name")
         st.stop()
@@ -1794,7 +1801,6 @@ if submitted:
             saved_names.append(safe_filename)
     attachment_str = ", ".join(saved_names) if saved_names else "None"
 
-    # Build new request record
     new_request = {
         "id": nid,
         "emp_name": en.strip(),
@@ -1812,25 +1818,19 @@ if submitted:
         "director_comments": ""
     }
 
-    # Save to Excel
     records = load_records_from_excel()
     records.append(new_request)
     save_all_records(records)
 
-    # Log action
     log_action(
         "REQUEST_CREATED",
         str(nid),
-        new_data={
-            **new_request,
-            "attachment_name": attachment_str
-        }
+        new_data={**new_request, "attachment_name": attachment_str}
     )
 
     st.success(f"✅ Request #{nid} submitted successfully!")
     st.balloons()
     st.rerun()
-
 
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
