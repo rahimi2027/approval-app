@@ -870,6 +870,7 @@ def change_my_password_form():
             old_pass = st.text_input("Current Password", type="password")
             new_pass1 = st.text_input("New Password", type="password")
             new_pass2 = st.text_input("Confirm New Password", type="password")
+            
             if st.form_submit_button("✅ Update Password", type="primary"):
                 if USERS[current_username]["password"] != old_pass:
                     st.error("❌ Current password is NOT correct!"); return
