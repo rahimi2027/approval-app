@@ -1221,7 +1221,7 @@ else:
     # ✅ LOGGED-IN PORTAL CONTENT
     # ============================================================
 
-    # ─── LOGO AT TOP ───
+    # ─── LOGO AT TOP — ONLY ONCE ───
     if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, use_container_width=False, width=250)
         st.markdown("---")
@@ -1239,27 +1239,28 @@ else:
     with col_a:
         if st.button("📥 Generate & Download (This Range)", type="primary"):
             st.success("✅ Generating PDFs for selected date range...")
-            # --- ACTUAL PDF GENERATION BY DATE RANGE ---
             records = load_records_from_excel()
             generated_files = []
             for req in records:
                 if req.get("status") != "approved":
                     continue
-                # Parse request date
+                # Parse request date safely
                 try:
-                    req_date = datetime.strptime(str(req.get("date", ""))[:10], "%Y-%m-%d").date()
+                    date_str = str(req.get("date", "")).strip()[:10]
+                    req_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else None
                 except:
                     continue
-                # Check date range
-                if from_date and req_date < from_date:
+                # Apply date range filter
+                if from_date and req_date and req_date < from_date:
                     continue
-                if to_date and req_date > to_date:
+                if to_date and req_date and req_date > to_date:
                     continue
                 # Generate PDF
                 pdf_path = generate_approval_pdf(req)
-                if pdf_path and os.path.exists(pdf_path):
+                # ✅ FIXED: Safe type check to avoid TypeError
+                if pdf_path and isinstance(pdf_path, (str, bytes)) and os.path.exists(pdf_path):
                     generated_files.append(pdf_path)
-            # --- RESULTS ---
+            # Show results
             if generated_files:
                 st.success(f"✅ Generated {len(generated_files)} PDF(s)")
                 for fpath in generated_files:
@@ -1272,15 +1273,15 @@ else:
     with col_b:
         if st.button("📄 Generate ALL Approved PDFs"):
             st.success("✅ Generating ALL approved PDFs...")
-            # --- GENERATE ALL APPROVED ---
             records = load_records_from_excel()
             generated_files = []
             for req in records:
                 if req.get("status") == "approved":
                     pdf_path = generate_approval_pdf(req)
-                    if pdf_path and os.path.exists(pdf_path):
+                    # ✅ SAME FIX: Safe type check
+                    if pdf_path and isinstance(pdf_path, (str, bytes)) and os.path.exists(pdf_path):
                         generated_files.append(pdf_path)
-            # --- RESULTS ---
+            # Show results
             if generated_files:
                 st.success(f"✅ Generated {len(generated_files)} PDF(s)")
                 for fpath in generated_files:
@@ -1292,7 +1293,7 @@ else:
 
     st.divider()
 
-    # ← REST OF YOUR PORTAL CODE (Welcome, Requests, etc.) GOES HERE ←
+    # ← REST OF YOUR PORTAL CODE — REMOVE THE DUPLICATE LOGO FROM HERE ←
 
     user = st.session_state.user_info
     FULL_NAME = user.get("full_name", user["username"])
