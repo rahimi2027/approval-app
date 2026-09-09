@@ -55,23 +55,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ─── STYLING ───
-st.markdown("""
-    <style>
-    .block-container {
-        padding-top: 1.5rem;
-        padding-left: 2.5rem;
-        padding-right: 2.5rem;
-        max-width: 98% !important;
-    }
-    div[data-testid="stForm"] {
-        background-color: #f8f9fa;
-        padding: 1.5rem;
-        border-radius: 0.6rem;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
 # ============================================================
 # ✅ ALL CONFIGURATION — DEFINED FIRST!
 # ============================================================
