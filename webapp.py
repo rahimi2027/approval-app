@@ -1760,16 +1760,20 @@ with c2:
     mgr = st.text_input("👔 Line Manager")
     desc = st.text_area("📝 Description / Justification")
 
-# --- File Attachments ---
-st.markdown("### 📎 Attachments (Optional)")
-uploaded_files = st.file_uploader(
-    "Upload supporting documents",
-    type=["pdf", "png", "jpg", "jpeg"],
-    accept_multiple_files=True
-)
+    # --- File Attachments ---
+    st.markdown("### 📎 Attachments (Optional)")
+    uploaded_files = st.file_uploader(
+        "Upload supporting documents",
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True
+    )
 
-# --- Submit New Request ---
-if st.form_submit_button("✅ Submit Request", type="primary"):
+    # --- Submit Button — MUST be INSIDE the form block! ---
+    submitted = st.form_submit_button("✅ Submit Request", type="primary")
+
+# === FORM END — validation & processing OUTSIDE the `with` block ===
+if submitted:
+    # Validate required fields
     if not en.strip():
         st.error("❌ Please enter Employee Name")
         st.stop()
@@ -1788,10 +1792,9 @@ if st.form_submit_button("✅ Submit Request", type="primary"):
             with open(os.path.join(UPLOAD_DIR, safe_filename), "wb") as outfile:
                 outfile.write(f.getbuffer())
             saved_names.append(safe_filename)
-
     attachment_str = ", ".join(saved_names) if saved_names else "None"
 
-    # Build new record
+    # Build new request record
     new_request = {
         "id": nid,
         "emp_name": en.strip(),
