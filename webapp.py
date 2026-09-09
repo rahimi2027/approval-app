@@ -1218,10 +1218,10 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
 else:
     # ============================================================
-    # ✅ LOGGED-IN PORTAL CONTENT — ONLY ONE LOGO AT TOP
+    # ✅ LOGGED-IN PORTAL CONTENT — LOGO ONCE AT TOP
     # ============================================================
 
-    # ─── LOGO — ONLY DISPLAYED ONCE HERE ───
+    # ─── LOGO — ONLY ONCE HERE ───
     if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, use_container_width=False, width=250)
         st.markdown("---")
@@ -1241,40 +1241,49 @@ else:
             st.success("✅ Generating PDFs for selected date range...")
             records = load_records_from_excel()
             
-            # --- DEBUG: Show what we're loading ---
             st.info(f"📋 Total records loaded: {len(records)}")
             approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
             st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
 
             generated_files = []
+            matched_by_date = 0
+            
             for req in approved_records:
-                # Parse request date — try multiple formats
+                # PARSE DATE — TRY ALL COMMON FORMATS
                 req_date = None
                 date_str = str(req.get("date", "")).strip()
-                date_str = date_str.replace("/", "-")
+                date_str = date_str.replace("/", "-").replace(".", "-")
                 date_str_short = date_str[:10]
-                
-                for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
+
+                # TRY: DD-MM-YYYY, YYYY-MM-DD, MM-DD-YYYY
+                for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%m-%d-%Y"):
                     try:
-                        from datetime import datetime
                         req_date = datetime.strptime(date_str_short, fmt).date()
                         break
                     except:
                         continue
 
-                # Apply date range filter
+                # Show sample for debugging (first record only)
+                if approved_records.index(req) == 0:
+                    st.info(f"📅 Sample Excel date: '{date_str_short}' → Parsed as: {req_date or 'FAILED'}")
+
+                # DATE FILTER LOGIC
                 include = True
-                if from_date and req_date and req_date < from_date:
-                    include = False
-                if to_date and req_date and req_date > to_date:
-                    include = False
+                if from_date and req_date:
+                    if req_date < from_date:
+                        include = False
+                if to_date and req_date:
+                    if req_date > to_date:
+                        include = False
 
                 if include:
+                    matched_by_date += 1
                     pdf_path = generate_approval_pdf(req)
                     if pdf_path and isinstance(pdf_path, (str, bytes)) and os.path.exists(pdf_path):
                         generated_files.append(pdf_path)
 
-            # Show results
+            st.info(f"📅 Records matched by date range: {matched_by_date}")
+
             if generated_files:
                 st.success(f"✅ Generated {len(generated_files)} PDF(s)")
                 for fpath in generated_files:
@@ -1306,7 +1315,7 @@ else:
 
     st.divider()
 
-    # ⚠️ SCROLL DOWN — DELETE ANY DUPLICATE LOGO CODE HERE ⚠️
+    # ⚠️ DELETE THE DUPLICATE LOGO BLOCK FROM HERE DOWN ⚠️
     
     user = st.session_state.user_info
     FULL_NAME = user.get("full_name", user["username"])
