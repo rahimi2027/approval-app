@@ -1211,7 +1211,9 @@ if not st.session_state.logged_in:
             else:
                 st.error("❌ Invalid Username or Password. Please try again.")
 else:
-    # ✅ PDF CODE — INSIDE LOGGED-IN SECTION ✅
+    # ============================================================
+    # ✅ LOGGED-IN PORTAL CONTENT
+    # ============================================================
     
     st.subheader("📄 Generate Approved PDFs")
     st.markdown("### 📅 Filter by Date Range")
@@ -1226,17 +1228,13 @@ else:
     with col_a:
         if st.button("📥 Generate & Download (This Range)", type="primary"):
             st.success("✅ Generating PDFs for selected date range...")
-            # [Your date-filtered PDF logic here]
     with col_b:
         if st.button("📄 Generate ALL Approved PDFs"):
             st.success("✅ Generating ALL approved PDFs...")
-            # [Your original ALL PDF logic here]
     
     st.divider()
     
-    # ============================================================
-    # REST OF YOUR PORTAL CONTENT (Welcome message, Requests, etc.)
-    # ============================================================
+    # ← REST OF YOUR PORTAL CODE (Welcome, Requests, etc.) GOES HERE ←
 
 # ============================================================
 # MAIN APPLICATION — ROLE-BASED PORTALS (✅ ORDER FIXED)
