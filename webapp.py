@@ -1368,38 +1368,38 @@ else:
     # ============================================================
     # 📋 SIDEBAR — PDF CONTROLS (below Change Password)
     # ============================================================
-    with st.sidebar:
-        st.divider()
-        st.subheader("📄 Generate Approved PDFs")
-        st.caption("Filter by Date Range")
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            from_date = st.date_input("From Date", value=None, label_visibility="collapsed")
-        with col_s2:
-            to_date = st.date_input("To Date", value=None, label_visibility="collapsed")
-        st.divider()
-        gen_range = st.button("📥 Generate & Download (Range)", type="primary", key="sb_range")
-        gen_all = st.button("📄 Generate ALL Approved PDFs", key="sb_all")
-        if st.session_state.get("zip_range_data"):
-            st.download_button(
-                "📦 Download Range PDFs (ZIP)",
-                data=st.session_state.zip_range_data,
-                file_name=st.session_state.zip_range_name,
-                mime="application/zip",
-                type="primary",
-                use_container_width=True,
-                key="dl_sb_range"
-            )
-        if st.session_state.get("zip_all_data"):
-            st.download_button(
-                "📦 Download ALL PDFs (ZIP)",
-                data=st.session_state.zip_all_data,
-                file_name=st.session_state.zip_all_name,
-                mime="application/zip",
-                type="primary",
-                use_container_width=True,
-                key="dl_sb_all"
-            )
+#    with st.sidebar:
+#        st.divider()
+#        st.subheader("📄 Generate Approved PDFs")
+#        st.caption("Filter by Date Range")
+#        col_s1, col_s2 = st.columns(2)
+#        with col_s1:
+#            from_date = st.date_input("From Date", value=None, label_visibility="collapsed")
+#        with col_s2:
+#            to_date = st.date_input("To Date", value=None, label_visibility="collapsed")
+#        st.divider()
+#        gen_range = st.button("📥 Generate & Download (Range)", type="primary", key="sb_range")
+#        gen_all = st.button("📄 Generate ALL Approved PDFs", key="sb_all")
+#        if st.session_state.get("zip_range_data"):
+#            st.download_button(
+#                "📦 Download Range PDFs (ZIP)",
+#                data=st.session_state.zip_range_data,
+#                file_name=st.session_state.zip_range_name,
+#                mime="application/zip",
+#                type="primary",
+#                use_container_width=True,
+#                key="dl_sb_range"
+#            )
+#        if st.session_state.get("zip_all_data"):
+#            st.download_button(
+#                "📦 Download ALL PDFs (ZIP)",
+#                data=st.session_state.zip_all_data,
+#                file_name=st.session_state.zip_all_name,
+#                mime="application/zip",
+#                type="primary",
+#                use_container_width=True,
+#                key="dl_sb_all"
+#            )
 
     # ============================================================
     # 📊 MAIN PAGE — STATUS MESSAGES ONLY
