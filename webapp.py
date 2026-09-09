@@ -1499,13 +1499,23 @@ else:
                     st.session_state.editing_request_id = req.get("id")
                     st.rerun()
                             
-# ─── DIRECTOR PORTAL ───
+# ─── ROLE BASED VIEWS ───
+if role == "Admin":
+    # ─── ADMIN SECTION ───
+    st.subheader("🔧 Admin Dashboard")
+    # ... your admin code here ...
+
+elif role == "Manager":
+    # ─── MANAGER SECTION ───
+    st.subheader("👔 Manager Approval Portal")
+    # ... your manager code here ...
+
 elif role == "Director":
+    # ─── DIRECTOR PORTAL ───
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
     st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
     st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-
     with tab_pending:
         pending = [r for r in all_live_requests if r.get("status") == "pending"]
         if not pending:
@@ -1531,7 +1541,6 @@ elif role == "Director":
                         comments = st.text_area("Director Comments", key=f"comm_{req_id}")
                         approve_btn = st.button("✅ APPROVE", type="primary", key=f"appr_{req_id}")
                         reject_btn = st.button("❌ REJECT", type="secondary", key=f"rejt_{req_id}")
-
                         if approve_btn:
                             records = load_records_from_excel()
                             for r in records:
@@ -1547,7 +1556,6 @@ elif role == "Director":
                             log_action("APPROVED", req_id)
                             st.success(f"✅ Request #{req_id} APPROVED.")
                             st.rerun()
-
                         if reject_btn:
                             records = load_records_from_excel()
                             for r in records:
@@ -1561,7 +1569,6 @@ elif role == "Director":
                             log_action("REJECTED", req_id)
                             st.error(f"❌ Request #{req_id} REJECTED.")
                             st.rerun()
-
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
         if not approved:
@@ -1581,7 +1588,6 @@ elif role == "Director":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
         if not rejected:
@@ -1598,7 +1604,11 @@ elif role == "Director":
                     st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                     display_attachments(req)
-                    
+
+else:
+    # ─── DEFAULT / EMPLOYEE SECTION ───
+    st.subheader("📋 My Requests")
+    # ... your default / employee code here ...                    
 
 # ─── 4️⃣ SUPER ADMIN PORTAL ───
 elif role == "Super Admin":
