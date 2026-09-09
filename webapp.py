@@ -30,9 +30,11 @@ st.markdown("""
        ======================================== */
     .block-container {
         padding-top: 2rem !important;
-        padding-left: 2rem !important;   /* 👈 Content away from edge nicely */
+        padding-left: 2rem !important;
         padding-right: 2rem !important;
-        max-width: 100% !important;      /* 👈 Remove max-width restriction */
+        max-width: 1200px !important;  /* 👈 Adjust page width here! */
+        /* ↓ Use 100% for full width, or 700px / 900px / 1200px */
+        width: 95% !important;
     }
 
     /* ========================================
