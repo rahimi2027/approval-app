@@ -23,44 +23,23 @@ from google.oauth2 import service_account
 # ============================================================
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
-st.set_page_config(
-    page_title="Acoole Electrical Portal",
-    page_icon="⚡",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
-
-# ============================================================
-# ─── LOCK WIDTH — NEWEST WORKING VERSION ───
-# ============================================================
 st.markdown("""
     <style>
     /* ========================================
-       🔥 MAIN CONTENT: Align to LEFT & control width
-       ======================================== */
-    .block-container {
-        padding-top: 2rem !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-        max-width: 1200px !important;  /* 👈 Adjust page width here! */
-        /* ↓ Use 100% for full width, or 700px / 900px / 1200px */
-        width: 95% !important;
-    }
-
-    /* ========================================
-       SIDEBAR: Remove centering & push left
+       🔥 THE MAIN FIX — Remove sidebar container's 
+       default left padding (the invisible wall!)
        ======================================== */
     section[data-testid="stSidebar"] > div:first-child > div {
-        padding-left: 0.3rem !important;   /* Closer to edge */
-        padding-right: 0.3rem !important;
+        padding-left: 0rem !important;
+        padding-right: 0rem !important;
     }
+
+    /* Sidebar content alignment */
     section[data-testid="stSidebar"] > div:first-child {
         align-items: flex-start !important;
     }
 
-    /* ========================================
-       EXPANDER/FORM: Fit perfectly & flush left
-       ======================================== */
+    /* Expander — full width, no margins */
     .streamlit-expander {
         width: 100% !important;
         margin: 0 !important;
@@ -70,19 +49,26 @@ st.markdown("""
         justify-content: flex-start !important;
         padding-left: 0.5rem !important;
     }
+
+    /* Expander content — ZERO left padding */
     .streamlit-expanderContent {
         width: 100% !important;
         box-sizing: border-box !important;
         padding: 0.5rem 0.4rem !important;
-        padding-left: 0.25rem !important;  /* Tight to left edge */
+        padding-left: 0.25rem !important;
+        margin: 0 !important;
         text-align: left !important;
     }
+
+    /* Form — full width, flush left */
     .streamlit-expanderContent form {
         width: 100% !important;
         box-sizing: border-box !important;
         padding: 0 !important;
         margin: 0 !important;
     }
+
+    /* Labels & Inputs */
     .streamlit-expanderContent label {
         text-align: left !important;
         justify-content: flex-start !important;
@@ -92,10 +78,11 @@ st.markdown("""
         width: 100% !important;
         box-sizing: border-box !important;
     }
-    .streamlit-expanderContent .stButton > button {
+
+    /* Buttons in sidebar */
+    .stButton > button {
         width: 100% !important;
         box-sizing: border-box !important;
-      #  margin-top: 0.5rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
