@@ -339,7 +339,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
                     "Field_Changed": label, "Old_Value": old, "New_Value": new, "IP_Address": "Auto-Logged"})
 def display_audit_log_panel():
     st.subheader("📖 Full System Audit Log — Complete History")
-    st.info("🔒 Super Admin Only — Cannot be deleted or modified."); st.divider()
+    st.info("🔒 Cannot be deleted or modified."); st.divider()
     logs = load_audit_log()
     if not logs: st.info("📋 No activity recorded yet."); return
     c1, c2, c3, c4 = st.columns(4)
