@@ -26,7 +26,7 @@ from google.oauth2 import service_account
 st.markdown("""
     <style>
     /* ========================================
-       🔥 MAIN FIX: Align CENTER content to LEFT
+       🔥 MAIN CONTENT: Align to LEFT & control width
        ======================================== */
     .block-container {
         padding-top: 2rem !important;
@@ -38,27 +38,54 @@ st.markdown("""
     }
 
     /* ========================================
-       Optional: If you want even CLOSER to edge
-       change padding-left to: 0.5rem or 0rem
+       SIDEBAR: Remove centering & push left
        ======================================== */
-
-    /* Keep sidebar fixes as well */
     section[data-testid="stSidebar"] > div:first-child > div {
-        padding-left: 0.5rem !important;
-        padding-right: 0.5rem !important;
+        padding-left: 0.3rem !important;   /* Closer to edge */
+        padding-right: 0.3rem !important;
     }
     section[data-testid="stSidebar"] > div:first-child {
         align-items: flex-start !important;
+    }
+
+    /* ========================================
+       EXPANDER/FORM: Fit perfectly & flush left
+       ======================================== */
+    .streamlit-expander {
+        width: 100% !important;
+        margin: 0 !important;
+        padding-left: 0 !important;
+    }
+    .streamlit-expanderHeader {
+        justify-content: flex-start !important;
+        padding-left: 0.5rem !important;
     }
     .streamlit-expanderContent {
         width: 100% !important;
         box-sizing: border-box !important;
         padding: 0.5rem !important;
+        padding-left: 0.25rem !important;  /* Tight to left edge */
         text-align: left !important;
+    }
+    .streamlit-expanderContent form {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .streamlit-expanderContent label {
+        text-align: left !important;
+        justify-content: flex-start !important;
+        padding-left: 0.2rem !important;
     }
     .streamlit-expanderContent input {
         width: 100% !important;
         box-sizing: border-box !important;
+    }
+    .streamlit-expanderContent .stButton > button {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        margin-top: 0.5rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
