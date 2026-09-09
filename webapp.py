@@ -1067,25 +1067,27 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ============================================================
-# ✅ POST-LOGIN — ALL FIXED VARIABLES DEFINED
+# ✅ LOGO AT THE VERY TOP ✅
 # ============================================================
-user_info = st.session_state.user_info or {}
-full_name = user_info.get("full_name", user_info.get("username", "User"))
-dept = user_info.get("dept", "")
-role = user_info.get("role", "")
-FULL_NAME = full_name  # ✅ Fixed missing variable!
-all_live_requests = load_records_from_excel()  # ✅ Fixed missing variable!
-CATEGORIES = load_categories()  # ✅ Fixed missing variable!
-display_company_header()
-# ✅ REFRESH BUTTON — DISPLAYS FIRST
-refresh_data_button()
+display_company_header()  # Logo centered at top
 
-# ✅ WELCOME MESSAGE & SECURE LOGOUT → PLACED BELOW REFRESH BUTTON ✅
+# ============================================================
+# ✅ REFRESH LEFT | LOGOUT RIGHT — SAME ROW ✅
+# ============================================================
+col_left, col_right = st.columns([4, 1])  # Wide space left, logout tight right
+
+with col_left:
+    refresh_data_button()  # 🔄 Refresh Data — top left
+
+with col_right:
+    if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
+        st.session_state.clear()
+        st.rerun()  # 🔓 Logout — top right, above welcome
+
+# ============================================================
+# ✅ WELCOME BANNER — FULL WIDTH, BELOW BUTTONS ✅
+# ============================================================
 st.info(f"👤 Welcome: {full_name} | System Administration | Super Admin")
-if st.button("🔓 Secure Logout", type="secondary"):
-    st.session_state.clear()
-    st.rerun()
-
 
 change_my_password_form()
 
