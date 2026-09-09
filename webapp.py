@@ -385,6 +385,30 @@ def display_audit_log_panel():
     df_export = pd.DataFrame(filtered)
     st.download_button("📥 Download Full Audit Log (CSV)", df_export.to_csv(index=False).encode("utf-8"), "Acoole_Audit_Log.csv", type="primary")
 
+with tab_audit:
+    # ✅ INSERT THIS BLOCK HERE ✅
+    # --- CLEAR AUDIT LOG BUTTON ---
+    user_info = st.session_state.get("user_info", {})
+    user_role = user_info.get("role", "")
+    if user_role == "Super Admin":
+        st.divider()
+        col_btn, col_info = st.columns([1, 3])
+        with col_btn:
+            if st.button("🗑️ Clear History Log", type="secondary"):
+                # Step 1: Archive first
+                archive_path, count = archive_audit_log()
+                # Step 2: Clear the file
+                clear_audit_log_file()
+                st.success(f"✅ Log cleared! Archived {count} entries → `{os.path.basename(archive_path)}`")
+                st.rerun()
+        with col_info:
+            st.caption("⚠️ This archives current log then starts fresh — history is backed up before clearing.")
+    st.divider()
+    
+    if "display_audit_log_panel" in globals():
+        display_audit_log_panel()
+    else:
+        st.info("📖 Audit log panel not defined — skipping")
 # --- CLEAR HISTORY LOG BUTTON ---
 # Only show button if user is Super Admin
 if st.session_state.get("user_role") == "super_admin":
