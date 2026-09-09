@@ -704,7 +704,7 @@ def generate_approval_pdf(request_data):
         dash_y = pdf.get_y()
         for x in range(10, 200, 4): pdf.line(x, dash_y, x + 2, dash_y)
         if status == "approved" and os.path.exists(APPROVED_STAMP_PATH): pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
-                elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH): pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
+        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH): pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         pdf.ln(8)
         pdf.set_font("Courier", "", 8)
         pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
