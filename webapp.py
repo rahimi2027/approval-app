@@ -35,67 +35,53 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    /* ===== 1. Sidebar base & alignment ===== */
-    section[data-testid="stSidebar"] {
-        width: 400px !important;
-    }
-    /* Force ALL sidebar content to LEFT — THIS is what was missing */
-    section[data-testid="stSidebar"] > div:first-child {
+    /* === OVERRIDE: Force sidebar content LEFT (Streamlit hides this!) === */
+    section[data-testid="stSidebar"] > div {
         align-items: flex-start !important;
-        text-align: left !important;
-    }
-    .block-container {
-        padding-top: 1rem !important;
     }
 
-    /* ===== 2. Expander — fit to width & align left ===== */
+    /* === Expander box: fit width & no overflow === */
     .streamlit-expanderContent {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
-        padding: 1rem !important;
+        padding: 1rem 0.8rem !important;
         overflow: hidden !important;
         text-align: left !important;
     }
 
-    /* ===== 3. Form & inputs — fit perfectly, NO overflow ===== */
-    .stForm {
+    /* === Form container: FULL WIDTH, left aligned === */
+    .streamlit-expanderContent form {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
         text-align: left !important;
-    }
-    .stTextInput {
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-    }
-    .stTextInput > div > div > input {
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-        text-align: left !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important; /* 👈 Pushes everything LEFT */
     }
 
-    /* ===== 4. Labels — left aligned ===== */
-    .stTextInput label {
+    /* === Labels: LEFT aligned === */
+    .streamlit-expanderContent label {
         text-align: left !important;
+        width: 100% !important;
         justify-content: flex-start !important;
     }
 
-    /* ===== 5. Buttons — full width & left aligned ===== */
-    .stButton > button {
+    /* === Input boxes: fit perfectly, no overflow === */
+    .streamlit-expanderContent input {
         width: 100% !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
     }
 
-    /* ===== 6. ALL sidebar elements — remove default centering ===== */
-    section[data-testid="stSidebar"] .element-container {
+    /* === Update Password button: match input width, left aligned === */
+    .streamlit-expanderContent .stButton {
         width: 100% !important;
-        text-align: left !important;
     }
-    section[data-testid="stSidebar"] .stMarkdown {
-        text-align: left !important;
+    .streamlit-expanderContent button {
+        width: 100% !important;
+        box-sizing: border-box !important;
     }
     </style>
 """, unsafe_allow_html=True)
