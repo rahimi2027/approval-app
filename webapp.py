@@ -35,9 +35,10 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    /* ===== Sidebar base: PUSH ALL LEFT ===== */
+    /* ===== Sidebar content: FULL LEFT, NO GAP ===== */
     section[data-testid="stSidebar"] > div:first-child {
         align-items: flex-start !important;
+        padding-left: 0 !important;
     }
     section[data-testid="stSidebar"] .block-container {
         padding-left: 0 !important;
@@ -45,49 +46,57 @@ st.markdown("""
         max-width: 100% !important;
     }
 
-    /* ===== Expander WRAPPER: remove margins & centering ===== */
+    /* ===== Expander WRAPPER: NO left margin/padding ===== */
     .streamlit-expander {
         width: 100% !important;
         margin: 0 !important;
+        margin-left: 0 !important;
         padding-left: 0 !important;
     }
     .streamlit-expanderHeader {
         justify-content: flex-start !important;
         padding-left: 0.5rem !important;
+        margin-left: 0 !important;
     }
 
-    /* ===== Expander CONTENT: flush to edges ===== */
+    /* ===== Expander CONTENT: ZERO left padding ===== */
     .streamlit-expanderContent {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
         padding: 0.5rem 0.2rem !important;
+        padding-left: 0 !important; /* 👈 ZERO left gap */
         margin: 0 !important;
+        margin-left: 0 !important;
         overflow: hidden !important;
         text-align: left !important;
     }
 
-    /* ===== Form: full width, zero margins ===== */
+    /* ===== Form: ZERO left margin ===== */
     .streamlit-expanderContent form {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
         padding: 0 !important;
+        padding-left: 0 !important;
         margin: 0 !important;
+        margin-left: 0 !important;
     }
 
-    /* ===== Labels: tight left ===== */
+    /* ===== Labels: flush left ===== */
     .streamlit-expanderContent label {
         text-align: left !important;
         justify-content: flex-start !important;
-        padding-left: 0.1rem !important;
+        padding-left: 0.3rem !important;
+        margin-left: 0 !important;
     }
 
-    /* ===== Inputs: fit perfectly ===== */
+    /* ===== Inputs: touch the left edge ===== */
     .streamlit-expanderContent input {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
+        margin-left: 0 !important;
     }
 
     /* ===== Button: full width ===== */
