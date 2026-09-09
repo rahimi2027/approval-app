@@ -1074,20 +1074,23 @@ display_company_header()  # Logo centered at top
 # ============================================================
 # ✅ REFRESH LEFT | LOGOUT RIGHT — SAME ROW ✅
 # ============================================================
-col_left, col_right = st.columns([4, 1])  # Wide space left, logout tight right
+col_left, col_right = st.columns([4, 1])
 
 with col_left:
-    refresh_data_button()  # 🔄 Refresh Data — top left
+    refresh_data_button()
 
 with col_right:
     if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
         st.session_state.clear()
-        st.rerun()  # 🔓 Logout — top right, above welcome
+        st.rerun()
 
 # ============================================================
-# ✅ WELCOME BANNER — FULL WIDTH, BELOW BUTTONS ✅
+# ✅ WELCOME BANNER — FIXED VARIABLE ✅
 # ============================================================
-st.info(f"👤 Welcome: {full_name} | System Administration | Super Admin")
+# ↓↓↓ USE YOUR ACTUAL VARIABLE NAME HERE ↓↓↓
+user_display_name = st.session_state.get("full_name", st.session_state.get("username", "User"))
+
+st.info(f"👤 Welcome: {user_display_name} | System Administration | Super Admin")
 
 change_my_password_form()
 
