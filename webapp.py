@@ -39,8 +39,8 @@ st.markdown("""
     .stApp .block-container,
     .stMain .block-container,
     section.main > div {
-        max-width: 900px !important;
-        width: 900px !important;
+        max-width: 1000px !important;
+        width: 1000px !important;
         padding-left: 2rem !important;
         padding-right: 2rem !important;
         margin-left: auto !important;
@@ -49,8 +49,8 @@ st.markdown("""
     
     /* Also limit form/login containers */
     .stForm, div[data-testid="stForm"] {
-        max-width: 900px !important;
-        width: 900px !important;
+        max-width: 1000px !important;
+        width: 1000px !important;
         margin-left: auto !important;
         margin-right: auto !important;
     }
