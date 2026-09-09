@@ -386,18 +386,6 @@ def display_audit_log_panel():
     st.download_button("📥 Download Full Audit Log (CSV)", df_export.to_csv(index=False).encode("utf-8"), "Acoole_Audit_Log.csv", type="primary")
 
 # --- CLEAR HISTORY LOG BUTTON ---
-tab1, tab2, tab3 = st.tabs(["Approvals", "Payroll", "Audit Logs"])
-
-with tab3:  # ✅ INSIDE THE AUDIT TAB
-    # Clear button FIRST at top of tab
-    if st.button("🗑️ Clear All History"):
-        st.session_state.history_log = []
-        open(LOG_FILE_PATH, "w").close()
-        st.rerun()
-    
-    # Then show log
-    st.subheader("Audit History")
-    # [your log display code here]
 # Only show button if user is Super Admin
 if st.session_state.get("user_role") == "super_admin":
     if st.button("🗑️ Clear History Log"):
