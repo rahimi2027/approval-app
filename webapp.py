@@ -1482,12 +1482,12 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 else:
                     st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
         st.divider()
-     #   st.divider()
-     #   st.subheader(f"📋 My Department Requests")
-     #   my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
-     #   if not my_reqs:
-     #       st.info("📋 No requests yet.")
-     #   else:
+        st.divider()
+        st.subheader(f"📋 My Department Requests")
+        my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+        if not my_reqs:
+            st.info("📋 No requests yet.")
+        else:
             for req in reversed(my_reqs):
                 status = req.get("status", "pending").lower()
                 icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
