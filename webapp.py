@@ -1588,7 +1588,10 @@ elif role == "Director":
                 req_id = req.get("id")
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = format_date(req.get('decision_date',''))
-                with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date}"):
+                label = (  f"🟢 ID #{req_id} | {req.get('emp_name')} | APPROVED | £{float(req.get('amount',0)):.2f} | 📅 {dec_date[:10] if dec_date else '—'} "
+                f"| ✅ Approved by: {dec_by} | ⏰ {dec_date}"
+                )
+                with st.expander(label):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
