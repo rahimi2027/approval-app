@@ -343,13 +343,7 @@ def display_audit_log_panel():
     logs = load_audit_log()
     if not logs: st.info("📋 No activity recorded yet."); return
     c1, c2, c3, c4 = st.columns(4)
-    with c1:
-    user_options = sorted(set(l["User_Name"] for l in logs))
-    filter_user = st.multiselect(
-        "🔍 Filter by User",
-        options=user_options,
-        key="audit_log_filter_user"  # ← REQUIRED: unique, fixed key name
-    )
+    with c1: filter_user = st.multiselect("🔍 Filter by User", sorted(set([l["User_Name"] for l in logs])))
     with c2: dept_list = sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"]))
     filter_dept = st.multiselect("🏢 Filter by Department", dept_list)
     with c3: filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
