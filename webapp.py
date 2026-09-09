@@ -385,7 +385,7 @@ def display_audit_log_panel():
     df_export = pd.DataFrame(filtered)
     st.download_button("📥 Download Full Audit Log (CSV)", df_export.to_csv(index=False).encode("utf-8"), "Acoole_Audit_Log.csv", type="primary")
 
-with tab_audit:
+#with tab_audit:
     # ✅ INSERT THIS BLOCK HERE ✅
     # --- CLEAR AUDIT LOG BUTTON ---
     user_info = st.session_state.get("user_info", {})
