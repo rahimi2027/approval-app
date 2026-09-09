@@ -20,6 +20,16 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 
+# Limit page width
+st.markdown("""
+    <style>
+    .main .block-container {
+        max-width: 1000px;  /* ✅ Adjust this number (800–1200 works best) */
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
 # ============================================================
 # ─── PAGE CONFIG — FULL WIDTH (PERFECTED) ───
 # ============================================================
