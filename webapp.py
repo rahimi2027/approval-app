@@ -84,7 +84,7 @@ ONEDRIVE_FOLDER = "Acoole_App_Uploads/"
 USE_ONEDRIVE = False  # ✅ Set = True to SWITCH from Google → OneDrive
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
-os.makedirs(ARCHIVE_FOLDER, exist_ok=True))
+os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 # ============================================================
 # ✅ LOAD GOOGLE CREDENTIALS FROM FILE
 # ============================================================
