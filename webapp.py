@@ -1082,10 +1082,9 @@ st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 if st.button("🔓 Secure Logout"):
     st.session_state.clear()
     st.rerun()
-
 display_company_header()
-
 change_my_password_form()
+refresh_data_button()  # ✅ REFRESH BUTTON NOW SHOWS
 
 # Sidebar PDF section
 with st.sidebar:
