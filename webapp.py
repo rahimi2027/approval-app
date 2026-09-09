@@ -30,7 +30,7 @@ st.markdown("""
        ======================================== */
     .block-container {
         padding-top: 2rem !important;
-        padding-left: 0.5rem !important;   /* ✅ Much closer to sidebar */
+        padding-left: 0.1rem !important;   /* ✅ Much closer to sidebar */
         padding-right: 2rem !important;
         max-width: 1400px !important;      /* ✅ Wide enough, no centering */
         width: 90% !important;             /* ✅ Use most of screen */
