@@ -867,9 +867,9 @@ def change_my_password_form():
         USERS = load_users()
         current_username = st.session_state.user_info["username"]
         with st.form("change_my_password", clear_on_submit=True):
-            old_pass = st.text_input("🔑 Current Password", type="password")
-            new_pass1 = st.text_input("🔑 New Password", type="password")
-            new_pass2 = st.text_input("🔑 Confirm New Password", type="password")
+            old_pass = st.text_input("Current Password", type="password")
+            new_pass1 = st.text_input("New Password", type="password")
+            new_pass2 = st.text_input("Confirm New Password", type="password")
             if st.form_submit_button("✅ Update Password", type="primary"):
                 if USERS[current_username]["password"] != old_pass:
                     st.error("❌ Current password is NOT correct!"); return
