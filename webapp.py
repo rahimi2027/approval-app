@@ -1076,7 +1076,7 @@ role = user_info.get("role", "")
 FULL_NAME = full_name  # ✅ Fixed missing variable!
 all_live_requests = load_records_from_excel()  # ✅ Fixed missing variable!
 CATEGORIES = load_categories()  # ✅ Fixed missing variable!
-
+display_company_header()
 # ✅ REFRESH BUTTON — DISPLAYS FIRST
 refresh_data_button()
 
@@ -1086,7 +1086,7 @@ if st.button("🔓 Secure Logout", type="secondary"):
     st.session_state.clear()
     st.rerun()
 
-display_company_header()
+
 change_my_password_form()
 
 # Sidebar PDF section
