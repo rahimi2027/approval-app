@@ -35,26 +35,31 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    .stApp .block-container,
-    .stMain .block-container,
-    section.main > div {
-        max-width: 1200px !important;
-        width: 1200px !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-        margin-left: 2rem !important;     /* ✅ Pushes LEFT by ~32px */
-        margin-right: auto !important;     /* ✅ Keeps right side fluid */
+    /* 👇 Lock expander & all content inside its boundaries */
+    .streamlit-expanderContent {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        overflow: hidden !important;
     }
-    
-    .stForm, div[data-testid="stForm"] {
-        max-width: 1200px !important;
-        width: 1200px !important;
-        margin-left: 2rem !important;
-        margin-right: auto !important;
+
+    /* 👇 Force ALL inputs to fit perfectly — NO overflow */
+    .stTextInput > div > div > input {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    /* 👇 Also fix the form container itself */
+    form[data-testid="change_my_password"] {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
     }
     </style>
 """, unsafe_allow_html=True)
-
 # ============================================================
 # ✅ ALL CONFIGURATION — DEFINED FIRST!
 # ============================================================
