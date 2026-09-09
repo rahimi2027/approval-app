@@ -907,9 +907,18 @@ def display_company_header():
         st.divider()
 
 def change_my_password_form():
+    # ✅ Guard clause: don't run if not logged in / user_info missing
+    if not st.session_state.get("logged_in") or not st.session_state.get("user_info"):
+        return
+
     with st.sidebar.expander("🔑 Change My Password", expanded=False):
         USERS = load_users()
-        current_username = st.session_state.user_info["username"]
+        # ✅ Safe get with fallback
+        current_username = st.session_state.user_info.get("username")
+        if not current_username or current_username not in USERS:
+            st.warning("⚠️ Please log in before changing password.")
+            return
+
         with st.form("change_my_password", clear_on_submit=True):
             old_pass = st.text_input("Current Password", type="password")
             new_pass1 = st.text_input("New Password", type="password")
