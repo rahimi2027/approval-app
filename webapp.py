@@ -343,12 +343,34 @@ def display_audit_log_panel():
     logs = load_audit_log()
     if not logs: st.info("📋 No activity recorded yet."); return
     c1, c2, c3, c4 = st.columns(4)
-    with c1: filter_user = st.multiselect("🔍 Filter by User", sorted(set([l["User_Name"] for l in logs])))
-    with c2: dept_list = sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"]))
-    filter_dept = st.multiselect("🏢 Filter by Department", dept_list)
-    with c3: filter_action = st.multiselect("🔧 Filter by Action", sorted(set([l["Action"] for l in logs])))
-    with c4: req_list = sorted(set([str(l["Request_ID"]) for l in logs if str(l["Request_ID"]) != "-"]))
-    filter_req = st.multiselect("🆔 Filter by Request ID", req_list)
+    with c1:
+        # ✅ INDENTED properly now!
+        filter_user = st.multiselect(
+            "🔍 Filter by User",
+            sorted(set([l["User_Name"] for l in logs])),
+            key="audit_log_filter_user"  # ✅ EXPLICIT KEY prevents duplicates
+        )
+    with c2:
+        dept_list = sorted(set([l.get("Department", "") for l in logs if l.get("Department") != "-"]))
+        filter_dept = st.multiselect(
+            "🏢 Filter by Department",
+            dept_list,
+            key="audit_log_filter_dept"
+        )
+    with c3:
+        filter_action = st.multiselect(
+            "🔧 Filter by Action",
+            sorted(set([l["Action"] for l in logs])),
+            key="audit_log_filter_action"
+        )
+    with c4:
+        req_list = sorted(set([str(l["Request_ID"]) for l in logs if str(l["Request_ID"]) != "-"]))
+        filter_req = st.multiselect(
+            "🆔 Filter by Request ID",
+            req_list,
+            key="audit_log_filter_req"
+        )
+    # ... rest of function unchanged ...
     filtered = logs
     if filter_user: filtered = [l for l in filtered if l["User_Name"] in filter_user]
     if filter_dept: filtered = [l for l in filtered if l.get("Department", "") in filter_dept]
@@ -405,9 +427,9 @@ def display_audit_log_panel():
             st.caption("⚠️ This archives current log then starts fresh — history is backed up before clearing.")
     st.divider()
     
-    if "display_audit_log_panel" in globals():
-        display_audit_log_panel()
-    else:
+#    if "display_audit_log_panel" in globals():
+#        display_audit_log_panel()
+#    else:
         st.info("📖 Audit log panel not defined — skipping")
 
 # ============================================================
