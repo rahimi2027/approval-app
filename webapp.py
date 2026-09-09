@@ -76,7 +76,7 @@ USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
 
 # ─── GOOGLE DRIVE ───
-GOOGLE_DRIVE_FOLDER_ID = "1oecpaa8c5tryCtcIAnbjEXemGDonvgPZ"
+GOOGLE_DRIVE_FOLDER_ID = "folders/1oecpaa8c5tryCtcIAnbjEXemGDonvgPZ"
 
 # ─── ONEDRIVE / MICROSOFT GRAPH ───
 ONEDRIVE_CLIENT_ID = ""         # ← Fill later when ready
