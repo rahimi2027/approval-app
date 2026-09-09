@@ -1489,7 +1489,7 @@ with st.sidebar:
 
     # ↓ REST OF YOUR PORTAL CODE STARTS HERE (keep indented!) ↓
     user = st.session_state.user_info
-    FULL_NAME = user.get("full_name", user["username"])
+    FULL_NAME = user.get("full_name") or user.get("username", "Unknown User")
     CATEGORIES = load_categories()
     refresh_data_button()
     change_my_password_form()
