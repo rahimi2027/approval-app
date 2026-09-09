@@ -1085,14 +1085,23 @@ with col_right:
         st.rerun()
 
 # ============================================================
-# ✅ WELCOME BANNER — FIXED VARIABLE ✅
+# ✅ WELCOME BANNER — USING CORRECT VARIABLES ✅
 # ============================================================
-# ↓↓↓ USE YOUR ACTUAL VARIABLE NAME HERE ↓↓↓
-user_display_name = st.session_state.get("full_name", st.session_state.get("username", "User"))
+user_info = st.session_state.get("user_info", {})
+full_name = user_info.get("full_name", user_info.get("username", "User"))
+user_role = user_info.get("role", "")
 
-st.info(f"👤 Welcome: {user_display_name} | System Administration | Super Admin")
+st.info(f"👤 Welcome: {full_name} | {user_role}")
 
 change_my_password_form()
+
+# ============================================================
+# ✅ LOAD GLOBAL VARIABLES BEFORE PORTALS ✅
+# ============================================================
+all_live_requests = load_records_from_excel()
+role = user_info.get("role", "")
+dept = user_info.get("dept", "")
+CATEGORIES = load_categories()
 
 # Sidebar PDF section
 with st.sidebar:
