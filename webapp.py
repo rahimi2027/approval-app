@@ -35,53 +35,51 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
     <style>
-    /* === OVERRIDE: Force sidebar content LEFT (Streamlit hides this!) === */
-    section[data-testid="stSidebar"] > div {
+    /* 👇 REMOVE DEFAULT CENTERING — PUSH ALL LEFT */
+    section[data-testid="stSidebar"] > div:first-child {
         align-items: flex-start !important;
     }
 
-    /* === Expander box: fit width & no overflow === */
+    /* 👇 Expander: FULL WIDTH, NO extra side padding — flush to edges */
     .streamlit-expanderContent {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
-        padding: 1rem 0.8rem !important;
+        padding: 0.5rem 0.3rem !important; /* 👈 Minimal padding */
+        margin: 0 !important;
         overflow: hidden !important;
         text-align: left !important;
     }
 
-    /* === Form container: FULL WIDTH, left aligned === */
+    /* 👇 Form: FULL WIDTH, zero margin, tight left */
     .streamlit-expanderContent form {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
-        text-align: left !important;
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: flex-start !important; /* 👈 Pushes everything LEFT */
+        padding: 0 !important;
+        margin: 0 !important;
+        align-items: flex-start !important;
     }
 
-    /* === Labels: LEFT aligned === */
+    /* 👇 Labels: TIGHT to left */
     .streamlit-expanderContent label {
         text-align: left !important;
-        width: 100% !important;
         justify-content: flex-start !important;
+        padding-left: 0.2rem !important;
     }
 
-    /* === Input boxes: fit perfectly, no overflow === */
+    /* 👇 Inputs: PERFECT FIT — touch the left edge nicely */
     .streamlit-expanderContent input {
         width: 100% !important;
         max-width: 100% !important;
         box-sizing: border-box !important;
     }
 
-    /* === Update Password button: match input width, left aligned === */
-    .streamlit-expanderContent .stButton {
-        width: 100% !important;
-    }
-    .streamlit-expanderContent button {
+    /* 👇 Button: match inputs, full width */
+    .streamlit-expanderContent .stButton > button {
         width: 100% !important;
         box-sizing: border-box !important;
+        margin-top: 0.5rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
