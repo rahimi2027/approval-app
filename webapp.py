@@ -1195,6 +1195,9 @@ if "editing_request_id" not in st.session_state:
 # ============================================================
 # LOGIN PAGE
 # ============================================================
+import zipfile
+import io
+
 # ─── INIT SESSION STATE ───
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -1245,51 +1248,66 @@ else:
             approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
             st.info(f"✅ Approved records (before date filter): {len(approved_records)}")
 
-            generated_files = []
-            matched_by_date = 0
-            
+            matched_records = []
             for req in approved_records:
-                # PARSE DATE — TRY ALL COMMON FORMATS
                 req_date = None
                 date_str = str(req.get("date", "")).strip()
-                date_str = date_str.replace("/", "-").replace(".", "-")
-                date_str_short = date_str[:10]
+                date_str = date_str.replace("/", "-").replace(".", "-")[:10]
 
-                # TRY: DD-MM-YYYY, YYYY-MM-DD, MM-DD-YYYY
                 for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%m-%d-%Y"):
                     try:
-                        req_date = datetime.strptime(date_str_short, fmt).date()
+                        req_date = datetime.strptime(date_str, fmt).date()
                         break
                     except:
                         continue
 
-                # Show sample for debugging (first record only)
-                if approved_records.index(req) == 0:
-                    st.info(f"📅 Sample Excel date: '{date_str_short}' → Parsed as: {req_date or 'FAILED'}")
-
-                # DATE FILTER LOGIC
                 include = True
-                if from_date and req_date:
-                    if req_date < from_date:
-                        include = False
-                if to_date and req_date:
-                    if req_date > to_date:
-                        include = False
+                if from_date and req_date and req_date < from_date:
+                    include = False
+                if to_date and req_date and req_date > to_date:
+                    include = False
 
                 if include:
-                    matched_by_date += 1
-                    pdf_path = generate_approval_pdf(req)
-                    if pdf_path and isinstance(pdf_path, (str, bytes)) and os.path.exists(pdf_path):
-                        generated_files.append(pdf_path)
+                    matched_records.append(req)
 
-            st.info(f"📅 Records matched by date range: {matched_by_date}")
+            st.info(f"📅 Records matched by date range: {len(matched_records)}")
 
-            if generated_files:
-                st.success(f"✅ Generated {len(generated_files)} PDF(s)")
-                for fpath in generated_files:
-                    with open(fpath, "rb") as f:
-                        fname = os.path.basename(fpath)
-                        st.download_button(f"⬇️ Download {fname}", f.read(), file_name=fname)
+            # --- GENERATE PDFs & BUNDLE INTO ZIP ---
+            if matched_records:
+                zip_buffer = io.BytesIO()
+                pdf_count = 0
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                    for req in matched_records:
+                        pdf_path = generate_approval_pdf(req)
+                        
+                        # ✅ MORE ROBUST CHECK
+                        if pdf_path and isinstance(pdf_path, str) and len(pdf_path.strip()) > 0:
+                            if os.path.exists(pdf_path):
+                                try:
+                                    with open(pdf_path, "rb") as f:
+                                        fname = os.path.basename(pdf_path)
+                                        zipf.writestr(fname, f.read())
+                                        pdf_count += 1
+                                except Exception as e:
+                                    st.warning(f"⚠️ Could not read PDF #{req.get('id', '?')}: {e}")
+                            else:
+                                st.warning(f"⚠️ PDF path returned but file missing for #{req.get('id', '?')}: {pdf_path}")
+                        else:
+                            st.warning(f"⚠️ PDF generation returned empty/None for request #{req.get('id', '?')}")
+
+                zip_buffer.seek(0)
+                if pdf_count > 0:
+                    st.success(f"✅ Successfully generated {pdf_count} PDF(s) — Download below!")
+                    st.download_button(
+                        f"📦 Download ALL {pdf_count} PDFs (ZIP)",
+                        data=zip_buffer,
+                        file_name=f"Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                        mime="application/zip",
+                        type="primary",
+                        use_container_width=True
+                    )
+                else:
+                    st.error("❌ No PDFs were generated successfully. Check your generate_approval_pdf() function.")
             else:
                 st.info("ℹ️ No approved requests found in this date range.")
 
@@ -1297,25 +1315,44 @@ else:
         if st.button("📄 Generate ALL Approved PDFs"):
             st.success("✅ Generating ALL approved PDFs...")
             records = load_records_from_excel()
-            generated_files = []
-            for req in records:
-                if str(req.get("status", "")).strip().lower() == "approved":
-                    pdf_path = generate_approval_pdf(req)
-                    if pdf_path and isinstance(pdf_path, (str, bytes)) and os.path.exists(pdf_path):
-                        generated_files.append(pdf_path)
+            approved_records = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
 
-            if generated_files:
-                st.success(f"✅ Generated {len(generated_files)} PDF(s)")
-                for fpath in generated_files:
-                    with open(fpath, "rb") as f:
-                        fname = os.path.basename(fpath)
-                        st.download_button(f"⬇️ Download {fname}", f.read(), file_name=fname)
+            if approved_records:
+                zip_buffer = io.BytesIO()
+                pdf_count = 0
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                    for req in approved_records:
+                        pdf_path = generate_approval_pdf(req)
+                        if pdf_path and isinstance(pdf_path, str) and len(pdf_path.strip()) > 0 and os.path.exists(pdf_path):
+                            try:
+                                with open(pdf_path, "rb") as f:
+                                    fname = os.path.basename(pdf_path)
+                                    zipf.writestr(fname, f.read())
+                                    pdf_count += 1
+                            except Exception as e:
+                                st.warning(f"⚠️ PDF read error for #{req.get('id', '?')}: {e}")
+                        else:
+                            st.warning(f"⚠️ PDF empty/None for request #{req.get('id', '?')}")
+
+                zip_buffer.seek(0)
+                if pdf_count > 0:
+                    st.success(f"✅ Successfully generated {pdf_count} PDF(s) — Download below!")
+                    st.download_button(
+                        f"📦 Download ALL {pdf_count} PDFs (ZIP)",
+                        data=zip_buffer,
+                        file_name=f"All_Approved_PDFs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                        mime="application/zip",
+                        type="primary",
+                        use_container_width=True
+                    )
+                else:
+                    st.error("❌ No PDFs were generated successfully.")
             else:
                 st.info("ℹ️ No approved requests found.")
 
     st.divider()
 
-    # ⚠️ DELETE THE DUPLICATE LOGO BLOCK FROM HERE DOWN ⚠️
+    # ⚠️ SCROLL DOWN — DELETE THE DUPLICATE LOGO BLOCK HERE ⚠️
     
     user = st.session_state.user_info
     FULL_NAME = user.get("full_name", user["username"])
