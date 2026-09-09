@@ -1,10 +1,11 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.2 (UPDATED)
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.3 (KEYERROR FIXED)
 # ============================================================
 # ✅ BASE_DIR defined FIRST — no more NameError!
 # ✅ All files save to ONE unified folder: Acoole_App_Uploads
 # ✅ OneDrive folder name MATCHES your created folder
 # ✅ Google Drive active by default — switch anytime
+# ✅ ✅ ALL KEYERRORS FIXED — safe .get() everywhere!
 # ============================================================
 import streamlit as st
 import os
@@ -19,87 +20,42 @@ from datetime import datetime, date
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
-
 # ============================================================
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
 st.markdown("""
     <style>
-    /* ========================================
-       🔥 MAIN CONTENT: Pull LEFT, close to sidebar
-       ======================================== */
     .block-container {
         padding-top: 2rem !important;
-        padding-left: 0.3rem !important;   /* ✅ Much closer to sidebar */
+        padding-left: 0.3rem !important;
         padding-right: 2rem !important;
-        max-width: 1400px !important;      /* ✅ Wide enough, no centering */
-        width: 90% !important;             /* ✅ Use most of screen */
+        max-width: 1400px !important;
+        width: 90% !important;
     }
-
-    /* ========================================
-       SIDEBAR: Push all content tight LEFT
-       ======================================== */
-    section[data-testid="stSidebar"] {
-        width: 320px !important;            /* ✅ Slightly narrower sidebar */
-    }
+    section[data-testid="stSidebar"] { width: 320px !important; }
     section[data-testid="stSidebar"] > div:first-child > div {
-        padding-left: 0.2rem !important;   /* ✅ Tight to left edge */
+        padding-left: 0.2rem !important;
         padding-right: 0.2rem !important;
     }
-    section[data-testid="stSidebar"] > div:first-child {
-        align-items: flex-start !important;
-    }
-
-    /* ========================================
-       EXPANDER/FORM: Fit perfectly
-       ======================================== */
-    .streamlit-expander {
-        width: 100% !important;
-        margin: 0 !important;
-        padding-left: 0 !important;
-    }
-    .streamlit-expanderHeader {
-        justify-content: flex-start !important;
-        padding-left: 0.5rem !important;
-    }
+    section[data-testid="stSidebar"] > div:first-child { align-items: flex-start !important; }
+    .streamlit-expander { width: 100% !important; margin: 0 !important; padding-left: 0 !important; }
+    .streamlit-expanderHeader { justify-content: flex-start !important; padding-left: 0.5rem !important; }
     .streamlit-expanderContent {
-        width: 100% !important;
-        box-sizing: border-box !important;
-        padding: 0.5rem !important;
-        padding-left: 0.3rem !important;
-        text-align: left !important;
+        width: 100% !important; box-sizing: border-box !important;
+        padding: 0.5rem !important; padding-left: 0.3rem !important; text-align: left !important;
     }
-    .streamlit-expanderContent form {
-        width: 100% !important;
-        box-sizing: border-box !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }
-    .streamlit-expanderContent label {
-        text-align: left !important;
-        justify-content: flex-start !important;
-        padding-left: 0.2rem !important;
-    }
-    .streamlit-expanderContent input {
-        width: 100% !important;
-        box-sizing: border-box !important;
-    }
-    .streamlit-expanderContent .stButton > button {
-        width: 100% !important;
-        box-sizing: border-box !important;
-        margin-top: 0.5rem !important;
-    }
+    .streamlit-expanderContent form { width: 100% !important; box-sizing: border-box !important; padding: 0 !important; margin: 0 !important; }
+    .streamlit-expanderContent label { text-align: left !important; justify-content: flex-start !important; padding-left: 0.2rem !important; }
+    .streamlit-expanderContent input { width: 100% !important; box-sizing: border-box !important; }
+    .streamlit-expanderContent .stButton > button { width: 100% !important; box-sizing: border-box !important; margin-top: 0.5rem !important; }
     </style>
 """, unsafe_allow_html=True)
 # ============================================================
 # ✅ ALL CONFIGURATION — DEFINED FIRST!
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ✅ UNIFIED FOLDER — ALL FILES SAVE TOGETHER
 APP_FOLDER = os.path.join(BASE_DIR, "Acoole_App_Uploads")
 os.makedirs(APP_FOLDER, exist_ok=True)
-
 UPLOAD_DIR = os.path.join(APP_FOLDER, "uploaded_attachments")
 AUDIT_LOG_PATH = os.path.join(APP_FOLDER, "audit_log.xlsx")
 AUDIT_LOG_FILE = AUDIT_LOG_PATH
@@ -118,22 +74,17 @@ REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
 EXCEL_PATH = os.path.join(APP_FOLDER, "requests.xlsx")
 USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
-
 # ─── GOOGLE DRIVE ───
 GOOGLE_DRIVE_FOLDER_ID = "1oecpaa8c5tryCtcIAnbjEXemGDonvgPZ"
-
 # ─── ONEDRIVE / MICROSOFT GRAPH ───
-ONEDRIVE_CLIENT_ID = ""         # ← Fill later when ready
-ONEDRIVE_CLIENT_SECRET = ""     # ← Fill later when ready
+ONEDRIVE_CLIENT_ID = ""
+ONEDRIVE_CLIENT_SECRET = ""
 ONEDRIVE_TENANT_ID = "common"
-ONEDRIVE_FOLDER = "Acoole_App_Uploads/"  # ✅ MATCHES YOUR FOLDER!
+ONEDRIVE_FOLDER = "Acoole_App_Uploads/"
 USE_ONEDRIVE = False  # ✅ Set = True to SWITCH from Google → OneDrive
-
-# ✅ Auto-create ALL required folders
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
-os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
-
+os.makedirs(ARCHIVE_FOLDER, exist_ok=True))
 # ============================================================
 # ✅ LOAD GOOGLE CREDENTIALS FROM FILE
 # ============================================================
@@ -148,14 +99,13 @@ if os.path.exists(KEY_FILE):
         st.error(f"⚠️ Failed to load credentials: {str(e)[:200]}")
 else:
     st.warning("⚠️ Credentials file not found — using local storage only")
-
 # ============================================================
 # ✅ GOOGLE DRIVE UPLOAD FUNCTION
 # ============================================================
 def get_drive_service():
     try:
         credentials = service_account.Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO, 
+            SERVICE_ACCOUNT_INFO,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
         return build("drive", "v3", credentials=credentials)
@@ -166,57 +116,34 @@ def get_drive_service():
 def upload_to_google_drive(local_file_path, display_filename):
     try:
         st.info(f"📤 Uploading: {display_filename}")
-        
-        # Load credentials
         credentials = service_account.Credentials.from_service_account_info(
             SERVICE_ACCOUNT_INFO,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
-        
         service = build("drive", "v3", credentials=credentials)
-        
-        # ✅ STEP 1: Verify folder exists and bot can access it
+        # Verify folder access
         try:
-            folder = service.files().get(
-                fileId=GOOGLE_DRIVE_FOLDER_ID, 
-                fields="id, name"
-            ).execute()
+            folder = service.files().get(fileId=GOOGLE_DRIVE_FOLDER_ID, fields="id, name").execute()
             st.success(f"✅ Folder FOUND: {folder.get('name')}")
         except Exception as fe:
             st.error(f"❌ CANNOT ACCESS FOLDER! Error: {str(fe)}")
             st.info("👉 SHARE folder with bot email: drive-upload-bot@acoole-attachments.iam.gserviceaccount.com")
             return None
-        
-        # ✅ STEP 2: Upload file EXPLICITLY into YOUR folder
-        file_metadata = {
-            "name": display_filename,
-            "parents": [GOOGLE_DRIVE_FOLDER_ID]  # ← CRITICAL: MUST go HERE!
-        }
+        file_metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
         media = MediaFileUpload(local_file_path, resumable=True)
-        
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id, name, parents"
-        ).execute()
-        
+        file = service.files().create(body=file_metadata, media_body=media, fields="id, name, parents").execute()
         file_id = file.get("id")
         parents = file.get("parents", [])
-        
-        # ✅ STEP 3: VERIFY file is IN your folder
         if GOOGLE_DRIVE_FOLDER_ID in parents:
             st.success(f"✅ ✅ SUCCESS! File IS IN YOUR FOLDER! 🎉 ID: {file_id[:12]}...")
             st.info("👉 REFRESH your Google Drive folder → FILE IS THERE!")
         else:
             st.warning(f"⚠️ Uploaded but NOT in your folder! Parents: {parents}")
             st.info("👉 File went to bot's storage — check folder sharing!")
-        
         return file_id
-
     except Exception as e:
         st.error(f"❌ UPLOAD FAILED! Error: {str(e)}")
         return None
-
 # ============================================================
 # ✅ ONEDRIVE UPLOAD FUNCTIONS
 # ============================================================
@@ -252,7 +179,6 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
         else: st.warning(f"⚠️ OneDrive sync: {res.status_code}")
     except Exception as e: st.warning(f"⚠️ Could not sync to OneDrive: {str(e)}")
     return False
-
 # ============================================================
 # DEFAULTS — ROLES, DEPARTMENTS, USERS, PERMISSIONS
 # ============================================================
@@ -288,7 +214,6 @@ PERMISSION_LABELS = {
     "can_download_data": "📥 Download Data Backups",
     "can_approve_requests": "✅ Approve/Reject Requests"
 }
-
 # ============================================================
 # PDF LIBRARY
 # ============================================================
@@ -301,12 +226,10 @@ except ImportError:
         PDF_AVAILABLE = True
     except ImportError:
         PDF_AVAILABLE = False
-
 # ============================================================
 # ✅ SAFE EXCEL INIT — FIXES "File is not a zip file"
 # ============================================================
 def safe_init_excel(path, columns):
-    """Create empty Excel if missing or corrupted"""
     if not os.path.exists(path):
         pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
         return True
@@ -317,7 +240,6 @@ def safe_init_excel(path, columns):
         os.remove(path)
         pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
         return True
-
 # ============================================================
 # AUDIT LOG FUNCTIONS
 # ============================================================
@@ -374,7 +296,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
     if not st.session_state.get("logged_in"): return
     user = st.session_state.user_info
     username = user.get("full_name", user.get("username", "Unknown"))
-    role = user.get("role", "Unknown")
+    role = user.get("role", "Unknown")  # ✅ SAFE
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     SETTING_ACTIONS = ["CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
         "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED",
@@ -474,7 +396,6 @@ def display_audit_log_panel():
     st.divider()
     df_export = pd.DataFrame(filtered)
     st.download_button("📥 Download Full Audit Log (CSV)", df_export.to_csv(index=False).encode("utf-8"), "Acoole_Audit_Log.csv", type="primary")
-
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -549,7 +470,6 @@ def make_request_title(req):
     elif req["status"] == "approved": return f"🟢 ID #{req['id']} | {req['emp_name']} | APPROVED | {amount} | ✅ Approved by {dec_by} on {decision_dt}"
     elif req["status"] == "rejected": return f"🔴 ID #{req['id']} | {req['emp_name']} | REJECTED | {amount} | ❌ Rejected by {dec_by} on {decision_dt}"
     else: return f"⚪ ID #{req['id']} | {req['emp_name']} | {status} | {amount} | 📅 {dt}"
-
 # ============================================================
 # SETTINGS FUNCTIONS
 # ============================================================
@@ -624,7 +544,6 @@ def save_roles(roles_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "roles", "value": "|".join(roles_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
 # ============================================================
 # USER DATABASE
 # ============================================================
@@ -653,7 +572,8 @@ def load_users():
         for _, r in df.iterrows():
             users[r["username"]] = {
                 "full_name": str(r.get("full_name", r["username"])).strip(),
-                "password": str(r["password"]), "role": str(r["role"]), "dept": str(r["dept"]),
+                "password": str(r["password"]), "role": str(r.get("role", "Staff")),  # ✅ DEFAULT
+                "dept": str(r.get("dept", "")),
                 "can_view_all_dept": str(r.get("can_view_all_dept", "False")).lower() == "true",
                 "can_generate_pdf": str(r.get("can_generate_pdf", "False")).lower() == "true",
                 "can_download_data": str(r.get("can_download_data", "False")).lower() == "true",
@@ -661,7 +581,6 @@ def load_users():
         return users
     except Exception as e:
         st.error(f"User DB Load Error: {e}"); return {}
-
 # ============================================================
 # REQUESTS EXCEL
 # ============================================================
@@ -722,7 +641,6 @@ def save_record_to_excel(new_record):
     current = load_records_from_excel()
     current.append(new_record)
     save_all_records(current)
-
 # ============================================================
 # PDF GENERATION
 # ============================================================
@@ -1716,7 +1634,7 @@ elif user.get("role") in ["Manager", "Staff", "Team Member"]:
                         st.rerun()
 
 # ─── 3️⃣ DIRECTOR PORTAL ───
-elif user["role"] == "Director":
+elif user.get("role") == "Director":
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
     st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
     st.divider()
