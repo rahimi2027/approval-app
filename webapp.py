@@ -1323,7 +1323,7 @@ if role == "Payroll":
             for req in reversed(approved):
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = req.get('decision_date', '')
-                display_date = dec_date[:10] if dec_date and len(dec_date)>=10 else ""
+                display_date = dec_date if dec_date else ""
                 extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
                 title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}{extra_text}"
                 with st.expander(title):
@@ -1660,7 +1660,7 @@ elif role == "Super Admin":
                 amount = float(req.get("amount", 0))
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = req.get('decision_date', '')
-                display_date = dec_date[:10] if dec_date and len(dec_date) >= 10 else ""
+                display_date = dec_date if dec_date else ""
                 extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
                 title = f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}{extra_text}"
                 with st.expander(title):
