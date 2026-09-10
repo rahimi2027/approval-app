@@ -1319,7 +1319,8 @@ with tab_approved:
     if not approved:
         st.info("📋 No approved requests.")
     else:
-        st.metric("✅ Approved", len(approved)); st.divider()
+        st.metric("✅ Approved", len(approved))
+        st.divider()
         for req in reversed(approved):
             dec_by = req.get('decision_by', 'Director')
             dec_date = req.get('decision_date', '')
@@ -1337,7 +1338,8 @@ with tab_approved:
                 st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
                 st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                 st.write(f"🎯 Approved By: {dec_by}")
-                if display_date: st.write(f"📅 Approval Date: {display_date}")
+                if display_date:
+                    st.write(f"📅 Approval Date: {display_date}")
                 st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
                 display_attachments(req)
                 st.divider()
