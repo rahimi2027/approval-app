@@ -1066,7 +1066,17 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
     st.stop()
 
+# ✅ REFRESH LEFT | LOGOUT RIGHT — SAME ROW ✅
+# ============================================================
+col_left, col_right = st.columns([4, 1])
 
+with col_left:
+    refresh_data_button()
+
+with col_right:
+    if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
+        st.session_state.clear()
+        st.rerun()
 # ============================================================
 # ✅ POST-LOGIN — ALL FIXED VARIABLES DEFINED
 # ============================================================
