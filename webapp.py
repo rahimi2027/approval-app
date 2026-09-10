@@ -1746,20 +1746,17 @@ elif role in ["Manager", "Staff", "Team Member"]:
         st.subheader(f"➕ New Request — {dept_name}")
         nid = get_next_id(all_live_requests)
         st.markdown(f"**🆔 Request ID:** `#{nid}`")
-
         with st.form("new_req", clear_on_submit=True):
             # === DEFINE COLUMNS FIRST — INSIDE THE FORM, PROPERLY INDENTED ===
             c1, c2 = st.columns(2)
-
             # --- LEFT COLUMN (c1) ---
             with c1:
                 en = st.text_input("👤 Employee Name")
                 dept_name = st.text_input("🏢 Department", value=dept)
                 rt = st.selectbox("📋 Request Type", ["Expense", "Purchase", "Leave", "Other"])
-                cat_idx = CATEGORIES.index(ct) if ct in CATEGORIES else 0
-                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                # ✅ FIXED: Define ct FIRST before using it
+                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
                 amt = st.number_input("💷 Amount (£)", min_value=0.0, step=1.0)
-
             # --- RIGHT COLUMN (c2) ---
             with c2:
                 from datetime import datetime as dt
