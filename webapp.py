@@ -1743,11 +1743,16 @@ elif role == "Director":
 # ─── SUPER ADMIN PORTAL ───
 elif role == "Super Admin":
     st.subheader("🛡️ Super Admin Control Centre")
-    st.info("✅ Full system access — Dashboard, Users, Settings, Audit Logs & Data"); st.divider()
-
-    show_dashboard(user, all_live_requests)
+    st.info("✅ Full system access — Dashboard, Users, Settings, Audit Logs & Data")
     st.divider()
 
+    # ✅ SAFETY CHECK: Only call if function exists
+    if "show_dashboard" in globals() and callable(show_dashboard):
+        show_dashboard(user, all_live_requests)
+    else:
+        st.error("⚠️ Function `show_dashboard` is not defined — check placement above this block!")
+
+    st.divider()
     tab_audit, tab_users, tab_settings, tab_data = st.tabs([
         "📜 Audit Logs", "👤 User Management", "⚙️ Settings", "📊 Data Export"
     ])
@@ -1765,10 +1770,18 @@ elif role == "Super Admin":
             st.warning("⚠️ Audit log file not found.")
 
     with tab_users:
-        user_management_panel()
+        # ✅ SAFETY CHECK
+        if "user_management_panel" in globals() and callable(user_management_panel):
+            user_management_panel()
+        else:
+            st.error("⚠️ `user_management_panel` is not defined!")
 
     with tab_settings:
-        settings_management_panel()
+        # ✅ SAFETY CHECK
+        if "settings_management_panel" in globals() and callable(settings_management_panel):
+            settings_management_panel()
+        else:
+            st.error("⚠️ `settings_management_panel` is not defined!")
 
     with tab_data:
         st.markdown("### 📊 Download All Request Data")
@@ -1781,12 +1794,14 @@ elif role == "Super Admin":
                 writer = csv.DictWriter(output, fieldnames=fields)
                 writer.writeheader()
                 writer.writerows(all_live_requests)
-                st.download_button("📄 Download requests.csv", data=output.getvalue(),
-                                   file_name=f"requests_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                   mime="text/csv")
+                st.download_button(
+                    "📄 Download requests.csv",
+                    data=output.getvalue(),
+                    file_name=f"requests_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
             else:
                 st.info("No data to export.")
-
 
 # ─── FALLBACK / UNKNOWN ROLE ───
 else:
