@@ -1753,7 +1753,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
             with c1:
                 en = st.text_input("👤 Employee Name")
                 dept_name = st.text_input("🏢 Department", value=dept)
-                rt = st.selectbox("📋 Request Type", ["Expense", "Purchase", "Leave", "Other"])
+                rt = st.selectbox("📋 Request Type", ["Addition", "Deduction"])
                 # ✅ FIXED: Define ct FIRST before using it
                 ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
                 amt = st.number_input("💷 Amount (£)", min_value=0.0, step=1.0)
