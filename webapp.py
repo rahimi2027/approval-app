@@ -1077,13 +1077,14 @@ FULL_NAME = full_name  # ✅ Fixed missing variable!
 all_live_requests = load_records_from_excel()  # ✅ Fixed missing variable!
 CATEGORIES = load_categories()  # ✅ Fixed missing variable!
 
+
+display_company_header()
 # ✅ Welcome + Logout
 st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 if st.button("🔓 Secure Logout"):
     st.session_state.clear()
     st.rerun()
 
-display_company_header()
 
 change_my_password_form()
 
