@@ -1509,19 +1509,20 @@ for req in reversed(my_reqs):
         title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date}"
     else:
         title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
-                with st.expander(title):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
-                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                    st.info(f"📝 Description: {req.get('desc')}")
-                    display_attachments(req)
-                    if req.get("director_comments"):
-                        st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                    if status == "approved":
-                        display_pdf_button(req, can_generate=False)
-                    if status in ["pending", "rejected"]:
-                        if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
-                            st.session_state.editing_request_id = req.get("id")
-                            st.rerun()
+    # ↓ THIS LINE WAS INDENTED TOO FAR! ↓
+    with st.expander(title):
+        st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+        st.info(f"📝 Description: {req.get('desc')}")
+        display_attachments(req)
+        if req.get("director_comments"):
+            st.info(f"💬 Director Comments: {req.get('director_comments')}")
+        if status == "approved":
+            display_pdf_button(req, can_generate=False)
+        if status in ["pending", "rejected"]:
+            if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                st.session_state.editing_request_id = req.get("id")
+                st.rerun()
 
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
