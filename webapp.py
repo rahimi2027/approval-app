@@ -1525,19 +1525,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             st.session_state.editing_request_id = req.get("id")
                             st.rerun()
 
-# ✅ elif COMES BEFORE else
-elif role == "Director":
-    st.subheader("🎛️ Director Approval Portal — Andy Acoole")
-    st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
-    st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
-    st.divider()
-    tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-    # ... rest of Director code ...
-
-# ✅ else COMES LAST
-else:
-    st.error("❌ Unauthorized role.")
-
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
@@ -1618,7 +1605,7 @@ elif role == "Director":
                 req_id = req.get("id")
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = format_date(req.get('decision_date',''))
-                with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ✅ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
+                with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
@@ -1670,7 +1657,7 @@ elif role == "Director":
                 req_id = req.get("id")
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = format_date(req.get('decision_date',''))
-                with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ❌ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
+                with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ❌ {dec_by} — {dec_date}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
@@ -1708,30 +1695,15 @@ elif role == "Director":
                             st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
                             st.rerun()
 
-
 # ─── SUPER ADMIN PORTAL ✅ NOW USING ELIF ───
 elif role == "Super Admin":
-    # ============================================================
-    # ✅ TOGGLE: Show/Hide Danger Zone Buttons
-    # ============================================================
-    if "show_danger_buttons" not in st.session_state:
-        st.session_state.show_danger_buttons = False  # Hidden by default
-
-    st.session_state.show_danger_buttons = st.toggle(
-        "⚠️ Show Danger Zone (Clear Data Buttons)",
-        value=st.session_state.show_danger_buttons,
-        help="Reveal buttons to clear all requests or audit log — hidden by default for safety"
-    )
-    st.divider()
-
     # ⚠️ Danger Zone — Clear All Requests (with confirmation)
-    if st.session_state.show_danger_buttons:
-        with st.expander("⚠️ Danger Zone — Clear All Requests"):
-            confirm_clear = st.checkbox("✅ I understand — this deletes ALL requests and cannot be undone")
-            if st.button("🗑️ CLEAR ALL TEST REQUESTS", type="secondary", disabled=not confirm_clear):
-                pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-                st.success("✅ ALL REQUESTS CLEARED! Refresh page — ready for live data!")
-                st.rerun()
+    with st.expander("⚠️ Danger Zone — Clear All Requests"):
+        confirm_clear = st.checkbox("✅ I understand — this deletes ALL requests and cannot be undone")
+        if st.button("🗑️ CLEAR ALL TEST REQUESTS", type="secondary", disabled=not confirm_clear):
+            pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+            st.success("✅ ALL REQUESTS CLEARED! Refresh page — ready for live data!")
+            st.rerun()
     # ============================================================
     st.subheader("🛡️ Super Admin — All Requests")
     st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
@@ -1815,12 +1787,11 @@ elif role == "Super Admin":
         with tab_audit:
             if "display_audit_log_panel" in globals():
                 display_audit_log_panel()
-                # ✅ CLEAR AUDIT LOG BUTTON — TOGGLED!
-                if st.session_state.show_danger_buttons:
-                    if st.button("🗑️ Clear Audit Log", type="secondary"):
-                        clear_audit_log_file()
-                        st.success("✅ Audit log cleared!")
-                        st.rerun()
+                # ✅ CLEAR AUDIT LOG BUTTON added here!
+                if st.button("🗑️ Clear Audit Log", type="secondary"):
+                    clear_audit_log_file()
+                    st.success("✅ Audit log cleared!")
+                    st.rerun()
             else:
                 st.info("📖 Audit log panel not defined — skipping")
         st.divider()
