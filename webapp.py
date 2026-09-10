@@ -1695,15 +1695,30 @@ elif role == "Director":
                             st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
                             st.rerun()
 
+
 # ─── SUPER ADMIN PORTAL ✅ NOW USING ELIF ───
 elif role == "Super Admin":
+    # ============================================================
+    # ✅ TOGGLE: Show/Hide Danger Zone Buttons
+    # ============================================================
+    if "show_danger_buttons" not in st.session_state:
+        st.session_state.show_danger_buttons = False  # Hidden by default
+
+    st.session_state.show_danger_buttons = st.toggle(
+        "⚠️ Show Danger Zone (Clear Data Buttons)",
+        value=st.session_state.show_danger_buttons,
+        help="Reveal buttons to clear all requests or audit log — hidden by default for safety"
+    )
+    st.divider()
+
     # ⚠️ Danger Zone — Clear All Requests (with confirmation)
-    with st.expander("⚠️ Danger Zone — Clear All Requests"):
-        confirm_clear = st.checkbox("✅ I understand — this deletes ALL requests and cannot be undone")
-        if st.button("🗑️ CLEAR ALL TEST REQUESTS", type="secondary", disabled=not confirm_clear):
-            pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-            st.success("✅ ALL REQUESTS CLEARED! Refresh page — ready for live data!")
-            st.rerun()
+    if st.session_state.show_danger_buttons:
+        with st.expander("⚠️ Danger Zone — Clear All Requests"):
+            confirm_clear = st.checkbox("✅ I understand — this deletes ALL requests and cannot be undone")
+            if st.button("🗑️ CLEAR ALL TEST REQUESTS", type="secondary", disabled=not confirm_clear):
+                pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+                st.success("✅ ALL REQUESTS CLEARED! Refresh page — ready for live data!")
+                st.rerun()
     # ============================================================
     st.subheader("🛡️ Super Admin — All Requests")
     st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
@@ -1787,11 +1802,12 @@ elif role == "Super Admin":
         with tab_audit:
             if "display_audit_log_panel" in globals():
                 display_audit_log_panel()
-                # ✅ CLEAR AUDIT LOG BUTTON added here!
-                if st.button("🗑️ Clear Audit Log", type="secondary"):
-                    clear_audit_log_file()
-                    st.success("✅ Audit log cleared!")
-                    st.rerun()
+                # ✅ CLEAR AUDIT LOG BUTTON — TOGGLED!
+                if st.session_state.show_danger_buttons:
+                    if st.button("🗑️ Clear Audit Log", type="secondary"):
+                        clear_audit_log_file()
+                        st.success("✅ Audit log cleared!")
+                        st.rerun()
             else:
                 st.info("📖 Audit log panel not defined — skipping")
         st.divider()
