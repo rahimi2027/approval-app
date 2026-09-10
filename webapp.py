@@ -1531,8 +1531,11 @@ elif role in ["Manager", "Staff", "Team Member"]:
 elif role == "Director":
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
     st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
+    st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
     st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+
+    # ─── PENDING TAB (unchanged) ───
     with tab_pending:
         pending = [r for r in all_live_requests if r.get("status") == "pending"]
         if not pending:
@@ -1553,8 +1556,6 @@ elif role == "Director":
                         st.write(f"📅 **Date:** {format_date(req.get('date',''))}")
                         st.info(f"📝 **Description / Justification:**\n{req.get('desc','')}")
                         display_attachments(req)
-
-                        # ✅ WHAT CHANGED BLOCK — PROPERLY INDENTED
                         old_data_raw = req.get("old_data", "")
                         if old_data_raw and old_data_raw not in ["", "{}", "None"]:
                             st.divider()
@@ -1563,7 +1564,6 @@ elif role == "Director":
                         else:
                             st.divider()
                             st.success("✅ **New Request — No previous version**")
-
                     with col_right:
                         st.markdown("### ✍️ Decision")
                         comments = st.text_area("Director Comments", key=f"comm_{req_id}")
@@ -1597,12 +1597,16 @@ elif role == "Director":
                             log_action("REJECTED", req_id)
                             st.error(f"❌ Request #{req_id} REJECTED.")
                             st.rerun()
+
+    # ─── APPROVED TAB — NOW WITH STATUS CHANGE BUTTONS ✅ ───
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
         if not approved:
             st.info("📋 No approved requests yet.")
         else:
-            st.metric("✅ Approved Requests", len(approved)); st.divider()
+            st.metric("✅ Approved Requests", len(approved))
+            st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Rejected")
+            st.divider()
             for req in reversed(approved):
                 req_id = req.get("id")
                 dec_by = req.get('decision_by', 'Director')
@@ -1616,22 +1620,92 @@ elif role == "Director":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
+
+                    # ✅ NEW: STATUS CHANGE OPTIONS FROM APPROVED
+                    st.markdown("### 🔄 Change Status")
+                    new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_app_{req_id}", placeholder="Reason for status change...")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("⏳ Move to Pending", key=f"app_to_pend_{req_id}"):
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "pending"
+                                    r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {full_name}: {new_comments}").strip()
+                                    r["decision_date"] = ""
+                                    r["decision_by"] = ""
+                                    break
+                            save_all_records(records)
+                            log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"pending"})
+                            st.success(f"✅ Request #{req_id} moved to Pending. Audit Log updated.")
+                            st.rerun()
+                    with col2:
+                        if st.button("❌ Change to REJECTED", key=f"app_to_rej_{req_id}"):
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "rejected"
+                                    r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ❌ Changed to Rejected by {full_name}: {new_comments}").strip()
+                                    r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    r["decision_by"] = full_name
+                                    break
+                            save_all_records(records)
+                            log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
+                            st.success(f"✅ Request #{req_id} changed to Rejected. Audit Log updated.")
+                            st.rerun()
+
+    # ─── REJECTED TAB — NOW WITH STATUS CHANGE BUTTONS ✅ ───
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
         if not rejected:
             st.success("✅ No rejected requests!")
         else:
-            st.metric("❌ Rejected Requests", len(rejected)); st.divider()
+            st.metric("❌ Rejected Requests", len(rejected))
+            st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Approved")
+            st.divider()
             for req in reversed(rejected):
                 req_id = req.get("id")
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = format_date(req.get('decision_date',''))
                 with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ❌ {dec_by} — {dec_date}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                     display_attachments(req)
+
+                    # ✅ NEW: STATUS CHANGE OPTIONS FROM REJECTED
+                    st.markdown("### 🔄 Change Status")
+                    new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_rej_{req_id}", placeholder="Reason for status change...")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("⏳ Move to Pending", key=f"rej_to_pend_{req_id}"):
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "pending"
+                                    r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {full_name}: {new_comments}").strip()
+                                    r["decision_date"] = ""
+                                    r["decision_by"] = ""
+                                    break
+                            save_all_records(records)
+                            log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"pending"})
+                            st.success(f"✅ Request #{req_id} moved to Pending. Audit Log updated.")
+                            st.rerun()
+                    with col2:
+                        if st.button("✅ Change to APPROVED", key=f"rej_to_app_{req_id}"):
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "approved"
+                                    r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ✅ Changed to Approved by {full_name}: {new_comments}").strip()
+                                    r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    r["decision_by"] = full_name
+                                    break
+                            save_all_records(records)
+                            log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
+                            st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
+                            st.rerun()
 
 # ─── 4️⃣ SUPER ADMIN PORTAL ───
 elif role == "Super Admin":
