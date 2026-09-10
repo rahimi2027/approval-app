@@ -1281,22 +1281,21 @@ if gen_all:
 st.divider()
 
 # ============================================================
-# 📋 ROLE-BASED PORTALS — ALL NOW WORKING
+# 📋 ROLE-BASED PORTALS — ✅ FIXED CHAIN ORDER
 # ============================================================
+
 # ─── PAYROLL PORTAL ───
 if role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-
     with tab_pending:
         pending = [r for r in all_live_requests if r.get("status") == "pending"]
         if not pending:
             st.success("✅ No pending requests!")
         else:
-            st.metric("⏳ Pending", len(pending))
-            st.divider()
+            st.metric("⏳ Pending", len(pending)); st.divider()
             for req in reversed(pending):
                 with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
@@ -1316,18 +1315,15 @@ if role == "Payroll":
                         st.success("✅ **New Request — No previous version**")
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
         if not approved:
             st.info("📋 No approved requests.")
         else:
-            st.metric("✅ Approved", len(approved))
-            st.divider()
+            st.metric("✅ Approved", len(approved)); st.divider()
             for req in reversed(approved):
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = req.get('decision_date', '')
-                # ✅ Add clock symbol ⏰ between date and time
                 if dec_date and " " in dec_date:
                     date_part, time_part = dec_date.split(" ", 1)
                     display_date = f"{date_part} ⏰ {time_part}"
@@ -1345,14 +1341,12 @@ if role == "Payroll":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
         if not rejected:
             st.success("✅ No rejected requests!")
         else:
-            st.metric("❌ Rejected", len(rejected))
-            st.divider()
+            st.metric("❌ Rejected", len(rejected)); st.divider()
             for req in reversed(rejected):
                 with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
@@ -1408,7 +1402,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
                     rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"],
                         index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
-                    cat_idx = CATEGORIES.index(rec["category"]) if rec.get("category") in CATEGORIES else 0
+                    cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
                     amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
                 with c2:
@@ -1503,42 +1497,34 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 else:
                     st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
         st.divider()
-    st.subheader(f"📋 My Department Requests")
-    my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
-    if not my_reqs:
-        st.info("📋 No requests yet.")
-    else:
-        for req in reversed(my_reqs):
-            status = req.get("status", "pending").lower()
-            icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-            
-            # Get approval info
-            dec_by = req.get("decision_by", "")
-            dec_date = format_date(req.get("decision_date", ""))
-            
-            # Build title with approval info when available
-            if status in ["approved", "rejected"] and dec_by:
-                # Clock symbol added between date & time
-                title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date.replace(' ', ' 🕓 ')}"
-            else:
-                title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
-            
-            with st.expander(title):
-                st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
-                st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                st.info(f"📝 Description: {req.get('desc')}")
-                display_attachments(req)
-                
-                if req.get("director_comments"):
-                    st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                
-                if status == "approved":
-                    display_pdf_button(req, can_generate=False)
-                
-                if status in ["pending", "rejected"]:
-                    if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
-                        st.session_state.editing_request_id = req.get("id")
-                        st.rerun()
+        st.subheader(f"📋 My Department Requests")
+        my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+        if not my_reqs:
+            st.info("📋 No requests yet.")
+        else:
+            for req in reversed(my_reqs):
+                status = req.get("status", "pending").lower()
+                icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+                dec_by = req.get("decision_by", "")
+                dec_date = format_date(req.get("decision_date", ""))
+                if status in ["approved", "rejected"] and dec_by:
+                    title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date.replace(' ', ' 🕓 ')}"
+                else:
+                    title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
+                with st.expander(title):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                    st.info(f"📝 Description: {req.get('desc')}")
+                    display_attachments(req)
+                    if req.get("director_comments"):
+                        st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                    if status == "approved":
+                        display_pdf_button(req, can_generate=False)
+                    if status in ["pending", "rejected"]:
+                        if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                            st.session_state.editing_request_id = req.get("id")
+                            st.rerun()
+
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
@@ -1546,8 +1532,6 @@ elif role == "Director":
     st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
     st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-
-    # ─── PENDING TAB (unchanged) ───
     with tab_pending:
         pending = [r for r in all_live_requests if r.get("status") == "pending"]
         if not pending:
@@ -1609,8 +1593,6 @@ elif role == "Director":
                             log_action("REJECTED", req_id)
                             st.error(f"❌ Request #{req_id} REJECTED.")
                             st.rerun()
-
-    # ─── APPROVED TAB — NOW WITH STATUS CHANGE BUTTONS ✅ ───
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
         if not approved:
@@ -1632,8 +1614,6 @@ elif role == "Director":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
-                    # ✅ NEW: STATUS CHANGE OPTIONS FROM APPROVED
                     st.markdown("### 🔄 Change Status")
                     new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_app_{req_id}", placeholder="Reason for status change...")
                     col1, col2 = st.columns(2)
@@ -1665,8 +1645,6 @@ elif role == "Director":
                             log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
                             st.success(f"✅ Request #{req_id} changed to Rejected. Audit Log updated.")
                             st.rerun()
-
-    # ─── REJECTED TAB — NOW WITH STATUS CHANGE BUTTONS ✅ ───
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
         if not rejected:
@@ -1685,8 +1663,6 @@ elif role == "Director":
                     st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                     display_attachments(req)
-
-                    # ✅ NEW: STATUS CHANGE OPTIONS FROM REJECTED
                     st.markdown("### 🔄 Change Status")
                     new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_rej_{req_id}", placeholder="Reason for status change...")
                     col1, col2 = st.columns(2)
@@ -1719,16 +1695,19 @@ elif role == "Director":
                             st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
                             st.rerun()
 
-if role == "Super Admin":
-    if st.button("🗑️ CLEAR ALL TEST REQUESTS", type="secondary"):
-        pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-        st.success("✅ ALL REQUESTS CLEARED! Refresh page — ready for live data!")
-        st.rerun()
-    # ============================================================  ✅ INDENTED NOW!
+# ─── SUPER ADMIN PORTAL ✅ NOW USING ELIF ───
+elif role == "Super Admin":
+    # ⚠️ Danger Zone — Clear All Requests (with confirmation)
+    with st.expander("⚠️ Danger Zone — Clear All Requests"):
+        confirm_clear = st.checkbox("✅ I understand — this deletes ALL requests and cannot be undone")
+        if st.button("🗑️ CLEAR ALL TEST REQUESTS", type="secondary", disabled=not confirm_clear):
+            pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+            st.success("✅ ALL REQUESTS CLEARED! Refresh page — ready for live data!")
+            st.rerun()
+    # ============================================================
     st.subheader("🛡️ Super Admin — All Requests")
-    st.info("✅ View ALL requests across ALL departments...")
+    st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
     st.divider()
-    # ... rest of portal stays indented ...
     tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs([
         "⏳ All Pending", "✅ All Approved", "❌ All Rejected", "🔧 System Management"
     ])
@@ -1808,6 +1787,11 @@ if role == "Super Admin":
         with tab_audit:
             if "display_audit_log_panel" in globals():
                 display_audit_log_panel()
+                # ✅ CLEAR AUDIT LOG BUTTON added here!
+                if st.button("🗑️ Clear Audit Log", type="secondary"):
+                    clear_audit_log_file()
+                    st.success("✅ Audit log cleared!")
+                    st.rerun()
             else:
                 st.info("📖 Audit log panel not defined — skipping")
         st.divider()
