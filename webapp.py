@@ -1547,6 +1547,8 @@ if role == "Payroll":
 
     with tab_pending:
         pending = [r for r in all_live_requests if r.get("status") == "pending"]
+        st.write("📋 My dept:", repr(dept), "| Total requests:", len(all_live_requests))
+        st.write("📋 All depts on file:", sorted(set([r.get("dept","") for r in all_live_requests])))
         if not pending:
             st.success("✅ No pending requests!")
         else:
