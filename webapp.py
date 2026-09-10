@@ -1719,11 +1719,16 @@ elif role == "Director":
                             st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
                             st.rerun()
 
-# ─── 4️⃣ SUPER ADMIN PORTAL ───
-elif role == "Super Admin":
+if role == "Super Admin":
+    if st.button("🗑️ CLEAR ALL TEST REQUESTS", type="secondary"):
+        pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+        st.success("✅ ALL REQUESTS CLEARED! Refresh page — ready for live data!")
+        st.rerun()
+    # ============================================================  ✅ INDENTED NOW!
     st.subheader("🛡️ Super Admin — All Requests")
-    st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
+    st.info("✅ View ALL requests across ALL departments...")
     st.divider()
+    # ... rest of portal stays indented ...
     tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs([
         "⏳ All Pending", "✅ All Approved", "❌ All Rejected", "🔧 System Management"
     ])
