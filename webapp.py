@@ -1066,33 +1066,40 @@ if not st.session_state.logged_in:
                 st.error("❌ Invalid Username or Password. Please try again.")
     st.stop()
 
+# ============================================================
 # ✅ REFRESH LEFT | LOGOUT RIGHT — SAME ROW ✅
 # ============================================================
 col_left, col_right = st.columns([4, 1])
-
 with col_left:
     refresh_data_button()
+with col_right:
+    if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
+        st.session_state.clear()
+        st.rerun()
 
 # ============================================================
-# ✅ POST-LOGIN — ALL FIXED VARIABLES DEFINED
+# ✅ CENTERED LOGO — BELOW BUTTONS ✅
 # ============================================================
-user_info = st.session_state.user_info or {}
+display_company_header()
+
+# ============================================================
+# ✅ WELCOME BANNER — CORRECTLY POSITIONED ✅
+# ============================================================
+user_info = st.session_state.get("user_info", {})
 full_name = user_info.get("full_name", user_info.get("username", "User"))
 dept = user_info.get("dept", "")
 role = user_info.get("role", "")
-FULL_NAME = full_name  # ✅ Fixed missing variable!
-all_live_requests = load_records_from_excel()  # ✅ Fixed missing variable!
-CATEGORIES = load_categories()  # ✅ Fixed missing variable!
 
-
-display_company_header()
-# ✅ Welcome + Logout
+# Welcome banner with full details
 st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
-if st.button("🔓 Secure Logout"):
-    st.session_state.clear()
-    st.rerun()
 
 change_my_password_form()
+
+# ============================================================
+# ✅ LOAD DATA — AFTER WELCOME ✅
+# ============================================================
+all_live_requests = load_records_from_excel()
+CATEGORIES = load_categories()
 
 # Sidebar PDF section
 with st.sidebar:
