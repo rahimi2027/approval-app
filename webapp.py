@@ -1739,6 +1739,39 @@ elif role == "Director":
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                     display_attachments(req)
 
+# ==================================================
+# ✅ REQUIRED FUNCTIONS — MUST BE AT TOP OF FILE
+# ==================================================
+
+def show_dashboard(user, all_live_requests):
+    """Display main dashboard — used by all roles"""
+    import streamlit as st
+    st.subheader("📊 Dashboard Overview")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Requests", len(all_live_requests))
+    with col2:
+        pending = [r for r in all_live_requests if r.get("status", "").lower() == "pending"]
+        st.metric("Pending Approval", len(pending))
+    with col3:
+        st.metric("Logged-in User", user.get("name", "Unknown"))
+    st.divider()
+
+
+def user_management_panel():
+    """User Management tab content"""
+    import streamlit as st
+    st.subheader("👤 User Management")
+    st.info("🔧 Add, view, or deactivate users — define your logic here")
+    # st.dataframe(your_user_data)  # ← add your existing code here
+
+
+def settings_management_panel():
+    """Settings tab content"""
+    import streamlit as st
+    st.subheader("⚙️ System Settings")
+    st.info("🔧 Configure system-wide settings — define your logic here")
+    # st.text_input("Setting name...")  # ← add your existing code here
 
 # ─── SUPER ADMIN PORTAL ───
 elif role == "Super Admin":
