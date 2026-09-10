@@ -1496,10 +1496,19 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if not my_reqs:
             st.info("📋 No requests yet.")
         else:
-            for req in reversed(my_reqs):
-                status = req.get("status", "pending").lower()
-                icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-                title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
+for req in reversed(my_reqs):
+    status = req.get("status", "pending").lower()
+    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+    
+    # Get approval info
+    dec_by = req.get("decision_by", "")
+    dec_date = format_date(req.get("decision_date", ""))
+    
+    # Build title with approval info when available
+    if status in ["approved", "rejected"] and dec_by:
+        title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date}"
+    else:
+        title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
