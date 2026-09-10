@@ -1286,14 +1286,17 @@ st.divider()
 # ─── PAYROLL PORTAL ───
 if role == "Payroll":
     st.subheader("🧾 Payroll Portal")
-    st.info("✅ View all requests and Download PDFs."); st.divider()
+    st.info("✅ View all requests and Download PDFs.")
+    st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+
     with tab_pending:
         pending = [r for r in all_live_requests if r.get("status") == "pending"]
         if not pending:
             st.success("✅ No pending requests!")
         else:
-            st.metric("⏳ Pending", len(pending)); st.divider()
+            st.metric("⏳ Pending", len(pending))
+            st.divider()
             for req in reversed(pending):
                 with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
@@ -1302,7 +1305,6 @@ if role == "Payroll":
                     st.write(f"👔 **Line Manager:** {req.get('manager')}")
                     st.write(f"📅 **Date:** {req.get('date')}")
                     st.info(f"📝 **Description:** {req.get('desc')}")
-                    # ✅ YOUR NEW BLOCK
                     display_attachments(req)
                     old_data_raw = req.get("old_data", "")
                     if old_data_raw and old_data_raw not in ["", "{}", "None"]:
@@ -1314,42 +1316,43 @@ if role == "Payroll":
                         st.success("✅ **New Request — No previous version**")
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-with tab_approved:
-    approved = [r for r in all_live_requests if r.get("status") == "approved"]
-    if not approved:
-        st.info("📋 No approved requests.")
-    else:
-        st.metric("✅ Approved", len(approved))
-        st.divider()
-        for req in reversed(approved):
-            dec_by = req.get('decision_by', 'Director')
-            dec_date = req.get('decision_date', '')
 
-            # ✅ Add clock symbol ⏰ between date and time
-            if dec_date and " " in dec_date:
-                date_part, time_part = dec_date.split(" ", 1)
-                display_date = f"{date_part} ⏰ {time_part}"
-            else:
-                display_date = dec_date if dec_date else ""
+    with tab_approved:
+        approved = [r for r in all_live_requests if r.get("status") == "approved"]
+        if not approved:
+            st.info("📋 No approved requests.")
+        else:
+            st.metric("✅ Approved", len(approved))
+            st.divider()
+            for req in reversed(approved):
+                dec_by = req.get('decision_by', 'Director')
+                dec_date = req.get('decision_date', '')
+                # ✅ Add clock symbol ⏰ between date and time
+                if dec_date and " " in dec_date:
+                    date_part, time_part = dec_date.split(" ", 1)
+                    display_date = f"{date_part} ⏰ {time_part}"
+                else:
+                    display_date = dec_date if dec_date else ""
+                extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
+                title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}{extra_text}"
+                with st.expander(title):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
+                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                    st.write(f"🎯 Approved By: {dec_by}")
+                    if display_date:
+                        st.write(f"📅 Approval Date: {display_date}")
+                    st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
+                    display_attachments(req)
+                    st.divider()
+                    display_pdf_button(req, can_generate=True)
 
-            extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
-            title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}{extra_text}"
-            with st.expander(title):
-                st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
-                st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                st.write(f"🎯 Approved By: {dec_by}")
-                if display_date:
-                    st.write(f"📅 Approval Date: {display_date}")
-                st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
-                display_attachments(req)
-                st.divider()
-                display_pdf_button(req, can_generate=True)
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
         if not rejected:
             st.success("✅ No rejected requests!")
         else:
-            st.metric("❌ Rejected", len(rejected)); st.divider()
+            st.metric("❌ Rejected", len(rejected))
+            st.divider()
             for req in reversed(rejected):
                 with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
