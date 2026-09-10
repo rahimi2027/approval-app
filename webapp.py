@@ -1280,7 +1280,6 @@ st.divider()
 # ============================================================
 # 📋 ROLE-BASED PORTALS — ALL NOW WORKING
 # ============================================================
-
 # ─── PAYROLL PORTAL ───
 if role == "Payroll":
     st.subheader("🧾 Payroll Portal")
@@ -1300,9 +1299,8 @@ if role == "Payroll":
                     st.write(f"👔 **Line Manager:** {req.get('manager')}")
                     st.write(f"📅 **Date:** {req.get('date')}")
                     st.info(f"📝 **Description:** {req.get('desc')}")
-                    # ✅ YOUR NEW BLOCK — PASTE HERE
-                    # ✅ YOUR NEW BLOCK — PASTE HERE
-                    display_attachments(req)  # ✅ ADD THIS BLOCK
+                    # ✅ YOUR NEW BLOCK
+                    display_attachments(req)
                     old_data_raw = req.get("old_data", "")
                     if old_data_raw and old_data_raw not in ["", "{}", "None"]:
                         st.divider()
@@ -1311,14 +1309,8 @@ if role == "Payroll":
                     else:
                         st.divider()
                         st.success("✅ **New Request — No previous version**")
-                    # ✅ END OF BLOCK
-                    # ↓ THIS PART STAYS BELOW YOUR NEW BLOCK ↓
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-                    
-                  #  display_attachments(req)
-                  #  st.divider()
-                   # display_pdf_button(req, can_generate=True)
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
         if not approved:
@@ -1334,8 +1326,8 @@ if role == "Payroll":
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                    st.write(f"🎯 **Approved By:** {dec_by}")
-                    if display_date: st.write(f"📅 **Approval Date:** {display_date}")
+                    st.write(f"🎯 Approved By: {dec_by}")
+                    if display_date: st.write(f"📅 Approval Date: {display_date}")
                     st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
                     display_attachments(req)
                     st.divider()
@@ -1518,14 +1510,13 @@ elif role in ["Manager", "Staff", "Team Member"]:
                         if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                             st.session_state.editing_request_id = req.get("id")
                             st.rerun()
-                            
+
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
     st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
     st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-
     with tab_pending:
         pending = [r for r in all_live_requests if r.get("status") == "pending"]
         if not pending:
@@ -1546,29 +1537,22 @@ elif role == "Director":
                         st.write(f"📅 **Date:** {format_date(req.get('date',''))}")
                         st.info(f"📝 **Description / Justification:**\n{req.get('desc','')}")
                         display_attachments(req)
-    # ✅ =====================================================
-    # ✅ ADD THIS BLOCK RIGHT HERE — SHOWS CHANGES!
-    # ✅ =====================================================
-            old_data_raw = req.get("old_data", "")
-            if old_data_raw and old_data_raw not in ["", "{}", "None"]:
-                st.divider()
-                st.markdown("### 🔄 What Changed / Edits")
-                show_old_new_comparison(old_data_raw, req)
-            else:
-                st.divider()
-                st.success("✅ **New Request — No previous version**")
-                # ✅ =====================================================
 
-                    with col_right:
-                    st.markdown("### ✍️ Decision")
-                    comments = st.text_area("Director Comments", key=f"comm_{req_id}")
-                    
+                        # ✅ WHAT CHANGED BLOCK — PROPERLY INDENTED
+                        old_data_raw = req.get("old_data", "")
+                        if old_data_raw and old_data_raw not in ["", "{}", "None"]:
+                            st.divider()
+                            st.markdown("### 🔄 What Changed / Edits")
+                            show_old_new_comparison(old_data_raw, req)
+                        else:
+                            st.divider()
+                            st.success("✅ **New Request — No previous version**")
+
                     with col_right:
                         st.markdown("### ✍️ Decision")
                         comments = st.text_area("Director Comments", key=f"comm_{req_id}")
                         approve_btn = st.button("✅ APPROVE", type="primary", key=f"appr_{req_id}")
                         reject_btn = st.button("❌ REJECT", type="secondary", key=f"rejt_{req_id}")
-
                         if approve_btn:
                             records = load_records_from_excel()
                             for r in records:
@@ -1584,7 +1568,6 @@ elif role == "Director":
                             log_action("APPROVED", req_id)
                             st.success(f"✅ Request #{req_id} APPROVED.")
                             st.rerun()
-
                         if reject_btn:
                             records = load_records_from_excel()
                             for r in records:
@@ -1598,7 +1581,6 @@ elif role == "Director":
                             log_action("REJECTED", req_id)
                             st.error(f"❌ Request #{req_id} REJECTED.")
                             st.rerun()
-
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
         if not approved:
@@ -1618,7 +1600,6 @@ elif role == "Director":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
         if not rejected:
@@ -1644,7 +1625,6 @@ elif role == "Super Admin":
     tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs([
         "⏳ All Pending", "✅ All Approved", "❌ All Rejected", "🔧 System Management"
     ])
-
     with tab_pending:
         pending = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "pending"]
         if not pending:
@@ -1666,7 +1646,6 @@ elif role == "Super Admin":
                         st.info(f"💬 Director Comments: {req.get('director_comments')}")
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_approved:
         approved = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "approved"]
         if not approved:
@@ -1691,7 +1670,6 @@ elif role == "Super Admin":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_rejected:
         rejected = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "rejected"]
         if not rejected:
@@ -1712,7 +1690,6 @@ elif role == "Super Admin":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
-
     with tab_manage:
         tab_settings, tab_users, tab_audit = st.tabs([
             "⚙️ System Settings", "👤 User Management", "📖 Audit History"
@@ -1762,7 +1739,6 @@ elif role == "Super Admin":
 else:
     st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
-
 # ========================================================
 # ✅ END OF ROLE-BASED PORTALS
 # ========================================================
