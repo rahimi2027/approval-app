@@ -1301,21 +1301,20 @@ if role == "Payroll":
                     st.write(f"📅 **Date:** {req.get('date')}")
                     st.info(f"📝 **Description:** {req.get('desc')}")
                     # ✅ YOUR NEW BLOCK — PASTE HERE
-                display_attachments(req)  # ✅ ADD THIS BLOCK
-
-                old_data_raw = req.get("old_data", "")
-                if old_data_raw and old_data_raw not in ["", "{}", "None"]:
-                st.divider()
-                st.markdown("### 🔄 What Changed / Edits")
-                show_old_new_comparison(old_data_raw, req)
-                else:
-                st.divider()
-                st.success("✅ **New Request — No previous version**")
+                    # ✅ YOUR NEW BLOCK — PASTE HERE
+                    display_attachments(req)  # ✅ ADD THIS BLOCK
+                    old_data_raw = req.get("old_data", "")
+                    if old_data_raw and old_data_raw not in ["", "{}", "None"]:
+                        st.divider()
+                        st.markdown("### 🔄 What Changed / Edits")
+                        show_old_new_comparison(old_data_raw, req)
+                    else:
+                        st.divider()
+                        st.success("✅ **New Request — No previous version**")
                     # ✅ END OF BLOCK
-
                     # ↓ THIS PART STAYS BELOW YOUR NEW BLOCK ↓
                     st.divider()
-                   display_pdf_button(req, can_generate=True)
+                    display_pdf_button(req, can_generate=True)
                     
                   #  display_attachments(req)
                   #  st.divider()
