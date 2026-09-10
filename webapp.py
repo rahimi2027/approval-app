@@ -19,6 +19,12 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 # ============================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_FOLDER = os.path.join(BASE_DIR, "Acoole_App_Uploads")
+print("📂 Folder location should be:", APP_FOLDER)
+os.makedirs(APP_FOLDER, exist_ok=True)
+
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
 st.markdown("""
