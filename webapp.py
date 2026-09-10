@@ -1283,13 +1283,13 @@ st.divider()
 # ============================================================
 # 📋 ROLE-BASED PORTALS — ✅ FIXED CHAIN ORDER
 # ============================================================
-
 # ─── PAYROLL PORTAL ───
 if role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
     tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+    
     with tab_pending:
         pending = [r for r in all_live_requests if r.get("status") == "pending"]
         if not pending:
@@ -1297,7 +1297,8 @@ if role == "Payroll":
         else:
             st.metric("⏳ Pending", len(pending)); st.divider()
             for req in reversed(pending):
-                with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
+                # ✅ Department added after amount
+                with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
@@ -1315,6 +1316,7 @@ if role == "Payroll":
                         st.success("✅ **New Request — No previous version**")
                     st.divider()
                     display_pdf_button(req, can_generate=True)
+    
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
         if not approved:
@@ -1330,7 +1332,8 @@ if role == "Payroll":
                 else:
                     display_date = dec_date if dec_date else ""
                 extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
-                title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}{extra_text}"
+                # ✅ Department added after amount
+                title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')}{extra_text}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
@@ -1341,6 +1344,7 @@ if role == "Payroll":
                     display_attachments(req)
                     st.divider()
                     display_pdf_button(req, can_generate=True)
+    
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
         if not rejected:
@@ -1348,7 +1352,8 @@ if role == "Payroll":
         else:
             st.metric("❌ Rejected", len(rejected)); st.divider()
             for req in reversed(rejected):
-                with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
+                # ✅ Department added after amount
+                with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
