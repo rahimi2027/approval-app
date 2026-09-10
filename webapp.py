@@ -388,8 +388,11 @@ def display_audit_log_panel():
 # HELPER FUNCTIONS
 # ============================================================
 def format_date(d):
-    if not d or str(d).strip() in ["", "none", "nan"]: return "-"
-    return str(d).strip()[:10]
+    if not d or str(d).strip().lower() in ["", "none", "nan"]:
+        return "-"
+    s = str(d).strip()
+    # Return full date+time if it contains time, otherwise just date
+    return s
 def display_attachments(req):
     att = req.get("attachment_name", "None")
     if not att or str(att).strip().lower() in ["none", "nan", ""]:
