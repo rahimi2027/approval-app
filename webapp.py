@@ -20,10 +20,76 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 # ============================================================
 
+# ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_FOLDER = os.path.join(BASE_DIR, "Acoole_App_Uploads")
 print("📂 Folder location should be:", APP_FOLDER)
 os.makedirs(APP_FOLDER, exist_ok=True)
+
+# ✅ =========================================================
+# ✅ PASTE THE AUTO-CREATE BLOCK RIGHT HERE ↓↓↓
+# ✅ =========================================================
+
+# ─── AUTO-CREATE ALL REQUIRED FOLDERS & EMPTY EXCEL FILES ───
+UPLOAD_DIR = os.path.join(APP_FOLDER, "uploaded_attachments")
+PDF_DIR = os.path.join(APP_FOLDER, "approved_pdfs")
+ARCHIVE_FOLDER = os.path.join(APP_FOLDER, "audit_archives")
+EXCEL_PATH = os.path.join(APP_FOLDER, "requests.xlsx")
+USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
+SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
+AUDIT_LOG_PATH = os.path.join(APP_FOLDER, "audit_log.xlsx")
+
+# Create subfolders
+for folder in [UPLOAD_DIR, PDF_DIR, ARCHIVE_FOLDER]:
+    os.makedirs(folder, exist_ok=True)
+    print(f"✅ Folder ready: {folder}")
+
+# Create empty Excel files if missing
+def create_empty_if_missing(path, columns):
+    if not os.path.exists(path):
+        pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
+        print(f"✅ Created file: {path}")
+    else:
+        print(f"✅ Exists: {path}")
+
+# Requests
+create_empty_if_missing(EXCEL_PATH, [
+    "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
+    "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name",
+    "Status", "Director Comments", "Decision Date", "Decision By",
+    "PDF File Path", "Edited From ID", "Old Data"
+])
+
+# User Database
+create_empty_if_missing(USER_DB_PATH, [
+    "full_name","username","password","role","dept",
+    "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"
+])
+
+# Settings
+create_empty_if_missing(SETTINGS_PATH, ["setting", "value"])
+
+# Audit Log
+create_empty_if_missing(AUDIT_LOG_PATH, [
+    "AuditID", "Timestamp", "User_Name", "User_Role",
+    "Action", "Request_ID", "Department", "Amount",
+    "Decision_By", "Decision_Date", "Field_Changed",
+    "Old_Value", "New_Value", "IP_Address"
+])
+
+print("\n🎉 ALL FOLDERS & FILES READY! Look in:", APP_FOLDER)
+
+# ✅ =========================================================
+# ✅ END OF AUTO-CREATE BLOCK — PAGE CONFIG STARTS NEXT
+# ✅ =========================================================
+
+# ─── PAGE CONFIG — MUST BE FIRST! ───
+# ============================================================
+st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 2rem !important;
+        ...
 
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
