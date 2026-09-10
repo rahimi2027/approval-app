@@ -93,7 +93,7 @@ st.markdown("""
 
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
-st.markdown("""
+st.html("""
     <style>
     .block-container {
         padding-top: 2rem !important;
@@ -119,7 +119,7 @@ st.markdown("""
     .streamlit-expanderContent input { width: 100% !important; box-sizing: border-box !important; }
     .streamlit-expanderContent .stButton > button { width: 100% !important; box-sizing: border-box !important; margin-top: 0.5rem !important; }
     </style>
-""", unsafe_allow_html=True)
+""")
 # ============================================================
 # ─── PAGE CONFIG & CSS STYLING ───
 # ============================================================
