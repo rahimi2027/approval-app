@@ -1073,10 +1073,6 @@ col_left, col_right = st.columns([4, 1])
 with col_left:
     refresh_data_button()
 
-with col_right:
-    if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
-        st.session_state.clear()
-        st.rerun()
 # ============================================================
 # ✅ POST-LOGIN — ALL FIXED VARIABLES DEFINED
 # ============================================================
@@ -1092,7 +1088,8 @@ CATEGORIES = load_categories()  # ✅ Fixed missing variable!
 display_company_header()
 # ✅ Welcome + Logout
 st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
-if st.button("🔓 Secure Logout"):
+with col_right:
+    if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
     st.session_state.clear()
     st.rerun()
 
