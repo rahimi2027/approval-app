@@ -1084,16 +1084,6 @@ with col_right:
         st.rerun()
 
 # ============================================================
-# ✅ WELCOME BANNER — USING CORRECT VARIABLES ✅
-# ============================================================
-user_info = st.session_state.get("user_info", {})
-full_name = user_info.get("full_name", user_info.get("username", "User"))
-user_role = user_info.get("role", "")
-
-st.info(f"👤 Welcome: {full_name} | {user_role}")
-
-change_my_password_form()
-# ============================================================
 # ✅ POST-LOGIN — ALL FIXED VARIABLES DEFINED
 # ============================================================
 user_info = st.session_state.user_info or {}
