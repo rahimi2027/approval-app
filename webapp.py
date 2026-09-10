@@ -1087,7 +1087,7 @@ CATEGORIES = load_categories()  # ✅ Fixed missing variable!
 
 display_company_header()
 # ✅ Welcome + Logout
-st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
+#st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 with col_right:
     if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
     st.session_state.clear()
