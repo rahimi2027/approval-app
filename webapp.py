@@ -86,19 +86,43 @@ os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION
+# GOOGLE DRIVE - PERSONAL GOOGLE ACCOUNT
 # ============================================================
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-credentials = None
 drive_service = None
 
 try:
-    credentials = service_account.Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]),
+    if not st.user.is_logged_in:
+
+        st.warning(
+            "🔐 Google Drive access is required to upload attachments."
+        )
+
+        if st.button("Sign in with Google"):
+            st.login()
+
+        st.stop()
+
+    access_token = st.user.tokens.get("access")
+
+    if not access_token:
+        st.error(
+            "❌ Google Drive access token was not provided."
+        )
+
+        st.info(
+            "Please sign out and sign in with Google again."
+        )
+
+        st.stop()
+
+    # OAuth credentials for YOUR personal Google account
+    credentials = Credentials(
+        token=access_token,
         scopes=SCOPES
     )
 
@@ -109,42 +133,46 @@ try:
         cache_discovery=False
     )
 
-    # REAL authentication test
     about = drive_service.about().get(
         fields="user"
     ).execute()
 
     st.success(
-        f"✅ Google Drive authentication successful: "
+        f"✅ Google Drive connected: "
         f"{about['user'].get('emailAddress')}"
     )
 
 except Exception as e:
+
     drive_service = None
 
     st.error(
-        f"❌ GOOGLE DRIVE AUTHENTICATION FAILED:\n\n{repr(e)}"
+        f"❌ GOOGLE DRIVE CONNECTION FAILED:\n\n{repr(e)}"
     )
-
 
 # ============================================================
 # TEST GOOGLE DRIVE FOLDER ACCESS
 # ============================================================
 
 if drive_service:
+
     try:
+
         folder = drive_service.files().get(
             fileId=GOOGLE_DRIVE_FOLDER_ID,
             fields="id,name,mimeType"
         ).execute()
 
         st.success(
-            f"✅ Google Drive folder accessible: {folder['name']}"
+            f"✅ Google Drive folder accessible: "
+            f"{folder['name']}"
         )
 
     except Exception as e:
+
         st.error(
-            f"❌ Google Drive folder access failed:\n\n{repr(e)}"
+            f"❌ Google Drive folder access failed:\n\n"
+            f"{repr(e)}"
         )
 
 
@@ -152,45 +180,73 @@ if drive_service:
 # GOOGLE DRIVE FILE UPLOAD
 # ============================================================
 
-def upload_to_google_drive(local_file_path, display_filename):
+def upload_to_google_drive(
+    local_file_path,
+    display_filename
+):
 
     if drive_service is None:
-        st.error("❌ Google Drive is not connected.")
+
+        st.error(
+            "❌ Google Drive is not connected."
+        )
+
         return None
+
 
     if not os.path.exists(local_file_path):
+
         st.error(
-            f"❌ Upload file not found:\n{local_file_path}"
+            f"❌ Upload file not found:\n"
+            f"{local_file_path}"
         )
+
         return None
 
+
     try:
+
         file_metadata = {
             "name": display_filename,
-            "parents": [GOOGLE_DRIVE_FOLDER_ID]
+            "parents": [
+                GOOGLE_DRIVE_FOLDER_ID
+            ]
         }
+
 
         media = MediaFileUpload(
             local_file_path,
             resumable=True
         )
 
+
         uploaded = drive_service.files().create(
+
             body=file_metadata,
+
             media_body=media,
+
             fields="id,name,parents"
+
         ).execute()
 
+
         st.success(
-            f"✅ Uploaded to Google Drive: {display_filename}"
+            f"✅ Uploaded to Google Drive: "
+            f"{display_filename}"
         )
+
 
         return uploaded.get("id")
 
+
     except Exception as e:
+
         st.error(
-            f"❌ Google Drive upload failed:\n\n{repr(e)}"
+            f"❌ Google Drive upload failed:\n\n"
+            f"{repr(e)}"
         )
+
         return None
 
 # ============================================================
