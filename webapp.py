@@ -89,7 +89,7 @@ os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 
 # ============================================================
-# GOOGLE DRIVE — SERVICE ACCOUNT
+# GOOGLE DRIVE — YOUR PERSONAL GOOGLE ACCOUNT
 # USERS DO NOT NEED GOOGLE LOGIN
 # ============================================================
 
@@ -102,10 +102,16 @@ SCOPES = [
 drive_service = None
 
 try:
-    gcp = dict(st.secrets["gcp_service_account"])
 
-    credentials = service_account.Credentials.from_service_account_info(
-        gcp,
+    # OAuth credentials stored securely in Streamlit Secrets
+    gdrive = st.secrets["gdrive"]
+
+    credentials = Credentials(
+        token=None,
+        refresh_token=gdrive["refresh_token"],
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=gdrive["client_id"],
+        client_secret=gdrive["client_secret"],
         scopes=SCOPES
     )
 
@@ -116,9 +122,23 @@ try:
         cache_discovery=False
     )
 
+    # Test the authenticated Google account
+    about = drive_service.about().get(
+        fields="user"
+    ).execute()
+
+    st.success(
+        f"✅ Google Drive connected: "
+        f"{about['user'].get('emailAddress')}"
+    )
+
 except Exception as e:
+
     drive_service = None
-    st.error(f"❌ Google Drive connection failed: {e}")
+
+    st.error(
+        f"❌ Google Drive connection failed: {e}"
+    )
 
 
 # ============================================================
