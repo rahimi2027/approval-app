@@ -125,7 +125,6 @@ except Exception as e:
     st.error(
         f"❌ GOOGLE DRIVE AUTHENTICATION FAILED:\n\n{repr(e)}"
     )
-    return False
 # ============================================================
 # ✅ ONEDRIVE UPLOAD FUNCTIONS
 # ============================================================
