@@ -89,11 +89,6 @@ os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 # GOOGLE DRIVE CONNECTION
 # ============================================================
 
-SERVICE_ACCOUNT_FILE = os.path.join(
-    BASE_DIR,
-    "service_account_key.json"
-)
-
 SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
@@ -101,40 +96,35 @@ SCOPES = [
 credentials = None
 drive_service = None
 
-if not os.path.exists(SERVICE_ACCOUNT_FILE):
-    st.error(
-        f"❌ service_account_key.json NOT FOUND:\n{SERVICE_ACCOUNT_FILE}"
+try:
+    credentials = service_account.Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=SCOPES
     )
-else:
-    try:
-        credentials = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE,
-            scopes=SCOPES
-        )
 
-        drive_service = build(
-            "drive",
-            "v3",
-            credentials=credentials,
-            cache_discovery=False
-        )
+    drive_service = build(
+        "drive",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False
+    )
 
-        # REAL authentication test
-        about = drive_service.about().get(
-            fields="user"
-        ).execute()
+    # REAL authentication test
+    about = drive_service.about().get(
+        fields="user"
+    ).execute()
 
-        st.success(
-            f"✅ Google Drive authentication successful: "
-            f"{about['user'].get('emailAddress')}"
-        )
+    st.success(
+        f"✅ Google Drive authentication successful: "
+        f"{about['user'].get('emailAddress')}"
+    )
 
-    except Exception as e:
-        drive_service = None
+except Exception as e:
+    drive_service = None
 
-        st.error(
-            f"❌ GOOGLE DRIVE AUTHENTICATION FAILED:\n\n{repr(e)}"
-        )
+    st.error(
+        f"❌ GOOGLE DRIVE AUTHENTICATION FAILED:\n\n{repr(e)}"
+    )
 # ============================================================
 # ✅ ONEDRIVE UPLOAD FUNCTIONS
 # ============================================================
