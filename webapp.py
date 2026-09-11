@@ -127,6 +127,40 @@ except Exception as e:
     )
     return False
 # ============================================================
+# ✅ ONEDRIVE UPLOAD FUNCTIONS
+# ============================================================
+def get_onedrive_token():
+    if not ONEDRIVE_CLIENT_ID or not ONEDRIVE_CLIENT_SECRET:
+        return None
+    try:
+        url = f"https://login.microsoftonline.com/{ONEDRIVE_TENANT_ID}/oauth2/v2.0/token"
+        data = {
+            "grant_type": "client_credentials", "client_id": ONEDRIVE_CLIENT_ID,
+            "client_secret": ONEDRIVE_CLIENT_SECRET, "scope": "https://graph.microsoft.com/.default"
+        }
+        res = requests.post(url, data=data, timeout=30)
+        if res.status_code == 200:
+            return res.json().get("access_token")
+    except Exception as e:
+        st.warning(f"⚠️ OneDrive connection: {e}")
+    return None
+def upload_to_onedrive(local_file_path, remote_filename=None):
+    if not USE_ONEDRIVE: return False
+    token = get_onedrive_token()
+    if not token: return False
+    filename = remote_filename or os.path.basename(local_file_path)
+    remote_path = f"{ONEDRIVE_FOLDER}{filename}"
+    try:
+        with open(local_file_path, 'rb') as f: file_content = f.read()
+        url = f"https://graph.microsoft.com/v1.0/drives/me/items/root:/{remote_path}:/content"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"}
+        res = requests.put(url, data=file_content, headers=headers, timeout=60)
+        if res.status_code in (200, 201):
+            st.info(f"✅ Synced to OneDrive: {filename}"); return True
+        else: st.warning(f"⚠️ OneDrive sync: {res.status_code}")
+    except Exception as e: st.warning(f"⚠️ Could not sync to OneDrive: {str(e)}")
+    return False
+# ============================================================
 # DEFAULTS — ROLES, DEPARTMENTS, USERS, PERMISSIONS
 # ============================================================
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
