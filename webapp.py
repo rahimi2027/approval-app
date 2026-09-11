@@ -15,9 +15,10 @@ import pandas as pd
 import io
 import requests
 from datetime import datetime, date
+
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 # ============================================================
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
