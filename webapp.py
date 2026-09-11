@@ -73,13 +73,14 @@ EXCEL_PATH = os.path.join(APP_FOLDER, "requests.xlsx")
 USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
 # ─── GOOGLE DRIVE ───
-GOOGLE_DRIVE_FOLDER_ID = "1oecpaa8c5tryCtcIAnbjEXemGDonvgPZ"
+GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"  # ✅ YOUR folder ID
 # ─── ONEDRIVE / MICROSOFT GRAPH ───
 ONEDRIVE_CLIENT_ID = ""
 ONEDRIVE_CLIENT_SECRET = ""
 ONEDRIVE_TENANT_ID = "common"
 ONEDRIVE_FOLDER = "Acoole_App_Uploads/"
 USE_ONEDRIVE = False
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
