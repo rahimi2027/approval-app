@@ -96,47 +96,16 @@ SCOPES = [
 drive_service = None
 
 try:
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
-
-    # --------------------------------------------------------
-    # Read YOUR Google OAuth credentials from Streamlit Secrets
-    # --------------------------------------------------------
-
-    gdrive_config = st.secrets["gdrive"]
-
-    client_id = gdrive_config["client_id"]
-    client_secret = gdrive_config["client_secret"]
-    refresh_token = gdrive_config["refresh_token"]
-
-    if not client_id:
-        raise ValueError("Google Drive client_id is missing.")
-
-    if not client_secret:
-        raise ValueError("Google Drive client_secret is missing.")
-
-    if not refresh_token:
-        raise ValueError("Google Drive refresh_token is missing.")
-
-    # --------------------------------------------------------
-    # Create credentials for YOUR personal Google account
-    # --------------------------------------------------------
+    gdrive = st.secrets["gdrive"]
 
     credentials = Credentials(
         token=None,
-        refresh_token=refresh_token,
+        refresh_token=gdrive["refresh_token"],
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=client_id,
-        client_secret=client_secret,
+        client_id=gdrive["client_id"],
+        client_secret=gdrive["client_secret"],
         scopes=SCOPES
     )
-
-    # Get a fresh access token
-    credentials.refresh(Request())
-
-    # --------------------------------------------------------
-    # Connect to Google Drive
-    # --------------------------------------------------------
 
     drive_service = build(
         "drive",
@@ -145,10 +114,7 @@ try:
         cache_discovery=False
     )
 
-    # --------------------------------------------------------
-    # Test connection
-    # --------------------------------------------------------
-
+    # Test the connection
     about = drive_service.about().get(
         fields="user"
     ).execute()
@@ -180,15 +146,10 @@ if drive_service:
             fields="id,name,mimeType"
         ).execute()
 
-        if folder.get("mimeType") != "application/vnd.google-apps.folder":
-            st.error(
-                "❌ The GOOGLE_DRIVE_FOLDER_ID is not a folder."
-            )
-        else:
-            st.success(
-                f"✅ Google Drive folder accessible: "
-                f"{folder['name']}"
-            )
+        st.success(
+            f"✅ Google Drive folder accessible: "
+            f"{folder['name']}"
+        )
 
     except Exception as e:
 
@@ -202,35 +163,23 @@ if drive_service:
 # GOOGLE DRIVE FILE UPLOAD
 # ============================================================
 
-def upload_to_google_drive(
-    local_file_path,
-    display_filename
-):
+def upload_to_google_drive(local_file_path, display_filename):
 
     if drive_service is None:
-
-        st.error(
-            "❌ Google Drive is not connected."
-        )
-
+        st.error("❌ Google Drive is not connected.")
         return None
 
     if not os.path.exists(local_file_path):
-
         st.error(
-            f"❌ Upload file not found:\n"
-            f"{local_file_path}"
+            f"❌ Upload file not found:\n{local_file_path}"
         )
-
         return None
 
     try:
 
         file_metadata = {
             "name": display_filename,
-            "parents": [
-                GOOGLE_DRIVE_FOLDER_ID
-            ]
+            "parents": [GOOGLE_DRIVE_FOLDER_ID]
         }
 
         media = MediaFileUpload(
@@ -245,8 +194,7 @@ def upload_to_google_drive(
         ).execute()
 
         st.success(
-            f"✅ Uploaded to Google Drive: "
-            f"{display_filename}"
+            f"✅ Uploaded to Google Drive: {display_filename}"
         )
 
         return uploaded.get("id")
@@ -254,8 +202,7 @@ def upload_to_google_drive(
     except Exception as e:
 
         st.error(
-            f"❌ Google Drive upload failed:\n\n"
-            f"{repr(e)}"
+            f"❌ Google Drive upload failed:\n\n{repr(e)}"
         )
 
         return None
