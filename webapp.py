@@ -95,6 +95,78 @@ SCOPES = [
 
 drive_service = None
 
+try:
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    # --------------------------------------------------------
+    # Read YOUR Google OAuth credentials from Streamlit Secrets
+    # --------------------------------------------------------
+
+    gdrive_config = st.secrets["gdrive"]
+
+    client_id = gdrive_config["client_id"]
+    client_secret = gdrive_config["client_secret"]
+    refresh_token = gdrive_config["refresh_token"]
+
+    if not client_id:
+        raise ValueError("Google Drive client_id is missing.")
+
+    if not client_secret:
+        raise ValueError("Google Drive client_secret is missing.")
+
+    if not refresh_token:
+        raise ValueError("Google Drive refresh_token is missing.")
+
+    # --------------------------------------------------------
+    # Create credentials for YOUR personal Google account
+    # --------------------------------------------------------
+
+    credentials = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=SCOPES
+    )
+
+    # Get a fresh access token
+    credentials.refresh(Request())
+
+    # --------------------------------------------------------
+    # Connect to Google Drive
+    # --------------------------------------------------------
+
+    drive_service = build(
+        "drive",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False
+    )
+
+    # --------------------------------------------------------
+    # Test connection
+    # --------------------------------------------------------
+
+    about = drive_service.about().get(
+        fields="user"
+    ).execute()
+
+    st.success(
+        f"✅ Google Drive connected: "
+        f"{about['user'].get('emailAddress')}"
+    )
+
+except Exception as e:
+
+    drive_service = None
+
+    st.error(
+        f"❌ GOOGLE DRIVE CONNECTION FAILED:\n\n{repr(e)}"
+    )
+
+
 # ============================================================
 # TEST GOOGLE DRIVE FOLDER ACCESS
 # ============================================================
@@ -108,10 +180,15 @@ if drive_service:
             fields="id,name,mimeType"
         ).execute()
 
-        st.success(
-            f"✅ Google Drive folder accessible: "
-            f"{folder['name']}"
-        )
+        if folder.get("mimeType") != "application/vnd.google-apps.folder":
+            st.error(
+                "❌ The GOOGLE_DRIVE_FOLDER_ID is not a folder."
+            )
+        else:
+            st.success(
+                f"✅ Google Drive folder accessible: "
+                f"{folder['name']}"
+            )
 
     except Exception as e:
 
@@ -138,7 +215,6 @@ def upload_to_google_drive(
 
         return None
 
-
     if not os.path.exists(local_file_path):
 
         st.error(
@@ -147,7 +223,6 @@ def upload_to_google_drive(
         )
 
         return None
-
 
     try:
 
@@ -158,32 +233,23 @@ def upload_to_google_drive(
             ]
         }
 
-
         media = MediaFileUpload(
             local_file_path,
             resumable=True
         )
 
-
         uploaded = drive_service.files().create(
-
             body=file_metadata,
-
             media_body=media,
-
             fields="id,name,parents"
-
         ).execute()
-
 
         st.success(
             f"✅ Uploaded to Google Drive: "
             f"{display_filename}"
         )
 
-
         return uploaded.get("id")
-
 
     except Exception as e:
 
