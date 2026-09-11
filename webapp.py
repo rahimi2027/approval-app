@@ -86,63 +86,55 @@ os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 
 # ============================================================
-# ✅ GOOGLE DRIVE — READS FILE DIRECTLY (NO JWT ERRORS)
+# GOOGLE DRIVE CONNECTION
 # ============================================================
-SERVICE_ACCOUNT_FILE = os.path.join(BASE_DIR, "service_account_key.json")
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+
+SERVICE_ACCOUNT_FILE = os.path.join(
+    BASE_DIR,
+    "service_account_key.json"
+)
+
+SCOPES = [
+    "https://www.googleapis.com/auth/drive"
+]
 
 credentials = None
 drive_service = None
 
-if os.path.exists(SERVICE_ACCOUNT_FILE):
+if not os.path.exists(SERVICE_ACCOUNT_FILE):
+    st.error(
+        f"❌ service_account_key.json NOT FOUND:\n{SERVICE_ACCOUNT_FILE}"
+    )
+else:
     try:
-        # ✅ READS FILE — NO JSON PARSING = NO SIGNATURE BREAK
         credentials = service_account.Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE,
             scopes=SCOPES
         )
-        drive_service = build("drive", "v3", credentials=credentials)
-        st.success("✅ Google Drive connected — Key loaded successfully!")
-    except Exception as e:
-        st.error(f"❌ Key Load Error: {str(e)[:300]}")
-else:
-    st.error("❌ service_account_key.json NOT FOUND — put file in project folder!")
 
+        drive_service = build(
+            "drive",
+            "v3",
+            credentials=credentials,
+            cache_discovery=False
+        )
 
-def upload_to_google_drive(local_file_path, display_filename):
-    if not drive_service:
-        st.error("❌ No Drive connection — check key file")
-        return None
-    try:
-        st.info(f"📤 Uploading: {display_filename}")
-        
-        # Verify folder access
-        try:
-            folder = drive_service.files().get(fileId=GOOGLE_DRIVE_FOLDER_ID, fields="id, name").execute()
-            st.success(f"✅ Folder FOUND: {folder.get('name')}")
-        except Exception as fe:
-            st.error(f"❌ CANNOT ACCESS FOLDER! Error: {str(fe)}")
-            st.info("👉 SHARE folder with: drive-upload-bot@acoole-attachments.iam.gserviceaccount.com")
-            return None
-        
-        # Upload file
-        file_metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
-        media = MediaFileUpload(local_file_path, resumable=True)
-        file = drive_service.files().create(body=file_metadata, media_body=media, fields="id, name, parents").execute()
-        
-        file_id = file.get("id")
-        parents = file.get("parents", [])
-        
-        if GOOGLE_DRIVE_FOLDER_ID in parents:
-            st.success(f"✅ ✅ UPLOAD SUCCESS! File IS IN YOUR FOLDER! 🎉 ID: {file_id[:12]}...")
-        else:
-            st.warning(f"⚠️ Uploaded but NOT in target folder — check sharing permissions")
-        
-        return file_id
-    
+        # REAL authentication test
+        about = drive_service.about().get(
+            fields="user"
+        ).execute()
+
+        st.success(
+            f"✅ Google Drive authentication successful: "
+            f"{about['user'].get('emailAddress')}"
+        )
+
     except Exception as e:
-        st.error(f"❌ UPLOAD FAILED: {str(e)}")
-        return None
+        drive_service = None
+
+        st.error(
+            f"❌ GOOGLE DRIVE AUTHENTICATION FAILED:\n\n{repr(e)}"
+        )
 # ============================================================
 # ✅ ONEDRIVE UPLOAD FUNCTIONS
 # ============================================================
