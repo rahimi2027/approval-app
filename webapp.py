@@ -87,8 +87,11 @@ os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 
 # ============================================================
-# GOOGLE DRIVE - PERSONAL GOOGLE ACCOUNT
+# GOOGLE DRIVE — SERVICE ACCOUNT
+# USERS DO NOT NEED GOOGLE LOGIN
 # ============================================================
+
+GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive"
@@ -97,15 +100,10 @@ SCOPES = [
 drive_service = None
 
 try:
+    gcp = dict(st.secrets["gcp_service_account"])
 
-    gdrive = st.secrets["gdrive"]
-
-    credentials = Credentials(
-        token=None,
-        refresh_token=gdrive["refresh_token"],
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=gdrive["client_id"],
-        client_secret=gdrive["client_secret"],
+    credentials = service_account.Credentials.from_service_account_info(
+        gcp,
         scopes=SCOPES
     )
 
@@ -116,25 +114,13 @@ try:
         cache_discovery=False
     )
 
-    # Test Google Drive connection
-    about = drive_service.about().get(
-        fields="user"
-    ).execute()
-
-    st.success(
-        f"✅ Google Drive connected: "
-        f"{about['user'].get('emailAddress')}"
-    )
-
 except Exception as e:
-
     drive_service = None
+    st.error(f"❌ Google Drive connection failed: {e}")
 
-    st.error(
-        f"❌ GOOGLE DRIVE CONNECTION FAILED:\n\n{repr(e)}"
-    )
+
 # ============================================================
-# TEST GOOGLE DRIVE FOLDER ACCESS
+# TEST GOOGLE DRIVE FOLDER
 # ============================================================
 
 if drive_service:
@@ -147,23 +133,26 @@ if drive_service:
         ).execute()
 
         st.success(
-            f"✅ Google Drive folder accessible: "
-            f"{folder['name']}"
+            f"✅ Google Drive connected: {folder['name']}"
         )
 
     except Exception as e:
 
+        drive_service = None
+
         st.error(
-            f"❌ Google Drive folder access failed:\n\n"
-            f"{repr(e)}"
+            f"❌ Google Drive folder access failed: {e}"
         )
 
 
 # ============================================================
-# GOOGLE DRIVE FILE UPLOAD
+# GOOGLE DRIVE UPLOAD
 # ============================================================
 
-def upload_to_google_drive(local_file_path, display_filename):
+def upload_to_google_drive(
+    local_file_path,
+    display_filename
+):
 
     if drive_service is None:
         st.error("❌ Google Drive is not connected.")
@@ -171,7 +160,7 @@ def upload_to_google_drive(local_file_path, display_filename):
 
     if not os.path.exists(local_file_path):
         st.error(
-            f"❌ Upload file not found:\n{local_file_path}"
+            f"❌ File not found: {local_file_path}"
         )
         return None
 
@@ -193,16 +182,12 @@ def upload_to_google_drive(local_file_path, display_filename):
             fields="id,name,parents"
         ).execute()
 
-        st.success(
-            f"✅ Uploaded to Google Drive: {display_filename}"
-        )
-
         return uploaded.get("id")
 
     except Exception as e:
 
         st.error(
-            f"❌ Google Drive upload failed:\n\n{repr(e)}"
+            f"❌ Google Drive upload failed: {e}"
         )
 
         return None
