@@ -85,40 +85,47 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 # ============================================================
-# ✅ LOAD GOOGLE CREDENTIALS FROM FILE
+# ✅ LOAD GOOGLE CREDENTIALS FROM FILE — FIXED JWT SIGNATURE
 # ============================================================
-SERVICE_ACCOUNT_INFO = {}
-KEY_FILE = os.path.join(BASE_DIR, "service_account_key.json")
-if os.path.exists(KEY_FILE):
+SERVICE_ACCOUNT_FILE = os.path.join(BASE_DIR, "service_account_key.json")
+SCOPES = ["https://www.googleapis.com/auth/drive"]
+
+credentials = None
+drive_service = None
+
+if os.path.exists(SERVICE_ACCOUNT_FILE):
     try:
-        with open(KEY_FILE, "r", encoding="utf-8") as f:
-            SERVICE_ACCOUNT_INFO = json.load(f)
+        # ✅ USE FILE DIRECTLY — avoids JSON parsing → JWT SIGNATURE STAYS VALID
+        credentials = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE,
+            scopes=SCOPES
+        )
+        drive_service = build("drive", "v3", credentials=credentials)
         st.success("✅ Google Drive credentials loaded successfully!")
     except Exception as e:
-        st.error(f"⚠️ Failed to load credentials: {str(e)[:200]}")
+        st.error(f"⚠️ Failed to load credentials: {str(e)[:300]}")
 else:
     st.warning("⚠️ Credentials file not found — using local storage only")
+
 # ============================================================
-# ✅ GOOGLE DRIVE UPLOAD FUNCTION
+# ✅ GOOGLE DRIVE UPLOAD FUNCTION — USES GLOBAL CREDENTIALS
 # ============================================================
 def get_drive_service():
-    try:
-        credentials = service_account.Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO,
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build("drive", "v3", credentials=credentials)
-    except Exception as e:
-        st.error(f"❌ Google Drive Error: {e}")
-        return None
+    """Return existing service — no re-authentication = no signature errors"""
+    return drive_service  # ✅ Reuse — DON'T re-create credentials!
+
 def upload_to_google_drive(local_file_path, display_filename):
+    if not credentials or not drive_service:
+        st.error("❌ Google Drive not connected — check service_account_key.json")
+        return None
+    
     try:
         st.info(f"📤 Uploading: {display_filename}")
-        credentials = service_account.Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO,
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        service = build("drive", "v3", credentials=credentials)
+        
+        # ✅ REUSE existing service — NO re-authentication inside function
+        service = drive_service
+        
+        # Verify folder access
         try:
             folder = service.files().get(fileId=GOOGLE_DRIVE_FOLDER_ID, fields="id, name").execute()
             st.success(f"✅ Folder FOUND: {folder.get('name')}")
@@ -126,18 +133,23 @@ def upload_to_google_drive(local_file_path, display_filename):
             st.error(f"❌ CANNOT ACCESS FOLDER! Error: {str(fe)}")
             st.info("👉 SHARE folder with bot email: drive-upload-bot@acoole-attachments.iam.gserviceaccount.com")
             return None
+        
+        # Upload file
         file_metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
         media = MediaFileUpload(local_file_path, resumable=True)
         file = service.files().create(body=file_metadata, media_body=media, fields="id, name, parents").execute()
         file_id = file.get("id")
         parents = file.get("parents", [])
+        
         if GOOGLE_DRIVE_FOLDER_ID in parents:
             st.success(f"✅ ✅ SUCCESS! File IS IN YOUR FOLDER! 🎉 ID: {file_id[:12]}...")
             st.info("👉 REFRESH your Google Drive folder → FILE IS THERE!")
         else:
             st.warning(f"⚠️ Uploaded but NOT in your folder! Parents: {parents}")
             st.info("👉 File went to bot's storage — check folder sharing!")
+        
         return file_id
+    
     except Exception as e:
         st.error(f"❌ UPLOAD FAILED! Error: {str(e)}")
         return None
