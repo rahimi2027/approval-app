@@ -96,6 +96,7 @@ SCOPES = [
 drive_service = None
 
 try:
+
     gdrive = st.secrets["gdrive"]
 
     credentials = Credentials(
@@ -114,7 +115,7 @@ try:
         cache_discovery=False
     )
 
-    # Test the connection
+    # Test Google Drive connection
     about = drive_service.about().get(
         fields="user"
     ).execute()
@@ -131,8 +132,6 @@ except Exception as e:
     st.error(
         f"❌ GOOGLE DRIVE CONNECTION FAILED:\n\n{repr(e)}"
     )
-
-
 # ============================================================
 # TEST GOOGLE DRIVE FOLDER ACCESS
 # ============================================================
