@@ -529,7 +529,12 @@ def save_roles(roles_list):
 def init_user_db():
     safe_init_excel(USER_DB_PATH, ["full_name","username","password","role","dept",
         "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"])
-    if os.path.getsize(USER_DB_PATH) < 500:
+    # ✅ Only populate defaults if file is EMPTY (no rows), NOT based on file size
+    try:
+        df = pd.read_excel(USER_DB_PATH, engine="openpyxl")
+        if df.empty:  # Only add defaults if truly empty
+            pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+    except:
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
 def save_users(users_dict):
     rows = []
