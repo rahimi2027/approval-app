@@ -19,6 +19,8 @@ from datetime import datetime, date
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
+
+st.write("DEBUG: service_account import OK")
 # ============================================================
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
