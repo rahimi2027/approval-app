@@ -149,6 +149,51 @@ if drive_service:
 
 
 # ============================================================
+# GOOGLE DRIVE FILE UPLOAD
+# ============================================================
+
+def upload_to_google_drive(local_file_path, display_filename):
+
+    if drive_service is None:
+        st.error("❌ Google Drive is not connected.")
+        return None
+
+    if not os.path.exists(local_file_path):
+        st.error(
+            f"❌ Upload file not found:\n{local_file_path}"
+        )
+        return None
+
+    try:
+        file_metadata = {
+            "name": display_filename,
+            "parents": [GOOGLE_DRIVE_FOLDER_ID]
+        }
+
+        media = MediaFileUpload(
+            local_file_path,
+            resumable=True
+        )
+
+        uploaded = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id,name,parents"
+        ).execute()
+
+        st.success(
+            f"✅ Uploaded to Google Drive: {display_filename}"
+        )
+
+        return uploaded.get("id")
+
+    except Exception as e:
+        st.error(
+            f"❌ Google Drive upload failed:\n\n{repr(e)}"
+        )
+        return None
+
+# ============================================================
 # YOUR OTHER GOOGLE DRIVE FUNCTIONS GO BELOW THIS
 # ============================================================
 # ============================================================
