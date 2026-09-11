@@ -84,28 +84,6 @@ USE_ONEDRIVE = False
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
-# ============================================================
-# ✅ GOOGLE DRIVE — READS FILE DIRECTLY (NO JWT ERRORS!)
-# ============================================================
-SERVICE_ACCOUNT_FILE = os.path.join(BASE_DIR, "service_account_key.json")
-SCOPES = ["https://www.googleapis.com/auth/drive"]
-
-credentials = None
-drive_service = None
-
-if os.path.exists(SERVICE_ACCOUNT_FILE):
-    try:
-        # ✅ READS THE FILE — NEVER PARSES JSON TEXT = SIGNATURE STAYS VALID
-        credentials = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE,
-            scopes=SCOPES
-        )
-        drive_service = build("drive", "v3", credentials=credentials)
-        st.success("✅ Google Drive connected — Key loaded successfully!")
-    except Exception as e:
-        st.error(f"❌ Key Load Error: {str(e)[:300]}")
-else:
-    st.error("❌ service_account_key.json NOT FOUND — check filename and location!")
 
 # ============================================================
 # ✅ GOOGLE DRIVE — READS FILE DIRECTLY (NO JWT ERRORS)
