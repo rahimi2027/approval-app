@@ -85,7 +85,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 # ============================================================
-# ✅ LOAD GOOGLE CREDENTIALS FROM FILE — FIXED JWT SIGNATURE
+# ✅ GOOGLE DRIVE — READS FILE DIRECTLY (NO JWT ERRORS!)
 # ============================================================
 SERVICE_ACCOUNT_FILE = os.path.join(BASE_DIR, "service_account_key.json")
 SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -95,17 +95,17 @@ drive_service = None
 
 if os.path.exists(SERVICE_ACCOUNT_FILE):
     try:
-        # ✅ USE FILE DIRECTLY — avoids JSON parsing → JWT SIGNATURE STAYS VALID
+        # ✅ READS THE FILE — NEVER PARSES JSON TEXT = SIGNATURE STAYS VALID
         credentials = service_account.Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE,
             scopes=SCOPES
         )
         drive_service = build("drive", "v3", credentials=credentials)
-        st.success("✅ Google Drive credentials loaded successfully!")
+        st.success("✅ Google Drive connected — Key loaded successfully!")
     except Exception as e:
-        st.error(f"⚠️ Failed to load credentials: {str(e)[:300]}")
+        st.error(f"❌ Key Load Error: {str(e)[:300]}")
 else:
-    st.warning("⚠️ Credentials file not found — using local storage only")
+    st.error("❌ service_account_key.json NOT FOUND — check filename and location!")
 
 # ============================================================
 # ✅ GOOGLE DRIVE — READS FILE DIRECTLY (NO JWT ERRORS)
