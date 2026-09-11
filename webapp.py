@@ -95,61 +95,6 @@ SCOPES = [
 
 drive_service = None
 
-try:
-    if not st.user.is_logged_in:
-
-        st.warning(
-            "🔐 Google Drive access is required to upload attachments."
-        )
-
-        if st.button("Sign in with Google"):
-            st.login()
-
-        st.stop()
-
-    access_token = st.user.tokens.get("access")
-
-    if not access_token:
-        st.error(
-            "❌ Google Drive access token was not provided."
-        )
-
-        st.info(
-            "Please sign out and sign in with Google again."
-        )
-
-        st.stop()
-
-    # OAuth credentials for YOUR personal Google account
-    credentials = Credentials(
-        token=access_token,
-        scopes=SCOPES
-    )
-
-    drive_service = build(
-        "drive",
-        "v3",
-        credentials=credentials,
-        cache_discovery=False
-    )
-
-    about = drive_service.about().get(
-        fields="user"
-    ).execute()
-
-    st.success(
-        f"✅ Google Drive connected: "
-        f"{about['user'].get('emailAddress')}"
-    )
-
-except Exception as e:
-
-    drive_service = None
-
-    st.error(
-        f"❌ GOOGLE DRIVE CONNECTION FAILED:\n\n{repr(e)}"
-    )
-
 # ============================================================
 # TEST GOOGLE DRIVE FOLDER ACCESS
 # ============================================================
