@@ -125,6 +125,32 @@ except Exception as e:
     st.error(
         f"❌ GOOGLE DRIVE AUTHENTICATION FAILED:\n\n{repr(e)}"
     )
+
+
+# ============================================================
+# TEST GOOGLE DRIVE FOLDER ACCESS
+# ============================================================
+
+if drive_service:
+    try:
+        folder = drive_service.files().get(
+            fileId=GOOGLE_DRIVE_FOLDER_ID,
+            fields="id,name,mimeType"
+        ).execute()
+
+        st.success(
+            f"✅ Google Drive folder accessible: {folder['name']}"
+        )
+
+    except Exception as e:
+        st.error(
+            f"❌ Google Drive folder access failed:\n\n{repr(e)}"
+        )
+
+
+# ============================================================
+# YOUR OTHER GOOGLE DRIVE FUNCTIONS GO BELOW THIS
+# ============================================================
 # ============================================================
 # ✅ ONEDRIVE UPLOAD FUNCTIONS
 # ============================================================
