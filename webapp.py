@@ -802,6 +802,21 @@ def save_record_to_excel(new_record):
     current.append(new_record)
     save_all_records(current)
 # ============================================================
+# COMPLETION / APPROVAL DISPLAY HELPER
+# ============================================================
+def get_completed_by(req):
+    """Return the person who completed the final director decision.
+
+    Older requests store this as decision_by; approved_by is used as a
+    fallback for records created by earlier versions of the app.
+    """
+    for key in ("completed_by", "decision_by", "approved_by"):
+        value = str(req.get(key, "") or "").strip()
+        if value and value.lower() not in ("nan", "none", "-", "director"):
+            return value
+    return str(req.get("decision_by", "") or req.get("approved_by", "") or "").strip()
+
+# ============================================================
 # PDF GENERATION
 # ============================================================
 def generate_approval_pdf(request_data):
@@ -862,6 +877,9 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Request Date:", 0, 0); pdf.cell(0, 5, req_date, ln=True)
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
+        completed_by = clean_text(get_completed_by(fresh_data))
+        if completed_by:
+            pdf.cell(52, 5, "Completed By:", 0, 0); pdf.cell(0, 5, completed_by, ln=True)
         pdf.ln(6)
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True); pdf.ln(2)
@@ -1544,6 +1562,9 @@ def create_pdf_from_request(req):
         except: pass
         row("Amount Approved", amount)
         row("Line Manager", req.get("manager", ""))
+        completed_by = get_completed_by(req)
+        if completed_by:
+            row("Completed By", completed_by)
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
@@ -1923,6 +1944,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     str(r.get("desc", "")),
                     str(r.get("decision_by", "")),
                     str(r.get("approved_by", "")),
+                    str(r.get("completed_by", "")),
                     str(r.get("decision_date", "")),
                     str(r.get("director_comments", "")),
                     str(r.get("attachment_name", "")),
@@ -1947,6 +1969,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+                    completed_by = get_completed_by(req)
+                    if completed_by and status in ["approved", "rejected"]:
+                        st.write(f"✅ **Completed by:** {completed_by}")
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.info(f"📝 Description: {req.get('desc')}")
                     display_attachments(req)
@@ -2067,6 +2092,7 @@ elif role == "Director":
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
+                    st.write(f"✅ **Completed by:** {get_completed_by(req) or dec_by}")
                     st.write(f"📅 Approval Date: {dec_date}")
                     st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
                     display_attachments(req)
