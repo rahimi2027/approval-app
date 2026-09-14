@@ -960,10 +960,18 @@ def _pdf_text(value):
 
 
 def work_order_pdf(req):
+    """Generate the final Work Order PDF safely on Streamlit Cloud.
+
+    Uses an installed Unicode font when available and explicit column widths
+    so long filenames/descriptions cannot trigger FPDF's
+    "Not enough horizontal space to render a single character" error.
+    """
     if not PDF_AVAILABLE:
         return None
+
     try:
-        pdf = FPDF()
+        pdf = FPDF(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
 
         regular_font, bold_font = _pdf_font_paths()
@@ -972,8 +980,6 @@ def work_order_pdf(req):
             pdf.add_font("DejaVu", "B", bold_font)
             font_family = "DejaVu"
         else:
-            # Fallback for environments without a bundled/system Unicode font.
-            # Replace only characters unsupported by the built-in Helvetica font.
             font_family = "Helvetica"
 
         def safe(value):
@@ -982,67 +988,109 @@ def work_order_pdf(req):
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
+        def write_label_value(label, value):
+            """Write a two-column row using fixed widths and safe wrapping."""
+            label_text = safe(f"{label}:")
+            value_text = safe(value)
+
+            # 45mm label + 145mm value = 190mm printable width.
+            pdf.set_font(font_family, "B", 10)
+            pdf.cell(45, 6, label_text, border=0)
+
+            current_y = pdf.get_y()
+            pdf.set_xy(55, current_y)
+            pdf.set_font(font_family, "", 10)
+            pdf.multi_cell(
+                145, 6, value_text,
+                border=0, align="L", fill=False,
+                new_x="LMARGIN", new_y="NEXT",
+                wrapmode="CHAR"
+            )
+            pdf.set_x(10)
+
         pdf.set_font(font_family, "B", 16)
         pdf.cell(0, 10, safe("WORK ORDER - PAYMENT AUTHORISATION"), ln=True, align="C")
         pdf.ln(5)
 
-        pdf.set_font(font_family, "", 10)
         rows = [
             ("Work Order ID", req.get("id", "")),
             ("Employee", req.get("emp_name", "")),
             ("Department", req.get("dept", "")),
             ("Work Date", req.get("work_date", "")),
             ("Hours", req.get("hours", "")),
-            ("Amount", f"GBP {float(req.get('amount', 0)):.2f}"),
+            ("Amount", f"GBP {float(req.get('amount', 0) or 0):.2f}"),
             ("Manager", req.get("manager", "")),
             ("Submitted By", req.get("submitted_by", "")),
             ("Submitted Date", req.get("submitted_date", "")),
         ]
+
         for label, value in rows:
-            pdf.set_font(font_family, "B", 10)
-            pdf.cell(45, 6, safe(label + ":"), 0, 0)
-            pdf.set_font(font_family, "", 10)
-            pdf.multi_cell(0, 6, safe(value), wrapmode="CHAR")
+            write_label_value(label, value)
 
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Work Performed / Description:"), ln=True)
         pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(req.get("desc", "")), wrapmode="CHAR")
+        pdf.multi_cell(
+            190, 6, safe(req.get("desc", "")),
+            border=0, align="L", fill=False,
+            new_x="LMARGIN", new_y="NEXT",
+            wrapmode="CHAR"
+        )
 
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Manager Review"), ln=True)
         pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(
+        manager_review = (
             f"Reviewed By: {req.get('manager_decision_by', '')}\n"
             f"Review Date: {req.get('manager_decision_date', '')}\n"
             f"Comments: {req.get('manager_comments', '')}"
-        ), wrapmode="CHAR")
+        )
+        pdf.multi_cell(
+            190, 6, safe(manager_review),
+            border=0, align="L", fill=False,
+            new_x="LMARGIN", new_y="NEXT",
+            wrapmode="CHAR"
+        )
 
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Director Final Approval"), ln=True)
         pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(
+        director_review = (
             f"Approved By: {req.get('director_decision_by', '')}\n"
             f"Approval Date: {req.get('director_decision_date', '')}\n"
             f"Comments: {req.get('director_comments', '')}"
-        ), wrapmode="CHAR")
+        )
+        pdf.multi_cell(
+            190, 6, safe(director_review),
+            border=0, align="L", fill=False,
+            new_x="LMARGIN", new_y="NEXT",
+            wrapmode="CHAR"
+        )
 
         pdf.ln(4)
         pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"), ln=True)
+        pdf.cell(
+            0, 6,
+            safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"),
+            ln=True
+        )
 
         os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
-        path = os.path.join(WORK_ORDER_PDF_DIR, f"{req.get('id', 'Work_Order')}.pdf")
+        filename = f"{req.get('id', 'Work_Order')}.pdf"
+        path = os.path.join(WORK_ORDER_PDF_DIR, filename)
         pdf.output(path)
-        upload_to_google_drive(path, os.path.basename(path))
-        return path
-    except Exception as e:
-        st.error(f"Work Order PDF Error: {e}")
-        return None
 
+        # Keep one PDF per Work Order ID in Google Drive (update existing file).
+        upload_to_google_drive(path, filename)
+        return path
+
+    except Exception as e:
+        # Do not crash the entire Streamlit app because a single PDF failed.
+        st.error(f"Work Order PDF Error: {type(e).__name__}: {e}")
+        return None
 
 def display_work_order_pdf(req):
     path = req.get("pdf_path", "")
