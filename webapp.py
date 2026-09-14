@@ -837,19 +837,104 @@ def generate_approval_pdf(request_data):
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
-def display_pdf_button(req, can_generate=False, key_suffix=""):
-    req_id = req["id"]
-    unique_key = f"genpdf_{req_id}_{key_suffix}"
-    if can_generate and PDF_AVAILABLE:
-        st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=unique_key)
-        ok, pdf_bytes, name = generate_approval_pdf(req)
-        if ok:
-            st.success(f"✅ Generated! Ready to download ⬇")
-            st.download_button(f"📥 Download: {name}", data=pdf_bytes, file_name=name,
-                mime="application/pdf", type="primary", key=f"dl_{unique_key}")
-        else:
-            st.error(f"❌ {name}")
-    return False
+def display_attachments(req):
+    att = req.get("attachment_name", "None")
+
+    if not att or str(att).strip().lower() in ["none", "nan", ""]:
+        st.info("📎 No attachments.")
+        return
+
+    try:
+        attached_files = [
+            n.strip()
+            for n in str(att).split(",")
+            if n.strip()
+        ]
+
+        found_any = False
+
+        for idx, name in enumerate(attached_files):
+
+            path = os.path.join(UPLOAD_DIR, name)
+
+            if not os.path.exists(path):
+                continue
+
+            found_any = True
+
+            # ------------------------------------------------
+            # IMAGE PREVIEW
+            # ------------------------------------------------
+            if name.lower().endswith(
+                (".png", ".jpg", ".jpeg", ".gif", ".webp")
+            ):
+
+                st.markdown(f"### 🖼️ {name}")
+
+                st.image(
+                    path,
+                    caption=name,
+                    use_container_width=True
+                )
+
+                # Optional download button underneath preview
+                with open(path, "rb") as f:
+                    file_data = f.read()
+
+                st.download_button(
+                    f"⬇️ Download {name}",
+                    data=file_data,
+                    file_name=name,
+                    mime="image/*",
+                    key=f"att_{req.get('id', idx)}_{idx}"
+                )
+
+            # ------------------------------------------------
+            # PDF
+            # ------------------------------------------------
+            elif name.lower().endswith(".pdf"):
+
+                st.markdown(f"### 📄 {name}")
+
+                with open(path, "rb") as f:
+                    pdf_data = f.read()
+
+                st.download_button(
+                    f"⬇️ Download {name}",
+                    data=pdf_data,
+                    file_name=name,
+                    mime="application/pdf",
+                    key=f"att_{req.get('id', idx)}_{idx}"
+                )
+
+            # ------------------------------------------------
+            # OTHER FILES
+            # ------------------------------------------------
+            else:
+
+                st.markdown(f"### 📎 {name}")
+
+                with open(path, "rb") as f:
+                    file_data = f.read()
+
+                st.download_button(
+                    f"⬇️ Download {name}",
+                    data=file_data,
+                    file_name=name,
+                    key=f"att_{req.get('id', idx)}_{idx}"
+                )
+
+        if not found_any:
+            st.info(
+                "📎 Attachments are listed, but the files "
+                "are not available on the server."
+            )
+
+    except Exception as e:
+
+        st.error(
+            f"❌ Could not display attachments: {e}"
+        )
 # ============================================================
 # 📊 DASHBOARD COMPONENT
 # ============================================================
