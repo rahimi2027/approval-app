@@ -128,7 +128,7 @@ try:
 
     st.success(
         f"✅ Google Drive connected: "
-        f"{about['user'].get('emailAddress')}"
+      #  f"{about['user'].get('emailAddress')}"
     )
 
 except Exception as e:
