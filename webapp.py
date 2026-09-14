@@ -1930,470 +1930,375 @@ elif role == "Director":
                             st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
                             st.rerun()
 
-# ─── SUPER ADMIN PORTAL ✅ NOW USING ELIF ───
-elif role == "Super Admin":
-    # ============================================================
-    # ✅ TOGGLE: Show/Hide Danger Zone Buttons
-    # ============================================================
-    if "show_danger_buttons" not in st.session_state:
-        st.session_state.show_danger_buttons = False  # Hidden by default
+# ─── SUPER ADMIN PORTAL ─────────────────────────────────────
 
-    st.session_state.show_danger_buttons = st.toggle(
-        "⚠️ Show Danger Zone (Clear Data Buttons)",
-        value=st.session_state.show_danger_buttons,
-        help="Reveal buttons to clear all requests or audit log — hidden by default for safety"
+elif role == "Super Admin":
+
+    st.subheader("🛡️ Super Admin — All Requests")
+
+    st.info(
+        "✅ View ALL requests across ALL departments. "
+        "Download PDFs. **Approval → Director only.**"
     )
+
     st.divider()
 
-    # ⚠️ Danger Zone — Clear All Requests (with confirmation)
-    if st.session_state.show_danger_buttons:
-        with st.expander("⚠️ Danger Zone — Clear All Requests"):
-            confirm_clear = st.checkbox("✅ I understand — this deletes ALL requests and cannot be undone")
-            if st.button("🗑️ CLEAR ALL TEST REQUESTS", type="secondary", disabled=not confirm_clear):
-                pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-                st.success("✅ ALL REQUESTS CLEARED! Refresh page — ready for live data!")
-                st.rerun()
-    # ============================================================
-st.subheader("🛡️ Super Admin — All Requests")
-st.info(
-    "✅ View ALL requests across ALL departments. "
-    "Download PDFs. **Approval → Director only.**"
-)
-st.divider()
-
-tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs([
-    "⏳ All Pending",
-    "✅ All Approved",
-    "❌ All Rejected",
-    "🔧 System Management"
-])
-
-
-# ============================================================
-# ALL PENDING
-# ============================================================
-
-with tab_pending:
-
-    pending = [
-        r for r in all_live_requests
-        if str(r.get("status", "")).strip().lower() == "pending"
-    ]
-
-    if not pending:
-
-        st.success("✅ No pending requests.")
-
-    else:
-
-        st.metric("⏳ All Pending", len(pending))
-        st.divider()
-
-        for req in reversed(pending):
-
-            req_id = req.get("id")
-            amount = float(req.get("amount", 0))
-
-            title = (
-                f"🟡 ID #{req_id} | "
-                f"{req.get('emp_name')} | "
-                f"{req.get('dept')} | "
-                f"£{amount:.2f}"
-            )
-
-            with st.expander(title):
-
-                st.write(
-                    f"👤 Employee: {req.get('emp_name')} | "
-                    f"🏢 Department: {req.get('dept')}"
-                )
-
-                st.write(
-                    f"🔄 Type: {req.get('type')} | "
-                    f"🏷️ Category: {req.get('category')}"
-                )
-
-                st.write(
-                    f"💷 Amount: £{amount:.2f}"
-                )
-
-                st.write(
-                    f"👔 Line Manager: {req.get('manager')} | "
-                    f"📅 Date: {format_date(req.get('date', ''))}"
-                )
-
-                st.info(
-                    f"📝 Description: {req.get('desc')}"
-                )
-
-                # =================================================
-                # ATTACHMENTS
-                # Director = preview images
-                # Everyone else = download only
-                # =================================================
-
-                display_attachments(req)
-
-                if req.get("director_comments"):
-
-                    st.info(
-                        f"💬 Director Comments: "
-                        f"{req.get('director_comments')}"
-                    )
-
-                st.divider()
-
-                # =================================================
-                # PDF
-                # =================================================
-
-                display_pdf_button(
-                    req,
-                    can_generate=True
-                )
-
-
-# ============================================================
-# ALL APPROVED
-# ============================================================
-
-with tab_approved:
-
-    approved = [
-        r for r in all_live_requests
-        if str(r.get("status", "")).strip().lower() == "approved"
-    ]
-
-    if not approved:
-
-        st.info("📋 No approved requests.")
-
-    else:
-
-        st.metric("✅ All Approved", len(approved))
-        st.divider()
-
-        for req in reversed(approved):
-
-            req_id = req.get("id")
-            amount = float(req.get("amount", 0))
-
-            dec_by = req.get(
-                "decision_by",
-                "Director"
-            )
-
-            dec_date = req.get(
-                "decision_date",
-                ""
-            )
-
-            display_date = (
-                dec_date
-                if dec_date
-                else ""
-            )
-
-            if display_date:
-
-                extra_text = (
-                    f" | ✅ Approved by {dec_by} "
-                    f"on {display_date}"
-                )
-
-            else:
-
-                extra_text = (
-                    f" | ✅ Approved by {dec_by}"
-                )
-
-            title = (
-                f"🟢 ID #{req_id} | "
-                f"{req.get('emp_name')} | "
-                f"{req.get('dept')} | "
-                f"£{amount:.2f}"
-                f"{extra_text}"
-            )
-
-            with st.expander(title):
-
-                st.write(
-                    f"👤 Employee: {req.get('emp_name')} | "
-                    f"🏢 Department: {req.get('dept')}"
-                )
-
-                st.write(
-                    f"💷 Amount: £{amount:.2f}"
-                )
-
-                st.write(
-                    f"🎯 **Approved By:** {dec_by}"
-                )
-
-                if display_date:
-
-                    st.write(
-                        f"📅 **Approval Date:** "
-                        f"{display_date}"
-                    )
-
-                st.success(
-                    f"💬 Director Comments: "
-                    f"{req.get('director_comments', 'None')}"
-                )
-
-                # =================================================
-                # ATTACHMENTS
-                # =================================================
-
-                display_attachments(req)
-
-                st.divider()
-
-                # =================================================
-                # PDF
-                # =================================================
-
-                display_pdf_button(
-                    req,
-                    can_generate=True
-                )
-
-
-# ============================================================
-# ALL REJECTED
-# ============================================================
-
-with tab_rejected:
-
-    rejected = [
-        r for r in all_live_requests
-        if str(r.get("status", "")).strip().lower() == "rejected"
-    ]
-
-    if not rejected:
-
-        st.info("📋 No rejected requests.")
-
-    else:
-
-        st.metric("❌ All Rejected", len(rejected))
-        st.divider()
-
-        for req in reversed(rejected):
-
-            req_id = req.get("id")
-            amount = float(req.get("amount", 0))
-
-            dec_by = req.get(
-                "decision_by",
-                "Director"
-            )
-
-            dec_date = format_date(
-                req.get("decision_date", "")
-            )
-
-            title = (
-                f"🔴 ID #{req_id} | "
-                f"{req.get('emp_name')} | "
-                f"{req.get('dept')} | "
-                f"£{amount:.2f}"
-            )
-
-            with st.expander(title):
-
-                st.write(
-                    f"👤 Employee: {req.get('emp_name')} | "
-                    f"🏢 Department: {req.get('dept')}"
-                )
-
-                st.write(
-                    f"💷 Amount: £{amount:.2f}"
-                )
-
-                st.error(
-                    f"❌ Rejected By: "
-                    f"{dec_by} on {dec_date}"
-                )
-
-                st.error(
-                    f"💬 Reason: "
-                    f"{req.get('director_comments', 'None')}"
-                )
-
-                # =================================================
-                # ATTACHMENTS
-                # =================================================
-
-                display_attachments(req)
-
-                st.divider()
-
-                # =================================================
-                # PDF
-                # =================================================
-
-                display_pdf_button(
-                    req,
-                    can_generate=True
-                )
-
-
-# ============================================================
-# SYSTEM MANAGEMENT
-# ============================================================
-
-with tab_manage:
-
-    tab_settings, tab_users, tab_audit = st.tabs([
-        "⚙️ System Settings",
-        "👤 User Management",
-        "📖 Audit History"
+    tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs([
+        "⏳ All Pending",
+        "✅ All Approved",
+        "❌ All Rejected",
+        "🔧 System Management"
     ])
 
-
     # ========================================================
-    # SETTINGS
-    # ========================================================
-
-    with tab_settings:
-
-        settings_management_panel()
-
-
-    # ========================================================
-    # USERS
+    # PENDING
     # ========================================================
 
-    with tab_users:
+    with tab_pending:
 
-        user_management_panel()
+        pending = [
+            r for r in all_live_requests
+            if str(r.get("status", "")).strip().lower() == "pending"
+        ]
 
+        if not pending:
 
-    # ========================================================
-    # AUDIT
-    # ========================================================
-
-    with tab_audit:
-
-        if "display_audit_log_panel" in globals():
-
-            display_audit_log_panel()
-
-            # Clear Audit Log
-            if st.session_state.show_danger_buttons:
-
-                if st.button(
-                    "🗑️ Clear Audit Log",
-                    type="secondary"
-                ):
-
-                    clear_audit_log_file()
-
-                    st.success(
-                        "✅ Audit log cleared!"
-                    )
-
-                    st.rerun()
+            st.success("✅ No pending requests.")
 
         else:
 
-            st.info(
-                "📖 Audit log panel not defined — skipping"
-            )
+            st.metric("⏳ All Pending", len(pending))
+            st.divider()
+
+            for req in reversed(pending):
+
+                req_id = req.get("id")
+                amount = float(req.get("amount", 0))
+
+                with st.expander(
+                    f"🟡 ID #{req_id} | "
+                    f"{req.get('emp_name')} | "
+                    f"{req.get('dept')} | "
+                    f"£{amount:.2f}"
+                ):
+
+                    st.write(
+                        f"👤 Employee: {req.get('emp_name')} | "
+                        f"🏢 Department: {req.get('dept')}"
+                    )
+
+                    st.write(
+                        f"🔄 Type: {req.get('type')} | "
+                        f"🏷️ Category: {req.get('category')}"
+                    )
+
+                    st.write(
+                        f"💷 Amount: £{amount:.2f}"
+                    )
+
+                    st.write(
+                        f"👔 Line Manager: {req.get('manager')} | "
+                        f"📅 Date: {format_date(req.get('date', ''))}"
+                    )
+
+                    st.info(
+                        f"📝 Description: {req.get('desc')}"
+                    )
+
+                    # Attachments
+                    display_attachments(req)
+
+                    if req.get("director_comments"):
+
+                        st.info(
+                            f"💬 Director Comments: "
+                            f"{req.get('director_comments')}"
+                        )
+
+                    st.divider()
+
+                    display_pdf_button(
+                        req,
+                        can_generate=True
+                    )
 
 
     # ========================================================
-    # BACKUPS
+    # APPROVED
     # ========================================================
 
-    st.divider()
+    with tab_approved:
 
-    st.subheader(
-        "📥 Download Data Backups"
-    )
+        approved = [
+            r for r in all_live_requests
+            if str(r.get("status", "")).strip().lower() == "approved"
+        ]
 
-    backup_col1, backup_col2, backup_col3 = st.columns(3)
+        if not approved:
 
+            st.info("📋 No approved requests.")
 
-    # Requests backup
-    with backup_col1:
+        else:
 
-        if (
-            "EXCEL_PATH" in globals()
-            and os.path.exists(EXCEL_PATH)
-        ):
+            st.metric("✅ All Approved", len(approved))
+            st.divider()
 
-            with open(EXCEL_PATH, "rb") as f:
+            for req in reversed(approved):
 
-                st.download_button(
-                    "📥 Download Requests",
-                    f.read(),
-                    file_name=(
-                        f"BACKUP_requests_"
-                        f"{datetime.now().strftime('%Y-%m-%d')}.xlsx"
-                    ),
-                    type="primary"
+                req_id = req.get("id")
+                amount = float(req.get("amount", 0))
+
+                dec_by = req.get(
+                    "decision_by",
+                    "Director"
                 )
 
-
-    # Users backup
-    with backup_col2:
-
-        if (
-            "USER_DB_PATH" in globals()
-            and os.path.exists(USER_DB_PATH)
-        ):
-
-            with open(USER_DB_PATH, "rb") as f:
-
-                st.download_button(
-                    "📥 Download Users",
-                    f.read(),
-                    file_name=(
-                        f"BACKUP_users_"
-                        f"{datetime.now().strftime('%Y-%m-%d')}.xlsx"
-                    ),
-                    type="primary"
+                dec_date = req.get(
+                    "decision_date",
+                    ""
                 )
 
+                with st.expander(
+                    f"🟢 ID #{req_id} | "
+                    f"{req.get('emp_name')} | "
+                    f"{req.get('dept')} | "
+                    f"£{amount:.2f}"
+                ):
 
-    # Settings backup
-    with backup_col3:
+                    st.write(
+                        f"👤 Employee: {req.get('emp_name')} | "
+                        f"🏢 Department: {req.get('dept')}"
+                    )
 
-        if (
-            "SETTINGS_PATH" in globals()
-            and os.path.exists(SETTINGS_PATH)
-        ):
+                    st.write(
+                        f"💷 Amount: £{amount:.2f}"
+                    )
 
-            with open(SETTINGS_PATH, "rb") as f:
+                    st.write(
+                        f"🎯 **Approved By:** {dec_by}"
+                    )
 
-                st.download_button(
-                    "📥 Download Settings",
-                    f.read(),
-                    file_name=(
-                        f"BACKUP_settings_"
-                        f"{datetime.now().strftime('%Y-%m-%d')}.xlsx"
-                    ),
-                    type="primary"
+                    if dec_date:
+
+                        st.write(
+                            f"📅 **Approval Date:** {dec_date}"
+                        )
+
+                    st.success(
+                        f"💬 Director Comments: "
+                        f"{req.get('director_comments', 'None')}"
+                    )
+
+                    display_attachments(req)
+
+                    st.divider()
+
+                    display_pdf_button(
+                        req,
+                        can_generate=True
+                    )
+
+
+    # ========================================================
+    # REJECTED
+    # ========================================================
+
+    with tab_rejected:
+
+        rejected = [
+            r for r in all_live_requests
+            if str(r.get("status", "")).strip().lower() == "rejected"
+        ]
+
+        if not rejected:
+
+            st.info("📋 No rejected requests.")
+
+        else:
+
+            st.metric("❌ All Rejected", len(rejected))
+            st.divider()
+
+            for req in reversed(rejected):
+
+                req_id = req.get("id")
+                amount = float(req.get("amount", 0))
+
+                dec_by = req.get(
+                    "decision_by",
+                    "Director"
                 )
 
+                dec_date = format_date(
+                    req.get("decision_date", "")
+                )
 
-    st.caption(
-        "💾 Save these files to your computer for backup"
-    )
+                with st.expander(
+                    f"🔴 ID #{req_id} | "
+                    f"{req.get('emp_name')} | "
+                    f"{req.get('dept')} | "
+                    f"£{amount:.2f}"
+                ):
+
+                    st.write(
+                        f"👤 Employee: {req.get('emp_name')} | "
+                        f"🏢 Department: {req.get('dept')}"
+                    )
+
+                    st.write(
+                        f"💷 Amount: £{amount:.2f}"
+                    )
+
+                    st.error(
+                        f"❌ Rejected By: "
+                        f"{dec_by} on {dec_date}"
+                    )
+
+                    st.error(
+                        f"💬 Reason: "
+                        f"{req.get('director_comments', 'None')}"
+                    )
+
+                    display_attachments(req)
+
+                    st.divider()
+
+                    display_pdf_button(
+                        req,
+                        can_generate=True
+                    )
+
+
+    # ========================================================
+    # SYSTEM MANAGEMENT
+    # ========================================================
+
+    with tab_manage:
+
+        tab_settings, tab_users, tab_audit = st.tabs([
+            "⚙️ System Settings",
+            "👤 User Management",
+            "📖 Audit History"
+        ])
+
+        with tab_settings:
+            settings_management_panel()
+
+        with tab_users:
+            user_management_panel()
+
+        with tab_audit:
+
+            if "display_audit_log_panel" in globals():
+
+                display_audit_log_panel()
+
+                if st.session_state.get(
+                    "show_danger_buttons",
+                    False
+                ):
+
+                    if st.button(
+                        "🗑️ Clear Audit Log",
+                        type="secondary"
+                    ):
+
+                        clear_audit_log_file()
+
+                        st.success(
+                            "✅ Audit log cleared!"
+                        )
+
+                        st.rerun()
+
+            else:
+
+                st.info(
+                    "📖 Audit log panel not defined — skipping"
+                )
+
+        # ====================================================
+        # BACKUPS
+        # ====================================================
+
+        st.divider()
+
+        st.subheader("📥 Download Data Backups")
+
+        backup_col1, backup_col2, backup_col3 = st.columns(3)
+
+        with backup_col1:
+
+            if (
+                "EXCEL_PATH" in globals()
+                and os.path.exists(EXCEL_PATH)
+            ):
+
+                with open(EXCEL_PATH, "rb") as f:
+
+                    st.download_button(
+                        "📥 Download Requests",
+                        f.read(),
+                        file_name=(
+                            f"BACKUP_requests_"
+                            f"{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+                        ),
+                        type="primary",
+                        key="backup_requests"
+                    )
+
+        with backup_col2:
+
+            if (
+                "USER_DB_PATH" in globals()
+                and os.path.exists(USER_DB_PATH)
+            ):
+
+                with open(USER_DB_PATH, "rb") as f:
+
+                    st.download_button(
+                        "📥 Download Users",
+                        f.read(),
+                        file_name=(
+                            f"BACKUP_users_"
+                            f"{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+                        ),
+                        type="primary",
+                        key="backup_users"
+                    )
+
+        with backup_col3:
+
+            if (
+                "SETTINGS_PATH" in globals()
+                and os.path.exists(SETTINGS_PATH)
+            ):
+
+                with open(SETTINGS_PATH, "rb") as f:
+
+                    st.download_button(
+                        "📥 Download Settings",
+                        f.read(),
+                        file_name=(
+                            f"BACKUP_settings_"
+                            f"{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+                        ),
+                        type="primary",
+                        key="backup_settings"
+                    )
+
+        st.caption(
+            "💾 Save these files to your computer for backup"
+        )
 
 
 # ============================================================
-# DEFAULT / FALLBACK — MUST BE LAST
+# DEFAULT / FALLBACK
 # ============================================================
 
 else:
 
-    st.subheader(
-        "🔐 Access Restricted"
-    )
+    st.subheader("🔐 Access Restricted")
 
     st.error(
         "❌ Your role does not have a defined portal. "
