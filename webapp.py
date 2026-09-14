@@ -938,102 +938,37 @@ def _manager_options_for_department(department):
     return sorted([n for n in names if n])
 
 
-def _pdf_font_paths():
-    """Return Unicode-capable fonts available on Streamlit Cloud/local runtime."""
-    candidates = [
-        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-        ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
-    ]
-    for regular, bold in candidates:
-        if os.path.exists(regular) and os.path.exists(bold):
-            return regular, bold
-    return None, None
-
-
-def _pdf_text(value):
-    """Convert arbitrary values to safe PDF text without losing normal Unicode."""
-    if value is None:
-        return ""
-    return str(value).replace("\x00", "")
-
-
 def work_order_pdf(req):
     if not PDF_AVAILABLE:
         return None
     try:
         pdf = FPDF()
         pdf.add_page()
-
-        regular_font, bold_font = _pdf_font_paths()
-        if regular_font and bold_font:
-            pdf.add_font("DejaVu", "", regular_font)
-            pdf.add_font("DejaVu", "B", bold_font)
-            font_family = "DejaVu"
-        else:
-            # Fallback for environments without a bundled/system Unicode font.
-            # Replace only characters unsupported by the built-in Helvetica font.
-            font_family = "Helvetica"
-
-        def safe(value):
-            text = _pdf_text(value)
-            if font_family == "Helvetica":
-                return text.encode("latin-1", "replace").decode("latin-1")
-            return text
-
-        pdf.set_font(font_family, "B", 16)
-        pdf.cell(0, 10, safe("WORK ORDER - PAYMENT AUTHORISATION"), ln=True, align="C")
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, "WORK ORDER — PAYMENT AUTHORISATION", ln=True, align="C")
         pdf.ln(5)
-
-        pdf.set_font(font_family, "", 10)
+        pdf.set_font("Helvetica", "", 10)
         rows = [
-            ("Work Order ID", req.get("id", "")),
-            ("Employee", req.get("emp_name", "")),
-            ("Department", req.get("dept", "")),
-            ("Work Date", req.get("work_date", "")),
-            ("Hours", req.get("hours", "")),
-            ("Amount", f"GBP {float(req.get('amount', 0)):.2f}"),
-            ("Manager", req.get("manager", "")),
-            ("Submitted By", req.get("submitted_by", "")),
+            ("Work Order ID", req.get("id", "")), ("Employee", req.get("emp_name", "")),
+            ("Department", req.get("dept", "")), ("Work Date", req.get("work_date", "")),
+            ("Hours", req.get("hours", "")), ("Amount", f"£{float(req.get('amount', 0)):.2f}"),
+            ("Manager", req.get("manager", "")), ("Submitted By", req.get("submitted_by", "")),
             ("Submitted Date", req.get("submitted_date", "")),
         ]
         for label, value in rows:
-            pdf.set_font(font_family, "B", 10)
-            pdf.cell(45, 6, safe(label + ":"), 0, 0)
-            pdf.set_font(font_family, "", 10)
-            pdf.multi_cell(0, 6, safe(value))
-
-        pdf.ln(2)
-        pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe("Work Performed / Description:"), ln=True)
-        pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(req.get("desc", "")))
-
-        pdf.ln(3)
-        pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe("Manager Review"), ln=True)
-        pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(
-            f"Reviewed By: {req.get('manager_decision_by', '')}\n"
-            f"Review Date: {req.get('manager_decision_date', '')}\n"
-            f"Comments: {req.get('manager_comments', '')}"
-        ))
-
-        pdf.ln(2)
-        pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe("Director Final Approval"), ln=True)
-        pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(
-            f"Approved By: {req.get('director_decision_by', '')}\n"
-            f"Approval Date: {req.get('director_decision_date', '')}\n"
-            f"Comments: {req.get('director_comments', '')}"
-        ))
-
-        pdf.ln(4)
-        pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"), ln=True)
-
+            pdf.set_font("Helvetica", "B", 10); pdf.cell(45, 6, label + ":", 0, 0)
+            pdf.set_font("Helvetica", "", 10); pdf.multi_cell(0, 6, str(value))
+        pdf.ln(2); pdf.set_font("Helvetica", "B", 10); pdf.cell(0, 6, "Work Performed / Description:", ln=True)
+        pdf.set_font("Helvetica", "", 10); pdf.multi_cell(0, 6, str(req.get("desc", "")))
+        pdf.ln(3); pdf.set_font("Helvetica", "B", 10); pdf.cell(0, 6, "Manager Review", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, f"Reviewed By: {req.get('manager_decision_by', '')}\nReview Date: {req.get('manager_decision_date', '')}\nComments: {req.get('manager_comments', '')}")
+        pdf.ln(2); pdf.set_font("Helvetica", "B", 10); pdf.cell(0, 6, "Director Final Approval", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, f"Approved By: {req.get('director_decision_by', '')}\nApproval Date: {req.get('director_decision_date', '')}\nComments: {req.get('director_comments', '')}")
+        pdf.ln(4); pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 6, f"Payment Status: {req.get('payroll_status', 'Pending')}", ln=True)
+        if req.get("payroll_by"): pdf.cell(0, 6, f"Processed By: {req.get('payroll_by')} on {req.get('payroll_date', '')}", ln=True)
         os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
         path = os.path.join(WORK_ORDER_PDF_DIR, f"{req.get('id', 'Work_Order')}.pdf")
         pdf.output(path)
@@ -1183,45 +1118,22 @@ def render_work_order_director_portal(director_name):
 
 def render_work_order_payroll_portal(payroll_name):
     st.subheader("🛠️ Work Orders — Payroll")
-    st.info("View Director-approved work orders and download the authorised PDF. Payroll does not change the work order status.")
-    orders = load_work_orders()
-    approved = [r for r in orders if r.get("status") == "approved_payment"]
-
-    search = st.text_input(
-        "🔎 Search approved work orders",
-        placeholder="Search by ID, employee, manager, director, department, amount or date...",
-        key="wo_payroll_search"
-    )
+    orders=load_work_orders(); approved=[r for r in orders if r.get("status")=="approved_payment"]
+    search=st.text_input("🔎 Search approved work orders", placeholder="Search by ID, employee, manager, director, department, amount or date...", key="wo_payroll_search")
     if search.strip():
-        q = search.lower().strip()
-        approved = [r for r in approved if q in " ".join(str(v) for v in r.values()).lower()]
-
-    st.metric("✅ Approved for Payment", len(approved))
-    st.divider()
-
-    if not approved:
-        st.success("✅ No Director-approved work orders found.")
-        return
-
+        q=search.lower().strip(); approved=[r for r in approved if q in " ".join(str(v) for v in r.values()).lower()]
+    st.metric("✅ Approved for Payment",len(approved)); st.divider()
     for r in reversed(approved):
-        with st.expander(
-            f"🟢 {r.get('id')} | {r.get('emp_name')} | "
-            f"£{r.get('amount', 0):.2f} | Approved by {r.get('director_decision_by')}"
-        ):
-            st.write(
-                f"📝 Submitted by: {r.get('submitted_by')} | "
-                f"👔 Manager: {r.get('manager')} | "
-                f"🎯 Director: {r.get('director_decision_by')}"
-            )
-            st.write(
-                f"📅 Approval: {r.get('director_decision_date')} | "
-                f"💷 £{r.get('amount', 0):.2f}"
-            )
-            st.info(r.get('desc', ''))
-            display_attachments(r)
-
-            # Payroll only downloads the final authorised PDF.
-            # There is deliberately no 'Mark as Paid' action here.
+        with st.expander(f"🟢 {r.get('id')} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Approved by {r.get('director_decision_by')}"):
+            st.write(f"📝 Submitted by: {r.get('submitted_by')} | 👔 Manager: {r.get('manager')} | 🎯 Director: {r.get('director_decision_by')}")
+            st.write(f"📅 Approval: {r.get('director_decision_date')} | 💷 £{r.get('amount',0):.2f}"); st.info(r.get('desc','')); display_attachments(r)
+            if r.get("payroll_status") != "Paid":
+                if st.button("💳 Mark as Paid", key=f"wo_paid_{r.get('id')}", type="primary"):
+                    for x in orders:
+                        if str(x.get("id"))==str(r.get("id")):
+                            x["payroll_status"]="Paid"; x["payroll_by"]=payroll_name; x["payroll_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    save_all_work_orders(orders); log_action("WORK_ORDER_PAID", r.get("id"), decision_by=payroll_name); st.success("Marked as Paid."); st.rerun()
+            else: st.success(f"✅ Paid by {r.get('payroll_by')} on {r.get('payroll_date')}")
             display_work_order_pdf(r)
 
 # ============================================================
