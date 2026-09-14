@@ -838,16 +838,6 @@ def generate_approval_pdf(request_data):
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
 
-is_director = (
-    st.session_state.get("user_info", {})
-    .get("role", "")
-    .strip()
-    .lower()
-    == "director"
-)
-
-display_attachments(req, preview=is_director)
-
 def display_attachments(req, preview=False):
     att = req.get("attachment_name", "None")
 
@@ -865,6 +855,7 @@ def display_attachments(req, preview=False):
         found_any = False
 
         for idx, name in enumerate(attached_files):
+
             path = os.path.join(UPLOAD_DIR, name)
 
             if not os.path.exists(path):
@@ -872,9 +863,11 @@ def display_attachments(req, preview=False):
 
             found_any = True
 
+            # Director gets image preview
             if preview and name.lower().endswith(
                 (".png", ".jpg", ".jpeg", ".gif", ".webp")
             ):
+
                 st.markdown(f"### 🖼️ {name}")
 
                 st.image(
@@ -883,6 +876,7 @@ def display_attachments(req, preview=False):
                     use_container_width=True
                 )
 
+                # Director can also download
                 with open(path, "rb") as f:
                     st.download_button(
                         f"⬇️ Download {name}",
@@ -892,7 +886,9 @@ def display_attachments(req, preview=False):
                         key=f"att_{req.get('id', idx)}_{idx}"
                     )
 
+            # Everyone else gets download only
             else:
+
                 with open(path, "rb") as f:
                     file_data = f.read()
 
@@ -909,7 +905,9 @@ def display_attachments(req, preview=False):
             )
 
     except Exception as e:
-        st.error(f"❌ Could not display attachments: {e}")
+        st.error(
+            f"❌ Could not display attachments: {e}"
+        )
 # ============================================================
 # 📊 DASHBOARD COMPONENT
 # ============================================================
