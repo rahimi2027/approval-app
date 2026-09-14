@@ -914,9 +914,6 @@ def generate_approval_pdf(request_data):
         submitted_by = clean_text(get_submitted_by(fresh_data))
         if submitted_by:
             pdf.cell(52, 5, "Submitted By:", 0, 0); pdf.cell(0, 5, submitted_by, ln=True)
-        completed_by = clean_text(get_completed_by(fresh_data))
-        if completed_by:
-            pdf.cell(52, 5, "Completed By:", 0, 0); pdf.cell(0, 5, completed_by, ln=True)
         pdf.ln(6)
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True); pdf.ln(2)
@@ -1602,9 +1599,6 @@ def create_pdf_from_request(req):
         submitted_by = get_submitted_by(req)
         if submitted_by:
             row("Submitted By", submitted_by)
-        completed_by = get_completed_by(req)
-        if completed_by:
-            row("Completed By", completed_by)
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
