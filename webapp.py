@@ -17,9 +17,10 @@ import requests
 from datetime import datetime, date
 
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
+st.write("DEBUG: service_account import OK")
 # ============================================================
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
@@ -128,7 +129,7 @@ try:
 
     st.success(
         f"✅ Google Drive connected: "
-      #  f"{about['user'].get('emailAddress')}"
+        f"{about['user'].get('emailAddress')}"
     )
 
 except Exception as e:
@@ -155,7 +156,7 @@ if drive_service:
 
         st.success(
             f"✅ Google Drive folder accessible: "
-           # f"{folder['name']}"
+            f"{folder['name']}"
         )
 
     except Exception as e:
@@ -171,156 +172,106 @@ if drive_service:
 # GOOGLE DRIVE UPLOAD
 # ============================================================
 
-def upload_to_google_drive(
-    local_file_path,
-    display_filename
-):
-
-    if drive_service is None:
-
-        st.error(
-            "❌ Google Drive is not connected."
-        )
-
-        return None
-
-    if not os.path.exists(local_file_path):
-
-        st.error(
-            f"❌ File not found: {local_file_path}"
-        )
-
-        return None
-
-    try:
-
-        file_metadata = {
-            "name": display_filename,
-            "parents": [
-                GOOGLE_DRIVE_FOLDER_ID
-            ]
-        }
-
-        media = MediaFileUpload(
-            local_file_path,
-            resumable=True
-        )
-
-        uploaded = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id,name,parents"
-        ).execute()
-
-        st.success(
-            f"✅ Uploaded to Google Drive: "
-            f"{display_filename}"
-        )
-
-        return uploaded.get("id")
-
-    except Exception as e:
-
-        st.error(
-            f"❌ Google Drive upload failed: {e}"
-        )
-
-        return None
-
-# ============================================================
-# GOOGLE DRIVE — PERMANENT APPLICATION DATA STORAGE
-# ============================================================
-# The Streamlit filesystem is used only as a working/cache copy.
-# These helpers keep the important Excel/PDF data permanently in
-# the configured Google Drive folder.
-
-def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+def find_google_drive_file(display_filename):
+    """Return the newest non-trashed file with this name in the app folder."""
     if drive_service is None:
         return None
     try:
-        safe_name = filename.replace("'", "\\'")
-        q = (f"name = '{safe_name}' and '{parent_id}' in parents "
-             "and trashed = false")
+        safe_name = str(display_filename).replace("\\", "\\\\").replace("'", "\\'")
+        query = (
+            f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents "
+            f"and name = '{safe_name}' "
+            f"and trashed = false"
+        )
         result = drive_service.files().list(
-            q=q, spaces="drive", fields="files(id,name,modifiedTime)", pageSize=10
+            q=query,
+            spaces="drive",
+            fields="files(id,name,modifiedTime,mimeType)",
+            orderBy="modifiedTime desc",
+            pageSize=10
         ).execute()
         files = result.get("files", [])
         return files[0] if files else None
     except Exception as e:
-        print(f"Drive lookup failed for {filename}: {e}")
+        print(f"⚠️ Google Drive file lookup failed for {display_filename}: {e}")
         return None
 
-def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    if drive_service is None or not os.path.exists(local_path):
+def upload_to_google_drive(local_file_path, display_filename, silent=False):
+    """
+    Create the file once, then UPDATE that same Google Drive file on later saves.
+    This prevents requests.xlsx, settings.xlsx, user_database.xlsx and audit_log.xlsx
+    from generating duplicate copies on every request/action.
+    """
+    if drive_service is None:
+        if not silent:
+            st.error("❌ Google Drive is not connected.")
         return None
-    filename = filename or os.path.basename(local_path)
+
+    if not os.path.exists(local_file_path):
+        if not silent:
+            st.error(f"❌ File not found: {local_file_path}")
+        return None
+
     try:
-        existing = _drive_find_file(filename, parent_id)
+        media = MediaFileUpload(local_file_path, resumable=True)
+        existing = find_google_drive_file(display_filename)
+
         if existing:
-            media = MediaFileUpload(local_path, resumable=True)
             updated = drive_service.files().update(
-                fileId=existing["id"], media_body=media, fields="id,name"
+                fileId=existing["id"],
+                media_body=media,
+                fields="id,name,modifiedTime"
             ).execute()
+            if not silent:
+                st.success(f"🔄 Updated existing Google Drive file: {display_filename}")
             return updated.get("id")
-        metadata = {"name": filename, "parents": [parent_id]}
-        media = MediaFileUpload(local_path, resumable=True)
+
+        file_metadata = {
+            "name": display_filename,
+            "parents": [GOOGLE_DRIVE_FOLDER_ID]
+        }
         created = drive_service.files().create(
-            body=metadata, media_body=media, fields="id,name"
+            body=file_metadata,
+            media_body=media,
+            fields="id,name,parents"
         ).execute()
+        if not silent:
+            st.success(f"☁️ Created Google Drive file: {display_filename}")
         return created.get("id")
+
     except Exception as e:
-        print(f"Drive upload failed for {filename}: {e}")
+        if not silent:
+            st.error(f"❌ Google Drive sync failed for {display_filename}: {e}")
+        else:
+            print(f"⚠️ Google Drive sync failed for {display_filename}: {e}")
         return None
 
-def _drive_download_file(file_id, local_path):
+def restore_google_drive_file(display_filename, local_file_path):
+    """Restore a persistent Excel file from Drive when the Streamlit instance is new."""
     if drive_service is None:
         return False
+    if os.path.exists(local_file_path):
+        try:
+            pd.read_excel(local_file_path, engine="openpyxl")
+            return False
+        except Exception:
+            pass
+    existing = find_google_drive_file(display_filename)
+    if not existing:
+        return False
     try:
-        request = drive_service.files().get_media(fileId=file_id)
-        with open(local_path, "wb") as fh:
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
+        response = drive_service.files().get_media(fileId=existing["id"]).execute()
+        with open(local_file_path, "wb") as f:
+            f.write(response)
+        print(f"✅ Restored {display_filename} from Google Drive")
         return True
     except Exception as e:
-        print(f"Drive download failed for {local_path}: {e}")
+        print(f"⚠️ Could not restore {display_filename} from Google Drive: {e}")
         return False
 
-def sync_persistent_file(local_path, columns=None):
-    """On startup: Drive is authoritative; migrate an existing local file if Drive has none."""
-    if drive_service is None:
-        return
-    filename = os.path.basename(local_path)
-    remote = _drive_find_file(filename)
-    if remote:
-        if not _drive_download_file(remote["id"], local_path):
-            print(f"Using local copy of {filename} because Drive download failed")
-    elif os.path.exists(local_path):
-        _drive_upload_path(local_path, filename)
-    elif columns is not None:
-        pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
-        _drive_upload_path(local_path, filename)
-
-def sync_saved_file_to_drive(local_path):
-    """Push a newly saved local file to Google Drive."""
-    if drive_service is not None and os.path.exists(local_path):
-        _drive_upload_path(local_path)
-
-def initialise_drive_storage():
-    if drive_service is None or st.session_state.get("drive_storage_initialised"):
-        return
-    # These are the application's permanent databases.
-    targets = [
-        (EXCEL_PATH, EXCEL_COLUMNS),
-        (USER_DB_PATH, ["full_name","username","password","role","dept",
-            "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"]),
-        (SETTINGS_PATH, ["setting", "value"]),
-        (AUDIT_LOG_PATH, AUDIT_COLUMNS),
-    ]
-    for path, columns in targets:
-        sync_persistent_file(path, columns)
-    st.session_state["drive_storage_initialised"] = True
+def sync_persistent_file(local_file_path, display_filename):
+    """Sync one canonical app data file to one canonical Drive file."""
+    return upload_to_google_drive(local_file_path, display_filename, silent=True)
 
 # ============================================================
 # YOUR OTHER GOOGLE DRIVE FUNCTIONS GO BELOW THIS
@@ -398,12 +349,14 @@ PERMISSION_LABELS = {
 # PDF LIBRARY
 # ============================================================
 try:
-    # The PyPI package is named fpdf2, but its Python module is named fpdf.
-    from fpdf import FPDF
+    from fpdf2 import FPDF
     PDF_AVAILABLE = True
 except ImportError:
-    FPDF = None
-    PDF_AVAILABLE = False
+    try:
+        from fpdf import FPDF
+        PDF_AVAILABLE = True
+    except ImportError:
+        PDF_AVAILABLE = False
 # ============================================================
 # ✅ SAFE EXCEL INIT — FIXES "File is not a zip file"
 # ============================================================
@@ -436,7 +389,7 @@ def save_audit_entry(entry):
         df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
         df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
         df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
-        sync_saved_file_to_drive(AUDIT_LOG_PATH)
+        sync_persistent_file(AUDIT_LOG_PATH, "audit_log.xlsx")
     except Exception as e:
         print(f"⚠️ Failed to save audit entry: {e}")
 def archive_audit_log():
@@ -451,7 +404,7 @@ def archive_audit_log():
 def clear_audit_log_file():
     if os.path.exists(AUDIT_LOG_FILE): os.remove(AUDIT_LOG_FILE)
     pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
-    sync_saved_file_to_drive(AUDIT_LOG_FILE)
+    sync_persistent_file(AUDIT_LOG_FILE, "audit_log.xlsx")
 def get_request_details(req_id):
     dept, amount, decision_by, decision_date = "-", "-", "-", "-"
     try:
@@ -578,6 +531,21 @@ def format_date(d):
     s = str(d).strip()
     # Return full date+time if it contains time, otherwise just date
     return s
+def display_attachments(req):
+    att = req.get("attachment_name", "None")
+    if not att or str(att).strip().lower() in ["none", "nan", ""]:
+        st.info("📎 No attachments."); return
+    try:
+        attached_files = [n.strip() for n in str(att).split(",")]
+        found_any = False
+        for idx, name in enumerate(attached_files):
+            path = os.path.join(UPLOAD_DIR, name)
+            if os.path.exists(path):
+                found_any = True
+                with open(path, "rb") as f:
+                    st.download_button(f"⬇️ Download {name}", f.read(), file_name=name, key=f"att_{req.get('id', idx)}_{idx}")
+        if not found_any: st.info("📎 Attachments referenced but files not available.")
+    except Exception as e: st.info(f"📎 Attachments: {att}")
 def get_next_id(all_records):
     if not all_records: return 1
     return max(int(r.get("id", 0)) for r in all_records) + 1
@@ -632,6 +600,7 @@ def init_settings():
         pd.DataFrame([{"setting": "categories", "value": "|".join(DEFAULT_CATEGORIES)},
             {"setting": "roles", "value": "|".join(DEFAULT_ROLES)},
             {"setting": "departments", "value": "|".join(DEFAULT_DEPARTMENTS)}]).to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+        sync_persistent_file(SETTINGS_PATH, "settings.xlsx")
 def load_departments():
     init_settings()
     try:
@@ -652,7 +621,7 @@ def save_departments(dept_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-    sync_saved_file_to_drive(SETTINGS_PATH)
+    sync_persistent_file(SETTINGS_PATH, "settings.xlsx")
 def load_categories():
     init_settings()
     try:
@@ -673,7 +642,7 @@ def save_categories(cat_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(cat_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-    sync_saved_file_to_drive(SETTINGS_PATH)
+    sync_persistent_file(SETTINGS_PATH, "settings.xlsx")
 def load_roles():
     init_settings()
     try:
@@ -694,12 +663,7 @@ def save_roles(roles_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "roles", "value": "|".join(roles_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-    sync_saved_file_to_drive(SETTINGS_PATH)
-# ============================================================
-# INITIALISE PERMANENT GOOGLE DRIVE STORAGE
-# ============================================================
-initialise_drive_storage()
-
+    sync_persistent_file(SETTINGS_PATH, "settings.xlsx")
 # ============================================================
 # USER DATABASE
 # ============================================================
@@ -711,10 +675,10 @@ def init_user_db():
         df = pd.read_excel(USER_DB_PATH, engine="openpyxl")
         if df.empty:  # Only add defaults if truly empty
             pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-            sync_saved_file_to_drive(USER_DB_PATH)
+            sync_persistent_file(USER_DB_PATH, "user_database.xlsx")
     except:
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-        sync_saved_file_to_drive(USER_DB_PATH)
+        sync_persistent_file(USER_DB_PATH, "user_database.xlsx")
 def save_users(users_dict):
     rows = []
     for username, u in users_dict.items():
@@ -725,7 +689,7 @@ def save_users(users_dict):
             "can_download_data": u.get("can_download_data", False),
             "can_approve_requests": u.get("can_approve_requests", False)})
     pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-    sync_saved_file_to_drive(USER_DB_PATH)
+    sync_persistent_file(USER_DB_PATH, "user_database.xlsx")
 def load_users():
     init_user_db()
     try:
@@ -746,6 +710,17 @@ def load_users():
 # ============================================================
 # REQUESTS EXCEL
 # ============================================================
+# ============================================================
+# GOOGLE DRIVE PERSISTENCE — RESTORE CANONICAL DATA FILES FIRST
+# ============================================================
+# Streamlit Cloud storage is not the permanent database. Google Drive is the
+# persistent source for these four Excel files. We only restore when the local
+# file is missing/unreadable, so normal app reruns do not overwrite local data.
+restore_google_drive_file("requests.xlsx", EXCEL_PATH)
+restore_google_drive_file("user_database.xlsx", USER_DB_PATH)
+restore_google_drive_file("settings.xlsx", SETTINGS_PATH)
+restore_google_drive_file("audit_log.xlsx", AUDIT_LOG_PATH)
+
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
 initialise_excel()
@@ -796,7 +771,7 @@ def save_all_records(records):
             "Edited From ID": str(r.get("edited_from_id", "")),
             "Old Data": str(r.get("old_data", ""))})
     pd.DataFrame(export, columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-    sync_saved_file_to_drive(EXCEL_PATH)
+    sync_persistent_file(EXCEL_PATH, "requests.xlsx")
 def save_record_to_excel(new_record):
     current = load_records_from_excel()
     current.append(new_record)
@@ -925,56 +900,9 @@ def generate_approval_pdf(request_data):
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f: f.write(pdf_bytes)
-        _drive_upload_path(full_pdf_path, filename)
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
-
-
-def display_pdf_button(req, can_generate=True, key_suffix=""):
-    """Generate and download a PDF for one request without generating on every rerun."""
-    if not PDF_AVAILABLE:
-        st.warning("⚠️ PDF generation is unavailable. Please install fpdf2.")
-        return False
-
-    req_id = str(req.get("id", "unknown"))
-    status = str(req.get("status", "pending")).strip().lower()
-    suffix = str(key_suffix or "default").replace(" ", "_")
-    state_key = f"pdf_result_{req_id}_{status}_{suffix}"
-    button_key = f"generate_pdf_{req_id}_{status}_{suffix}"
-    download_key = f"download_pdf_{req_id}_{status}_{suffix}"
-
-    if can_generate:
-        if st.button(
-            f"📄 Generate PDF for ID #{req_id}",
-            type="primary",
-            key=button_key,
-        ):
-            ok, pdf_bytes, filename = generate_approval_pdf(req)
-            if ok and pdf_bytes:
-                st.session_state[state_key] = {
-                    "data": bytes(pdf_bytes),
-                    "filename": filename,
-                }
-                st.success("✅ PDF generated successfully. Download it below.")
-            else:
-                st.session_state.pop(state_key, None)
-                st.error(f"❌ {filename}")
-
-    result = st.session_state.get(state_key)
-    if result:
-        st.download_button(
-            "📥 Download PDF",
-            data=result["data"],
-            file_name=result["filename"],
-            mime="application/pdf",
-            type="primary",
-            key=download_key,
-        )
-        return True
-
-    return False
-
 
 def display_attachments(req):
     """
@@ -1683,39 +1611,14 @@ if role == "Payroll":
                         st.divider()
                         st.success("✅ **New Request — No previous version**")
                     st.divider()
-                    display_pdf_button(req, can_generate=True)
+                    display_pdf_button(req, can_generate=False)
     
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
         if not approved:
             st.info("📋 No approved requests.")
         else:
-            st.metric("✅ Approved", len(approved))
-            approved_search = st.text_input(
-                "🔎 Search approved requests",
-                placeholder="Search by ID, employee, department, approved by, amount, date or comments...",
-                key="payroll_approved_search",
-            )
-            if approved_search.strip():
-                q = approved_search.strip().lower()
-                approved = [
-                    r for r in approved
-                    if q in " ".join([
-                        str(r.get("id", "")),
-                        str(r.get("emp_name", "")),
-                        str(r.get("dept", "")),
-                        str(r.get("decision_by", "")),
-                        str(r.get("approved_by", "")),
-                        str(r.get("amount", "")),
-                        str(r.get("decision_date", "")),
-                        str(r.get("date", "")),
-                        str(r.get("director_comments", "")),
-                    ]).lower()
-                ]
-                st.caption(f"🔎 Showing {len(approved)} matching approved request(s).")
-            st.divider()
-            if not approved:
-                st.warning("No approved requests match your search.")
+            st.metric("✅ Approved", len(approved)); st.divider()
             for req in reversed(approved):
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = req.get('decision_date', '')
@@ -1736,7 +1639,7 @@ if role == "Payroll":
                     st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
                     display_attachments(req)
                     st.divider()
-                    display_pdf_button(req, can_generate=True)
+                    display_pdf_button(req, can_generate=False)
     
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
@@ -1815,9 +1718,11 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     if new_files_upload:
                         for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
                             fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
-                            with open(os.path.join(UPLOAD_DIR, fn), "wb") as outfile:
+                            new_file_path = os.path.join(UPLOAD_DIR, fn)
+                            with open(new_file_path, "wb") as outfile:
                                 outfile.write(f.getbuffer())
                             final_attachments.append(fn)
+                            upload_to_google_drive(new_file_path, fn, silent=True)
                     records = load_records_from_excel()
                     old_data_dict = {
                         "emp_name": rec.get("emp_name"), "dept": rec.get("dept"),
@@ -1997,32 +1902,8 @@ elif role == "Director":
             st.info("📋 No approved requests yet.")
         else:
             st.metric("✅ Approved Requests", len(approved))
-            approved_search = st.text_input(
-                "🔎 Search approved requests",
-                placeholder="Search by ID, employee, department, approved by, amount, date or comments...",
-                key="director_approved_search",
-            )
-            if approved_search.strip():
-                q = approved_search.strip().lower()
-                approved = [
-                    r for r in approved
-                    if q in " ".join([
-                        str(r.get("id", "")),
-                        str(r.get("emp_name", "")),
-                        str(r.get("dept", "")),
-                        str(r.get("decision_by", "")),
-                        str(r.get("approved_by", "")),
-                        str(r.get("amount", "")),
-                        str(r.get("decision_date", "")),
-                        str(r.get("date", "")),
-                        str(r.get("director_comments", "")),
-                    ]).lower()
-                ]
-                st.caption(f"🔎 Showing {len(approved)} matching approved request(s).")
             st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Rejected")
             st.divider()
-            if not approved:
-                st.warning("No approved requests match your search.")
             for req in reversed(approved):
                 req_id = req.get("id")
                 dec_by = req.get('decision_by', 'Director')
