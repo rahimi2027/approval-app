@@ -1545,7 +1545,7 @@ if role == "Payroll":
                         st.divider()
                         st.success("✅ **New Request — No previous version**")
                     st.divider()
-                    display_pdf_button(req, can_generate=True)
+                    display_pdf_button(req, can_generate=False)
     
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
@@ -1573,7 +1573,7 @@ if role == "Payroll":
                     st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
                     display_attachments(req)
                     st.divider()
-                    display_pdf_button(req, can_generate=True)
+                    display_pdf_button(req, can_generate=False)
     
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
