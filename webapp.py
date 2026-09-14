@@ -1580,7 +1580,32 @@ if role == "Payroll":
         if not approved:
             st.info("📋 No approved requests.")
         else:
-            st.metric("✅ Approved", len(approved)); st.divider()
+            st.metric("✅ Approved", len(approved))
+            approved_search = st.text_input(
+                "🔎 Search approved requests",
+                placeholder="Search by ID, employee, department, approved by, amount, date or comments...",
+                key="payroll_approved_search",
+            )
+            if approved_search.strip():
+                q = approved_search.strip().lower()
+                approved = [
+                    r for r in approved
+                    if q in " ".join([
+                        str(r.get("id", "")),
+                        str(r.get("emp_name", "")),
+                        str(r.get("dept", "")),
+                        str(r.get("decision_by", "")),
+                        str(r.get("approved_by", "")),
+                        str(r.get("amount", "")),
+                        str(r.get("decision_date", "")),
+                        str(r.get("date", "")),
+                        str(r.get("director_comments", "")),
+                    ]).lower()
+                ]
+                st.caption(f"🔎 Showing {len(approved)} matching approved request(s).")
+            st.divider()
+            if not approved:
+                st.warning("No approved requests match your search.")
             for req in reversed(approved):
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = req.get('decision_date', '')
@@ -1862,8 +1887,32 @@ elif role == "Director":
             st.info("📋 No approved requests yet.")
         else:
             st.metric("✅ Approved Requests", len(approved))
+            approved_search = st.text_input(
+                "🔎 Search approved requests",
+                placeholder="Search by ID, employee, department, approved by, amount, date or comments...",
+                key="director_approved_search",
+            )
+            if approved_search.strip():
+                q = approved_search.strip().lower()
+                approved = [
+                    r for r in approved
+                    if q in " ".join([
+                        str(r.get("id", "")),
+                        str(r.get("emp_name", "")),
+                        str(r.get("dept", "")),
+                        str(r.get("decision_by", "")),
+                        str(r.get("approved_by", "")),
+                        str(r.get("amount", "")),
+                        str(r.get("decision_date", "")),
+                        str(r.get("date", "")),
+                        str(r.get("director_comments", "")),
+                    ]).lower()
+                ]
+                st.caption(f"🔎 Showing {len(approved)} matching approved request(s).")
             st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Rejected")
             st.divider()
+            if not approved:
+                st.warning("No approved requests match your search.")
             for req in reversed(approved):
                 req_id = req.get("id")
                 dec_by = req.get('decision_by', 'Director')
