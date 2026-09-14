@@ -16,14 +16,6 @@ import io
 import requests
 from datetime import datetime, date
 
-# Streamlit page configuration must run before any other Streamlit command.
-st.set_page_config(
-    page_title="Acoole Electrical Ltd — Approval Portal",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
@@ -110,9 +102,8 @@ drive_service = None
 
 try:
 
-    # OAuth credentials stored securely in Streamlit Secrets.
-    # Google Drive is optional; the local upload still works if secrets are not configured.
-    gdrive = st.secrets.get("gdrive")
+    # OAuth credentials stored securely in Streamlit Secrets
+    gdrive = st.secrets["gdrive"]
 
     credentials = Credentials(
         token=None,
@@ -143,8 +134,10 @@ try:
 except Exception as e:
 
     drive_service = None
-    # Do not stop the application when Drive is not configured.
-    st.info("ℹ️ Google Drive is not connected. Local file storage remains available.")
+
+    st.error(
+        f"❌ Google Drive connection failed: {e}"
+    )
 
 
 # ============================================================
@@ -169,8 +162,8 @@ if drive_service:
 
         drive_service = None
 
-        st.warning(
-            f"⚠️ Google Drive folder is not accessible: {e}"
+        st.error(
+            f"❌ Google Drive folder access failed: {e}"
         )
 
 
@@ -310,7 +303,7 @@ PERMISSION_LABELS = {
 # PDF LIBRARY
 # ============================================================
 try:
-    # The fpdf2 package is imported as `fpdf`, not `fpdf2`.
+    # The PyPI package is named fpdf2, but its Python module is named fpdf.
     from fpdf import FPDF
     PDF_AVAILABLE = True
 except ImportError:
@@ -489,15 +482,8 @@ def format_date(d):
     # Return full date+time if it contains time, otherwise just date
     return s
 def get_next_id(all_records):
-    if not all_records:
-        return 1
-    ids = []
-    for record in all_records:
-        try:
-            ids.append(int(float(record.get("id", 0))))
-        except (TypeError, ValueError):
-            continue
-    return (max(ids) + 1) if ids else 1
+    if not all_records: return 1
+    return max(int(r.get("id", 0)) for r in all_records) + 1
 def update_record_status_in_excel(req_id, new_status, comments, approved_by):
     records = load_records_from_excel()
     decision_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -612,18 +598,6 @@ def save_roles(roles_list):
 # ============================================================
 # USER DATABASE
 # ============================================================
-def as_bool(value, default=False):
-    """Safely convert Excel/string boolean values to a real bool."""
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    text = str(value).strip().lower()
-    if text in {"true", "1", "yes", "y", "on"}:
-        return True
-    if text in {"false", "0", "no", "n", "off", "", "nan", "none"}:
-        return False
-    return default
 def init_user_db():
     safe_init_excel(USER_DB_PATH, ["full_name","username","password","role","dept",
         "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"])
@@ -631,17 +605,9 @@ def init_user_db():
     try:
         df = pd.read_excel(USER_DB_PATH, engine="openpyxl")
         if df.empty:  # Only add defaults if truly empty
-            default_rows = []
-            for user in DEFAULT_USERS:
-                role_defaults = PERMISSION_DEFAULTS.get(user.get("role", "Staff"), PERMISSION_DEFAULTS["Staff"])
-                default_rows.append({**role_defaults, **user})
-            pd.DataFrame(default_rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-    except Exception:
-        default_rows = []
-        for user in DEFAULT_USERS:
-            role_defaults = PERMISSION_DEFAULTS.get(user.get("role", "Staff"), PERMISSION_DEFAULTS["Staff"])
-            default_rows.append({**role_defaults, **user})
-        pd.DataFrame(default_rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+            pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+    except:
+        pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
 def save_users(users_dict):
     rows = []
     for username, u in users_dict.items():
@@ -658,21 +624,14 @@ def load_users():
         df = pd.read_excel(USER_DB_PATH, engine="openpyxl").fillna("")
         users = {}
         for _, r in df.iterrows():
-            username = str(r.get("username", "")).strip().lower()
-            if not username or username == "nan":
-                continue
-            role = str(r.get("role", "Staff")).strip() or "Staff"
-            defaults = PERMISSION_DEFAULTS.get(role, PERMISSION_DEFAULTS["Staff"])
-            users[username] = {
-                "full_name": str(r.get("full_name", username)).strip(),
-                "password": str(r.get("password", "")),
-                "role": role,
-                "dept": str(r.get("dept", "")).strip(),
-                "can_view_all_dept": as_bool(r.get("can_view_all_dept"), defaults["can_view_all_dept"]),
-                "can_generate_pdf": as_bool(r.get("can_generate_pdf"), defaults["can_generate_pdf"]),
-                "can_download_data": as_bool(r.get("can_download_data"), defaults["can_download_data"]),
-                "can_approve_requests": as_bool(r.get("can_approve_requests"), defaults["can_approve_requests"]),
-            }
+            users[r["username"]] = {
+                "full_name": str(r.get("full_name", r["username"])).strip(),
+                "password": str(r["password"]), "role": str(r.get("role", "Staff")),
+                "dept": str(r.get("dept", "")),
+                "can_view_all_dept": str(r.get("can_view_all_dept", "False")).lower() == "true",
+                "can_generate_pdf": str(r.get("can_generate_pdf", "False")).lower() == "true",
+                "can_download_data": str(r.get("can_download_data", "False")).lower() == "true",
+                "can_approve_requests": str(r.get("can_approve_requests", "False")).lower() == "true"}
         return users
     except Exception as e:
         st.error(f"User DB Load Error: {e}"); return {}
@@ -860,6 +819,52 @@ def generate_approval_pdf(request_data):
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
+
+
+def display_pdf_button(req, can_generate=True, key_suffix=""):
+    """Generate and download a PDF for one request without generating on every rerun."""
+    if not PDF_AVAILABLE:
+        st.warning("⚠️ PDF generation is unavailable. Please install fpdf2.")
+        return False
+
+    req_id = str(req.get("id", "unknown"))
+    status = str(req.get("status", "pending")).strip().lower()
+    suffix = str(key_suffix or "default").replace(" ", "_")
+    state_key = f"pdf_result_{req_id}_{status}_{suffix}"
+    button_key = f"generate_pdf_{req_id}_{status}_{suffix}"
+    download_key = f"download_pdf_{req_id}_{status}_{suffix}"
+
+    if can_generate:
+        if st.button(
+            f"📄 Generate PDF for ID #{req_id}",
+            type="primary",
+            key=button_key,
+        ):
+            ok, pdf_bytes, filename = generate_approval_pdf(req)
+            if ok and pdf_bytes:
+                st.session_state[state_key] = {
+                    "data": bytes(pdf_bytes),
+                    "filename": filename,
+                }
+                st.success("✅ PDF generated successfully. Download it below.")
+            else:
+                st.session_state.pop(state_key, None)
+                st.error(f"❌ {filename}")
+
+    result = st.session_state.get(state_key)
+    if result:
+        st.download_button(
+            "📥 Download PDF",
+            data=result["data"],
+            file_name=result["filename"],
+            mime="application/pdf",
+            type="primary",
+            key=download_key,
+        )
+        return True
+
+    return False
+
 
 def display_attachments(req):
     """
@@ -1200,9 +1205,6 @@ def user_management_panel():
     st.subheader("👤 User Management — Create & Manage System Users")
     st.info("🛡️ Super Admin Only — Create, edit, or delete user accounts."); st.divider()
     USERS = load_users(); ROLES = load_roles()
-    if not ROLES:
-        ROLES = ["Staff"]
-    departments_for_form = load_departments() or ["Unassigned"]
     tab1, tab2, tab3 = st.tabs(["➕ Create New User", "✏️ Edit User", "🗑️ Delete User"])
     with tab1:
         st.markdown("### ➕ Create New System User")
@@ -1213,13 +1215,13 @@ def user_management_panel():
             new_role = st.selectbox("🎖️ Role / Permission Level", ROLES)
             st.markdown("### ✅ Extra Permissions")
             st.caption(f"Defaults for **{new_role}** are pre-selected")
-            defaults = PERMISSION_DEFAULTS.get(new_role, PERMISSION_DEFAULTS["Staff"])
+            defaults = PERMISSION_DEFAULTS[new_role]
             col1, col2 = st.columns(2)
             perm_view_all = col1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=defaults["can_view_all_dept"])
             perm_pdf = col1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=defaults["can_generate_pdf"])
             perm_download = col2.checkbox(PERMISSION_LABELS["can_download_data"], value=defaults["can_download_data"])
             perm_approve = col2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=defaults["can_approve_requests"])
-            new_dept = st.selectbox("🏢 Department", departments_for_form)
+            new_dept = st.selectbox("🏢 Department", load_departments())
             if st.form_submit_button("✅ Create User Account", type="primary"):
                 if not new_full_name.strip() or not new_username or not new_password:
                     st.error("❌ All fields required!")
@@ -1242,12 +1244,7 @@ def user_management_panel():
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
     with tab2:
         st.markdown("### ✏️ Edit User")
-        user_keys = list(USERS.keys())
-        if not user_keys:
-            st.info("📋 No users available to edit.")
-            edit_user_sel = None
-        else:
-            edit_user_sel = st.selectbox("Select User to Edit", user_keys, key="edit_user_selector")
+        edit_user_sel = st.selectbox("Select User to Edit", list(USERS.keys()), key="edit_user_selector")
         if edit_user_sel:
             curr = USERS[edit_user_sel]
             st.info(f"Current: **{curr.get('full_name', edit_user_sel)}** | {curr['role']} | {curr['dept']}")
@@ -1256,7 +1253,7 @@ def user_management_panel():
                 upd_username_new = st.text_input("🔐 Change Username", value=edit_user_sel).lower().strip()
                 upd_password = st.text_input("🔑 New Password (leave blank to keep)", type="password")
                 upd_role = st.selectbox("🎖️ Role", ROLES, index=ROLES.index(curr["role"]) if curr["role"] in ROLES else 0)
-                dept_list = departments_for_form
+                dept_list = load_departments()
                 upd_dept = st.selectbox("🏢 Department", dept_list, index=dept_list.index(curr["dept"]) if curr["dept"] in dept_list else 0)
                 st.markdown("### ✅ Update Permissions")
                 curr_perm_view = str(curr.get("can_view_all_dept", "False")).lower() == "true"
@@ -1301,12 +1298,7 @@ def user_management_panel():
     with tab3:
         st.markdown("### ⚠️ Delete User Account")
         st.warning("Existing requests remain safe.")
-        deletable_users = [u for u in USERS.keys() if u != st.session_state.user_info.get("username")]
-        if not deletable_users:
-            st.info("📋 No other user accounts are available to delete.")
-            del_user_sel = None
-        else:
-            del_user_sel = st.selectbox("Select User to DELETE", deletable_users, key="delete_user_selector")
+        del_user_sel = st.selectbox("Select User to DELETE", [u for u in USERS.keys() if u != st.session_state.user_info["username"]])
         if del_user_sel:
             del_name = USERS[del_user_sel].get("full_name", del_user_sel)
             if st.button(f"🗑️ DELETE: {del_name} ({del_user_sel})", type="secondary"):
@@ -1368,7 +1360,7 @@ change_my_password_form()
 # ✅ LOAD DATA — AFTER WELCOME ✅
 # ============================================================
 all_live_requests = load_records_from_excel()
-CATEGORIES = load_categories() or DEFAULT_CATEGORIES.copy()
+CATEGORIES = load_categories()
 
 # Sidebar PDF section
 with st.sidebar:
@@ -1406,16 +1398,71 @@ if "zip_all_name" not in st.session_state:
     st.session_state.zip_all_name = None
 
 def create_pdf_from_request(req):
-    """Compatibility wrapper used by the ZIP PDF generator."""
-    if not PDF_AVAILABLE:
-        return None
     try:
-        ok, _pdf_bytes, filename = generate_approval_pdf(req)
-        if not ok:
-            return None
-        return os.path.join(PDF_DIR, filename)
+        from fpdf import FPDF
+        req_id = str(req.get("id", "unknown"))
+        emp_name = str(req.get("emp_name", "Request")).replace(" ", "_")
+        date_str = str(req.get("date", "unknown"))[:10].replace("-", "")
+        filename = f"{emp_name}_{date_str}.pdf"
+        filepath = os.path.join(PDF_DIR, filename)
+        os.makedirs(PDF_DIR, exist_ok=True)
+        pdf = FPDF()
+        pdf.add_page()
+        if os.path.exists(LOGO_PATH):
+            pdf.image(LOGO_PATH, x=60, y=10, w=90)
+        pdf.ln(35)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 10, "Addition & Deduction Approval Form", ln=True, align="C")
+        pdf.ln(5)
+        pdf.set_draw_color(0, 0, 0)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(8)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "REQUEST DETAILS", ln=True)
+        pdf.set_font("Helvetica", "", 11)
+        def row(label, value):
+            pdf.cell(55, 7, f"{label}:", 0, 0)
+            pdf.cell(0, 7, str(value), 0, 1)
+        row("Request ID", req_id)
+        row("Employee Name", req.get("emp_name", ""))
+        row("Department", req.get("dept", ""))
+        row("Transaction Type", req.get("type", ""))
+        row("Category / Reason", req.get("category", ""))
+        row("Request Date", str(req.get("date", ""))[:10])
+        amount = req.get("amount", "")
+        try: amount = f"£{float(amount):,.2f}"
+        except: pass
+        row("Amount Approved", amount)
+        row("Line Manager", req.get("manager", ""))
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
+        pdf.set_font("Helvetica", "", 11)
+        justification = str(req.get("justification", req.get("description", "")))
+        pdf.multi_cell(0, 7, justification)
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
+        pdf.set_font("Helvetica", "", 11)
+        row("Decision", "APPROVED")
+        row("Approved By", req.get("approved_by", "Andy Acoole"))
+        row("Approval Date / Time", str(req.get("approved_date", ""))[:16])
+        pdf.ln(10)
+        pdf.set_draw_color(100, 100, 100)
+        pdf.dashed_line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(8)
+        pdf.cell(0, 7, "Authorised Signature / Director", ln=True, align="C")
+        pdf.ln(15)
+        pdf.set_font("Helvetica", "B", 22)
+        pdf.set_text_color(0, 120, 0)
+        pdf.cell(0, 15, "[ APPROVED ]", ln=True, align="C")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 7, "Acoole Electrical Ltd", ln=True, align="C")
+        pdf.set_text_color(0, 0, 0)
+        pdf.output(filepath)
+        return filepath
     except Exception as e:
-        st.warning(f"⚠️ PDF Error for #{req.get('id', '?')}: {e}")
+        st.warning(f"⚠️ PDF Error for #{req.get('id', '?')}: {str(e)}")
         return None
 
 # PDF generation handlers
@@ -1526,7 +1573,7 @@ if role == "Payroll":
                         st.divider()
                         st.success("✅ **New Request — No previous version**")
                     st.divider()
-                    display_pdf_button(req, can_generate=False)
+                    display_pdf_button(req, can_generate=True)
     
     with tab_approved:
         approved = [r for r in all_live_requests if r.get("status") == "approved"]
@@ -1554,7 +1601,7 @@ if role == "Payroll":
                     st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
                     display_attachments(req)
                     st.divider()
-                    display_pdf_button(req, can_generate=False)
+                    display_pdf_button(req, can_generate=True)
     
     with tab_rejected:
         rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
@@ -1617,7 +1664,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 with c1:
                     en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
                     rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"],
-                        index=(0 if rec.get("type", "Addition") not in ["Addition", "Deduction"] else ["Addition", "Deduction"].index(rec.get("type", "Addition"))))
+                        index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
                     cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
                     amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
@@ -1632,7 +1679,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     final_attachments = list(files_to_keep)
                     if new_files_upload:
                         for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
-                            fn = f"ID_{eid}_EDIT_F{idx}_{os.path.basename(f.name)}"
+                            fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
                             with open(os.path.join(UPLOAD_DIR, fn), "wb") as outfile:
                                 outfile.write(f.getbuffer())
                             final_attachments.append(fn)
@@ -1691,7 +1738,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     att_list = []
                     if files:
                         for i, f in enumerate(files, 1):
-                            fn = f"ID_{nid}_F{i}_{os.path.basename(f.name)}"
+                            fn = f"ID_{nid}_F{i}_{f.name}"
                             file_path = os.path.join(UPLOAD_DIR, fn)
                             with open(file_path, "wb") as out:
                                 out.write(f.getbuffer())
