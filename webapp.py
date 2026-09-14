@@ -17,7 +17,7 @@ import requests
 from datetime import datetime, date
 
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2.credentials import Credentials
 
 # ============================================================
@@ -228,6 +228,101 @@ def upload_to_google_drive(
         return None
 
 # ============================================================
+# GOOGLE DRIVE — PERMANENT APPLICATION DATA STORAGE
+# ============================================================
+# The Streamlit filesystem is used only as a working/cache copy.
+# These helpers keep the important Excel/PDF data permanently in
+# the configured Google Drive folder.
+
+def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    if drive_service is None:
+        return None
+    try:
+        safe_name = filename.replace("'", "\\'")
+        q = (f"name = '{safe_name}' and '{parent_id}' in parents "
+             "and trashed = false")
+        result = drive_service.files().list(
+            q=q, spaces="drive", fields="files(id,name,modifiedTime)", pageSize=10
+        ).execute()
+        files = result.get("files", [])
+        return files[0] if files else None
+    except Exception as e:
+        print(f"Drive lookup failed for {filename}: {e}")
+        return None
+
+def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    if drive_service is None or not os.path.exists(local_path):
+        return None
+    filename = filename or os.path.basename(local_path)
+    try:
+        existing = _drive_find_file(filename, parent_id)
+        if existing:
+            media = MediaFileUpload(local_path, resumable=True)
+            updated = drive_service.files().update(
+                fileId=existing["id"], media_body=media, fields="id,name"
+            ).execute()
+            return updated.get("id")
+        metadata = {"name": filename, "parents": [parent_id]}
+        media = MediaFileUpload(local_path, resumable=True)
+        created = drive_service.files().create(
+            body=metadata, media_body=media, fields="id,name"
+        ).execute()
+        return created.get("id")
+    except Exception as e:
+        print(f"Drive upload failed for {filename}: {e}")
+        return None
+
+def _drive_download_file(file_id, local_path):
+    if drive_service is None:
+        return False
+    try:
+        request = drive_service.files().get_media(fileId=file_id)
+        with open(local_path, "wb") as fh:
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+        return True
+    except Exception as e:
+        print(f"Drive download failed for {local_path}: {e}")
+        return False
+
+def sync_persistent_file(local_path, columns=None):
+    """On startup: Drive is authoritative; migrate an existing local file if Drive has none."""
+    if drive_service is None:
+        return
+    filename = os.path.basename(local_path)
+    remote = _drive_find_file(filename)
+    if remote:
+        if not _drive_download_file(remote["id"], local_path):
+            print(f"Using local copy of {filename} because Drive download failed")
+    elif os.path.exists(local_path):
+        _drive_upload_path(local_path, filename)
+    elif columns is not None:
+        pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
+        _drive_upload_path(local_path, filename)
+
+def sync_saved_file_to_drive(local_path):
+    """Push a newly saved local file to Google Drive."""
+    if drive_service is not None and os.path.exists(local_path):
+        _drive_upload_path(local_path)
+
+def initialise_drive_storage():
+    if drive_service is None or st.session_state.get("drive_storage_initialised"):
+        return
+    # These are the application's permanent databases.
+    targets = [
+        (EXCEL_PATH, EXCEL_COLUMNS),
+        (USER_DB_PATH, ["full_name","username","password","role","dept",
+            "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"]),
+        (SETTINGS_PATH, ["setting", "value"]),
+        (AUDIT_LOG_PATH, AUDIT_COLUMNS),
+    ]
+    for path, columns in targets:
+        sync_persistent_file(path, columns)
+    st.session_state["drive_storage_initialised"] = True
+
+# ============================================================
 # YOUR OTHER GOOGLE DRIVE FUNCTIONS GO BELOW THIS
 # ============================================================
 # ============================================================
@@ -271,7 +366,7 @@ DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GY
 DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Director", "Payroll", "Super Admin"]
 DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
 EXCEL_COLUMNS = [
-    "ID", "Employee Name", "Completed By", "Department", "Transaction Type", "Category Reason",
+    "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
     "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name",
     "Status", "Director Comments", "Decision Date", "Decision By",
     "PDF File Path", "Edited From ID", "Old Data"
@@ -341,6 +436,7 @@ def save_audit_entry(entry):
         df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
         df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
         df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
+        sync_saved_file_to_drive(AUDIT_LOG_PATH)
     except Exception as e:
         print(f"⚠️ Failed to save audit entry: {e}")
 def archive_audit_log():
@@ -355,6 +451,7 @@ def archive_audit_log():
 def clear_audit_log_file():
     if os.path.exists(AUDIT_LOG_FILE): os.remove(AUDIT_LOG_FILE)
     pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
+    sync_saved_file_to_drive(AUDIT_LOG_FILE)
 def get_request_details(req_id):
     dept, amount, decision_by, decision_date = "-", "-", "-", "-"
     try:
@@ -517,11 +614,6 @@ def show_old_new_comparison(old_json, new_rec):
             changed = True
             st.markdown(f"**{label}**: ~~`{o}`~~ → **`{n}`**")
     if not changed: st.info("✅ No changes detected.")
-def display_completed_by(req):
-    """Show the person who actually completed/submitted the request."""
-    completed_by = str(req.get("completed_by", "")).strip() or get_original_completed_by(req.get("id", ""), req.get("emp_name", ""))
-    st.write(f"👤 **Completed by:** {completed_by}")
-
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         st.session_state["_last_refresh"] = datetime.now().isoformat()
@@ -560,6 +652,7 @@ def save_departments(dept_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    sync_saved_file_to_drive(SETTINGS_PATH)
 def load_categories():
     init_settings()
     try:
@@ -580,6 +673,7 @@ def save_categories(cat_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(cat_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    sync_saved_file_to_drive(SETTINGS_PATH)
 def load_roles():
     init_settings()
     try:
@@ -600,6 +694,12 @@ def save_roles(roles_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "roles", "value": "|".join(roles_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    sync_saved_file_to_drive(SETTINGS_PATH)
+# ============================================================
+# INITIALISE PERMANENT GOOGLE DRIVE STORAGE
+# ============================================================
+initialise_drive_storage()
+
 # ============================================================
 # USER DATABASE
 # ============================================================
@@ -611,8 +711,10 @@ def init_user_db():
         df = pd.read_excel(USER_DB_PATH, engine="openpyxl")
         if df.empty:  # Only add defaults if truly empty
             pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+            sync_saved_file_to_drive(USER_DB_PATH)
     except:
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+        sync_saved_file_to_drive(USER_DB_PATH)
 def save_users(users_dict):
     rows = []
     for username, u in users_dict.items():
@@ -623,6 +725,7 @@ def save_users(users_dict):
             "can_download_data": u.get("can_download_data", False),
             "can_approve_requests": u.get("can_approve_requests", False)})
     pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+    sync_saved_file_to_drive(USER_DB_PATH)
 def load_users():
     init_user_db()
     try:
@@ -646,23 +749,6 @@ def load_users():
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
 initialise_excel()
-def get_original_completed_by(req_id, fallback=""):
-    """Find the original person who created/completed a request.
-
-    New requests store Completed By directly. For older requests, recover the
-    creator from the CREATED audit entry when available, then fall back to the
-    employee name so existing data continues to display safely.
-    """
-    try:
-        for entry in load_audit_log():
-            if str(entry.get("Request_ID", "")).strip() == str(req_id).strip() and str(entry.get("Action", "")).strip().upper() == "CREATED":
-                creator = str(entry.get("User_Name", "")).strip()
-                if creator:
-                    return creator
-    except Exception:
-        pass
-    return str(fallback or "").strip() or "-"
-
 def load_records_from_excel():
     try:
         if not os.path.exists(EXCEL_PATH): return []
@@ -677,7 +763,6 @@ def load_records_from_excel():
             except: amount = 0.0
             parsed.append({
                 "id": record_id, "emp_name": str(r.get("Employee Name", "Not Specified")).strip(),
-                "completed_by": str(r.get("Completed By", "")).strip() or get_original_completed_by(record_id, r.get("Employee Name", "Not Specified")),
                 "dept": str(r.get("Department", "Not Specified")).strip(),
                 "type": str(r.get("Transaction Type", "Not Specified")).strip(),
                 "category": str(r.get("Category Reason", "Not Specified")).strip(),
@@ -699,7 +784,6 @@ def save_all_records(records):
     export = []
     for r in records:
         export.append({"ID": int(r.get("id", 0)), "Employee Name": str(r.get("emp_name", "")),
-            "Completed By": str(r.get("completed_by", "")) or str(r.get("emp_name", "")),
             "Department": str(r.get("dept", "")), "Transaction Type": str(r.get("type", "")),
             "Category Reason": str(r.get("category", "")), "Date": str(r.get("date", "")),
             "Amount (£)": float(r.get("amount", 0.0)), "Line Manager": str(r.get("manager", "")),
@@ -712,6 +796,7 @@ def save_all_records(records):
             "Edited From ID": str(r.get("edited_from_id", "")),
             "Old Data": str(r.get("old_data", ""))})
     pd.DataFrame(export, columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+    sync_saved_file_to_drive(EXCEL_PATH)
 def save_record_to_excel(new_record):
     current = load_records_from_excel()
     current.append(new_record)
@@ -740,11 +825,6 @@ def generate_approval_pdf(request_data):
         req_date = format_date(fresh_data.get("date", ""))
         desc = clean_text(fresh_data.get("desc", ""))
         manager = clean_text(fresh_data.get("manager", ""))
-        completed_by = clean_text(
-            fresh_data.get("completed_by", "")
-            or get_original_completed_by(req_id, fresh_data.get("emp_name", "Unknown"))
-            or fresh_data.get("emp_name", "Unknown")
-        )
         status = str(fresh_data.get("status", "pending")).strip().lower()
         dir_approve = format_date(fresh_data.get("decision_date", ""))
         dir_name = clean_text(fresh_data.get("decision_by", "Director"))
@@ -782,7 +862,6 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Request Date:", 0, 0); pdf.cell(0, 5, req_date, ln=True)
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
-        pdf.cell(52, 5, "Completed By:", 0, 0); pdf.cell(0, 5, completed_by, ln=True)
         pdf.ln(6)
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True); pdf.ln(2)
@@ -846,6 +925,7 @@ def generate_approval_pdf(request_data):
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f: f.write(pdf_bytes)
+        _drive_upload_path(full_pdf_path, filename)
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
@@ -1455,8 +1535,6 @@ def create_pdf_from_request(req):
             pdf.cell(0, 7, str(value), 0, 1)
         row("Request ID", req_id)
         row("Employee Name", req.get("emp_name", ""))
-        completed_by = req.get("completed_by", "") or get_original_completed_by(req_id, req.get("emp_name", ""))
-        row("Completed By", completed_by)
         row("Department", req.get("dept", ""))
         row("Transaction Type", req.get("type", ""))
         row("Category / Reason", req.get("category", ""))
@@ -1590,7 +1668,6 @@ if role == "Payroll":
                 # ✅ Department added after amount
                 with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    display_completed_by(req)
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"👔 **Line Manager:** {req.get('manager')}")
@@ -1626,11 +1703,9 @@ if role == "Payroll":
                     if q in " ".join([
                         str(r.get("id", "")),
                         str(r.get("emp_name", "")),
-                        str(r.get("completed_by", "")),
                         str(r.get("dept", "")),
                         str(r.get("decision_by", "")),
                         str(r.get("approved_by", "")),
-                        str(r.get("completed_by", "")),
                         str(r.get("amount", "")),
                         str(r.get("decision_date", "")),
                         str(r.get("date", "")),
@@ -1654,7 +1729,6 @@ if role == "Payroll":
                 title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')}{extra_text}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
-                    display_completed_by(req)
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
                     if display_date:
@@ -1674,7 +1748,6 @@ if role == "Payroll":
                 # ✅ Department added after amount
                 with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    display_completed_by(req)
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
@@ -1809,7 +1882,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             if file_id:
                                 st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
                     payload = {
-                        "id": nid, "emp_name": en.strip(), "completed_by": full_name, "dept": dept_name, "type": rt,
+                        "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
                         "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
                         "status": "pending", "director_comments": "", "decision_date": "",
@@ -1824,40 +1897,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
         st.divider()
         st.subheader(f"📋 My Department Requests")
         my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
-
-        # 🔎 Search all requests in this department (Pending / Approved / Rejected)
-        if my_reqs:
-            dept_search = st.text_input(
-                "🔎 Search my department requests",
-                placeholder="Search by ID, employee, status, manager, type, category, amount, date, approved by or comments...",
-                key="department_requests_search",
-            )
-            if dept_search.strip():
-                q = dept_search.strip().lower()
-                my_reqs = [
-                    r for r in my_reqs
-                    if q in " ".join([
-                        str(r.get("id", "")),
-                        str(r.get("emp_name", "")),
-                        str(r.get("completed_by", "")),
-                        str(r.get("dept", "")),
-                        str(r.get("status", "")),
-                        str(r.get("manager", "")),
-                        str(r.get("type", "")),
-                        str(r.get("category", "")),
-                        str(r.get("amount", "")),
-                        str(r.get("date", "")),
-                        str(r.get("decision_by", "")),
-                        str(r.get("approved_by", "")),
-                        str(r.get("decision_date", "")),
-                        str(r.get("director_comments", "")),
-                        str(r.get("desc", "")),
-                    ]).lower()
-                ]
-                st.caption(f"🔎 Showing {len(my_reqs)} matching department request(s).")
-
         if not my_reqs:
-            st.info("📋 No requests match your search." if all_live_requests else "📋 No requests yet.")
+            st.info("📋 No requests yet.")
         else:
             for req in reversed(my_reqs):
                 status = req.get("status", "pending").lower()
@@ -1901,7 +1942,6 @@ elif role == "Director":
                     col_left, col_right = st.columns([2, 1])
                     with col_left:
                         st.write(f"👤 **Employee:** {req.get('emp_name')}")
-                        display_completed_by(req)
                         st.write(f"🏢 **Department:** {req.get('dept')}")
                         st.write(f"🔄 **Type:** {req.get('type')}")
                         st.write(f"🏷️ **Category:** {req.get('category')}")
@@ -1969,11 +2009,9 @@ elif role == "Director":
                     if q in " ".join([
                         str(r.get("id", "")),
                         str(r.get("emp_name", "")),
-                        str(r.get("completed_by", "")),
                         str(r.get("dept", "")),
                         str(r.get("decision_by", "")),
                         str(r.get("approved_by", "")),
-                        str(r.get("completed_by", "")),
                         str(r.get("amount", "")),
                         str(r.get("decision_date", "")),
                         str(r.get("date", "")),
@@ -1991,7 +2029,6 @@ elif role == "Director":
                 dec_date = format_date(req.get('decision_date',''))
                 with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ✅ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
-                    display_completed_by(req)
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
                     st.write(f"📅 Approval Date: {dec_date}")
@@ -2044,7 +2081,6 @@ elif role == "Director":
                 dec_date = format_date(req.get('decision_date',''))
                 with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ❌ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    display_completed_by(req)
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
@@ -2137,7 +2173,6 @@ elif role == "Super Admin":
                         f"👤 Employee: {req.get('emp_name')} | "
                         f"🏢 Department: {req.get('dept')}"
                     )
-                    display_completed_by(req)
 
                     st.write(
                         f"🔄 Type: {req.get('type')} | "
@@ -2221,7 +2256,6 @@ elif role == "Super Admin":
                         f"👤 Employee: {req.get('emp_name')} | "
                         f"🏢 Department: {req.get('dept')}"
                     )
-                    display_completed_by(req)
 
                     st.write(
                         f"💷 Amount: £{amount:.2f}"
@@ -2297,7 +2331,6 @@ elif role == "Super Admin":
                         f"👤 Employee: {req.get('emp_name')} | "
                         f"🏢 Department: {req.get('dept')}"
                     )
-                    display_completed_by(req)
 
                     st.write(
                         f"💷 Amount: £{amount:.2f}"
