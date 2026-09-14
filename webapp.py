@@ -18,7 +18,7 @@ from datetime import datetime, date
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 
 st.write("DEBUG: service_account import OK")
 # ============================================================
