@@ -155,7 +155,8 @@ if drive_service:
         ).execute()
 
         st.success(
-            f"✅ Google Drive connected: {folder['name']}"
+            f"✅ Google Drive folder accessible: "
+            f"{folder['name']}"
         )
 
     except Exception as e:
@@ -177,20 +178,28 @@ def upload_to_google_drive(
 ):
 
     if drive_service is None:
-        st.error("❌ Google Drive is not connected.")
+
+        st.error(
+            "❌ Google Drive is not connected."
+        )
+
         return None
 
     if not os.path.exists(local_file_path):
+
         st.error(
             f"❌ File not found: {local_file_path}"
         )
+
         return None
 
     try:
 
         file_metadata = {
             "name": display_filename,
-            "parents": [GOOGLE_DRIVE_FOLDER_ID]
+            "parents": [
+                GOOGLE_DRIVE_FOLDER_ID
+            ]
         }
 
         media = MediaFileUpload(
@@ -203,6 +212,11 @@ def upload_to_google_drive(
             media_body=media,
             fields="id,name,parents"
         ).execute()
+
+        st.success(
+            f"✅ Uploaded to Google Drive: "
+            f"{display_filename}"
+        )
 
         return uploaded.get("id")
 
