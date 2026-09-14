@@ -838,6 +838,15 @@ def generate_approval_pdf(request_data):
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
 
+is_director = (
+    st.session_state.get("user_info", {})
+    .get("role", "")
+    .strip()
+    .lower()
+    == "director"
+)
+
+display_attachments(req, preview=is_director)
 
 def display_attachments(req, preview=False):
     att = req.get("attachment_name", "None")
@@ -1671,7 +1680,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     if req.get("director_comments"):
                         st.info(f"💬 Director Comments: {req.get('director_comments')}")
                     if status == "approved":
-                        display_pdf_button(req, can_generate=pass)
+                        display_pdf_button(req, can_generate=False)
                     if status in ["pending", "rejected"]:
                         if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                             st.session_state.editing_request_id = req.get("id")
