@@ -172,10 +172,9 @@ if drive_service:
 # ============================================================
 
 def upload_to_google_drive(local_file_path, display_filename):
-    """Upload a file to Google Drive using UPSERT semantics.
+    """Upload a file to the configured Drive folder, updating an existing file with the same name.
 
-    If a file with the same name already exists in the application folder,
-    its contents are UPDATED instead of creating another Drive file.
+    This prevents duplicate copies when the same attachment/PDF is saved again.
     """
     if drive_service is None:
         st.error("❌ Google Drive is not connected.")
@@ -183,84 +182,73 @@ def upload_to_google_drive(local_file_path, display_filename):
     if not os.path.exists(local_file_path):
         st.error(f"❌ File not found: {local_file_path}")
         return None
-    file_id = _drive_upload_path(local_file_path, display_filename)
-    if file_id:
-        st.success(f"✅ Saved to Google Drive: {display_filename}")
-    else:
-        st.error(f"❌ Could not save to Google Drive: {display_filename}")
-    return file_id
+    try:
+        existing = _drive_find_file(display_filename)
+        media = MediaFileUpload(local_file_path, resumable=True)
+        if existing:
+            updated = drive_service.files().update(
+                fileId=existing["id"],
+                media_body=media,
+                fields="id,name,parents"
+            ).execute()
+            return updated.get("id")
+
+        metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
+        created = drive_service.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id,name,parents"
+        ).execute()
+        return created.get("id")
+    except Exception as e:
+        st.error(f"❌ Google Drive upload failed: {e}")
+        return None
 
 # ============================================================
 # GOOGLE DRIVE — PERMANENT APPLICATION DATA STORAGE
 # ============================================================
-# Google Drive is the authoritative/persistent store.
-# Streamlit's local filesystem is only a temporary working/cache copy.
+# The Streamlit filesystem is used only as a working/cache copy.
+# These helpers keep the important Excel/PDF data permanently in
+# the configured Google Drive folder.
 
-def _drive_find_files(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Return all non-trashed files with this exact name in the app folder."""
+def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
     if drive_service is None:
-        return []
+        return None
     try:
         safe_name = str(filename).replace("'", "\\'")
         q = (f"name = '{safe_name}' and '{parent_id}' in parents "
              "and trashed = false")
         result = drive_service.files().list(
-            q=q, spaces="drive",
-            fields="files(id,name,modifiedTime,createdTime,mimeType,size)",
-            orderBy="modifiedTime desc", pageSize=100
+            q=q,
+            spaces="drive",
+            fields="files(id,name,modifiedTime)",
+            orderBy="modifiedTime desc",
+            pageSize=10,
         ).execute()
-        return result.get("files", [])
+        files = result.get("files", [])
+        return files[0] if files else None
     except Exception as e:
         print(f"Drive lookup failed for {filename}: {e}")
-        return []
+        return None
 
-def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    files = _drive_find_files(filename, parent_id)
-    return files[0] if files else None
-
-def _drive_delete_file(file_id):
-    if drive_service is None or not file_id:
-        return False
-    try:
-        drive_service.files().delete(fileId=file_id).execute()
-        return True
-    except Exception as e:
-        print(f"Drive delete failed for {file_id}: {e}")
-        return False
-
-def _drive_remove_duplicate_names(filename, keep_id, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Remove older duplicate copies of one managed filename."""
-    removed = 0
-    for item in _drive_find_files(filename, parent_id):
-        if item.get("id") != keep_id and _drive_delete_file(item.get("id")):
-            removed += 1
-    return removed
-
-def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID,
-                       remove_duplicates=True):
-    """Create-or-update one Drive file; never intentionally creates a copy."""
+def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
     if drive_service is None or not os.path.exists(local_path):
         return None
     filename = filename or os.path.basename(local_path)
     try:
         existing = _drive_find_file(filename, parent_id)
-        media = MediaFileUpload(local_path, resumable=True)
         if existing:
+            media = MediaFileUpload(local_path, resumable=True)
             updated = drive_service.files().update(
-                fileId=existing["id"], media_body=media,
-                body={"name": filename}, fields="id,name,modifiedTime"
+                fileId=existing["id"], media_body=media, fields="id,name"
             ).execute()
-            file_id = updated.get("id")
-        else:
-            metadata = {"name": filename, "parents": [parent_id]}
-            created = drive_service.files().create(
-                body=metadata, media_body=media, fields="id,name,modifiedTime"
-            ).execute()
-            file_id = created.get("id")
-
-        if remove_duplicates and file_id:
-            _drive_remove_duplicate_names(filename, file_id, parent_id)
-        return file_id
+            return updated.get("id")
+        metadata = {"name": filename, "parents": [parent_id]}
+        media = MediaFileUpload(local_path, resumable=True)
+        created = drive_service.files().create(
+            body=metadata, media_body=media, fields="id,name"
+        ).execute()
+        return created.get("id")
     except Exception as e:
         print(f"Drive upload failed for {filename}: {e}")
         return None
@@ -269,7 +257,6 @@ def _drive_download_file(file_id, local_path):
     if drive_service is None:
         return False
     try:
-        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
         request = drive_service.files().get_media(fileId=file_id)
         with open(local_path, "wb") as fh:
             downloader = MediaIoBaseDownload(fh, request)
@@ -281,21 +268,8 @@ def _drive_download_file(file_id, local_path):
         print(f"Drive download failed for {local_path}: {e}")
         return False
 
-def _ensure_local_attachment(filename):
-    """Make an attachment available locally from Drive when Streamlit has no cache copy."""
-    if not filename or str(filename).strip().lower() in ("none", "nan", ""):
-        return None
-    filename = os.path.basename(str(filename).strip())
-    local_path = os.path.join(UPLOAD_DIR, filename)
-    if os.path.exists(local_path):
-        return local_path
-    remote = _drive_find_file(filename)
-    if remote and _drive_download_file(remote["id"], local_path):
-        return local_path
-    return None
-
 def sync_persistent_file(local_path, columns=None):
-    """Drive is authoritative; local files are only a working/cache copy."""
+    """On startup: Drive is authoritative; migrate an existing local file if Drive has none."""
     if drive_service is None:
         return
     filename = os.path.basename(local_path)
@@ -310,39 +284,14 @@ def sync_persistent_file(local_path, columns=None):
         _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
-    """Push a saved working copy to the single matching Drive file."""
+    """Push a newly saved local file to Google Drive."""
     if drive_service is not None and os.path.exists(local_path):
         _drive_upload_path(local_path)
-
-def repair_drive_duplicates():
-    """Remove duplicate exact-name files from the application Drive folder."""
-    if drive_service is None:
-        return 0
-    try:
-        result = drive_service.files().list(
-            q=f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false",
-            spaces="drive",
-            fields="files(id,name,modifiedTime)",
-            orderBy="name,modifiedTime desc",
-            pageSize=1000
-        ).execute()
-        seen = set()
-        removed = 0
-        for item in result.get("files", []):
-            name = item.get("name", "")
-            if name in seen:
-                if _drive_delete_file(item.get("id")):
-                    removed += 1
-            else:
-                seen.add(name)
-        return removed
-    except Exception as e:
-        print(f"Drive duplicate repair failed: {e}")
-        return 0
 
 def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"):
         return
+    # These are the application's permanent databases.
     targets = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, ["full_name","username","password","role","dept",
@@ -462,21 +411,44 @@ def safe_init_excel(path, columns):
 # ============================================================
 # AUDIT LOG FUNCTIONS
 # ============================================================
+def _invalidate_data_cache(*names):
+    """Invalidate only the in-session caches affected by a write."""
+    for name in names:
+        st.session_state.pop(name, None)
+
+
+def _set_data_cache(name, value):
+    # Store a copy so UI filtering/editing cannot accidentally mutate the cache.
+    st.session_state[name] = value
+    return value
+
+
+def _read_excel_records(path):
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    return pd.read_excel(path, engine="openpyxl").fillna("")
+
 def init_audit_log():
     safe_init_excel(AUDIT_LOG_PATH, AUDIT_COLUMNS)
-def load_audit_log():
+def load_audit_log(force=False):
     init_audit_log()
+    if not force and "_audit_log_cache" in st.session_state:
+        return list(st.session_state["_audit_log_cache"])
     try:
-        df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
-        return df.to_dict(orient="records")
+        df = _read_excel_records(AUDIT_LOG_PATH)
+        records = df.to_dict(orient="records")
+        return _set_data_cache("_audit_log_cache", records).copy()
     except Exception as e:
-        print(f"⚠️ Failed to load audit log: {e}"); return []
+        print(f"⚠️ Failed to load audit log: {e}")
+        return []
+
 def save_audit_entry(entry):
     init_audit_log()
     try:
         df = pd.read_excel(AUDIT_LOG_PATH, engine="openpyxl").fillna("")
         df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
         df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
+        _invalidate_data_cache("_audit_log_cache")
         sync_saved_file_to_drive(AUDIT_LOG_PATH)
     except Exception as e:
         print(f"⚠️ Failed to save audit entry: {e}")
@@ -496,6 +468,7 @@ def clear_audit_log_file():
     pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(
         AUDIT_LOG_FILE, index=False, engine="openpyxl"
     )
+    _invalidate_data_cache("_audit_log_cache")
     sync_saved_file_to_drive(AUDIT_LOG_FILE)
 
 
@@ -510,6 +483,7 @@ def clear_all_requests_file():
     pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(
         EXCEL_PATH, index=False, engine="openpyxl"
     )
+    _set_data_cache("_records_cache", [])
     sync_saved_file_to_drive(EXCEL_PATH)
     # Make the current Streamlit session use the newly empty request list.
     st.session_state["_live_data_reset"] = datetime.now().isoformat()
@@ -683,6 +657,15 @@ def show_old_new_comparison(old_json, new_rec):
     if not changed: st.info("✅ No changes detected.")
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
+        # Manual refresh is the one place where this browser session pulls the
+        # latest persistent data from Google Drive again. Normal reruns use the
+        # in-session cache and therefore do not repeatedly hit Drive/disk.
+        if drive_service is not None:
+            for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH):
+                remote = _drive_find_file(os.path.basename(path))
+                if remote:
+                    _drive_download_file(remote["id"], path)
+        _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache")
         st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 def make_request_title(req):
@@ -699,19 +682,27 @@ def init_settings():
         pd.DataFrame([{"setting": "categories", "value": "|".join(DEFAULT_CATEGORIES)},
             {"setting": "roles", "value": "|".join(DEFAULT_ROLES)},
             {"setting": "departments", "value": "|".join(DEFAULT_DEPARTMENTS)}]).to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-def load_departments():
+def _load_setting_value(setting_name, default_values):
     init_settings()
-    try:
-        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-        for _, r in df.iterrows():
-            if r["setting"] == "departments":
-                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
-                return vals if vals else DEFAULT_DEPARTMENTS.copy()
-        return DEFAULT_DEPARTMENTS.copy()
-    except: return DEFAULT_DEPARTMENTS.copy()
+    if "_settings_cache" not in st.session_state:
+        try:
+            df = _read_excel_records(SETTINGS_PATH)
+            settings = {str(r.get("setting", "")).strip(): str(r.get("value", "")) for r in df.to_dict(orient="records")}
+            st.session_state["_settings_cache"] = settings
+        except Exception:
+            st.session_state["_settings_cache"] = {}
+    raw = st.session_state["_settings_cache"].get(setting_name, "")
+    vals = [v.strip() for v in str(raw).split("|") if v.strip()]
+    return vals if vals else list(default_values)
+
+
+def load_departments():
+    return _load_setting_value("departments", DEFAULT_DEPARTMENTS)
+
+
 def save_departments(dept_list):
     init_settings()
-    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+    df = _read_excel_records(SETTINGS_PATH)
     found = False
     for idx, r in df.iterrows():
         if r["setting"] == "departments":
@@ -719,20 +710,17 @@ def save_departments(dept_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
+
+
 def load_categories():
-    init_settings()
-    try:
-        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-        for _, r in df.iterrows():
-            if r["setting"] == "categories":
-                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
-                return vals if vals else DEFAULT_CATEGORIES
-        return DEFAULT_CATEGORIES
-    except: return DEFAULT_CATEGORIES
+    return _load_setting_value("categories", DEFAULT_CATEGORIES)
+
+
 def save_categories(cat_list):
     init_settings()
-    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+    df = _read_excel_records(SETTINGS_PATH)
     found = False
     for idx, r in df.iterrows():
         if r["setting"] == "categories":
@@ -740,20 +728,17 @@ def save_categories(cat_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(cat_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
+
+
 def load_roles():
-    init_settings()
-    try:
-        df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
-        for _, r in df.iterrows():
-            if r["setting"] == "roles":
-                vals = [v.strip() for v in str(r["value"]).split("|") if v.strip()]
-                return vals if vals else DEFAULT_ROLES
-        return DEFAULT_ROLES
-    except: return DEFAULT_ROLES
+    return _load_setting_value("roles", DEFAULT_ROLES)
+
+
 def save_roles(roles_list):
     init_settings()
-    df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
+    df = _read_excel_records(SETTINGS_PATH)
     found = False
     for idx, r in df.iterrows():
         if r["setting"] == "roles":
@@ -761,7 +746,9 @@ def save_roles(roles_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "roles", "value": "|".join(roles_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
+
 # ============================================================
 # INITIALISE PERMANENT GOOGLE DRIVE STORAGE
 # ============================================================
@@ -792,48 +779,69 @@ def save_users(users_dict):
             "can_download_data": u.get("can_download_data", False),
             "can_approve_requests": u.get("can_approve_requests", False)})
     pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+    _invalidate_data_cache("_users_cache")
     sync_saved_file_to_drive(USER_DB_PATH)
-def load_users():
+def load_users(force=False):
     init_user_db()
+    if not force and "_users_cache" in st.session_state:
+        return dict(st.session_state["_users_cache"])
     try:
-        df = pd.read_excel(USER_DB_PATH, engine="openpyxl").fillna("")
+        df = _read_excel_records(USER_DB_PATH)
         users = {}
         for _, r in df.iterrows():
-            users[r["username"]] = {
-                "full_name": str(r.get("full_name", r["username"])).strip(),
-                "password": str(r["password"]), "role": str(r.get("role", "Staff")),
+            username = str(r.get("username", "")).strip()
+            if not username:
+                continue
+            users[username] = {
+                "full_name": str(r.get("full_name", username)).strip(),
+                "password": str(r.get("password", "")),
+                "role": str(r.get("role", "Staff")),
                 "dept": str(r.get("dept", "")),
                 "can_view_all_dept": str(r.get("can_view_all_dept", "False")).lower() == "true",
                 "can_generate_pdf": str(r.get("can_generate_pdf", "False")).lower() == "true",
                 "can_download_data": str(r.get("can_download_data", "False")).lower() == "true",
-                "can_approve_requests": str(r.get("can_approve_requests", "False")).lower() == "true"}
-        return users
+                "can_approve_requests": str(r.get("can_approve_requests", "False")).lower() == "true",
+            }
+        _set_data_cache("_users_cache", users)
+        return dict(users)
     except Exception as e:
-        st.error(f"User DB Load Error: {e}"); return {}
+        st.error(f"User DB Load Error: {e}")
+        return {}
+
 # ============================================================
 # REQUESTS EXCEL
 # ============================================================
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
 initialise_excel()
-def load_records_from_excel():
+def load_records_from_excel(force=False):
+    """Load request data from the runtime working copy once per session.
+
+    Google Drive remains the persistent source of truth. The local Excel file is
+    only a working copy; after a write it is immediately synced back to Drive.
+    """
+    if not force and "_records_cache" in st.session_state:
+        return list(st.session_state["_records_cache"])
     try:
-        if not os.path.exists(EXCEL_PATH): return []
-        df = pd.read_excel(EXCEL_PATH, engine="openpyxl").fillna("")
-        if df.empty: return []
-        records = df.to_dict(orient="records")
+        if not os.path.exists(EXCEL_PATH):
+            return _set_data_cache("_records_cache", []).copy()
+        df = _read_excel_records(EXCEL_PATH)
+        if df.empty:
+            return _set_data_cache("_records_cache", []).copy()
         parsed = []
-        for r in records:
+        for r in df.to_dict(orient="records"):
             try: record_id = int(r.get("ID", 0))
             except: record_id = 0
             try: amount = float(r.get("Amount (£)", 0))
             except: amount = 0.0
             parsed.append({
-                "id": record_id, "emp_name": str(r.get("Employee Name", "Not Specified")).strip(),
+                "id": record_id,
+                "emp_name": str(r.get("Employee Name", "Not Specified")).strip(),
                 "dept": str(r.get("Department", "Not Specified")).strip(),
                 "type": str(r.get("Transaction Type", "Not Specified")).strip(),
                 "category": str(r.get("Category Reason", "Not Specified")).strip(),
-                "date": str(r.get("Date", "")).strip(), "amount": amount,
+                "date": str(r.get("Date", "")).strip(),
+                "amount": amount,
                 "manager": str(r.get("Line Manager", "Not Specified")).strip(),
                 "desc": str(r.get("Description", "")).strip(),
                 "attachment_name": str(r.get("Attachment Name", "None")).strip(),
@@ -844,18 +852,29 @@ def load_records_from_excel():
                 "submitted_by": str(r.get("Submitted By", "")).strip(),
                 "pdf_path": str(r.get("PDF File Path", "")).strip(),
                 "edited_from_id": str(r.get("Edited From ID", "")).strip(),
-                "old_data": str(r.get("Old Data", "")).strip()})
-        return parsed
+                "old_data": str(r.get("Old Data", "")).strip(),
+            })
+        _set_data_cache("_records_cache", parsed)
+        return list(parsed)
     except Exception as e:
-        st.error(f"Load Error: {e}"); return []
+        st.error(f"Load Error: {e}")
+        return []
+
+
 def save_all_records(records):
     export = []
     for r in records:
-        export.append({"ID": int(r.get("id", 0)), "Employee Name": str(r.get("emp_name", "")),
-            "Department": str(r.get("dept", "")), "Transaction Type": str(r.get("type", "")),
-            "Category Reason": str(r.get("category", "")), "Date": str(r.get("date", "")),
-            "Amount (£)": float(r.get("amount", 0.0)), "Line Manager": str(r.get("manager", "")),
-            "Description": str(r.get("desc", "")), "Attachment Name": str(r.get("attachment_name", "None")),
+        export.append({
+            "ID": int(r.get("id", 0)),
+            "Employee Name": str(r.get("emp_name", "")),
+            "Department": str(r.get("dept", "")),
+            "Transaction Type": str(r.get("type", "")),
+            "Category Reason": str(r.get("category", "")),
+            "Date": str(r.get("date", "")),
+            "Amount (£)": float(r.get("amount", 0.0)),
+            "Line Manager": str(r.get("manager", "")),
+            "Description": str(r.get("desc", "")),
+            "Attachment Name": str(r.get("attachment_name", "None")),
             "Status": str(r.get("status", "pending")).lower(),
             "Director Comments": str(r.get("director_comments", "")),
             "Decision Date": str(r.get("decision_date", "")),
@@ -863,13 +882,18 @@ def save_all_records(records):
             "Submitted By": str(r.get("submitted_by", "")),
             "PDF File Path": str(r.get("pdf_path", "")),
             "Edited From ID": str(r.get("edited_from_id", "")),
-            "Old Data": str(r.get("old_data", ""))})
+            "Old Data": str(r.get("old_data", "")),
+        })
     pd.DataFrame(export, columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_records_cache", list(records))
     sync_saved_file_to_drive(EXCEL_PATH)
+
+
 def save_record_to_excel(new_record):
     current = load_records_from_excel()
     current.append(new_record)
     save_all_records(current)
+
 # ============================================================
 # REQUESTER / COMPLETION DISPLAY HELPERS
 # ============================================================
@@ -1014,8 +1038,8 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Courier", "", 9)
         if len(display_files) > 0:
             for idx, fname in enumerate(display_files, 1):
-                file_path = _ensure_local_attachment(fname)
-                if file_path and os.path.exists(file_path):
+                file_path = os.path.join(UPLOAD_DIR, fname)
+                if os.path.exists(file_path):
                     if fname.lower().endswith((".png", ".jpg", ".jpeg")):
                         pdf.ln(2)
                         try: pdf.image(file_path, x=10, w=190); pdf.ln(70)
@@ -1086,6 +1110,21 @@ def display_pdf_button(req, can_generate=True, key_suffix=""):
     return False
 
 
+def ensure_attachment_local(filename):
+    """Return a local attachment path, downloading it from Drive when needed."""
+    if not filename or str(filename).strip().lower() in ("none", "nan", ""):
+        return None
+    filename = os.path.basename(str(filename).strip())
+    local_path = os.path.join(UPLOAD_DIR, filename)
+    if os.path.exists(local_path):
+        return local_path
+    if drive_service is not None:
+        remote = _drive_find_file(filename)
+        if remote and _drive_download_file(remote["id"], local_path):
+            return local_path
+    return None
+
+
 def display_attachments(req):
     """
     Display attachments according to the user's role.
@@ -1141,10 +1180,10 @@ def display_attachments(req):
 
         for idx, name in enumerate(attached_files):
 
-            path = _ensure_local_attachment(name)
+            path = ensure_attachment_local(name)
 
-            # File is not available locally and could not be restored from Drive.
-            if not path or not os.path.exists(path):
+            # File does not exist locally and could not be restored from Drive
+            if not path:
                 continue
 
             found_any = True
@@ -1620,9 +1659,7 @@ def create_pdf_from_request(req):
         req_id = str(req.get("id", "unknown"))
         emp_name = str(req.get("emp_name", "Request")).replace(" ", "_")
         date_str = str(req.get("date", "unknown"))[:10].replace("-", "")
-        # One stable PDF name per request. Re-generating the same request
-        # updates the same Drive file instead of creating another copy.
-        filename = f"ID_{req_id}_{emp_name}_{date_str}.pdf"
+        filename = f"{emp_name}_{date_str}.pdf"
         filepath = os.path.join(PDF_DIR, filename)
         os.makedirs(PDF_DIR, exist_ok=True)
         pdf = FPDF()
@@ -1660,15 +1697,15 @@ def create_pdf_from_request(req):
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.set_font("Helvetica", "", 11)
-        justification = str(req.get("desc", req.get("justification", req.get("description", ""))))
+        justification = str(req.get("justification", req.get("description", "")))
         pdf.multi_cell(0, 7, justification)
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
         pdf.set_font("Helvetica", "", 11)
         row("Decision", "APPROVED")
-        row("Approved By", req.get("decision_by", req.get("approved_by", "Andy Acoole")))
-        row("Approval Date / Time", str(req.get("decision_date", req.get("approved_date", "")))[:19])
+        row("Approved By", req.get("approved_by", "Andy Acoole"))
+        row("Approval Date / Time", str(req.get("approved_date", ""))[:16])
         pdf.ln(10)
         pdf.set_draw_color(100, 100, 100)
         pdf.dashed_line(10, pdf.get_y(), 200, pdf.get_y())
@@ -1682,7 +1719,6 @@ def create_pdf_from_request(req):
         pdf.cell(0, 7, "Acoole Electrical Ltd", ln=True, align="C")
         pdf.set_text_color(0, 0, 0)
         pdf.output(filepath)
-        _drive_upload_path(filepath, filename)
         return filepath
     except Exception as e:
         st.warning(f"⚠️ PDF Error for #{req.get('id', '?')}: {str(e)}")
@@ -1937,8 +1973,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     if new_files_upload:
                         for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
                             fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
-                            with open(os.path.join(UPLOAD_DIR, fn), "wb") as outfile:
+                            edit_path = os.path.join(UPLOAD_DIR, fn)
+                            with open(edit_path, "wb") as outfile:
                                 outfile.write(f.getbuffer())
+                            upload_to_google_drive(edit_path, fn)
                             final_attachments.append(fn)
                     records = load_records_from_excel()
                     old_data_dict = {
@@ -2001,8 +2039,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 out.write(f.getbuffer())
                             att_list.append(fn)
                             file_id = upload_to_google_drive(file_path, fn)
-                            if file_id:
-                                st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
+                            # Drive is the permanent store; do not create duplicate files.
                     payload = {
                         "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
@@ -2565,30 +2602,6 @@ elif role == "Super Admin":
                 display_audit_log_panel()
             else:
                 st.info("📖 Audit log panel not defined — skipping")
-
-            # ====================================================
-            # GOOGLE DRIVE STORAGE HEALTH
-            # ====================================================
-            st.divider()
-            st.subheader("☁️ Google Drive Storage")
-            st.caption(
-                "Google Drive is the permanent data store. Streamlit only keeps a temporary working copy while the app is running. "
-                "The four application databases are kept as single files and updated in place."
-            )
-            storage_col1, storage_col2 = st.columns(2)
-            with storage_col1:
-                if drive_service is not None:
-                    st.success("✅ Google Drive is connected and is the primary storage.")
-                else:
-                    st.error("❌ Google Drive is not connected. Do not rely on the temporary Streamlit filesystem.")
-            with storage_col2:
-                if st.button("🧹 Repair Duplicate Drive Files", key="repair_drive_duplicates"):
-                    removed = repair_drive_duplicates()
-                    if removed:
-                        st.success(f"✅ Removed {removed} duplicate Drive file(s).")
-                    else:
-                        st.info("✅ No duplicate filenames were found.")
-                    st.rerun()
 
             # ====================================================
             # SUPER ADMIN DANGER ZONE
