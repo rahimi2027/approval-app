@@ -1754,7 +1754,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     if req.get("director_comments"):
                         st.info(f"💬 Director Comments: {req.get('director_comments')}")
                     if status == "approved":
-                        display_pdf_button(req, can_generate=False)
+                        display_pdf_button(req, can_generate=True)
                     if status in ["pending", "rejected"]:
                         if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                             st.session_state.editing_request_id = req.get("id")
