@@ -458,9 +458,35 @@ def archive_audit_log():
         return archive_path, len(df)
     return None, 0
 def clear_audit_log_file():
-    if os.path.exists(AUDIT_LOG_FILE): os.remove(AUDIT_LOG_FILE)
-    pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
+    """Permanently clear the audit history and replace it with an empty log."""
+    if os.path.exists(AUDIT_LOG_FILE):
+        os.remove(AUDIT_LOG_FILE)
+    pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(
+        AUDIT_LOG_FILE, index=False, engine="openpyxl"
+    )
     sync_saved_file_to_drive(AUDIT_LOG_FILE)
+
+
+def clear_all_requests_file():
+    """Permanently clear all submitted request records.
+
+    This intentionally clears only requests.xlsx. User accounts, system
+    settings and uploaded attachment files are left untouched.
+    """
+    if os.path.exists(EXCEL_PATH):
+        os.remove(EXCEL_PATH)
+    pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(
+        EXCEL_PATH, index=False, engine="openpyxl"
+    )
+    sync_saved_file_to_drive(EXCEL_PATH)
+    # Make the current Streamlit session use the newly empty request list.
+    st.session_state["_live_data_reset"] = datetime.now().isoformat()
+
+
+def clear_live_request_and_audit_data():
+    """Reset request history and audit history for a fresh live launch."""
+    clear_all_requests_file()
+    clear_audit_log_file()
 def get_request_details(req_id):
     dept, amount, decision_by, decision_date = "-", "-", "-", "-"
     try:
@@ -533,7 +559,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
                     "Field_Changed": label, "Old_Value": old, "New_Value": new, "IP_Address": "Auto-Logged"})
 def display_audit_log_panel():
     st.subheader("📖 Full System Audit Log — Complete History")
-    st.info("🔒 Super Admin Only — Cannot be deleted or modified."); st.divider()
+    st.info("🔒 Super Admin Only — The audit history can be cleared from the Danger Zone below."); st.divider()
     logs = load_audit_log()
     if not logs: st.info("📋 No activity recorded yet."); return
     c1, c2, c3, c4 = st.columns(4)
@@ -909,7 +935,7 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Transaction Type:", 0, 0); pdf.cell(0, 5, clean_text(fresh_data.get("type", "")), ln=True)
         pdf.cell(52, 5, "Category / Reason:", 0, 0); pdf.cell(0, 5, category, ln=True)
         pdf.cell(52, 5, "Request Date:", 0, 0); pdf.cell(0, 5, req_date, ln=True)
-        pdf.cell(52, 5, "Amount:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
+        pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
         submitted_by = clean_text(get_submitted_by(fresh_data))
         if submitted_by:
@@ -2504,32 +2530,133 @@ elif role == "Super Admin":
         with tab_audit:
 
             if "display_audit_log_panel" in globals():
-
                 display_audit_log_panel()
-
-                if st.session_state.get(
-                    "show_danger_buttons",
-                    False
-                ):
-
-                    if st.button(
-                        "🗑️ Clear Audit Log",
-                        type="secondary"
-                    ):
-
-                        clear_audit_log_file()
-
-                        st.success(
-                            "✅ Audit log cleared!"
-                        )
-
-                        st.rerun()
-
             else:
+                st.info("📖 Audit log panel not defined — skipping")
 
-                st.info(
-                    "📖 Audit log panel not defined — skipping"
+            # ====================================================
+            # SUPER ADMIN DANGER ZONE
+            # ====================================================
+            st.divider()
+            st.subheader("⚠️ Super Admin — Data Reset / Live Launch")
+            st.warning(
+                "These controls are permanent. They are intended for preparing "
+                "the portal for live use. Clearing requests removes all request "
+                "records from requests.xlsx. Clearing the audit history removes "
+                "all audit entries. User accounts, system settings and uploaded "
+                "attachment files are NOT deleted by these controls."
+            )
+
+            danger_col1, danger_col2 = st.columns(2)
+
+            with danger_col1:
+                if not st.session_state.get("confirm_clear_requests", False):
+                    if st.button(
+                        "🧹 Clear All Submitted Requests",
+                        type="secondary",
+                        key="clear_all_requests_btn"
+                    ):
+                        st.session_state["confirm_clear_requests"] = True
+                        st.rerun()
+                else:
+                    st.error(
+                        "⚠️ This will permanently remove ALL request records "
+                        "from the application."
+                    )
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button(
+                            "✅ Yes, Clear Requests",
+                            type="primary",
+                            key="confirm_clear_all_requests_btn"
+                        ):
+                            clear_all_requests_file()
+                            st.session_state["confirm_clear_requests"] = False
+                            st.success("✅ All submitted request records have been cleared.")
+                            st.rerun()
+                    with c2:
+                        if st.button(
+                            "↩️ Cancel",
+                            key="cancel_clear_all_requests_btn"
+                        ):
+                            st.session_state["confirm_clear_requests"] = False
+                            st.rerun()
+
+            with danger_col2:
+                if not st.session_state.get("confirm_clear_audit", False):
+                    if st.button(
+                        "🗑️ Clear Audit History",
+                        type="secondary",
+                        key="clear_audit_history_btn"
+                    ):
+                        st.session_state["confirm_clear_audit"] = True
+                        st.rerun()
+                else:
+                    st.error(
+                        "⚠️ This will permanently remove the entire audit history."
+                    )
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button(
+                            "✅ Yes, Clear Audit",
+                            type="primary",
+                            key="confirm_clear_audit_btn"
+                        ):
+                            clear_audit_log_file()
+                            st.session_state["confirm_clear_audit"] = False
+                            st.success("✅ Audit history has been cleared.")
+                            st.rerun()
+                    with c2:
+                        if st.button(
+                            "↩️ Cancel",
+                            key="cancel_clear_audit_btn"
+                        ):
+                            st.session_state["confirm_clear_audit"] = False
+                            st.rerun()
+
+            st.divider()
+            st.markdown("**🚀 Fresh Live Start**")
+            st.caption(
+                "Use this when you are ready to go live and want both the request "
+                "history and audit history to start empty. This does not delete "
+                "users, departments, categories, permissions or uploaded files."
+            )
+
+            if not st.session_state.get("confirm_live_reset", False):
+                if st.button(
+                    "🚀 Prepare System for Live Use",
+                    type="primary",
+                    key="prepare_live_use_btn"
+                ):
+                    st.session_state["confirm_live_reset"] = True
+                    st.rerun()
+            else:
+                st.error(
+                    "🚨 FINAL CONFIRMATION: All submitted requests AND the entire "
+                    "audit history will be permanently cleared."
                 )
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button(
+                        "🚀 Yes, Prepare for Live Use",
+                        type="primary",
+                        key="confirm_live_reset_btn"
+                    ):
+                        clear_live_request_and_audit_data()
+                        st.session_state["confirm_live_reset"] = False
+                        st.session_state["confirm_clear_requests"] = False
+                        st.session_state["confirm_clear_audit"] = False
+                        st.success(
+                            "✅ Live launch reset complete. Request and audit history are now empty."
+                        )
+                        st.rerun()
+                with c2:
+                    if st.button(
+                        "↩️ Cancel",
+                        key="cancel_live_reset_btn"
+                    ):
+                        st.session_state["confirm_live_reset"] = False
+                        st.rerun()
 
         # ====================================================
         # BACKUPS
