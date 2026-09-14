@@ -838,14 +838,47 @@ def generate_approval_pdf(request_data):
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
 
-def display_attachments(req, preview=False):
+def display_attachments(req):
+    """
+    Display attachments according to the user's role.
+
+    Director:
+        - Can preview images
+        - Can download images/files
+
+    Everyone else:
+        - Download only
+        - No image preview
+    """
+
+    # =========================================================
+    # CHECK CURRENT USER ROLE
+    # =========================================================
+
+    user_info = st.session_state.get("user_info", {})
+
+    user_role = str(
+        user_info.get("role", "")
+    ).strip().lower()
+
+    is_director = (user_role == "director")
+
+    # =========================================================
+    # GET ATTACHMENT NAMES
+    # =========================================================
+
     att = req.get("attachment_name", "None")
 
-    if not att or str(att).strip().lower() in ["none", "nan", ""]:
+    if not att or str(att).strip().lower() in [
+        "none",
+        "nan",
+        ""
+    ]:
         st.info("📎 No attachments.")
         return
 
     try:
+
         attached_files = [
             n.strip()
             for n in str(att).split(",")
@@ -854,21 +887,43 @@ def display_attachments(req, preview=False):
 
         found_any = False
 
+        # =====================================================
+        # DISPLAY EACH ATTACHMENT
+        # =====================================================
+
         for idx, name in enumerate(attached_files):
 
-            path = os.path.join(UPLOAD_DIR, name)
+            path = os.path.join(
+                UPLOAD_DIR,
+                name
+            )
 
+            # File does not exist locally
             if not os.path.exists(path):
                 continue
 
             found_any = True
 
-            # Director gets image preview
-            if preview and name.lower().endswith(
-                (".png", ".jpg", ".jpeg", ".gif", ".webp")
-            ):
+            # =================================================
+            # DIRECTOR ONLY:
+            # IMAGE PREVIEW
+            # =================================================
 
-                st.markdown(f"### 🖼️ {name}")
+            is_image = name.lower().endswith(
+                (
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".gif",
+                    ".webp"
+                )
+            )
+
+            if is_director and is_image:
+
+                st.markdown(
+                    f"### 🖼️ {name}"
+                )
 
                 st.image(
                     path,
@@ -876,35 +931,56 @@ def display_attachments(req, preview=False):
                     use_container_width=True
                 )
 
-                # Director can also download
+                # Director can download too
                 with open(path, "rb") as f:
+
                     st.download_button(
-                        f"⬇️ Download {name}",
+                        label=f"⬇️ Download {name}",
                         data=f.read(),
                         file_name=name,
                         mime="image/*",
-                        key=f"att_{req.get('id', idx)}_{idx}"
+                        key=(
+                            f"director_att_"
+                            f"{req.get('id', idx)}_"
+                            f"{idx}"
+                        )
                     )
 
-            # Everyone else gets download only
+            # =================================================
+            # EVERYONE ELSE:
+            # DOWNLOAD ONLY
+            # =================================================
+
             else:
 
                 with open(path, "rb") as f:
+
                     file_data = f.read()
 
                 st.download_button(
-                    f"⬇️ Download {name}",
+                    label=f"⬇️ Download {name}",
                     data=file_data,
                     file_name=name,
-                    key=f"att_{req.get('id', idx)}_{idx}"
+                    key=(
+                        f"attachment_"
+                        f"{req.get('id', idx)}_"
+                        f"{idx}"
+                    )
                 )
 
+        # =====================================================
+        # NO FILE FOUND
+        # =====================================================
+
         if not found_any:
+
             st.info(
-                "📎 Attachments referenced but files are not available."
+                "📎 Attachments referenced but "
+                "files are not available."
             )
 
     except Exception as e:
+
         st.error(
             f"❌ Could not display attachments: {e}"
         )
