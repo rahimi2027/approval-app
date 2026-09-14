@@ -837,7 +837,7 @@ def generate_approval_pdf(request_data):
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
-def display_attachments(req):
+def display_attachments(req, preview=False):
     att = req.get("attachment_name", "None")
 
     if not att or str(att).strip().lower() in ["none", "nan", ""]:
@@ -862,10 +862,10 @@ def display_attachments(req):
 
             found_any = True
 
-            # ------------------------------------------------
-            # IMAGE PREVIEW
-            # ------------------------------------------------
-            if name.lower().endswith(
+            # ==========================================
+            # DIRECTOR: SHOW IMAGE PREVIEW
+            # ==========================================
+            if preview and name.lower().endswith(
                 (".png", ".jpg", ".jpeg", ".gif", ".webp")
             ):
 
@@ -877,42 +877,20 @@ def display_attachments(req):
                     use_container_width=True
                 )
 
-                # Optional download button underneath preview
+                # Optional download
                 with open(path, "rb") as f:
-                    file_data = f.read()
+                    st.download_button(
+                        f"⬇️ Download {name}",
+                        data=f.read(),
+                        file_name=name,
+                        mime="image/*",
+                        key=f"att_{req.get('id', idx)}_{idx}"
+                    )
 
-                st.download_button(
-                    f"⬇️ Download {name}",
-                    data=file_data,
-                    file_name=name,
-                    mime="image/*",
-                    key=f"att_{req.get('id', idx)}_{idx}"
-                )
-
-            # ------------------------------------------------
-            # PDF
-            # ------------------------------------------------
-            elif name.lower().endswith(".pdf"):
-
-                st.markdown(f"### 📄 {name}")
-
-                with open(path, "rb") as f:
-                    pdf_data = f.read()
-
-                st.download_button(
-                    f"⬇️ Download {name}",
-                    data=pdf_data,
-                    file_name=name,
-                    mime="application/pdf",
-                    key=f"att_{req.get('id', idx)}_{idx}"
-                )
-
-            # ------------------------------------------------
-            # OTHER FILES
-            # ------------------------------------------------
+            # ==========================================
+            # NON-DIRECTOR: DOWNLOAD ONLY
+            # ==========================================
             else:
-
-                st.markdown(f"### 📎 {name}")
 
                 with open(path, "rb") as f:
                     file_data = f.read()
@@ -926,15 +904,11 @@ def display_attachments(req):
 
         if not found_any:
             st.info(
-                "📎 Attachments are listed, but the files "
-                "are not available on the server."
+                "📎 Attachments referenced but files are not available."
             )
 
     except Exception as e:
-
-        st.error(
-            f"❌ Could not display attachments: {e}"
-        )
+        st.error(f"❌ Could not display attachments: {e}")
 # ============================================================
 # 📊 DASHBOARD COMPONENT
 # ============================================================
