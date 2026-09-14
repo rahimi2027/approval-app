@@ -1787,8 +1787,39 @@ elif role in ["Manager", "Staff", "Team Member"]:
         st.divider()
         st.subheader(f"📋 My Department Requests")
         my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+
+        # 🔎 Search all requests in this department (Pending / Approved / Rejected)
+        if my_reqs:
+            dept_search = st.text_input(
+                "🔎 Search my department requests",
+                placeholder="Search by ID, employee, status, manager, type, category, amount, date, approved by or comments...",
+                key="department_requests_search",
+            )
+            if dept_search.strip():
+                q = dept_search.strip().lower()
+                my_reqs = [
+                    r for r in my_reqs
+                    if q in " ".join([
+                        str(r.get("id", "")),
+                        str(r.get("emp_name", "")),
+                        str(r.get("dept", "")),
+                        str(r.get("status", "")),
+                        str(r.get("manager", "")),
+                        str(r.get("type", "")),
+                        str(r.get("category", "")),
+                        str(r.get("amount", "")),
+                        str(r.get("date", "")),
+                        str(r.get("decision_by", "")),
+                        str(r.get("approved_by", "")),
+                        str(r.get("decision_date", "")),
+                        str(r.get("director_comments", "")),
+                        str(r.get("desc", "")),
+                    ]).lower()
+                ]
+                st.caption(f"🔎 Showing {len(my_reqs)} matching department request(s).")
+
         if not my_reqs:
-            st.info("📋 No requests yet.")
+            st.info("📋 No requests match your search." if all_live_requests else "📋 No requests yet.")
         else:
             for req in reversed(my_reqs):
                 status = req.get("status", "pending").lower()
