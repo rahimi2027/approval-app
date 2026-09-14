@@ -234,101 +234,40 @@ def upload_to_google_drive(
 # These helpers keep the important Excel/PDF data permanently in
 # the configured Google Drive folder.
 
-# These files are application databases, not ordinary uploads.
-# There must be exactly ONE copy of each database in the configured
-# Google Drive folder.  We therefore UPDATE the existing Drive file
-# instead of calling files().create() on every save.
-SINGLETON_DRIVE_FILES = {
-    "requests.xlsx",
-    "user_database.xlsx",
-    "settings.xlsx",
-    "audit_log.xlsx",
-}
-
-def _drive_list_files(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Return all non-trashed Drive files with this exact name in the app folder."""
+def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
     if drive_service is None:
-        return []
+        return None
     try:
-        safe_name = str(filename).replace("'", "\\'")
-        q = (
-            f"name = '{safe_name}' and '{parent_id}' in parents "
-            "and trashed = false"
-        )
+        safe_name = filename.replace("'", "\\'")
+        q = (f"name = '{safe_name}' and '{parent_id}' in parents "
+             "and trashed = false")
         result = drive_service.files().list(
-            q=q,
-            spaces="drive",
-            orderBy="modifiedTime desc",
-            fields="files(id,name,modifiedTime,createdTime,size)",
-            pageSize=100,
+            q=q, spaces="drive", fields="files(id,name,modifiedTime)", pageSize=10
         ).execute()
-        return result.get("files", [])
+        files = result.get("files", [])
+        return files[0] if files else None
     except Exception as e:
         print(f"Drive lookup failed for {filename}: {e}")
-        return []
-
-def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Return the newest matching Drive file, if one exists."""
-    files = _drive_list_files(filename, parent_id)
-    return files[0] if files else None
-
-def _drive_remove_duplicate_files(filename, keep_file_id, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Delete older duplicate singleton database files from the app folder."""
-    if drive_service is None or filename not in SINGLETON_DRIVE_FILES:
-        return 0
-
-    removed = 0
-    for item in _drive_list_files(filename, parent_id):
-        file_id = item.get("id")
-        if not file_id or file_id == keep_file_id:
-            continue
-        try:
-            drive_service.files().delete(fileId=file_id).execute()
-            removed += 1
-            print(f"Removed duplicate Drive database: {filename} ({file_id})")
-        except Exception as e:
-            print(f"Could not remove duplicate {filename} ({file_id}): {e}")
-    return removed
-
-def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Upsert a file in Drive; singleton application files are never duplicated."""
-    if drive_service is None or not os.path.exists(local_path):
         return None
 
+def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    if drive_service is None or not os.path.exists(local_path):
+        return None
     filename = filename or os.path.basename(local_path)
     try:
-        existing_files = _drive_list_files(filename, parent_id)
-        existing = existing_files[0] if existing_files else None
-
-        media = MediaFileUpload(local_path, resumable=True)
-
+        existing = _drive_find_file(filename, parent_id)
         if existing:
-            # IMPORTANT: update the existing Drive file instead of creating a new one.
+            media = MediaFileUpload(local_path, resumable=True)
             updated = drive_service.files().update(
-                fileId=existing["id"],
-                media_body=media,
-                fields="id,name,modifiedTime",
+                fileId=existing["id"], media_body=media, fields="id,name"
             ).execute()
-            keep_id = updated.get("id") or existing["id"]
-
-            # Clean up duplicates created by older versions of the application.
-            if filename in SINGLETON_DRIVE_FILES:
-                _drive_remove_duplicate_files(filename, keep_id, parent_id)
-
-            return keep_id
-
+            return updated.get("id")
         metadata = {"name": filename, "parents": [parent_id]}
+        media = MediaFileUpload(local_path, resumable=True)
         created = drive_service.files().create(
-            body=metadata, media_body=media, fields="id,name,modifiedTime"
+            body=metadata, media_body=media, fields="id,name"
         ).execute()
-        keep_id = created.get("id")
-
-        # Normally there cannot be duplicates here, but clean up a race/legacy copy
-        # if one appeared between the list and create operations.
-        if keep_id and filename in SINGLETON_DRIVE_FILES:
-            _drive_remove_duplicate_files(filename, keep_id, parent_id)
-
-        return keep_id
+        return created.get("id")
     except Exception as e:
         print(f"Drive upload failed for {filename}: {e}")
         return None
@@ -349,36 +288,18 @@ def _drive_download_file(file_id, local_path):
         return False
 
 def sync_persistent_file(local_path, columns=None):
-    """
-    Synchronise one permanent application database with Google Drive.
-
-    Drive is authoritative when the file already exists.  If older versions
-    created multiple copies, the newest copy is kept, downloaded locally, and
-    all older duplicates are removed.  Future saves update that same Drive
-    file ID, so the folder stays clean.
-    """
+    """On startup: Drive is authoritative; migrate an existing local file if Drive has none."""
     if drive_service is None:
         return
-
     filename = os.path.basename(local_path)
-    remote_files = _drive_list_files(filename)
-
-    if remote_files:
-        # _drive_list_files is ordered newest-first.
-        remote = remote_files[0]
-        if _drive_download_file(remote["id"], local_path):
-            if filename in SINGLETON_DRIVE_FILES:
-                _drive_remove_duplicate_files(filename, remote["id"])
-        else:
+    remote = _drive_find_file(filename)
+    if remote:
+        if not _drive_download_file(remote["id"], local_path):
             print(f"Using local copy of {filename} because Drive download failed")
-        return
-
-    if os.path.exists(local_path):
+    elif os.path.exists(local_path):
         _drive_upload_path(local_path, filename)
     elif columns is not None:
-        pd.DataFrame(columns=columns).to_excel(
-            local_path, index=False, engine="openpyxl"
-        )
+        pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
         _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
@@ -445,7 +366,7 @@ DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GY
 DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Director", "Payroll", "Super Admin"]
 DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
 EXCEL_COLUMNS = [
-    "ID", "Employee Name", "Completed By", "Department", "Transaction Type", "Category Reason",
+    "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
     "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name",
     "Status", "Director Comments", "Decision Date", "Decision By",
     "PDF File Path", "Edited From ID", "Old Data"
@@ -828,26 +749,6 @@ def load_users():
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
 initialise_excel()
-
-def get_original_completed_by(req_id, fallback=""):
-    """Recover the original request creator for older records that predate Completed By."""
-    try:
-        for entry in load_audit_log():
-            if (str(entry.get("Request_ID", "")).strip() == str(req_id).strip()
-                    and str(entry.get("Action", "")).strip().upper() == "CREATED"):
-                creator = str(entry.get("User_Name", "")).strip()
-                if creator:
-                    return creator
-    except Exception:
-        pass
-    return str(fallback or "").strip() or "-"
-
-def display_completed_by(req):
-    """Show who originally completed/submitted the request."""
-    completed_by = (str(req.get("completed_by", "")).strip()
-                    or get_original_completed_by(req.get("id", ""), req.get("emp_name", "")))
-    st.write(f"👤 **Completed by:** {completed_by}")
-
 def load_records_from_excel():
     try:
         if not os.path.exists(EXCEL_PATH): return []
@@ -862,7 +763,6 @@ def load_records_from_excel():
             except: amount = 0.0
             parsed.append({
                 "id": record_id, "emp_name": str(r.get("Employee Name", "Not Specified")).strip(),
-                "completed_by": str(r.get("Completed By", "")).strip() or get_original_completed_by(record_id, r.get("Employee Name", "Not Specified")),
                 "dept": str(r.get("Department", "Not Specified")).strip(),
                 "type": str(r.get("Transaction Type", "Not Specified")).strip(),
                 "category": str(r.get("Category Reason", "Not Specified")).strip(),
@@ -884,7 +784,6 @@ def save_all_records(records):
     export = []
     for r in records:
         export.append({"ID": int(r.get("id", 0)), "Employee Name": str(r.get("emp_name", "")),
-            "Completed By": str(r.get("completed_by", "")) or str(r.get("emp_name", "")),
             "Department": str(r.get("dept", "")), "Transaction Type": str(r.get("type", "")),
             "Category Reason": str(r.get("category", "")), "Date": str(r.get("date", "")),
             "Amount (£)": float(r.get("amount", 0.0)), "Line Manager": str(r.get("manager", "")),
@@ -926,11 +825,6 @@ def generate_approval_pdf(request_data):
         req_date = format_date(fresh_data.get("date", ""))
         desc = clean_text(fresh_data.get("desc", ""))
         manager = clean_text(fresh_data.get("manager", ""))
-        completed_by = clean_text(
-            fresh_data.get("completed_by", "")
-            or get_original_completed_by(req_id, fresh_data.get("emp_name", "Unknown"))
-            or fresh_data.get("emp_name", "Unknown")
-        )
         status = str(fresh_data.get("status", "pending")).strip().lower()
         dir_approve = format_date(fresh_data.get("decision_date", ""))
         dir_name = clean_text(fresh_data.get("decision_by", "Director"))
@@ -968,7 +862,6 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Request Date:", 0, 0); pdf.cell(0, 5, req_date, ln=True)
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
-        pdf.cell(52, 5, "Completed By:", 0, 0); pdf.cell(0, 5, completed_by, ln=True)
         pdf.ln(6)
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True); pdf.ln(2)
@@ -1651,7 +1544,6 @@ def create_pdf_from_request(req):
         except: pass
         row("Amount Approved", amount)
         row("Line Manager", req.get("manager", ""))
-        row("Completed By", req.get("completed_by", "") or get_original_completed_by(req_id, req.get("emp_name", "")))
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
@@ -1776,7 +1668,6 @@ if role == "Payroll":
                 # ✅ Department added after amount
                 with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    display_completed_by(req)
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"👔 **Line Manager:** {req.get('manager')}")
@@ -1812,7 +1703,6 @@ if role == "Payroll":
                     if q in " ".join([
                         str(r.get("id", "")),
                         str(r.get("emp_name", "")),
-                        str(r.get("completed_by", "")),
                         str(r.get("dept", "")),
                         str(r.get("decision_by", "")),
                         str(r.get("approved_by", "")),
@@ -1839,7 +1729,6 @@ if role == "Payroll":
                 title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')}{extra_text}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
-                    display_completed_by(req)
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
                     if display_date:
@@ -1859,7 +1748,6 @@ if role == "Payroll":
                 # ✅ Department added after amount
                 with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    display_completed_by(req)
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
@@ -1994,7 +1882,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             if file_id:
                                 st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
                     payload = {
-                        "id": nid, "emp_name": en.strip(), "completed_by": full_name, "dept": dept_name, "type": rt,
+                        "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
                         "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
                         "status": "pending", "director_comments": "", "decision_date": "",
@@ -2007,10 +1895,46 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 else:
                     st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
         st.divider()
-        st.subheader(f"📋 My Department Requests")
+        st.subheader("📋 My Department Requests")
         my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+
+        # 🔎 Search box for My Department Requests
+        # Searches across the fields users are most likely to use when locating a request.
+        my_dept_search = st.text_input(
+            "🔎 Search my department requests",
+            placeholder="Search by ID, employee, status, amount, manager, category, date, description, approver or comments...",
+            key="my_department_requests_search",
+        )
+
+        if my_dept_search.strip():
+            q = my_dept_search.strip().lower()
+            my_reqs = [
+                r for r in my_reqs
+                if q in " ".join([
+                    str(r.get("id", "")),
+                    str(r.get("emp_name", "")),
+                    str(r.get("dept", "")),
+                    str(r.get("status", "")),
+                    str(r.get("amount", "")),
+                    str(r.get("manager", "")),
+                    str(r.get("type", "")),
+                    str(r.get("category", "")),
+                    str(r.get("date", "")),
+                    str(r.get("desc", "")),
+                    str(r.get("decision_by", "")),
+                    str(r.get("approved_by", "")),
+                    str(r.get("decision_date", "")),
+                    str(r.get("director_comments", "")),
+                    str(r.get("attachment_name", "")),
+                ]).lower()
+            ]
+            st.caption(f"🔎 Showing {len(my_reqs)} matching department request(s).")
+
         if not my_reqs:
-            st.info("📋 No requests yet.")
+            if my_dept_search.strip():
+                st.warning("No department requests match your search.")
+            else:
+                st.info("📋 No requests yet.")
         else:
             for req in reversed(my_reqs):
                 status = req.get("status", "pending").lower()
@@ -2023,7 +1947,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
-                    display_completed_by(req)
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.info(f"📝 Description: {req.get('desc')}")
                     display_attachments(req)
@@ -2060,7 +1983,6 @@ elif role == "Director":
                         st.write(f"🏷️ **Category:** {req.get('category')}")
                         st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
                         st.write(f"👔 **Line Manager:** {req.get('manager')}")
-                        display_completed_by(req)
                         st.write(f"📅 **Date:** {format_date(req.get('date',''))}")
                         st.info(f"📝 **Description / Justification:**\n{req.get('desc','')}")
                         display_attachments(req)
@@ -2123,7 +2045,6 @@ elif role == "Director":
                     if q in " ".join([
                         str(r.get("id", "")),
                         str(r.get("emp_name", "")),
-                        str(r.get("completed_by", "")),
                         str(r.get("dept", "")),
                         str(r.get("decision_by", "")),
                         str(r.get("approved_by", "")),
