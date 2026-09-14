@@ -1002,13 +1002,13 @@ def work_order_pdf(req):
             pdf.set_font(font_family, "B", 10)
             pdf.cell(45, 6, safe(label + ":"), 0, 0)
             pdf.set_font(font_family, "", 10)
-            pdf.multi_cell(0, 6, safe(value))
+            pdf.multi_cell(0, 6, safe(value), wrapmode="CHAR")
 
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Work Performed / Description:"), ln=True)
         pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(req.get("desc", "")))
+        pdf.multi_cell(0, 6, safe(req.get("desc", "")), wrapmode="CHAR")
 
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
@@ -1018,7 +1018,7 @@ def work_order_pdf(req):
             f"Reviewed By: {req.get('manager_decision_by', '')}\n"
             f"Review Date: {req.get('manager_decision_date', '')}\n"
             f"Comments: {req.get('manager_comments', '')}"
-        ))
+        ), wrapmode="CHAR")
 
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
@@ -1028,7 +1028,7 @@ def work_order_pdf(req):
             f"Approved By: {req.get('director_decision_by', '')}\n"
             f"Approval Date: {req.get('director_decision_date', '')}\n"
             f"Comments: {req.get('director_comments', '')}"
-        ))
+        ), wrapmode="CHAR")
 
         pdf.ln(4)
         pdf.set_font(font_family, "B", 10)
