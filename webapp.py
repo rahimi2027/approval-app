@@ -171,103 +171,96 @@ if drive_service:
 # GOOGLE DRIVE UPLOAD
 # ============================================================
 
-def upload_to_google_drive(
-    local_file_path,
-    display_filename
-):
+def upload_to_google_drive(local_file_path, display_filename):
+    """Upload a file to Google Drive using UPSERT semantics.
 
+    If a file with the same name already exists in the application folder,
+    its contents are UPDATED instead of creating another Drive file.
+    """
     if drive_service is None:
-
-        st.error(
-            "❌ Google Drive is not connected."
-        )
-
+        st.error("❌ Google Drive is not connected.")
         return None
-
     if not os.path.exists(local_file_path):
-
-        st.error(
-            f"❌ File not found: {local_file_path}"
-        )
-
+        st.error(f"❌ File not found: {local_file_path}")
         return None
-
-    try:
-
-        file_metadata = {
-            "name": display_filename,
-            "parents": [
-                GOOGLE_DRIVE_FOLDER_ID
-            ]
-        }
-
-        media = MediaFileUpload(
-            local_file_path,
-            resumable=True
-        )
-
-        uploaded = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id,name,parents"
-        ).execute()
-
-        st.success(
-            f"✅ Uploaded to Google Drive: "
-            f"{display_filename}"
-        )
-
-        return uploaded.get("id")
-
-    except Exception as e:
-
-        st.error(
-            f"❌ Google Drive upload failed: {e}"
-        )
-
-        return None
+    file_id = _drive_upload_path(local_file_path, display_filename)
+    if file_id:
+        st.success(f"✅ Saved to Google Drive: {display_filename}")
+    else:
+        st.error(f"❌ Could not save to Google Drive: {display_filename}")
+    return file_id
 
 # ============================================================
 # GOOGLE DRIVE — PERMANENT APPLICATION DATA STORAGE
 # ============================================================
-# The Streamlit filesystem is used only as a working/cache copy.
-# These helpers keep the important Excel/PDF data permanently in
-# the configured Google Drive folder.
+# Google Drive is the authoritative/persistent store.
+# Streamlit's local filesystem is only a temporary working/cache copy.
 
-def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+def _drive_find_files(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    """Return all non-trashed files with this exact name in the app folder."""
     if drive_service is None:
-        return None
+        return []
     try:
-        safe_name = filename.replace("'", "\\'")
+        safe_name = str(filename).replace("'", "\\'")
         q = (f"name = '{safe_name}' and '{parent_id}' in parents "
              "and trashed = false")
         result = drive_service.files().list(
-            q=q, spaces="drive", fields="files(id,name,modifiedTime)", pageSize=10
+            q=q, spaces="drive",
+            fields="files(id,name,modifiedTime,createdTime,mimeType,size)",
+            orderBy="modifiedTime desc", pageSize=100
         ).execute()
-        files = result.get("files", [])
-        return files[0] if files else None
+        return result.get("files", [])
     except Exception as e:
         print(f"Drive lookup failed for {filename}: {e}")
-        return None
+        return []
 
-def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    files = _drive_find_files(filename, parent_id)
+    return files[0] if files else None
+
+def _drive_delete_file(file_id):
+    if drive_service is None or not file_id:
+        return False
+    try:
+        drive_service.files().delete(fileId=file_id).execute()
+        return True
+    except Exception as e:
+        print(f"Drive delete failed for {file_id}: {e}")
+        return False
+
+def _drive_remove_duplicate_names(filename, keep_id, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    """Remove older duplicate copies of one managed filename."""
+    removed = 0
+    for item in _drive_find_files(filename, parent_id):
+        if item.get("id") != keep_id and _drive_delete_file(item.get("id")):
+            removed += 1
+    return removed
+
+def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID,
+                       remove_duplicates=True):
+    """Create-or-update one Drive file; never intentionally creates a copy."""
     if drive_service is None or not os.path.exists(local_path):
         return None
     filename = filename or os.path.basename(local_path)
     try:
         existing = _drive_find_file(filename, parent_id)
-        if existing:
-            media = MediaFileUpload(local_path, resumable=True)
-            updated = drive_service.files().update(
-                fileId=existing["id"], media_body=media, fields="id,name"
-            ).execute()
-            return updated.get("id")
-        metadata = {"name": filename, "parents": [parent_id]}
         media = MediaFileUpload(local_path, resumable=True)
-        created = drive_service.files().create(
-            body=metadata, media_body=media, fields="id,name"
-        ).execute()
-        return created.get("id")
+        if existing:
+            updated = drive_service.files().update(
+                fileId=existing["id"], media_body=media,
+                body={"name": filename}, fields="id,name,modifiedTime"
+            ).execute()
+            file_id = updated.get("id")
+        else:
+            metadata = {"name": filename, "parents": [parent_id]}
+            created = drive_service.files().create(
+                body=metadata, media_body=media, fields="id,name,modifiedTime"
+            ).execute()
+            file_id = created.get("id")
+
+        if remove_duplicates and file_id:
+            _drive_remove_duplicate_names(filename, file_id, parent_id)
+        return file_id
     except Exception as e:
         print(f"Drive upload failed for {filename}: {e}")
         return None
@@ -276,6 +269,7 @@ def _drive_download_file(file_id, local_path):
     if drive_service is None:
         return False
     try:
+        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
         request = drive_service.files().get_media(fileId=file_id)
         with open(local_path, "wb") as fh:
             downloader = MediaIoBaseDownload(fh, request)
@@ -287,8 +281,21 @@ def _drive_download_file(file_id, local_path):
         print(f"Drive download failed for {local_path}: {e}")
         return False
 
+def _ensure_local_attachment(filename):
+    """Make an attachment available locally from Drive when Streamlit has no cache copy."""
+    if not filename or str(filename).strip().lower() in ("none", "nan", ""):
+        return None
+    filename = os.path.basename(str(filename).strip())
+    local_path = os.path.join(UPLOAD_DIR, filename)
+    if os.path.exists(local_path):
+        return local_path
+    remote = _drive_find_file(filename)
+    if remote and _drive_download_file(remote["id"], local_path):
+        return local_path
+    return None
+
 def sync_persistent_file(local_path, columns=None):
-    """On startup: Drive is authoritative; migrate an existing local file if Drive has none."""
+    """Drive is authoritative; local files are only a working/cache copy."""
     if drive_service is None:
         return
     filename = os.path.basename(local_path)
@@ -303,14 +310,39 @@ def sync_persistent_file(local_path, columns=None):
         _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
-    """Push a newly saved local file to Google Drive."""
+    """Push a saved working copy to the single matching Drive file."""
     if drive_service is not None and os.path.exists(local_path):
         _drive_upload_path(local_path)
+
+def repair_drive_duplicates():
+    """Remove duplicate exact-name files from the application Drive folder."""
+    if drive_service is None:
+        return 0
+    try:
+        result = drive_service.files().list(
+            q=f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false",
+            spaces="drive",
+            fields="files(id,name,modifiedTime)",
+            orderBy="name,modifiedTime desc",
+            pageSize=1000
+        ).execute()
+        seen = set()
+        removed = 0
+        for item in result.get("files", []):
+            name = item.get("name", "")
+            if name in seen:
+                if _drive_delete_file(item.get("id")):
+                    removed += 1
+            else:
+                seen.add(name)
+        return removed
+    except Exception as e:
+        print(f"Drive duplicate repair failed: {e}")
+        return 0
 
 def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"):
         return
-    # These are the application's permanent databases.
     targets = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, ["full_name","username","password","role","dept",
@@ -982,8 +1014,8 @@ def generate_approval_pdf(request_data):
         pdf.set_font("Courier", "", 9)
         if len(display_files) > 0:
             for idx, fname in enumerate(display_files, 1):
-                file_path = os.path.join(UPLOAD_DIR, fname)
-                if os.path.exists(file_path):
+                file_path = _ensure_local_attachment(fname)
+                if file_path and os.path.exists(file_path):
                     if fname.lower().endswith((".png", ".jpg", ".jpeg")):
                         pdf.ln(2)
                         try: pdf.image(file_path, x=10, w=190); pdf.ln(70)
@@ -1109,13 +1141,10 @@ def display_attachments(req):
 
         for idx, name in enumerate(attached_files):
 
-            path = os.path.join(
-                UPLOAD_DIR,
-                name
-            )
+            path = _ensure_local_attachment(name)
 
-            # File does not exist locally
-            if not os.path.exists(path):
+            # File is not available locally and could not be restored from Drive.
+            if not path or not os.path.exists(path):
                 continue
 
             found_any = True
@@ -1591,7 +1620,9 @@ def create_pdf_from_request(req):
         req_id = str(req.get("id", "unknown"))
         emp_name = str(req.get("emp_name", "Request")).replace(" ", "_")
         date_str = str(req.get("date", "unknown"))[:10].replace("-", "")
-        filename = f"{emp_name}_{date_str}.pdf"
+        # One stable PDF name per request. Re-generating the same request
+        # updates the same Drive file instead of creating another copy.
+        filename = f"ID_{req_id}_{emp_name}_{date_str}.pdf"
         filepath = os.path.join(PDF_DIR, filename)
         os.makedirs(PDF_DIR, exist_ok=True)
         pdf = FPDF()
@@ -1629,15 +1660,15 @@ def create_pdf_from_request(req):
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.set_font("Helvetica", "", 11)
-        justification = str(req.get("justification", req.get("description", "")))
+        justification = str(req.get("desc", req.get("justification", req.get("description", ""))))
         pdf.multi_cell(0, 7, justification)
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
         pdf.set_font("Helvetica", "", 11)
         row("Decision", "APPROVED")
-        row("Approved By", req.get("approved_by", "Andy Acoole"))
-        row("Approval Date / Time", str(req.get("approved_date", ""))[:16])
+        row("Approved By", req.get("decision_by", req.get("approved_by", "Andy Acoole")))
+        row("Approval Date / Time", str(req.get("decision_date", req.get("approved_date", "")))[:19])
         pdf.ln(10)
         pdf.set_draw_color(100, 100, 100)
         pdf.dashed_line(10, pdf.get_y(), 200, pdf.get_y())
@@ -1651,6 +1682,7 @@ def create_pdf_from_request(req):
         pdf.cell(0, 7, "Acoole Electrical Ltd", ln=True, align="C")
         pdf.set_text_color(0, 0, 0)
         pdf.output(filepath)
+        _drive_upload_path(filepath, filename)
         return filepath
     except Exception as e:
         st.warning(f"⚠️ PDF Error for #{req.get('id', '?')}: {str(e)}")
@@ -2533,6 +2565,30 @@ elif role == "Super Admin":
                 display_audit_log_panel()
             else:
                 st.info("📖 Audit log panel not defined — skipping")
+
+            # ====================================================
+            # GOOGLE DRIVE STORAGE HEALTH
+            # ====================================================
+            st.divider()
+            st.subheader("☁️ Google Drive Storage")
+            st.caption(
+                "Google Drive is the permanent data store. Streamlit only keeps a temporary working copy while the app is running. "
+                "The four application databases are kept as single files and updated in place."
+            )
+            storage_col1, storage_col2 = st.columns(2)
+            with storage_col1:
+                if drive_service is not None:
+                    st.success("✅ Google Drive is connected and is the primary storage.")
+                else:
+                    st.error("❌ Google Drive is not connected. Do not rely on the temporary Streamlit filesystem.")
+            with storage_col2:
+                if st.button("🧹 Repair Duplicate Drive Files", key="repair_drive_duplicates"):
+                    removed = repair_drive_duplicates()
+                    if removed:
+                        st.success(f"✅ Removed {removed} duplicate Drive file(s).")
+                    else:
+                        st.info("✅ No duplicate filenames were found.")
+                    st.rerun()
 
             # ====================================================
             # SUPER ADMIN DANGER ZONE
