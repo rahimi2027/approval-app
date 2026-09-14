@@ -14,6 +14,7 @@ import subprocess
 import pandas as pd
 import io
 import requests
+import re
 from datetime import datetime, date
 
 from googleapiclient.discovery import build
@@ -117,6 +118,11 @@ try:
         scopes=SCOPES
     )
 
+    # Refresh once at startup so Drive requests have a valid access token.
+    from google.auth.transport.requests import Request
+    if credentials.expired or not credentials.token:
+        credentials.refresh(Request())
+
     drive_service = build(
         "drive",
         "v3",
@@ -129,18 +135,13 @@ try:
         fields="user"
     ).execute()
 
-    st.success(
-        f"✅ Google Drive connected: "
-      #  f"{about['user'].get('emailAddress')}"
-    )
 
 except Exception as e:
 
     drive_service = None
 
-    st.error(
-        f"❌ Google Drive connection failed: {e}"
-    )
+    print(f"Google Drive connection failed: {e}")
+    st.warning("⚠️ Google Drive is temporarily unavailable. The app will continue using its working copy and retry on refresh.")
 
 
 # ============================================================
@@ -156,18 +157,13 @@ if drive_service:
             fields="id,name,mimeType"
         ).execute()
 
-        st.success(
-            f"✅ Google Drive folder accessible: "
-           # f"{folder['name']}"
-        )
 
     except Exception as e:
 
         drive_service = None
 
-        st.error(
-            f"❌ Google Drive folder access failed: {e}"
-        )
+        print(f"Google Drive folder access failed: {e}")
+        st.warning("⚠️ Google Drive folder access failed. The app will continue using its working copy.")
 
 
 # ============================================================
@@ -693,11 +689,11 @@ def refresh_data_button():
         # latest persistent data from Google Drive again. Normal reruns use the
         # in-session cache and therefore do not repeatedly hit Drive/disk.
         if drive_service is not None:
-            for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH):
+            for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, WORK_ORDERS_PATH):
                 remote = _drive_find_file(os.path.basename(path))
                 if remote:
                     _drive_download_file(remote["id"], path)
-        _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache")
+        _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache")
         st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 def make_request_title(req):
@@ -959,19 +955,34 @@ def _pdf_text(value):
     return str(value).replace("\x00", "")
 
 
-def work_order_pdf(req):
-    """Generate the final Work Order PDF safely on Streamlit Cloud.
+def _pdf_layout_text(value, max_run=55):
+    """Prevent fpdf2 failures caused by extremely long unbroken strings.
 
-    Uses an installed Unicode font when available and explicit column widths
-    so long filenames/descriptions cannot trigger FPDF's
-    "Not enough horizontal space to render a single character" error.
+    Normal text is left unchanged. Only whitespace-free runs longer than
+    max_run characters receive soft line breaks. This is especially useful
+    for descriptions, filenames and pasted URLs/IDs.
     """
+    text = _pdf_text(value)
+    if not text:
+        return ""
+    parts = []
+    for chunk in re.split(r"(\s+)", text):
+        if chunk.isspace():
+            parts.append(chunk)
+            continue
+        while len(chunk) > max_run:
+            parts.append(chunk[:max_run])
+            parts.append("\n")
+            chunk = chunk[max_run:]
+        parts.append(chunk)
+    return "".join(parts)
+
+
+def work_order_pdf(req):
     if not PDF_AVAILABLE:
         return None
-
     try:
-        pdf = FPDF(orientation="P", unit="mm", format="A4")
-        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf = FPDF()
         pdf.add_page()
 
         regular_font, bold_font = _pdf_font_paths()
@@ -980,6 +991,8 @@ def work_order_pdf(req):
             pdf.add_font("DejaVu", "B", bold_font)
             font_family = "DejaVu"
         else:
+            # Fallback for environments without a bundled/system Unicode font.
+            # Replace only characters unsupported by the built-in Helvetica font.
             font_family = "Helvetica"
 
         def safe(value):
@@ -988,109 +1001,76 @@ def work_order_pdf(req):
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
-        def write_label_value(label, value):
-            """Write a two-column row using fixed widths and safe wrapping."""
-            label_text = safe(f"{label}:")
-            value_text = safe(value)
-
-            # 45mm label + 145mm value = 190mm printable width.
-            pdf.set_font(font_family, "B", 10)
-            pdf.cell(45, 6, label_text, border=0)
-
-            current_y = pdf.get_y()
-            pdf.set_xy(55, current_y)
-            pdf.set_font(font_family, "", 10)
-            pdf.multi_cell(
-                145, 6, value_text,
-                border=0, align="L", fill=False,
-                new_x="LMARGIN", new_y="NEXT",
-                wrapmode="CHAR"
-            )
-            pdf.set_x(10)
+        def layout_safe(value):
+            text = _pdf_layout_text(value)
+            if font_family == "Helvetica":
+                return text.encode("latin-1", "replace").decode("latin-1")
+            return text
 
         pdf.set_font(font_family, "B", 16)
         pdf.cell(0, 10, safe("WORK ORDER - PAYMENT AUTHORISATION"), ln=True, align="C")
         pdf.ln(5)
 
+        pdf.set_font(font_family, "", 10)
         rows = [
             ("Work Order ID", req.get("id", "")),
             ("Employee", req.get("emp_name", "")),
             ("Department", req.get("dept", "")),
             ("Work Date", req.get("work_date", "")),
             ("Hours", req.get("hours", "")),
-            ("Amount", f"GBP {float(req.get('amount', 0) or 0):.2f}"),
+            ("Amount", f"GBP {float(req.get('amount', 0)):.2f}"),
             ("Manager", req.get("manager", "")),
             ("Submitted By", req.get("submitted_by", "")),
             ("Submitted Date", req.get("submitted_date", "")),
         ]
-
         for label, value in rows:
-            write_label_value(label, value)
+            pdf.set_font(font_family, "B", 10)
+            pdf.cell(45, 6, safe(label + ":"), 0, 0)
+            pdf.set_font(font_family, "", 10)
+            # Explicit width avoids fpdf2's "not enough horizontal space"
+            # error when the cursor is already part-way across the page.
+            remaining_width = max(20, pdf.w - pdf.r_margin - pdf.get_x())
+            pdf.multi_cell(remaining_width, 6, layout_safe(value))
 
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Work Performed / Description:"), ln=True)
         pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(
-            190, 6, safe(req.get("desc", "")),
-            border=0, align="L", fill=False,
-            new_x="LMARGIN", new_y="NEXT",
-            wrapmode="CHAR"
-        )
+        pdf.multi_cell(max(20, pdf.w - pdf.l_margin - pdf.r_margin), 6, layout_safe(req.get("desc", "")))
 
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Manager Review"), ln=True)
         pdf.set_font(font_family, "", 10)
-        manager_review = (
+        pdf.multi_cell(max(20, pdf.w - pdf.l_margin - pdf.r_margin), 6, layout_safe(
             f"Reviewed By: {req.get('manager_decision_by', '')}\n"
             f"Review Date: {req.get('manager_decision_date', '')}\n"
             f"Comments: {req.get('manager_comments', '')}"
-        )
-        pdf.multi_cell(
-            190, 6, safe(manager_review),
-            border=0, align="L", fill=False,
-            new_x="LMARGIN", new_y="NEXT",
-            wrapmode="CHAR"
-        )
+        ))
 
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Director Final Approval"), ln=True)
         pdf.set_font(font_family, "", 10)
-        director_review = (
+        pdf.multi_cell(max(20, pdf.w - pdf.l_margin - pdf.r_margin), 6, layout_safe(
             f"Approved By: {req.get('director_decision_by', '')}\n"
             f"Approval Date: {req.get('director_decision_date', '')}\n"
             f"Comments: {req.get('director_comments', '')}"
-        )
-        pdf.multi_cell(
-            190, 6, safe(director_review),
-            border=0, align="L", fill=False,
-            new_x="LMARGIN", new_y="NEXT",
-            wrapmode="CHAR"
-        )
+        ))
 
         pdf.ln(4)
         pdf.set_font(font_family, "B", 10)
-        pdf.cell(
-            0, 6,
-            safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"),
-            ln=True
-        )
+        pdf.cell(0, 6, layout_safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"), ln=True)
 
         os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
-        filename = f"{req.get('id', 'Work_Order')}.pdf"
-        path = os.path.join(WORK_ORDER_PDF_DIR, filename)
+        path = os.path.join(WORK_ORDER_PDF_DIR, f"{req.get('id', 'Work_Order')}.pdf")
         pdf.output(path)
-
-        # Keep one PDF per Work Order ID in Google Drive (update existing file).
-        upload_to_google_drive(path, filename)
+        upload_to_google_drive(path, os.path.basename(path))
         return path
-
     except Exception as e:
-        # Do not crash the entire Streamlit app because a single PDF failed.
-        st.error(f"Work Order PDF Error: {type(e).__name__}: {e}")
+        st.error(f"Work Order PDF Error: {e}")
         return None
+
 
 def display_work_order_pdf(req):
     path = req.get("pdf_path", "")
@@ -1438,69 +1418,81 @@ def generate_approval_pdf(request_data):
                 if n and n.lower() not in ["none", ""]: display_files.append(n)
         pdf = FPDF()
         pdf.add_page()
+        regular_font, bold_font = _pdf_font_paths()
+        if regular_font and bold_font:
+            pdf.add_font("DejaVu", "", regular_font)
+            pdf.add_font("DejaVu", "B", bold_font)
+            pdf_font = "DejaVu"
+        else:
+            pdf_font = "Helvetica"
         if os.path.exists(LOGO_PATH): pdf.image(LOGO_PATH, x=75, y=10, w=60)
         pdf.ln(22)
-        pdf.set_font("Courier", "", 11)
-        pdf.cell(0, 5, txt="Addition & Deduction Approval Form", ln=True, align="C")
+        def pdf_safe(value):
+            text = _pdf_layout_text(value)
+            if pdf_font == "Helvetica":
+                return text.encode("latin-1", "replace").decode("latin-1")
+            return text
+        pdf.set_font(pdf_font, "", 11)
+        pdf.cell(0, 5, txt=pdf_safe("Addition & Deduction Approval Form"), ln=True, align="C")
         pdf.ln(3)
         line_y = pdf.get_y()
         pdf.line(10, line_y, 200, line_y)
         pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
         pdf.ln(12)
-        pdf.set_font("Courier", "B", 10)
-        pdf.cell(0, 5, txt="REQUEST DETAILS", ln=True); pdf.ln(2)
-        pdf.set_font("Courier", "", 9)
-        pdf.cell(52, 5, "Request ID:", 0, 0); pdf.cell(0, 5, str(fresh_data.get("id", "")), ln=True)
-        pdf.cell(52, 5, "Employee Name:", 0, 0); pdf.cell(0, 5, emp_name, ln=True)
-        pdf.cell(52, 5, "Department:", 0, 0); pdf.cell(0, 5, dept, ln=True)
-        pdf.cell(52, 5, "Transaction Type:", 0, 0); pdf.cell(0, 5, clean_text(fresh_data.get("type", "")), ln=True)
-        pdf.cell(52, 5, "Category / Reason:", 0, 0); pdf.cell(0, 5, category, ln=True)
-        pdf.cell(52, 5, "Request Date:", 0, 0); pdf.cell(0, 5, req_date, ln=True)
-        pdf.cell(52, 5, "Amount:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
-        pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
+        pdf.set_font(pdf_font, "B", 10)
+        pdf.cell(0, 5, txt=pdf_safe("REQUEST DETAILS"), ln=True); pdf.ln(2)
+        pdf.set_font(pdf_font, "", 9)
+        pdf.cell(52, 5, pdf_safe("Request ID:"), 0, 0); pdf.cell(0, 5, pdf_safe(fresh_data.get("id", "")), ln=True)
+        pdf.cell(52, 5, pdf_safe("Employee Name:"), 0, 0); pdf.cell(0, 5, pdf_safe(emp_name), ln=True)
+        pdf.cell(52, 5, pdf_safe("Department:"), 0, 0); pdf.cell(0, 5, pdf_safe(dept), ln=True)
+        pdf.cell(52, 5, pdf_safe("Transaction Type:"), 0, 0); pdf.cell(0, 5, pdf_safe(clean_text(fresh_data.get("type", ""))), ln=True)
+        pdf.cell(52, 5, pdf_safe("Category / Reason:"), 0, 0); pdf.cell(0, 5, pdf_safe(category), ln=True)
+        pdf.cell(52, 5, pdf_safe("Request Date:"), 0, 0); pdf.cell(0, 5, pdf_safe(req_date), ln=True)
+        pdf.cell(52, 5, pdf_safe("Amount:"), 0, 0); pdf.cell(0, 5, pdf_safe(f"£{amount}"), ln=True)
+        pdf.cell(52, 5, pdf_safe("Line Manager:"), 0, 0); pdf.cell(0, 5, pdf_safe(manager), ln=True)
         submitted_by = clean_text(get_submitted_by(fresh_data))
         if submitted_by:
-            pdf.cell(52, 5, "Submitted By:", 0, 0); pdf.cell(0, 5, submitted_by, ln=True)
+            pdf.cell(52, 5, pdf_safe("Submitted By:"), 0, 0); pdf.cell(0, 5, pdf_safe(submitted_by), ln=True)
         pdf.ln(6)
-        pdf.set_font("Courier", "B", 10)
-        pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True); pdf.ln(2)
-        pdf.set_font("Courier", "", 9)
-        pdf.multi_cell(0, 5, desc); pdf.ln(8)
-        pdf.set_font("Courier", "B", 10)
-        pdf.cell(0, 5, txt="DIRECTOR APPROVAL", ln=True); pdf.ln(2)
-        pdf.set_font("Courier", "", 9)
+        pdf.set_font(pdf_font, "B", 10)
+        pdf.cell(0, 5, txt=pdf_safe("DESCRIPTION / JUSTIFICATION"), ln=True); pdf.ln(2)
+        pdf.set_font(pdf_font, "", 9)
+        pdf.multi_cell(max(20, pdf.w - pdf.l_margin - pdf.r_margin), 5, pdf_safe(desc)); pdf.ln(8)
+        pdf.set_font(pdf_font, "B", 10)
+        pdf.cell(0, 5, txt=pdf_safe("DIRECTOR APPROVAL"), ln=True); pdf.ln(2)
+        pdf.set_font(pdf_font, "", 9)
         if status == "approved":
-            pdf.cell(52, 5, "Decision:", 0, 0)
-            pdf.set_font("Courier", "B", 9); pdf.set_text_color(0, 128, 0)
-            pdf.cell(0, 5, "APPROVED", ln=True); pdf.set_text_color(0, 0, 0); pdf.set_font("Courier", "", 9)
-            pdf.cell(52, 5, "Approved By:", 0, 0); pdf.cell(0, 5, dir_name, ln=True)
-            pdf.cell(52, 5, "Approval Date / Time:", 0, 0); pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
+            pdf.cell(52, 5, pdf_safe("Decision:"), 0, 0)
+            pdf.set_font(pdf_font, "B", 9); pdf.set_text_color(0, 128, 0)
+            pdf.cell(0, 5, pdf_safe("APPROVED"), ln=True); pdf.set_text_color(0, 0, 0); pdf.set_font(pdf_font, "", 9)
+            pdf.cell(52, 5, pdf_safe("Approved By:"), 0, 0); pdf.cell(0, 5, pdf_safe(dir_name), ln=True)
+            pdf.cell(52, 5, pdf_safe("Approval Date / Time:"), 0, 0); pdf.cell(0, 5, pdf_safe(dir_approve if dir_approve != "-" else "-"), ln=True)
             if dir_comments and dir_comments not in ["None", ""]:
-                pdf.ln(2); pdf.set_font("Courier", "B", 9); pdf.cell(52, 5, "Director Comments:", 0, 0)
-                pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
+                pdf.ln(2); pdf.set_font(pdf_font, "B", 9); pdf.cell(52, 5, pdf_safe("Director Comments:"), 0, 0)
+                pdf.set_font(pdf_font, "", 9); pdf.ln(5); pdf.multi_cell(max(20, pdf.w - pdf.l_margin - pdf.r_margin), 5, pdf_safe(dir_comments))
         elif status == "rejected":
-            pdf.cell(52, 5, "Decision:", 0, 0)
-            pdf.set_font("Courier", "B", 9); pdf.set_text_color(200, 0, 0)
-            pdf.cell(0, 5, "REJECTED", ln=True); pdf.set_text_color(0, 0, 0); pdf.set_font("Courier", "", 9)
-            pdf.cell(52, 5, "Rejected By:", 0, 0); pdf.cell(0, 5, dir_name, ln=True)
-            pdf.cell(52, 5, "Rejection Date / Time:", 0, 0); pdf.cell(0, 5, dir_approve if dir_approve != "-" else "-", ln=True)
+            pdf.cell(52, 5, pdf_safe("Decision:"), 0, 0)
+            pdf.set_font(pdf_font, "B", 9); pdf.set_text_color(200, 0, 0)
+            pdf.cell(0, 5, pdf_safe("REJECTED"), ln=True); pdf.set_text_color(0, 0, 0); pdf.set_font(pdf_font, "", 9)
+            pdf.cell(52, 5, pdf_safe("Rejected By:"), 0, 0); pdf.cell(0, 5, pdf_safe(dir_name), ln=True)
+            pdf.cell(52, 5, pdf_safe("Rejection Date / Time:"), 0, 0); pdf.cell(0, 5, pdf_safe(dir_approve if dir_approve != "-" else "-"), ln=True)
             if dir_comments and dir_comments not in ["None", ""]:
-                pdf.ln(2); pdf.set_font("Courier", "B", 9); pdf.cell(52, 5, "Reason for Rejection:", 0, 0)
-                pdf.set_font("Courier", "", 9); pdf.ln(5); pdf.multi_cell(0, 5, dir_comments)
+                pdf.ln(2); pdf.set_font(pdf_font, "B", 9); pdf.cell(52, 5, pdf_safe("Reason for Rejection:"), 0, 0)
+                pdf.set_font(pdf_font, "", 9); pdf.ln(5); pdf.multi_cell(max(20, pdf.w - pdf.l_margin - pdf.r_margin), 5, pdf_safe(dir_comments))
         else:
-            pdf.cell(52, 5, "Decision:", 0, 0); pdf.cell(0, 5, "Pending", ln=True)
+            pdf.cell(52, 5, pdf_safe("Decision:"), 0, 0); pdf.cell(0, 5, pdf_safe("Pending"), ln=True)
         pdf.ln(12)
         dash_y = pdf.get_y()
         for x in range(10, 200, 4): pdf.line(x, dash_y, x + 2, dash_y)
         if status == "approved" and os.path.exists(APPROVED_STAMP_PATH): pdf.image(APPROVED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH): pdf.image(REJECTED_STAMP_PATH, x=75, y=dash_y - 6, w=60)
         pdf.ln(8)
-        pdf.set_font("Courier", "", 8)
-        pdf.cell(0, 5, txt="Authorised Signature / Director", ln=True)
+        pdf.set_font(pdf_font, "", 8)
+        pdf.cell(0, 5, txt=pdf_safe("Authorised Signature / Director"), ln=True)
         pdf.add_page()
-        pdf.set_font("Courier", "B", 12)
-        pdf.cell(0, 8, txt="ATTACHMENTS", ln=True); pdf.ln(6)
-        pdf.set_font("Courier", "", 9)
+        pdf.set_font(pdf_font, "B", 12)
+        pdf.cell(0, 8, txt=pdf_safe("ATTACHMENTS"), ln=True); pdf.ln(6)
+        pdf.set_font(pdf_font, "", 9)
         if len(display_files) > 0:
             for idx, fname in enumerate(display_files, 1):
                 file_path = os.path.join(UPLOAD_DIR, fname)
@@ -1510,11 +1502,11 @@ def generate_approval_pdf(request_data):
                         try: pdf.image(file_path, x=10, w=190); pdf.ln(70)
                         except: pdf.cell(0, 5, "     Warning: Preview could not be displayed", ln=True); pdf.ln(3)
                     else:
-                        pdf.cell(0, 5, "     Non-image file - see original upload", ln=True); pdf.ln(3)
+                        pdf.cell(0, 5, pdf_safe("     Non-image file - see original upload"), ln=True); pdf.ln(3)
                 else:
-                    pdf.cell(0, 5, "     Warning: File not found on server", ln=True); pdf.ln(3)
+                    pdf.cell(0, 5, pdf_safe("     Warning: File not found on server"), ln=True); pdf.ln(3)
         else:
-            pdf.cell(0, 6, "- No files were attached to this request", ln=True)
+            pdf.cell(0, 6, pdf_safe("- No files were attached to this request"), ln=True)
         safe_id = clean_text(str(req_id))
         safe_name = emp_name
         safe_category = category
@@ -1677,7 +1669,7 @@ def display_attachments(req):
                 st.image(
                     path,
                     caption=name,
-                    use_container_width=True
+                    width="stretch"
                 )
 
                 # Director can download too
@@ -2038,7 +2030,7 @@ if not st.session_state.logged_in:
         st.caption("Enter your credentials to access the system"); st.divider()
         username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
         password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
-        if st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True):
+        if st.form_submit_button("🔐 Authenticate Portal", type="primary", width="stretch"):
             USERS = load_users()
             if username in USERS and USERS[username]["password"] == password:
                 st.session_state.logged_in = True
@@ -2103,11 +2095,11 @@ with st.sidebar:
         if st.session_state.get("zip_range_data"):
             st.download_button("📦 Download Range PDFs (ZIP)", data=st.session_state.zip_range_data,
                 file_name=st.session_state.zip_range_name, mime="application/zip",
-                type="primary", use_container_width=True, key="dl_sb_range")
+                type="primary", width="stretch", key="dl_sb_range")
         if st.session_state.get("zip_all_data"):
             st.download_button("📦 Download ALL PDFs (ZIP)", data=st.session_state.zip_all_data,
                 file_name=st.session_state.zip_all_name, mime="application/zip",
-                type="primary", use_container_width=True, key="dl_sb_all")
+                type="primary", width="stretch", key="dl_sb_all")
 
 if "zip_range_data" not in st.session_state:
     st.session_state.zip_range_data = None
@@ -2142,8 +2134,9 @@ def create_pdf_from_request(req):
         pdf.cell(0, 8, "REQUEST DETAILS", ln=True)
         pdf.set_font("Helvetica", "", 11)
         def row(label, value):
-            pdf.cell(55, 7, f"{label}:", 0, 0)
-            pdf.cell(0, 7, str(value), 0, 1)
+            pdf.cell(55, 7, _pdf_layout_text(label + ":"), 0, 0)
+            remaining = max(20, pdf.w - pdf.r_margin - pdf.get_x())
+            pdf.multi_cell(remaining, 7, _pdf_layout_text(value))
         row("Request ID", req_id)
         row("Employee Name", req.get("emp_name", ""))
         row("Department", req.get("dept", ""))
@@ -2163,7 +2156,7 @@ def create_pdf_from_request(req):
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
         pdf.set_font("Helvetica", "", 11)
         justification = str(req.get("justification", req.get("description", "")))
-        pdf.multi_cell(0, 7, justification)
+        pdf.multi_cell(max(20, pdf.w - pdf.l_margin - pdf.r_margin), 7, _pdf_layout_text(justification))
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DIRECTOR APPROVAL", ln=True)
