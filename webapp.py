@@ -175,48 +175,56 @@ def upload_to_google_drive(
     local_file_path,
     display_filename
 ):
-    """
-    Upload an attachment to the configured Google Drive folder.
 
-    IMPORTANT: files are identified by filename inside the application
-    folder. If the same filename already exists, its contents are UPDATED
-    instead of creating another Google Drive copy.
-    """
     if drive_service is None:
-        st.error("❌ Google Drive is not connected.")
+
+        st.error(
+            "❌ Google Drive is not connected."
+        )
+
         return None
 
     if not os.path.exists(local_file_path):
-        st.error(f"❌ File not found: {local_file_path}")
+
+        st.error(
+            f"❌ File not found: {local_file_path}"
+        )
+
         return None
 
     try:
-        existing = _drive_find_file(display_filename)
-        media = MediaFileUpload(local_file_path, resumable=True)
-
-        if existing:
-            updated = drive_service.files().update(
-                fileId=existing["id"],
-                media_body=media,
-                fields="id,name,parents,modifiedTime"
-            ).execute()
-            st.success(f"✅ Updated existing Google Drive file: {display_filename}")
-            return updated.get("id")
 
         file_metadata = {
             "name": display_filename,
-            "parents": [GOOGLE_DRIVE_FOLDER_ID]
+            "parents": [
+                GOOGLE_DRIVE_FOLDER_ID
+            ]
         }
-        created = drive_service.files().create(
+
+        media = MediaFileUpload(
+            local_file_path,
+            resumable=True
+        )
+
+        uploaded = drive_service.files().create(
             body=file_metadata,
             media_body=media,
-            fields="id,name,parents,modifiedTime"
+            fields="id,name,parents"
         ).execute()
-        st.success(f"✅ Uploaded new Google Drive file: {display_filename}")
-        return created.get("id")
+
+        st.success(
+            f"✅ Uploaded to Google Drive: "
+            f"{display_filename}"
+        )
+
+        return uploaded.get("id")
 
     except Exception as e:
-        st.error(f"❌ Google Drive file save failed: {e}")
+
+        st.error(
+            f"❌ Google Drive upload failed: {e}"
+        )
+
         return None
 
 # ============================================================
@@ -226,16 +234,23 @@ def upload_to_google_drive(
 # These helpers keep the important Excel/PDF data permanently in
 # the configured Google Drive folder.
 
-def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Find one exact filename in the application Drive folder.
+# These files are application databases, not ordinary uploads.
+# There must be exactly ONE copy of each database in the configured
+# Google Drive folder.  We therefore UPDATE the existing Drive file
+# instead of calling files().create() on every save.
+SINGLETON_DRIVE_FILES = {
+    "requests.xlsx",
+    "user_database.xlsx",
+    "settings.xlsx",
+    "audit_log.xlsx",
+}
 
-    If old duplicate copies exist, use the most recently modified copy.
-    The function NEVER creates a new file.
-    """
+def _drive_list_files(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    """Return all non-trashed Drive files with this exact name in the app folder."""
     if drive_service is None:
-        return None
+        return []
     try:
-        safe_name = str(filename).replace("\\", "\\\\").replace("'", "\\'")
+        safe_name = str(filename).replace("'", "\\'")
         q = (
             f"name = '{safe_name}' and '{parent_id}' in parents "
             "and trashed = false"
@@ -243,46 +258,80 @@ def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
         result = drive_service.files().list(
             q=q,
             spaces="drive",
-            fields="files(id,name,modifiedTime,createdTime,parents)",
             orderBy="modifiedTime desc",
-            pageSize=100
+            fields="files(id,name,modifiedTime,createdTime,size)",
+            pageSize=100,
         ).execute()
-        files = result.get("files", [])
-        return files[0] if files else None
+        return result.get("files", [])
     except Exception as e:
         print(f"Drive lookup failed for {filename}: {e}")
-        return None
+        return []
 
+def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    """Return the newest matching Drive file, if one exists."""
+    files = _drive_list_files(filename, parent_id)
+    return files[0] if files else None
+
+def _drive_remove_duplicate_files(filename, keep_file_id, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    """Delete older duplicate singleton database files from the app folder."""
+    if drive_service is None or filename not in SINGLETON_DRIVE_FILES:
+        return 0
+
+    removed = 0
+    for item in _drive_list_files(filename, parent_id):
+        file_id = item.get("id")
+        if not file_id or file_id == keep_file_id:
+            continue
+        try:
+            drive_service.files().delete(fileId=file_id).execute()
+            removed += 1
+            print(f"Removed duplicate Drive database: {filename} ({file_id})")
+        except Exception as e:
+            print(f"Could not remove duplicate {filename} ({file_id}): {e}")
+    return removed
 
 def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Create the Drive file once, then UPDATE that same file forever."""
+    """Upsert a file in Drive; singleton application files are never duplicated."""
     if drive_service is None or not os.path.exists(local_path):
         return None
 
     filename = filename or os.path.basename(local_path)
     try:
-        existing = _drive_find_file(filename, parent_id)
+        existing_files = _drive_list_files(filename, parent_id)
+        existing = existing_files[0] if existing_files else None
+
         media = MediaFileUpload(local_path, resumable=True)
 
         if existing:
+            # IMPORTANT: update the existing Drive file instead of creating a new one.
             updated = drive_service.files().update(
                 fileId=existing["id"],
                 media_body=media,
-                fields="id,name,modifiedTime"
+                fields="id,name,modifiedTime",
             ).execute()
-            return updated.get("id")
+            keep_id = updated.get("id") or existing["id"]
+
+            # Clean up duplicates created by older versions of the application.
+            if filename in SINGLETON_DRIVE_FILES:
+                _drive_remove_duplicate_files(filename, keep_id, parent_id)
+
+            return keep_id
 
         metadata = {"name": filename, "parents": [parent_id]}
         created = drive_service.files().create(
-            body=metadata,
-            media_body=media,
-            fields="id,name,modifiedTime"
+            body=metadata, media_body=media, fields="id,name,modifiedTime"
         ).execute()
-        return created.get("id")
-    except Exception as e:
-        print(f"Drive save failed for {filename}: {e}")
-        return None
+        keep_id = created.get("id")
 
+        # Normally there cannot be duplicates here, but clean up a race/legacy copy
+        # if one appeared between the list and create operations.
+        if keep_id and filename in SINGLETON_DRIVE_FILES:
+            _drive_remove_duplicate_files(filename, keep_id, parent_id)
+
+        return keep_id
+    except Exception as e:
+        print(f"Drive upload failed for {filename}: {e}")
+        return None
 
 def _drive_download_file(file_id, local_path):
     if drive_service is None:
@@ -300,18 +349,36 @@ def _drive_download_file(file_id, local_path):
         return False
 
 def sync_persistent_file(local_path, columns=None):
-    """On startup: Drive is authoritative; migrate an existing local file if Drive has none."""
+    """
+    Synchronise one permanent application database with Google Drive.
+
+    Drive is authoritative when the file already exists.  If older versions
+    created multiple copies, the newest copy is kept, downloaded locally, and
+    all older duplicates are removed.  Future saves update that same Drive
+    file ID, so the folder stays clean.
+    """
     if drive_service is None:
         return
+
     filename = os.path.basename(local_path)
-    remote = _drive_find_file(filename)
-    if remote:
-        if not _drive_download_file(remote["id"], local_path):
+    remote_files = _drive_list_files(filename)
+
+    if remote_files:
+        # _drive_list_files is ordered newest-first.
+        remote = remote_files[0]
+        if _drive_download_file(remote["id"], local_path):
+            if filename in SINGLETON_DRIVE_FILES:
+                _drive_remove_duplicate_files(filename, remote["id"])
+        else:
             print(f"Using local copy of {filename} because Drive download failed")
-    elif os.path.exists(local_path):
+        return
+
+    if os.path.exists(local_path):
         _drive_upload_path(local_path, filename)
     elif columns is not None:
-        pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
+        pd.DataFrame(columns=columns).to_excel(
+            local_path, index=False, engine="openpyxl"
+        )
         _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
