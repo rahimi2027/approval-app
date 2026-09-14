@@ -369,7 +369,7 @@ EXCEL_COLUMNS = [
     "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
     "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name",
     "Status", "Director Comments", "Decision Date", "Decision By",
-    "PDF File Path", "Edited From ID", "Old Data"
+    "Submitted By", "PDF File Path", "Edited From ID", "Old Data"
 ]
 DEFAULT_USERS = [
     {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid"},
@@ -412,7 +412,16 @@ def safe_init_excel(path, columns):
         pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
         return True
     try:
-        pd.read_excel(path, engine="openpyxl")
+        df = pd.read_excel(path, engine="openpyxl").fillna("")
+        # Add newly introduced columns without deleting or replacing existing data.
+        changed = False
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+                changed = True
+        if changed:
+            df.to_excel(path, index=False, engine="openpyxl")
+            sync_saved_file_to_drive(path)
         return True
     except Exception:
         os.remove(path)
@@ -774,6 +783,7 @@ def load_records_from_excel():
                 "director_comments": str(r.get("Director Comments", "")).strip(),
                 "decision_date": str(r.get("Decision Date", "")).strip(),
                 "decision_by": str(r.get("Decision By", "")).strip(),
+                "submitted_by": str(r.get("Submitted By", "")).strip(),
                 "pdf_path": str(r.get("PDF File Path", "")).strip(),
                 "edited_from_id": str(r.get("Edited From ID", "")).strip(),
                 "old_data": str(r.get("Old Data", "")).strip()})
@@ -792,6 +802,7 @@ def save_all_records(records):
             "Director Comments": str(r.get("director_comments", "")),
             "Decision Date": str(r.get("decision_date", "")),
             "Decision By": str(r.get("decision_by", "")),
+            "Submitted By": str(r.get("submitted_by", "")),
             "PDF File Path": str(r.get("pdf_path", "")),
             "Edited From ID": str(r.get("edited_from_id", "")),
             "Old Data": str(r.get("old_data", ""))})
@@ -802,19 +813,42 @@ def save_record_to_excel(new_record):
     current.append(new_record)
     save_all_records(current)
 # ============================================================
-# COMPLETION / APPROVAL DISPLAY HELPER
+# REQUESTER / COMPLETION DISPLAY HELPERS
 # ============================================================
-def get_completed_by(req):
-    """Return the person who completed the final director decision.
+def get_submitted_by(req):
+    """Return the person who originally submitted/created the request.
 
-    Older requests store this as decision_by; approved_by is used as a
-    fallback for records created by earlier versions of the app.
+    New records store this in Submitted By. For older records, recover the
+    original creator from the CREATED entry in the audit log when possible.
     """
+    value = str(req.get("submitted_by", "") or "").strip()
+    if value and value.lower() not in ("nan", "none", "-"):
+        return value
+
+    # Backward compatibility for requests created before Submitted By existed.
+    try:
+        req_id = str(req.get("id", "")).strip()
+        if req_id:
+            for entry in reversed(load_audit_log()):
+                action = str(entry.get("Action", "")).strip().upper()
+                audit_req_id = str(entry.get("Request_ID", "")).strip()
+                if action == "CREATED" and audit_req_id == req_id:
+                    creator = str(entry.get("User_Name", "")).strip()
+                    if creator and creator.lower() not in ("nan", "none", "-"):
+                        return creator
+    except Exception:
+        pass
+    return ""
+
+
+def get_completed_by(req):
+    """Return the person who made the final status/approval decision."""
     for key in ("completed_by", "decision_by", "approved_by"):
         value = str(req.get(key, "") or "").strip()
         if value and value.lower() not in ("nan", "none", "-", "director"):
             return value
-    return str(req.get("decision_by", "") or req.get("approved_by", "") or "").strip()
+    return ""
+
 
 # ============================================================
 # PDF GENERATION
@@ -877,6 +911,9 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Request Date:", 0, 0); pdf.cell(0, 5, req_date, ln=True)
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
+        submitted_by = clean_text(get_submitted_by(fresh_data))
+        if submitted_by:
+            pdf.cell(52, 5, "Submitted By:", 0, 0); pdf.cell(0, 5, submitted_by, ln=True)
         completed_by = clean_text(get_completed_by(fresh_data))
         if completed_by:
             pdf.cell(52, 5, "Completed By:", 0, 0); pdf.cell(0, 5, completed_by, ln=True)
@@ -1562,6 +1599,9 @@ def create_pdf_from_request(req):
         except: pass
         row("Amount Approved", amount)
         row("Line Manager", req.get("manager", ""))
+        submitted_by = get_submitted_by(req)
+        if submitted_by:
+            row("Submitted By", submitted_by)
         completed_by = get_completed_by(req)
         if completed_by:
             row("Completed By", completed_by)
@@ -1692,6 +1732,9 @@ if role == "Payroll":
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"👔 **Line Manager:** {req.get('manager')}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
                     st.write(f"📅 **Date:** {req.get('date')}")
                     st.info(f"📝 **Description:** {req.get('desc')}")
                     display_attachments(req)
@@ -1714,7 +1757,7 @@ if role == "Payroll":
             st.metric("✅ Approved", len(approved))
             approved_search = st.text_input(
                 "🔎 Search approved requests",
-                placeholder="Search by ID, employee, department, approved by, amount, date or comments...",
+                placeholder="Search by ID, employee, department, submitted by, approved by, amount, date or comments...",
                 key="payroll_approved_search",
             )
             if approved_search.strip():
@@ -1750,6 +1793,9 @@ if role == "Payroll":
                 title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')}{extra_text}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
                     if display_date:
@@ -1769,6 +1815,9 @@ if role == "Payroll":
                 # ✅ Department added after amount
                 with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
@@ -1907,7 +1956,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
                         "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
                         "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
                         "status": "pending", "director_comments": "", "decision_date": "",
-                        "decision_by": "", "pdf_path": "", "edited_from_id": "", "old_data": ""
+                        "decision_by": "", "submitted_by": full_name, "pdf_path": "",
+                        "edited_from_id": "", "old_data": ""
                     }
                     save_record_to_excel(payload)
                     log_action("CREATED", nid)
@@ -1944,7 +1994,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     str(r.get("desc", "")),
                     str(r.get("decision_by", "")),
                     str(r.get("approved_by", "")),
-                    str(r.get("completed_by", "")),
+                    str(r.get("submitted_by", "")),
                     str(r.get("decision_date", "")),
                     str(r.get("director_comments", "")),
                     str(r.get("attachment_name", "")),
@@ -1969,9 +2019,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
-                    completed_by = get_completed_by(req)
-                    if completed_by and status in ["approved", "rejected"]:
-                        st.write(f"✅ **Completed by:** {completed_by}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.info(f"📝 Description: {req.get('desc')}")
                     display_attachments(req)
@@ -2008,6 +2058,9 @@ elif role == "Director":
                         st.write(f"🏷️ **Category:** {req.get('category')}")
                         st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
                         st.write(f"👔 **Line Manager:** {req.get('manager')}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by:
+                            st.write(f"📝 **Submitted by:** {submitted_by}")
                         st.write(f"📅 **Date:** {format_date(req.get('date',''))}")
                         st.info(f"📝 **Description / Justification:**\n{req.get('desc','')}")
                         display_attachments(req)
@@ -2060,7 +2113,7 @@ elif role == "Director":
             st.metric("✅ Approved Requests", len(approved))
             approved_search = st.text_input(
                 "🔎 Search approved requests",
-                placeholder="Search by ID, employee, department, approved by, amount, date or comments...",
+                placeholder="Search by ID, employee, department, submitted by, approved by, amount, date or comments...",
                 key="director_approved_search",
             )
             if approved_search.strip():
@@ -2073,6 +2126,7 @@ elif role == "Director":
                         str(r.get("dept", "")),
                         str(r.get("decision_by", "")),
                         str(r.get("approved_by", "")),
+                        str(r.get("submitted_by", "")),
                         str(r.get("amount", "")),
                         str(r.get("decision_date", "")),
                         str(r.get("date", "")),
@@ -2090,9 +2144,11 @@ elif role == "Director":
                 dec_date = format_date(req.get('decision_date',''))
                 with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ✅ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
-                    st.write(f"✅ **Completed by:** {get_completed_by(req) or dec_by}")
                     st.write(f"📅 Approval Date: {dec_date}")
                     st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
                     display_attachments(req)
@@ -2143,6 +2199,9 @@ elif role == "Director":
                 dec_date = format_date(req.get('decision_date',''))
                 with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ❌ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
@@ -2245,6 +2304,10 @@ elif role == "Super Admin":
                         f"💷 Amount: £{amount:.2f}"
                     )
 
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
+
                     st.write(
                         f"👔 Line Manager: {req.get('manager')} | "
                         f"📅 Date: {format_date(req.get('date', ''))}"
@@ -2323,6 +2386,10 @@ elif role == "Super Admin":
                         f"💷 Amount: £{amount:.2f}"
                     )
 
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
+
                     st.write(
                         f"🎯 **Approved By:** {dec_by}"
                     )
@@ -2397,6 +2464,10 @@ elif role == "Super Admin":
                     st.write(
                         f"💷 Amount: £{amount:.2f}"
                     )
+
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
 
                     st.error(
                         f"❌ Rejected By: "
