@@ -155,7 +155,7 @@ if drive_service:
 
         st.success(
             f"✅ Google Drive folder accessible: "
-            f"{folder['name']}"
+           # f"{folder['name']}"
         )
 
     except Exception as e:
