@@ -445,7 +445,7 @@ DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GY
 DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Director", "Payroll", "Super Admin"]
 DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
 EXCEL_COLUMNS = [
-    "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
+    "ID", "Employee Name", "Completed By", "Department", "Transaction Type", "Category Reason",
     "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name",
     "Status", "Director Comments", "Decision Date", "Decision By",
     "PDF File Path", "Edited From ID", "Old Data"
@@ -828,6 +828,26 @@ def load_users():
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
 initialise_excel()
+
+def get_original_completed_by(req_id, fallback=""):
+    """Recover the original request creator for older records that predate Completed By."""
+    try:
+        for entry in load_audit_log():
+            if (str(entry.get("Request_ID", "")).strip() == str(req_id).strip()
+                    and str(entry.get("Action", "")).strip().upper() == "CREATED"):
+                creator = str(entry.get("User_Name", "")).strip()
+                if creator:
+                    return creator
+    except Exception:
+        pass
+    return str(fallback or "").strip() or "-"
+
+def display_completed_by(req):
+    """Show who originally completed/submitted the request."""
+    completed_by = (str(req.get("completed_by", "")).strip()
+                    or get_original_completed_by(req.get("id", ""), req.get("emp_name", "")))
+    st.write(f"👤 **Completed by:** {completed_by}")
+
 def load_records_from_excel():
     try:
         if not os.path.exists(EXCEL_PATH): return []
@@ -842,6 +862,7 @@ def load_records_from_excel():
             except: amount = 0.0
             parsed.append({
                 "id": record_id, "emp_name": str(r.get("Employee Name", "Not Specified")).strip(),
+                "completed_by": str(r.get("Completed By", "")).strip() or get_original_completed_by(record_id, r.get("Employee Name", "Not Specified")),
                 "dept": str(r.get("Department", "Not Specified")).strip(),
                 "type": str(r.get("Transaction Type", "Not Specified")).strip(),
                 "category": str(r.get("Category Reason", "Not Specified")).strip(),
@@ -863,6 +884,7 @@ def save_all_records(records):
     export = []
     for r in records:
         export.append({"ID": int(r.get("id", 0)), "Employee Name": str(r.get("emp_name", "")),
+            "Completed By": str(r.get("completed_by", "")) or str(r.get("emp_name", "")),
             "Department": str(r.get("dept", "")), "Transaction Type": str(r.get("type", "")),
             "Category Reason": str(r.get("category", "")), "Date": str(r.get("date", "")),
             "Amount (£)": float(r.get("amount", 0.0)), "Line Manager": str(r.get("manager", "")),
@@ -904,6 +926,11 @@ def generate_approval_pdf(request_data):
         req_date = format_date(fresh_data.get("date", ""))
         desc = clean_text(fresh_data.get("desc", ""))
         manager = clean_text(fresh_data.get("manager", ""))
+        completed_by = clean_text(
+            fresh_data.get("completed_by", "")
+            or get_original_completed_by(req_id, fresh_data.get("emp_name", "Unknown"))
+            or fresh_data.get("emp_name", "Unknown")
+        )
         status = str(fresh_data.get("status", "pending")).strip().lower()
         dir_approve = format_date(fresh_data.get("decision_date", ""))
         dir_name = clean_text(fresh_data.get("decision_by", "Director"))
@@ -941,6 +968,7 @@ def generate_approval_pdf(request_data):
         pdf.cell(52, 5, "Request Date:", 0, 0); pdf.cell(0, 5, req_date, ln=True)
         pdf.cell(52, 5, "Amount Approved:", 0, 0); pdf.cell(0, 5, f"£{amount}", ln=True)
         pdf.cell(52, 5, "Line Manager:", 0, 0); pdf.cell(0, 5, manager, ln=True)
+        pdf.cell(52, 5, "Completed By:", 0, 0); pdf.cell(0, 5, completed_by, ln=True)
         pdf.ln(6)
         pdf.set_font("Courier", "B", 10)
         pdf.cell(0, 5, txt="DESCRIPTION / JUSTIFICATION", ln=True); pdf.ln(2)
@@ -1623,6 +1651,7 @@ def create_pdf_from_request(req):
         except: pass
         row("Amount Approved", amount)
         row("Line Manager", req.get("manager", ""))
+        row("Completed By", req.get("completed_by", "") or get_original_completed_by(req_id, req.get("emp_name", "")))
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, "DESCRIPTION / JUSTIFICATION", ln=True)
@@ -1747,6 +1776,7 @@ if role == "Payroll":
                 # ✅ Department added after amount
                 with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    display_completed_by(req)
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"👔 **Line Manager:** {req.get('manager')}")
@@ -1782,6 +1812,7 @@ if role == "Payroll":
                     if q in " ".join([
                         str(r.get("id", "")),
                         str(r.get("emp_name", "")),
+                        str(r.get("completed_by", "")),
                         str(r.get("dept", "")),
                         str(r.get("decision_by", "")),
                         str(r.get("approved_by", "")),
@@ -1808,6 +1839,7 @@ if role == "Payroll":
                 title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')}{extra_text}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
+                    display_completed_by(req)
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
                     if display_date:
@@ -1827,6 +1859,7 @@ if role == "Payroll":
                 # ✅ Department added after amount
                 with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    display_completed_by(req)
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
@@ -1961,7 +1994,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             if file_id:
                                 st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
                     payload = {
-                        "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
+                        "id": nid, "emp_name": en.strip(), "completed_by": full_name, "dept": dept_name, "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
                         "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
                         "status": "pending", "director_comments": "", "decision_date": "",
@@ -1990,6 +2023,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
                 with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+                    display_completed_by(req)
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.info(f"📝 Description: {req.get('desc')}")
                     display_attachments(req)
@@ -2026,6 +2060,7 @@ elif role == "Director":
                         st.write(f"🏷️ **Category:** {req.get('category')}")
                         st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
                         st.write(f"👔 **Line Manager:** {req.get('manager')}")
+                        display_completed_by(req)
                         st.write(f"📅 **Date:** {format_date(req.get('date',''))}")
                         st.info(f"📝 **Description / Justification:**\n{req.get('desc','')}")
                         display_attachments(req)
@@ -2088,6 +2123,7 @@ elif role == "Director":
                     if q in " ".join([
                         str(r.get("id", "")),
                         str(r.get("emp_name", "")),
+                        str(r.get("completed_by", "")),
                         str(r.get("dept", "")),
                         str(r.get("decision_by", "")),
                         str(r.get("approved_by", "")),
