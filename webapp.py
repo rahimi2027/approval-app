@@ -837,6 +837,8 @@ def generate_approval_pdf(request_data):
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
+
+
 def display_attachments(req, preview=False):
     att = req.get("attachment_name", "None")
 
@@ -854,7 +856,6 @@ def display_attachments(req, preview=False):
         found_any = False
 
         for idx, name in enumerate(attached_files):
-
             path = os.path.join(UPLOAD_DIR, name)
 
             if not os.path.exists(path):
@@ -862,13 +863,9 @@ def display_attachments(req, preview=False):
 
             found_any = True
 
-            # ==========================================
-            # DIRECTOR: SHOW IMAGE PREVIEW
-            # ==========================================
             if preview and name.lower().endswith(
                 (".png", ".jpg", ".jpeg", ".gif", ".webp")
             ):
-
                 st.markdown(f"### 🖼️ {name}")
 
                 st.image(
@@ -877,7 +874,6 @@ def display_attachments(req, preview=False):
                     use_container_width=True
                 )
 
-                # Optional download
                 with open(path, "rb") as f:
                     st.download_button(
                         f"⬇️ Download {name}",
@@ -887,11 +883,7 @@ def display_attachments(req, preview=False):
                         key=f"att_{req.get('id', idx)}_{idx}"
                     )
 
-            # ==========================================
-            # NON-DIRECTOR: DOWNLOAD ONLY
-            # ==========================================
             else:
-
                 with open(path, "rb") as f:
                     file_data = f.read()
 
@@ -1679,7 +1671,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     if req.get("director_comments"):
                         st.info(f"💬 Director Comments: {req.get('director_comments')}")
                     if status == "approved":
-                        display_pdf_button(req, can_generate=False)
+                        display_pdf_button(req, can_generate=pass)
                     if status in ["pending", "rejected"]:
                         if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                             st.session_state.editing_request_id = req.get("id")
