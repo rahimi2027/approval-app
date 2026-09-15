@@ -1,11 +1,9 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.5 (DRIVE + SUBMIT FIXED)
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.4 (ALL BUGS FIXED)
 # ============================================================
-# ✅ ALL MISSING VARIABLES ADDED AFTER LOGIN
-# ✅ MANAGER SUBMIT NOW WORKS
-# ✅ "SEND TO DIRECTOR" REMOVED → "SUBMIT REQUEST"
-# ✅ GOOGLE DRIVE UPLOAD NOW REACHED (was blocked by NameError)
-# ✅ CREDENTIALS SECTION UNTOUCHED
+# ✅ ALL MISSING VARIABLES ADDED
+# ✅ CORRECTED user/user_info mixup
+# ✅ all_live_requests defined everywhere
 # ============================================================
 import streamlit as st
 import os
@@ -86,7 +84,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 # ============================================================
-# ✅ LOAD GOOGLE CREDENTIALS FROM FILE (UNTOUCHED)
+# ✅ LOAD GOOGLE CREDENTIALS FROM FILE
 # ============================================================
 SERVICE_ACCOUNT_INFO = {}
 KEY_FILE = os.path.join(BASE_DIR, "service_account_key.json")
@@ -100,7 +98,7 @@ if os.path.exists(KEY_FILE):
 else:
     st.warning("⚠️ Credentials file not found — using local storage only")
 # ============================================================
-# ✅ GOOGLE DRIVE UPLOAD FUNCTION (UNTOUCHED)
+# ✅ GOOGLE DRIVE UPLOAD FUNCTION
 # ============================================================
 def get_drive_service():
     try:
@@ -956,7 +954,7 @@ def user_management_panel():
             new_role = st.selectbox("🎖️ Role / Permission Level", ROLES)
             st.markdown("### ✅ Extra Permissions")
             st.caption(f"Defaults for **{new_role}** are pre-selected")
-            defaults = PERMISSION_DEFAULTS.get(new_role, PERMISSION_DEFAULTS["Staff"])
+            defaults = PERMISSION_DEFAULTS[new_role]
             col1, col2 = st.columns(2)
             perm_view_all = col1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=defaults["can_view_all_dept"])
             perm_pdf = col1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=defaults["can_generate_pdf"])
@@ -1069,17 +1067,12 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ============================================================
-# ✅ FIXED: DEFINE USER CONTEXT + LOAD DATA AFTER LOGIN
-# This block was MISSING — that's why Manager submit did nothing
-# and Google Drive upload never got reached.
+# ✅ FIX 1: DEFINE USER CONTEXT AFTER LOGIN (was missing)
 # ============================================================
-user_info = st.session_state.get("user_info", {})
-full_name = user_info.get("full_name", user_info.get("username", "User"))
+user_info = st.session_state.user_info
+full_name = user_info.get("full_name", "User")
 role = user_info.get("role", "")
 dept = user_info.get("dept", "")
-username = user_info.get("username", "")
-
-# Load live requests + categories ONCE per page load
 all_live_requests = load_records_from_excel()
 CATEGORIES = load_categories()
 
@@ -1103,7 +1096,6 @@ with col_right:
 
 # ============================================================
 # ✅ WELCOME BANNER — FULL WIDTH, BELOW BUTTONS ✅
-# ✅ FIXED: dynamic role/dept instead of hardcoded
 # ============================================================
 st.info(f"👤 Welcome: {full_name} | {role} | {dept}")
 
@@ -1461,7 +1453,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 mgr = st.text_input("👔 Line Manager")
                 files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
                 desc = st.text_area("📝 Description / Justification")
-            # ✅ FIXED: Renamed from "Send to Director" → "Submit Request"
+            # ✅ FIX 2: Renamed button from "Send to Director" → "Submit Request"
             if st.form_submit_button("📤 Submit Request", type="primary"):
                 if en.strip() and mgr.strip() and desc.strip():
                     att_list = []
@@ -1472,12 +1464,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             with open(file_path, "wb") as out:
                                 out.write(f.getbuffer())
                             att_list.append(fn)
-                            # ✅ FIXED: Google Drive upload — non-blocking so it can't stop the save
-                            try:
-                                if SERVICE_ACCOUNT_INFO:
-                                    upload_to_google_drive(file_path, fn)
-                            except Exception as _drive_err:
-                                st.warning(f"⚠️ Drive upload skipped: {_drive_err}")
+                            file_id = upload_to_google_drive(file_path, fn)
+                            if file_id:
+                                st.info(f"✅ Uploaded to Drive: {fn} (ID: {file_id[:12]}...)")
                     payload = {
                         "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
@@ -1488,7 +1477,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     save_record_to_excel(payload)
                     log_action("CREATED", nid)
                     st.success(f"✅ Request #{nid} submitted successfully!")
-                    st.balloons()
                     st.rerun()
                 else:
                     st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
@@ -1746,5 +1734,8 @@ else:
 # ========================================================
 # ✅ END OF ROLE-BASED PORTALS
 # ========================================================
+# Auto-save to GitHub after every page load
+#github_auto_save()
+# ============================================================
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
