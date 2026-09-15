@@ -1252,7 +1252,7 @@ def render_work_order_employee_portal(current_user, current_dept):
             if r.get("director_decision_by"): st.write(f"🎯 Approved By: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
 
 
-def render_work_order_manager_portal(manager_name, manager_dept):
+def render_work_order_manager_portal(manager_name, manager_dept, show_total=True):
     st.subheader("🛠️ Work Orders — Manager Review")
     orders = load_work_orders()
 
