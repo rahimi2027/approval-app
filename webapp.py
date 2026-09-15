@@ -2802,7 +2802,7 @@ elif role in ["Director", "Work Order Final Director"]:
         with st.expander("🛠️ Work Orders — Gemma Final Approval", expanded=True):
             render_work_order_final_director_portal(full_name)
     st.divider()
-    st.subheader("🎛️ Director Approval Portal — Andy Acoole")
+    st.subheader(f"🎛️ Director Approval Portal — {full_name}")
     st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
     st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
     st.divider()
