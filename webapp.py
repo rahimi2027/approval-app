@@ -1158,7 +1158,7 @@ def render_work_order_total(records, scope_department=None, key_prefix="wo_total
     st.markdown("### 💷 Approved Work Order Total")
     st.caption("Select an employee and work-date range. Only Director-approved work orders are included. Work Order No. is the manually entered number.")
 
-    scoped = [r for r in records if r.get("status") == "approved_payment"]
+    scoped = [r for r in records if r.get("status") in ("approved_payment", "approved")]
     if scope_department:
         scoped = [r for r in scoped if str(r.get("dept", "")) == str(scope_department)]
 
@@ -1462,7 +1462,12 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             # Reuse the existing approved-total renderer when available.
             renderer = globals().get("render_work_order_total")
             if renderer:
-                renderer(manager_name, manager_dept)
+                renderer(
+                    load_work_orders(),
+                    scope_department=manager_dept,
+                    key_prefix="wo_mgr_total_tab",
+                    prepared_by=manager_name
+                )
             else:
                 st.info("Approved Work Order Total is available in this tab.")
         else:
