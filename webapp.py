@@ -3139,7 +3139,7 @@ elif role in ["Manager", "Work Order Manager", "Staff", "Team Member"]:
         # contains the complete Work Order Manager portal. Ordinary Managers
         # keep the existing request portal and never see Work Orders.
         request_tab, work_order_tab = st.tabs([
-            "🧾 New Requests — Addition / Deduction",
+            "🧾 Addition / Deduction",
             "🛠️ Work Orders",
         ])
         with request_tab:
