@@ -357,7 +357,7 @@ EXCEL_COLUMNS = [
     "Submitted By", "PDF File Path", "Edited From ID", "Old Data"
 ]
 WORK_ORDER_COLUMNS = [
-    "Work Order ID", "Employee Name", "Department", "Work Date", "Hours",
+    "Work Order ID", "Work Order No.", "Employee Name", "Department", "Work Date", "Hours",
     "Customer Job No.", "Site Address", "Amount (£)", "Manager", "Description", "Attachment Name", "Status",
     "Manager Comments", "Manager Decision Date", "Manager Decision By",
     "Director Comments", "Director Decision Date", "Director Decision By",
@@ -869,6 +869,7 @@ def load_work_orders(force=False):
             except: hours = 0.0
             records.append({
                 "id": str(r.get("Work Order ID", "")).strip(),
+                "work_order_no": str(r.get("Work Order No.", "")).strip(),
                 "emp_name": str(r.get("Employee Name", "")).strip(),
                 "dept": str(r.get("Department", "")).strip(),
                 "work_date": str(r.get("Work Date", "")).strip(),
@@ -904,7 +905,7 @@ def save_all_work_orders(records):
     rows = []
     for r in records:
         rows.append({
-            "Work Order ID": str(r.get("id", "")), "Employee Name": str(r.get("emp_name", "")),
+            "Work Order ID": str(r.get("id", "")), "Work Order No.": str(r.get("work_order_no", "")), "Employee Name": str(r.get("emp_name", "")),
             "Department": str(r.get("dept", "")), "Work Date": str(r.get("work_date", "")),
             "Hours": float(r.get("hours", 0)),
             "Customer Job No.": str(r.get("customer_job_no", "")),
@@ -934,6 +935,18 @@ def get_next_work_order_id(records):
         try: nums.append(int(raw.replace("WO-", "")))
         except: pass
     return f"WO-{max(nums) + 1 if nums else 1:05d}"
+
+
+def _director_options():
+    """Return all users assigned the Director role."""
+    users = load_users()
+    names = []
+    for u in users.values():
+        if str(u.get("role", "")).strip().lower() == "director":
+            name = str(u.get("full_name", "")).strip()
+            if name:
+                names.append(name)
+    return sorted(set(names))
 
 
 def _manager_options_for_department(department):
@@ -995,8 +1008,9 @@ def work_order_pdf(req):
 
         pdf.set_font(font_family, "", 10)
         rows = [
-            ("Work Order ID", req.get("id", "")),
-            ("Employee", req.get("emp_name", "")),
+            ("Internal Request ID", req.get("id", "")),
+            ("Work Order No.", req.get("work_order_no", "") or req.get("id", "")),
+            ("Employee / Labour", req.get("emp_name", "")),
             ("Department", req.get("dept", "")),
             ("Work Date", req.get("work_date", "")),
             ("Hours", req.get("hours", "")),
@@ -1181,7 +1195,7 @@ def work_order_total_pdf(records, title="Approved Work Order Total"):
         pdf.set_font(family, "", 8)
         for r in sorted(records, key=lambda x: (str(x.get("emp_name", "")), str(x.get("work_date", "")), str(x.get("id", "")))):
             line = (
-                f"{r.get('id','-')} | {r.get('emp_name','-')} | "
+                f"{r.get('work_order_no') or r.get('id','-')} | {r.get('emp_name','-')} | "
                 f"{str(r.get('work_date','-'))[:10]} | GBP {float(r.get('amount',0) or 0):.2f} | "
                 f"Approved by {r.get('director_decision_by','-')}"
             )
@@ -1238,7 +1252,7 @@ def render_work_order_total_summary(records, key_prefix, title="Approved Work Or
 
     if selected:
         summary_df = pd.DataFrame([
-            {"Work Order No.": r.get("id"), "Employee": r.get("emp_name"), "Work Date": str(r.get("work_date", ""))[:10], "Amount (£)": float(r.get("amount", 0) or 0), "Approved By": r.get("director_decision_by", "")}
+            {"Work Order No.": r.get("work_order_no") or r.get("id"), "Employee": r.get("emp_name"), "Work Date": str(r.get("work_date", ""))[:10], "Amount (£)": float(r.get("amount", 0) or 0), "Approved By": r.get("director_decision_by", "")}
             for r in selected
         ])
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
@@ -1272,6 +1286,146 @@ def render_work_order_manager_portal(manager_name, manager_dept):
     pending = [r for r in assigned if r.get("status") == "pending_manager"]
     rejected = [r for r in assigned if r.get("status") == "rejected_director"]
 
+    # ------------------------------------------------------------
+    # MANAGER MANUAL WORK ORDER SUBMISSION
+    # ------------------------------------------------------------
+    st.markdown("### 📤 Submit New Work Order")
+    st.caption(
+        "Enter the details from the work-order sheet. No hours/time entry is required. "
+        "The manager submits the completed work order directly to a Director (Andy or Gemma) for the single final approval."
+    )
+
+    wid = get_next_work_order_id(orders)
+    director_options = _director_options()
+    with st.form("manager_new_work_order_form", clear_on_submit=True):
+        st.markdown(f"**🆔 Internal Request ID:** `{wid}`")
+        c1, c2 = st.columns(2)
+        with c1:
+            work_order_no = st.text_input(
+                "🧾 Work Order No.",
+                placeholder="e.g. 210366",
+                help="The Work Order No. printed on the work-order sheet."
+            )
+            employee = st.text_input(
+                "👤 Contractor / Employee Labour",
+                placeholder="e.g. William Pearce"
+            )
+            site_address = st.text_area(
+                "📍 Site Address",
+                placeholder="e.g. 230 Wide Lane\nMorley\nLeeds LS27 8SZ",
+                height=90
+            )
+            work_date = st.date_input("📅 Date", value=date.today())
+        with c2:
+            customer_job_no = st.text_input(
+                "📘 Customer Job No.",
+                placeholder="e.g. 116886"
+            )
+            amount = st.number_input(
+                "💷 Total (£)", min_value=0.01, step=1.0, format="%.2f"
+            )
+            desc = st.text_area(
+                "📝 Description",
+                placeholder="Enter the work completed and relevant details...",
+                height=150
+            )
+            if director_options:
+                director = st.selectbox("🎯 Send to Director", director_options)
+            else:
+                director = st.text_input(
+                    "🎯 Send to Director",
+                    placeholder="Andy Acoole or Gemma Coole"
+                )
+
+        files = st.file_uploader(
+            "📎 Work Order / Supporting Documents (optional)",
+            type=["pdf", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            help="Attach the original work-order sheet or supporting documents."
+        )
+
+        st.markdown(
+            f"👤 Submitted by: **{manager_name}** | 🏢 Department: **{manager_dept}** | "
+            f"🎯 Director: **{director or 'Not selected'}**"
+        )
+
+        create_manager_wo = st.form_submit_button(
+            "📤 Submit Work Order to Director", type="primary"
+        )
+
+    if create_manager_wo:
+        errors = []
+        if not work_order_no.strip():
+            errors.append("Work Order No.")
+        if not employee.strip():
+            errors.append("Contractor / Employee Labour")
+        if not site_address.strip():
+            errors.append("Site Address")
+        if not customer_job_no.strip():
+            errors.append("Customer Job No.")
+        if not desc.strip():
+            errors.append("Description")
+        if not director.strip():
+            errors.append("Director")
+
+        duplicate = any(
+            str(r.get("work_order_no", "")).strip().lower() == work_order_no.strip().lower()
+            for r in orders if str(r.get("work_order_no", "")).strip()
+        )
+        if duplicate:
+            errors.append("Work Order No. already exists")
+
+        if errors:
+            st.error("Please correct: " + ", ".join(errors) + ".")
+        else:
+            attachments = []
+            for i, f in enumerate(files or [], 1):
+                safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
+                fn = f"{wid}_F{i}_{safe_name}"
+                fp = os.path.join(UPLOAD_DIR, fn)
+                with open(fp, "wb") as out_file:
+                    out_file.write(f.getbuffer())
+                upload_to_google_drive(fp, fn)
+                attachments.append(fn)
+
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            rec = {
+                "id": wid,
+                "work_order_no": work_order_no.strip(),
+                "emp_name": employee.strip(),
+                "dept": manager_dept,
+                "work_date": str(work_date),
+                "hours": 0.0,
+                "customer_job_no": customer_job_no.strip(),
+                "site_address": site_address.strip(),
+                "amount": float(amount),
+                "manager": manager_name,
+                "desc": desc.strip(),
+                "attachment_name": ", ".join(attachments) or "None",
+                "status": "pending_director",
+                "manager_comments": "",
+                "manager_decision_date": "",
+                "manager_decision_by": "",
+                "director_comments": "",
+                "director_decision_date": "",
+                "director_decision_by": "",
+                "submitted_by": manager_name,
+                "submitted_date": now,
+                "payroll_status": "Pending",
+                "payroll_date": "",
+                "payroll_by": "",
+                "pdf_path": "",
+            }
+            orders.append(rec)
+            save_all_work_orders(orders)
+            log_action("WORK_ORDER_MANAGER_CREATED", wid, decision_by=manager_name)
+            st.success(
+                f"✅ Work Order {work_order_no.strip()} submitted to {director.strip()} for final approval."
+            )
+            st.rerun()
+
+    st.divider()
+
     tab_review, tab_rejected = st.tabs([
         "⏳ Waiting for Manager Review",
         "❌ Director Rejected — Edit & Resubmit",
@@ -1292,10 +1446,11 @@ def render_work_order_manager_portal(manager_name, manager_dept):
 
         for r in reversed(items):
             with st.expander(
-                f"🟡 {r.get('id')} | {r.get('emp_name')} | "
+                f"🟡 {r.get('work_order_no') or r.get('id')} | {r.get('emp_name')} | "
                 f"£{r.get('amount', 0):.2f} | {r.get('manager')}"
             ):
                 st.write(
+                    f"🧾 Work Order No.: **{r.get('work_order_no') or r.get('id')}** | "
                     f"📝 Submitted by: **{r.get('submitted_by')}** on {r.get('submitted_date')}"
                 )
                 st.write(
