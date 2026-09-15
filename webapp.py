@@ -384,32 +384,6 @@ def display_audit_log_panel():
     st.divider()
     df_export = pd.DataFrame(filtered)
     st.download_button("📥 Download Full Audit Log (CSV)", df_export.to_csv(index=False).encode("utf-8"), "Acoole_Audit_Log.csv", type="primary")
-
-with tab_audit:
-    # ✅ INSERT THIS BLOCK HERE ✅
-    # --- CLEAR AUDIT LOG BUTTON ---
-    user_info = st.session_state.get("user_info", {})
-    user_role = user_info.get("role", "")
-    if user_role == "Super Admin":
-        st.divider()
-        col_btn, col_info = st.columns([1, 3])
-        with col_btn:
-            if st.button("🗑️ Clear History Log", type="secondary"):
-                # Step 1: Archive first
-                archive_path, count = archive_audit_log()
-                # Step 2: Clear the file
-                clear_audit_log_file()
-                st.success(f"✅ Log cleared! Archived {count} entries → `{os.path.basename(archive_path)}`")
-                st.rerun()
-        with col_info:
-            st.caption("⚠️ This archives current log then starts fresh — history is backed up before clearing.")
-    st.divider()
-    
-    if "display_audit_log_panel" in globals():
-        display_audit_log_panel()
-    else:
-        st.info("📖 Audit log panel not defined — skipping")
-
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -1100,34 +1074,22 @@ display_company_header()  # Logo centered at top
 # ============================================================
 # ✅ REFRESH LEFT | LOGOUT RIGHT — SAME ROW ✅
 # ============================================================
-col_left, col_right = st.columns([4, 1])
+col_left, col_right = st.columns([4, 1])  # Wide space left, logout tight right
 
 with col_left:
-    refresh_data_button()
+    refresh_data_button()  # 🔄 Refresh Data — top left
 
 with col_right:
     if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
         st.session_state.clear()
-        st.rerun()
+        st.rerun()  # 🔓 Logout — top right, above welcome
 
 # ============================================================
-# ✅ WELCOME BANNER — USING CORRECT VARIABLES ✅
+# ✅ WELCOME BANNER — FULL WIDTH, BELOW BUTTONS ✅
 # ============================================================
-user_info = st.session_state.get("user_info", {})
-full_name = user_info.get("full_name", user_info.get("username", "User"))
-user_role = user_info.get("role", "")
-
-st.info(f"👤 Welcome: {full_name} | {user_role}")
+st.info(f"👤 Welcome: {full_name} | System Administration | Super Admin")
 
 change_my_password_form()
-
-# ============================================================
-# ✅ LOAD GLOBAL VARIABLES BEFORE PORTALS ✅
-# ============================================================
-all_live_requests = load_records_from_excel()
-role = user_info.get("role", "")
-dept = user_info.get("dept", "")
-CATEGORIES = load_categories()
 
 # Sidebar PDF section
 with st.sidebar:
@@ -1508,7 +1470,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 else:
                     st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
         st.divider()
-        st.divider()
         st.subheader(f"📋 My Department Requests")
         my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
         if not my_reqs:
@@ -1517,35 +1478,21 @@ elif role in ["Manager", "Staff", "Team Member"]:
             for req in reversed(my_reqs):
                 status = req.get("status", "pending").lower()
                 icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-                
-                # Get approval info
-                dec_by = req.get('decision_by', '—')
-                dec_date = req.get('decision_date', '')
-                display_dt = dec_date if dec_date else "—"
-                
-                # Build label with ALL info
-                label = (
-                    f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))} "
-                    f"| ✅ Approved by: {dec_by} | ⏰ {display_dt}"
-                )
-                
-                with st.expander(label):
+                title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
+                with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
                     st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
                     st.info(f"📝 Description: {req.get('desc')}")
                     display_attachments(req)
                     if req.get("director_comments"):
                         st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                    # Show approval details inside
-                    if status in ["approved", "rejected"]:
-                        st.write(f"🎯 Decision By: {dec_by}")
-                        st.write(f"📅 Decision Date/Time: {display_dt}")
                     if status == "approved":
                         display_pdf_button(req, can_generate=False)
                     if status in ["pending", "rejected"]:
                         if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
-                            st.session_state.editing_request_id = req.get('id')
+                            st.session_state.editing_request_id = req.get("id")
                             st.rerun()
+                            
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
@@ -1619,10 +1566,7 @@ elif role == "Director":
                 req_id = req.get("id")
                 dec_by = req.get('decision_by', 'Director')
                 dec_date = format_date(req.get('decision_date',''))
-                label = (  f"🟢 ID #{req_id} | {req.get('emp_name')} | APPROVED | £{float(req.get('amount',0)):.2f} | 📅 {dec_date[:10] if dec_date else '—'} "
-                f"| ✅ Approved by: {dec_by} | ⏰ {dec_date}"
-                )
-                with st.expander(label):
+                with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
                     st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                     st.write(f"🎯 Approved By: {dec_by}")
@@ -1693,13 +1637,8 @@ elif role == "Super Admin":
                 dec_date = req.get('decision_date', '')
                 display_date = dec_date[:10] if dec_date and len(dec_date) >= 10 else ""
                 extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
-                display_date = dec_date[:10] if dec_date and len(dec_date) >= 10 else "—"
-                full_dt = dec_date if dec_date else "—"
-                label = (
-                f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f} | 📅 {display_date} "
-                f"| ✅ Approved by: {dec_by} | ⏰ {full_dt}"
-                )
-                with st.expander(label):
+                title = f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}{extra_text}"
+                with st.expander(title):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
                     st.write(f"💷 Amount: £{amount:.2f}")
                     st.write(f"🎯 **Approved By:** {dec_by}")
