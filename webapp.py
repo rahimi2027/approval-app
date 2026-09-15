@@ -348,7 +348,16 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
 # DEFAULTS — ROLES, DEPARTMENTS, USERS, PERMISSIONS
 # ============================================================
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
-DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Work Order Employee", "Director", "Payroll", "Super Admin"]
+DEFAULT_ROLES = [
+    "Manager",
+    "Work Order Manager",
+    "Staff",
+    "Team Member",
+    "Work Order Employee",
+    "Director",
+    "Payroll",
+    "Super Admin"
+]
 DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
 EXCEL_COLUMNS = [
     "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
@@ -378,6 +387,9 @@ PERMISSION_DEFAULTS = {
     "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
     "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
     "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
+    # Work Order Manager can use the normal request portal AND the full
+    # Work Order Employee + Manager Review workflow.
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
     "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True},
     "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False},
     "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True}
@@ -2361,9 +2373,19 @@ elif role == "Payroll":
         render_work_order_payroll_portal(full_name)
 
 # ─── MANAGER / STAFF PORTAL ───
-elif role in ["Manager", "Staff", "Team Member"]:
+elif role in ["Manager", "Work Order Manager", "Staff", "Team Member"]:
     dept_name = dept
-    if role == "Manager":
+
+    # Work Order Manager is a combined role:
+    # 1) Can submit their own work orders (same facility as Work Order Employee)
+    # 2) Can review/forward work orders assigned to them as Manager
+    # 3) Still keeps the normal Manager request portal below
+    if role == "Work Order Manager":
+        with st.expander("🛠️ Work Orders — Submit Work", expanded=True):
+            render_work_order_employee_portal(full_name, dept_name)
+        st.divider()
+
+    if role in ["Manager", "Work Order Manager"]:
         with st.expander("🛠️ Work Orders — Manager Review", expanded=True):
             render_work_order_manager_portal(full_name, dept_name)
         st.divider()
