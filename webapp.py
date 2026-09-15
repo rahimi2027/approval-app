@@ -2487,7 +2487,12 @@ elif role == "Payroll":
 # ─── MANAGER / STAFF PORTAL ───
 elif role in ["Manager", "Work Order Manager", "Staff", "Team Member"]:
     dept_name = dept
-    if role in ["Manager", "Work Order Manager"]:
+
+    # IMPORTANT ROLE SEPARATION:
+    # - Manager = normal request portal ONLY. No Work Order access.
+    # - Work Order Manager = normal request portal + manual Work Order facility.
+    #   This role is the only manager-level role that receives the Work Order UI.
+    if role == "Work Order Manager":
         with st.expander("🛠️ Work Orders — Manual Submission", expanded=True):
             render_work_order_manager_portal(full_name, dept_name)
         st.divider()
