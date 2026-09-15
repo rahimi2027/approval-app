@@ -2501,18 +2501,228 @@ elif role == "Payroll":
         render_work_order_payroll_portal(full_name)
 
 # ─── WORK ORDER MANAGER PORTAL ───
-# Only users explicitly assigned the "Work Order Manager" role get work-order
-# access. Normal Managers remain on the normal request portal only.
+# A Work Order Manager gets BOTH portals, separated into tabs.
 elif role == "Work Order Manager":
     dept_name = dept
-    with st.expander("🛠️ Work Orders — Manager", expanded=True):
-        st.info("Only users assigned the Work Order Manager role can access work orders. This area includes work-order submission, manager review, rejected-order resubmission, and approved totals.")
-        # A Work Order Manager can create/submit their own work orders AND
-        # review work orders assigned to them.
+    request_tab, work_order_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders"])
+
+    with request_tab:
+        dept_name = dept
+        # IMPORTANT: normal Manager role does NOT receive work-order access.
+        # Work-order access is reserved for the separate "Work Order Manager" role.
+        if st.session_state.get("editing_request_id"):
+            eid = st.session_state.editing_request_id
+            rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
+            if rec:
+                st.subheader(f"✏️ Edit Request #{eid}")
+                show_old_new_comparison("{}", rec)
+                st.markdown("### 📎 Manage Attachments")
+                att_name_raw = rec.get("attachment_name", "None")
+                existing_files = []
+                if att_name_raw and str(att_name_raw).strip().lower() != "none":
+                    existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
+                files_to_keep = []
+                files_to_remove = []
+                if existing_files:
+                    st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
+                    for fname in existing_files:
+                        file_path = os.path.join(UPLOAD_DIR, fname)
+                        safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
+                        col_check, col_name, col_dl = st.columns([1, 5, 2])
+                        keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
+                        col_name.markdown(f"📄 `{fname}`")
+                        if os.path.exists(file_path):
+                            with open(file_path, "rb") as f:
+                                col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
+                        else:
+                            col_dl.caption("⚠️ Missing")
+                        if keep: files_to_keep.append(fname)
+                        else: files_to_remove.append(fname)
+                    if files_to_remove:
+                        st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
+                else:
+                    st.info("📋 No attachments currently attached.")
+                st.markdown("#### ➕ Attach New Files")
+                new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"],
+                    accept_multiple_files=True, key=f"new_upload_{eid}")
+                st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload or [])} new** = {len(files_to_keep)+len(new_files_upload or [])} total files")
+                with st.form("edit_form"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
+                        rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"],
+                            index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
+                        cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
+                        ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                        amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
+                    with c2:
+                        from datetime import datetime as dt
+                        try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
+                        except: d = dt.today()
+                        dt_val = st.date_input("📅 Date", d)
+                        mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
+                        desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
+                    if st.form_submit_button("✅ Submit Edit", type="primary"):
+                        final_attachments = list(files_to_keep)
+                        if new_files_upload:
+                            for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
+                                fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
+                                edit_path = os.path.join(UPLOAD_DIR, fn)
+                                with open(edit_path, "wb") as outfile:
+                                    outfile.write(f.getbuffer())
+                                upload_to_google_drive(edit_path, fn)
+                                final_attachments.append(fn)
+                        records = load_records_from_excel()
+                        old_data_dict = {
+                            "emp_name": rec.get("emp_name"), "dept": rec.get("dept"),
+                            "type": rec.get("type"), "category": rec.get("category"),
+                            "date": rec.get("date"), "amount": rec.get("amount"),
+                            "manager": rec.get("manager"), "desc": rec.get("desc")
+                        }
+                        new_data_dict = {
+                            "emp_name": en.strip(), "dept": dept_name, "type": rt,
+                            "category": ct, "date": str(dt_val), "amount": amt,
+                            "manager": mgr.strip(), "desc": desc.strip()
+                        }
+                        for r in records:
+                            if int(r.get("id", 0)) == int(eid):
+                                r["emp_name"] = en.strip()
+                                r["type"] = rt
+                                r["category"] = ct
+                                r["amount"] = amt
+                                r["date"] = str(dt_val)
+                                r["manager"] = mgr.strip()
+                                r["desc"] = desc.strip()
+                                r["status"] = "pending"
+                                r["attachment_name"] = ", ".join(final_attachments) or "None"
+                                r["old_data"] = json.dumps(old_data_dict)
+                                break
+                        log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
+                        save_all_records(records)
+                        st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload or [])}")
+                        st.session_state.editing_request_id = None
+                        st.rerun()
+                if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
+                    st.session_state.editing_request_id = None
+                    st.rerun()
+        else:
+            st.subheader(f"➕ New Request — {dept_name}")
+            nid = get_next_id(all_live_requests)
+            st.markdown(f"**🆔 Request ID:** `#{nid}`")
+            with st.form("new_req", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                with c1:
+                    en = st.text_input("👤 Employee Name")
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
+                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
+                with c2:
+                    from datetime import datetime as dt
+                    dt_val = st.date_input("📅 Date", value=dt.today())
+                    mgr = st.text_input("👔 Line Manager")
+                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+                    desc = st.text_area("📝 Description / Justification")
+                if st.form_submit_button("📤 Send to Director", type="primary"):
+                    if en.strip() and mgr.strip() and desc.strip():
+                        att_list = []
+                        if files:
+                            for i, f in enumerate(files, 1):
+                                fn = f"ID_{nid}_F{i}_{f.name}"
+                                file_path = os.path.join(UPLOAD_DIR, fn)
+                                with open(file_path, "wb") as out:
+                                    out.write(f.getbuffer())
+                                att_list.append(fn)
+                                file_id = upload_to_google_drive(file_path, fn)
+                                # Drive is the permanent store; do not create duplicate files.
+                        payload = {
+                            "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
+                            "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
+                            "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
+                            "status": "pending", "director_comments": "", "decision_date": "",
+                            "decision_by": "", "submitted_by": full_name, "pdf_path": "",
+                            "edited_from_id": "", "old_data": ""
+                        }
+                        save_record_to_excel(payload)
+                        log_action("CREATED", nid)
+                        st.success(f"✅ Request #{nid} sent for approval!")
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+            st.divider()
+            st.subheader("📋 My Department Requests")
+            my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+
+            # 🔎 Search box for My Department Requests
+            # Searches across the fields users are most likely to use when locating a request.
+            my_dept_search = st.text_input(
+                "🔎 Search my department requests",
+                placeholder="Search by ID, employee, status, amount, manager, category, date, description, approver or comments...",
+                key="my_department_requests_search",
+            )
+
+            if my_dept_search.strip():
+                q = my_dept_search.strip().lower()
+                my_reqs = [
+                    r for r in my_reqs
+                    if q in " ".join([
+                        str(r.get("id", "")),
+                        str(r.get("emp_name", "")),
+                        str(r.get("dept", "")),
+                        str(r.get("status", "")),
+                        str(r.get("amount", "")),
+                        str(r.get("manager", "")),
+                        str(r.get("type", "")),
+                        str(r.get("category", "")),
+                        str(r.get("date", "")),
+                        str(r.get("desc", "")),
+                        str(r.get("decision_by", "")),
+                        str(r.get("approved_by", "")),
+                        str(r.get("submitted_by", "")),
+                        str(r.get("decision_date", "")),
+                        str(r.get("director_comments", "")),
+                        str(r.get("attachment_name", "")),
+                    ]).lower()
+                ]
+                st.caption(f"🔎 Showing {len(my_reqs)} matching department request(s).")
+
+            if not my_reqs:
+                if my_dept_search.strip():
+                    st.warning("No department requests match your search.")
+                else:
+                    st.info("📋 No requests yet.")
+            else:
+                for req in reversed(my_reqs):
+                    status = req.get("status", "pending").lower()
+                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+                    dec_by = req.get("decision_by", "")
+                    dec_date = format_date(req.get("decision_date", ""))
+                    if status in ["approved", "rejected"] and dec_by:
+                        title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date.replace(' ', ' 🕓 ')}"
+                    else:
+                        title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
+                    with st.expander(title):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by:
+                            st.write(f"📝 **Submitted by:** {submitted_by}")
+                        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                        st.info(f"📝 Description: {req.get('desc')}")
+                        display_attachments(req)
+                        if req.get("director_comments"):
+                            st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                        if status == "approved":
+                            display_pdf_button(req, can_generate=True)
+                        if status in ["pending", "rejected"]:
+                            if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                                st.session_state.editing_request_id = req.get("id")
+                                st.rerun()
+
+    with work_order_tab:
+        st.subheader("🛠️ Work Orders — Manager")
+        st.info("Only users assigned the Work Order Manager role can access work orders. You can submit work orders, review assigned work orders, edit rejected orders, and create approved totals/PDFs.")
         render_work_order_employee_portal(full_name, dept_name)
         st.divider()
         render_work_order_manager_portal(full_name, dept_name)
-    st.divider()
 
 # ─── MANAGER / STAFF PORTAL ───
 elif role in ["Manager", "Staff", "Team Member"]:
