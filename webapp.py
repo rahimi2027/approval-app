@@ -1105,34 +1105,200 @@ def render_work_order_employee_portal(current_user, current_dept):
 
 
 def render_work_order_manager_portal(manager_name, manager_dept):
-    st.subheader("🛠️ Work Orders — Manager Review")
-    st.info("Only users assigned the **Work Order Manager** role can access this area. Normal Managers do not see work orders.")
-    orders=load_work_orders()
-    pending=[r for r in orders if r.get("status")=="pending_manager" and (r.get("manager")==manager_name or (not r.get("manager") and r.get("dept")==manager_dept))]
-    search=st.text_input("🔎 Search Work Orders", placeholder="Search by ID, employee, manager, amount, date or description...", key="wo_manager_search")
-    if search.strip():
-        q=search.lower().strip(); pending=[r for r in pending if q in " ".join(str(v) for v in r.values()).lower()]
-    st.metric("⏳ Waiting for Manager Review",len(pending)); st.divider()
-    for r in reversed(pending):
-        with st.expander(f"🟡 {r.get('id')} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {r.get('manager')}"):
-            st.write(f"📝 Submitted by: **{r.get('submitted_by')}** on {r.get('submitted_date')}")
-            st.write(f"🏢 Department: {r.get('dept')} | 📅 Work Date: {r.get('work_date')} | ⏱️ Hours: {r.get('hours')}")
-            st.write(f"💷 Amount: £{r.get('amount',0):.2f}"); st.info(r.get("desc","")); display_attachments(r)
-            comments=st.text_area("Manager Review Comments", key=f"wo_mgr_comm_{r.get('id')}")
-            c1,c2=st.columns(2)
-            with c1:
-                if st.button("✅ Approve & Send to Director", key=f"wo_mgr_app_{r.get('id')}", type="primary"):
-                    for x in orders:
-                        if str(x.get("id"))==str(r.get("id")):
-                            x["status"]="pending_director"; x["manager_comments"]=comments.strip(); x["manager_decision_by"]=manager_name; x["manager_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    save_all_work_orders(orders); log_action("WORK_ORDER_MANAGER_APPROVED", r.get("id"), decision_by=manager_name); st.success("Sent to Director."); st.rerun()
-            with c2:
-                if st.button("↩️ Return to Employee", key=f"wo_mgr_ret_{r.get('id')}"):
-                    for x in orders:
-                        if str(x.get("id"))==str(r.get("id")):
-                            x["status"]="returned_employee"; x["manager_comments"]=comments.strip(); x["manager_decision_by"]=manager_name; x["manager_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    save_all_work_orders(orders); log_action("WORK_ORDER_RETURNED", r.get("id")); st.success("Returned to employee."); st.rerun()
+    """Work Order Manager portal.
 
+    Only users with the dedicated Work Order Manager role see this portal.
+    They can manually enter a work order from the paper/work-order sheet and
+    send it directly to a Director (Andy or Gemma). No hours/time entry is
+    required. They can also search and view their own submitted work orders.
+    """
+    st.subheader("🛠️ Work Orders — Manager")
+    st.info(
+        "Only users assigned the **Work Order Manager** role can access this area. "
+        "Complete the work-order details below and submit it directly to a Director for approval."
+    )
+
+    orders = load_work_orders()
+    wid = get_next_work_order_id(orders)
+
+    # ------------------------------------------------------------
+    # MANUAL WORK ORDER SUBMISSION
+    # ------------------------------------------------------------
+    st.markdown("### 📝 Submit New Work Order")
+    st.caption(
+        "Enter the information shown on the work-order sheet. "
+        "No hours or time entry is required."
+    )
+
+    with st.form(f"manual_work_order_form_{manager_name}", clear_on_submit=True, border=True):
+        st.markdown(f"**🆔 Internal Request ID:** `{wid}`")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            work_order_no = st.text_input(
+                "🧾 Work Order No.",
+                placeholder="e.g. 210366",
+            )
+            contractor = st.text_input(
+                "👷 Contractor / Employee Labour",
+                placeholder="e.g. Employee Labour",
+            )
+            site_address = st.text_area(
+                "📍 Site Address",
+                placeholder="230 Wide Lane\nMorley\nLeeds LS27 8SZ",
+                height=100,
+            )
+            work_date = st.date_input("📅 Date", value=date.today())
+
+        with c2:
+            cust_job_no = st.text_input(
+                "🔢 Cust. Job No.",
+                placeholder="e.g. 116886",
+            )
+            amount = st.number_input(
+                "💷 Total (£)",
+                min_value=0.01,
+                step=1.00,
+                format="%.2f",
+            )
+            description = st.text_area(
+                "📝 Description",
+                placeholder="Enter the work completed and any relevant details...",
+                height=150,
+            )
+            files = st.file_uploader(
+                "📎 Work Order / Supporting Documents",
+                type=["pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+            )
+
+        st.caption(
+            f"👤 Submitted by: **{manager_name}** | "
+            f"🏢 Department: **{manager_dept}** | "
+            f"🎯 Sent to: **Director (Andy or Gemma)**"
+        )
+
+        submit = st.form_submit_button(
+            "📤 Submit Work Order to Director",
+            type="primary",
+        )
+
+    if submit:
+        missing = []
+        if not work_order_no.strip():
+            missing.append("Work Order No.")
+        if not contractor.strip():
+            missing.append("Contractor / Employee Labour")
+        if not site_address.strip():
+            missing.append("Site Address")
+        if not cust_job_no.strip():
+            missing.append("Cust. Job No.")
+        if not description.strip():
+            missing.append("Description")
+
+        if missing:
+            st.error("Please complete: " + ", ".join(missing))
+        else:
+            attachments = []
+            for i, f in enumerate(files or [], 1):
+                safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
+                fn = f"{wid}_F{i}_{safe_name}"
+                fp = os.path.join(UPLOAD_DIR, fn)
+                with open(fp, "wb") as out:
+                    out.write(f.getbuffer())
+                upload_to_google_drive(fp, fn)
+                attachments.append(fn)
+
+            rec = {
+                "id": wid,
+                "work_order_no": work_order_no.strip(),
+                "contractor": contractor.strip(),
+                "emp_name": contractor.strip(),
+                "dept": manager_dept,
+                "work_date": str(work_date),
+                "hours": 0,
+                "amount": float(amount),
+                "manager": manager_name,
+                "site_address": site_address.strip(),
+                "cust_job_no": cust_job_no.strip(),
+                "desc": description.strip(),
+                "attachment_name": ", ".join(attachments) or "None",
+                # Single approval workflow: Manager -> Director -> Payroll.
+                "status": "pending_director",
+                "manager_comments": "",
+                "manager_decision_date": "",
+                "manager_decision_by": manager_name,
+                "director_comments": "",
+                "director_decision_date": "",
+                "director_decision_by": "",
+                "submitted_by": manager_name,
+                "submitted_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "payroll_status": "Pending",
+                "payroll_date": "",
+                "payroll_by": "",
+                "pdf_path": "",
+            }
+
+            orders.append(rec)
+            save_all_work_orders(orders)
+            log_action("WORK_ORDER_CREATED", wid, decision_by=manager_name)
+            st.success(
+                f"✅ Work Order {work_order_no.strip()} submitted to the Director for approval."
+            )
+            st.rerun()
+
+    # ------------------------------------------------------------
+    # MANAGER'S OWN WORK ORDERS
+    # ------------------------------------------------------------
+    st.divider()
+    st.subheader("📋 My Submitted Work Orders")
+    search = st.text_input(
+        "🔎 Search my work orders",
+        placeholder=(
+            "Search by Work Order No., ID, contractor, site, customer job no., "
+            "amount, date, status or description..."
+        ),
+        key=f"wo_manager_my_search_{manager_name}",
+    )
+
+    mine = [r for r in orders if str(r.get("submitted_by", "")) == str(manager_name)]
+    if search.strip():
+        q = search.lower().strip()
+        mine = [r for r in mine if q in " ".join(str(v) for v in r.values()).lower()]
+
+    if not mine:
+        st.info("No work orders submitted by you yet.")
+
+    for r in reversed(mine):
+        status = str(r.get("status", "pending_director")).replace("_", " ").title()
+        label_no = r.get("work_order_no") or r.get("id")
+        contractor_name = r.get("contractor") or r.get("emp_name") or "—"
+        with st.expander(
+            f"🛠️ {label_no} | {contractor_name} | "
+            f"£{float(r.get('amount', 0) or 0):.2f} | {status}"
+        ):
+            st.write(
+                f"📍 **Site:** {r.get('site_address', '—')} | "
+                f"🔢 **Cust. Job No.:** {r.get('cust_job_no', '—')}"
+            )
+            st.write(
+                f"📅 **Date:** {r.get('work_date', '—')} | "
+                f"💷 **Total:** £{float(r.get('amount', 0) or 0):.2f}"
+            )
+            st.write(f"📝 **Description:** {r.get('desc', '—')}")
+            st.write(f"📊 **Status:** {status}")
+
+            if r.get("director_decision_by"):
+                st.write(
+                    f"🎯 **Approved/Rejected by:** {r.get('director_decision_by')} "
+                    f"on {r.get('director_decision_date', '—')}"
+                )
+            if r.get("director_comments"):
+                st.info(f"Director comments: {r.get('director_comments')}")
+
+            display_attachments(r)
+            if r.get("status") == "approved_payment":
+                display_work_order_pdf(r)
 
 def change_work_order_status(order_id, new_status, director_name, comment=""):
     """Director-only status change for work orders. All changes are persisted and audited."""
