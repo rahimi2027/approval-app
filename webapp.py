@@ -1252,7 +1252,7 @@ def render_work_order_employee_portal(current_user, current_dept):
             st.write(f"💳 Payment: {r.get('payroll_status')}")
 
 
-def render_work_order_manager_portal(manager_name, manager_dept):
+def render_work_order_manager_portal(manager_name, manager_dept, show_total=True):
     st.subheader("🛠️ Work Orders — Manager Review")
     orders=load_work_orders()
     pending=[r for r in orders if r.get("status")=="pending_manager" and (r.get("manager")==manager_name or (not r.get("manager") and r.get("dept")==manager_dept))]
@@ -1281,8 +1281,14 @@ def render_work_order_manager_portal(manager_name, manager_dept):
                             x["status"]="returned_employee"; x["manager_comments"]=comments.strip(); x["manager_decision_by"]=manager_name; x["manager_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     save_all_work_orders(orders); log_action("WORK_ORDER_RETURNED", r.get("id")); st.success("Returned to employee."); st.rerun()
 
-    st.divider()
-    render_work_order_total(orders, scope_department=manager_dept, key_prefix="wo_mgr_total", prepared_by=manager_name)
+    if show_total:
+        st.divider()
+        render_work_order_total(
+            orders,
+            scope_department=manager_dept,
+            key_prefix="wo_mgr_total",
+            prepared_by=manager_name
+        )
 
 
 def render_work_order_director_portal(director_name):
@@ -1335,8 +1341,22 @@ def render_work_order_director_portal(director_name):
                 st.write(f"Submitted by: {r.get('submitted_by')} | Rejected by: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
                 st.error(r.get('director_comments') or "No reason supplied")
 
+    # The director's approved-total report is deliberately separated from
+    # the approval lists to keep the workflow screen compact.
     st.divider()
-    render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
+    director_work_tab, director_total_tab = st.tabs([
+        "🛠️ Work Orders",
+        "💷 Approved Work Order Total"
+    ])
+
+    # The approval lists above are already rendered in the first section.
+    # The second tab contains only the total/reporting facility.
+    with director_total_tab:
+        render_work_order_total(
+            orders,
+            key_prefix="wo_dir_total_tab",
+            prepared_by=director_name
+        )
 
 
 def render_work_order_payroll_portal(payroll_name):
@@ -2720,9 +2740,31 @@ elif role == "Work Order Manager":
     with work_order_tab:
         st.subheader("🛠️ Work Orders — Manager")
         st.info("Only users assigned the Work Order Manager role can access work orders. You can submit work orders, review assigned work orders, edit rejected orders, and create approved totals/PDFs.")
-        render_work_order_employee_portal(full_name, dept_name)
-        st.divider()
-        render_work_order_manager_portal(full_name, dept_name)
+
+        # Keep the main work-order workflow and the approved-total report
+        # in separate tabs so the manager does not have to scroll through
+        # the work-order list to reach the totals/reporting area.
+        wo_main_tab, wo_total_tab = st.tabs([
+            "🛠️ Work Orders",
+            "💷 Approved Work Order Total"
+        ])
+
+        with wo_main_tab:
+            render_work_order_employee_portal(full_name, dept_name)
+            st.divider()
+            render_work_order_manager_portal(
+                full_name,
+                dept_name,
+                show_total=False
+            )
+
+        with wo_total_tab:
+            render_work_order_total(
+                load_work_orders(),
+                scope_department=dept_name,
+                key_prefix="wo_mgr_total_tab",
+                prepared_by=full_name
+            )
 
 # ─── MANAGER / STAFF PORTAL ───
 elif role in ["Manager", "Staff", "Team Member"]:
