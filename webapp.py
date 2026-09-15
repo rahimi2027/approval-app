@@ -901,6 +901,15 @@ def load_work_orders(force=False):
         return []
 
 
+def clear_all_work_orders():
+    """Permanently clear all Work Order records while retaining users/settings/files."""
+    try:
+        save_all_work_orders([])
+        return True
+    except Exception:
+        return False
+
+
 def save_all_work_orders(records):
     rows = []
     for r in records:
@@ -3765,3 +3774,47 @@ else:
 # ============================================================
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
+
+    st.divider()
+    st.markdown("### 🛠️ Work Order Data Reset")
+    st.warning(
+        "This permanently removes all Work Order records. "
+        "User accounts, system settings and uploaded attachment files are NOT deleted."
+    )
+
+    if st.button(
+        "🗑️ Clear all Work Orders",
+        type="secondary",
+        key="super_admin_clear_work_orders",
+    ):
+        st.session_state["confirm_clear_work_orders"] = True
+
+    if st.session_state.get("confirm_clear_work_orders", False):
+        st.error(
+            "⚠️ This action is permanent and will remove ALL Work Order records."
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button(
+                "Yes, permanently clear Work Orders",
+                key="super_admin_confirm_clear_work_orders",
+            ):
+                if clear_all_work_orders():
+                    log_action(
+                        "SUPER_ADMIN_CLEAR_WORK_ORDERS",
+                        "ALL",
+                        decision_by=full_name,
+                    )
+                    st.session_state["confirm_clear_work_orders"] = False
+                    st.success("✅ All Work Order records have been cleared.")
+                    st.rerun()
+                else:
+                    st.error("❌ Unable to clear Work Order records.")
+        with c2:
+            if st.button(
+                "Cancel",
+                key="super_admin_cancel_clear_work_orders",
+            ):
+                st.session_state["confirm_clear_work_orders"] = False
+                st.rerun()
+
