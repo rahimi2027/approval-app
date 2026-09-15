@@ -1278,6 +1278,176 @@ def render_work_order_manager_portal(manager_name, manager_dept):
     )
 
     orders = load_work_orders()
+
+    # ------------------------------------------------------------
+    # NEW WORK ORDER SUBMISSION
+    # Work Order Managers can raise a new work order directly from
+    # their Work Orders tab.  The manager is the submitter/reviewer
+    # and the selected Director gives the single final approval.
+    # ------------------------------------------------------------
+    st.markdown("### 📝 Submit New Work Order")
+    st.caption("Complete the work-order details below. No hours or time entry is required. The work order will be sent directly to the selected Director for final approval.")
+
+    director_options = _director_options()
+    new_wid = get_next_work_order_id(orders)
+
+    with st.form("manager_new_work_order_form", clear_on_submit=True):
+        st.markdown(f"**🆔 Internal Work Order ID:** `{new_wid}`")
+        c1, c2 = st.columns(2)
+        with c1:
+            new_work_order_no = st.text_input(
+                "🧾 Work Order No.",
+                placeholder="e.g. 210366",
+                key="manager_new_wo_no",
+            )
+            new_employee = st.text_input(
+                "👤 Contractor / Employee Labour",
+                placeholder="e.g. Employee Labour",
+                key="manager_new_wo_employee",
+            )
+            new_site = st.text_area(
+                "📍 Site Address",
+                placeholder="Enter the full site address...",
+                height=90,
+                key="manager_new_wo_site",
+            )
+            new_work_date = st.date_input(
+                "📅 Date",
+                value=date.today(),
+                key="manager_new_wo_date",
+            )
+        with c2:
+            new_customer_job = st.text_input(
+                "📘 Customer Job No.",
+                placeholder="e.g. 116886",
+                key="manager_new_wo_customer",
+            )
+            new_amount = st.number_input(
+                "💷 Total (£)",
+                min_value=0.01,
+                value=0.01,
+                step=1.0,
+                format="%.2f",
+                key="manager_new_wo_amount",
+            )
+            new_desc = st.text_area(
+                "📝 Description / Work Performed",
+                placeholder="Enter the work completed and any relevant details...",
+                height=150,
+                key="manager_new_wo_desc",
+            )
+            new_files = st.file_uploader(
+                "📎 Work Order / Supporting Documents",
+                type=["pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key="manager_new_wo_files",
+            )
+
+        if director_options:
+            new_director = st.selectbox(
+                "🎯 Send to Director for Final Approval",
+                director_options,
+                key="manager_new_wo_director",
+            )
+        else:
+            new_director = st.text_input(
+                "🎯 Director",
+                placeholder="Enter Director name",
+                key="manager_new_wo_director_fallback",
+            )
+
+        st.caption(
+            f"👤 Submitted by: **{manager_name}** | "
+            f"🏢 Department: **{manager_dept}** | "
+            f"👔 Manager: **{manager_name}**"
+        )
+
+        create_wo = st.form_submit_button(
+            "📤 Submit Work Order to Director",
+            type="primary",
+        )
+
+    if create_wo:
+        errors = []
+        if not new_work_order_no.strip():
+            errors.append("Work Order No.")
+        if not new_employee.strip():
+            errors.append("Contractor / Employee Labour")
+        if not new_site.strip():
+            errors.append("Site Address")
+        if not new_customer_job.strip():
+            errors.append("Customer Job No.")
+        if not new_desc.strip():
+            errors.append("Description / Work Performed")
+        if not str(new_director).strip():
+            errors.append("Director")
+
+        duplicate = any(
+            str(r.get("work_order_no", "")).strip().lower() == new_work_order_no.strip().lower()
+            for r in orders
+            if str(r.get("work_order_no", "")).strip()
+        )
+        if duplicate:
+            errors.append("Work Order No. already exists")
+
+        if errors:
+            st.error("Please correct: " + ", ".join(errors) + ".")
+        else:
+            attachments = []
+            for i, f in enumerate(new_files or [], 1):
+                safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
+                fn = f"{new_wid}_F{i}_{safe_name}"
+                fp = os.path.join(UPLOAD_DIR, fn)
+                with open(fp, "wb") as out:
+                    out.write(f.getbuffer())
+                upload_to_google_drive(fp, fn)
+                attachments.append(fn)
+
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            rec = {
+                "id": new_wid,
+                "work_order_no": new_work_order_no.strip(),
+                "emp_name": new_employee.strip(),
+                "dept": manager_dept,
+                "work_date": str(new_work_date),
+                "hours": 0.0,
+                "customer_job_no": new_customer_job.strip(),
+                "site_address": new_site.strip(),
+                "amount": float(new_amount),
+                "manager": manager_name,
+                "desc": new_desc.strip(),
+                "attachment_name": ", ".join(attachments) or "None",
+                "status": "pending_director",
+                "manager_comments": "",
+                "manager_decision_date": "",
+                "manager_decision_by": "",
+                "director_comments": "",
+                "director_decision_date": "",
+                "director_decision_by": "",
+                "submitted_by": manager_name,
+                "submitted_date": now,
+                "payroll_status": "Pending",
+                "payroll_date": "",
+                "payroll_by": "",
+                "pdf_path": "",
+                # Keep the selected director explicit in manager comments so the
+                # existing workbook schema remains unchanged.
+                "_selected_director": str(new_director).strip(),
+            }
+            orders.append(rec)
+            # The workbook schema has no separate Director Target column, so store
+            # the routing target in Manager Comments without changing the schema.
+            rec["manager_comments"] = f"Sent to Director: {str(new_director).strip()}"
+            save_all_work_orders(orders)
+            log_action(
+                "WORK_ORDER_MANAGER_CREATED",
+                new_wid,
+                decision_by=manager_name,
+                new_data={"director": str(new_director).strip(), "status": "pending_director"},
+            )
+            st.success(f"✅ {new_work_order_no.strip()} submitted to {str(new_director).strip()} for final approval.")
+            st.rerun()
+
     assigned = [
         r for r in orders
         if r.get("manager") == manager_name
