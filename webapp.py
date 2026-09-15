@@ -1465,25 +1465,23 @@ def render_work_order_manager_portal(manager_name, manager_dept):
 def render_work_order_director_portal(director_name, final_director=False):
     """Single-approval Work Order Director portal.
 
-    Any user with the Director role can approve or reject a work order.
-    There is NO second/final Gemma approval stage. Once either Andy or Gemma
-    approves, the work order becomes approved for Payroll and the submitting
-    Work Order Manager can immediately see who approved it and when.
+    Any user with the Director role can approve, reject, or change the status
+    of any work order at any time. A single approval by either Andy or Gemma
+    sends the work order to Payroll. Status changes are logged.
 
-    ``final_director`` is retained in the function signature for compatibility
-    with older calls/data, but it no longer changes the workflow.
+    ``final_director`` is retained for compatibility with older calls/data.
     """
     st.subheader(f"🛠️ Work Orders — Director Approval ({director_name})")
     st.info(
         "Review work orders submitted by authorised Work Order Managers. "
-        "A single approval by either Andy or Gemma sends the approved work order to Payroll."
+        "Either Andy or Gemma can approve them. Directors can also change any "
+        "work-order status at any time, and every change is logged."
     )
 
     orders = load_work_orders()
 
-    # New workflow: one director approval only.
-    # Keep old statuses visible so existing records are not lost, but all new
-    # submissions use pending_director.
+    # New workflow: one director approval only. Keep legacy statuses visible
+    # so existing records remain accessible after deployment.
     pending = [r for r in orders if r.get("status") in ("pending_director", "pending_andy", "pending_gemma")]
     approved = [r for r in orders if r.get("status") == "approved_payment"]
     rejected = [r for r in orders if str(r.get("status", "")).startswith("rejected")]
@@ -1504,6 +1502,34 @@ def render_work_order_director_portal(director_name, final_director=False):
             q = q.lower().strip()
             items = [r for r in items if q in " ".join(str(v) for v in r.values()).lower()]
         return items
+
+    def change_status(request_id, new_status, comments, action_name):
+        """Change a work-order status and record the director who changed it."""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        old_status = ""
+        changed = False
+        for x in orders:
+            if str(x.get("id")) == str(request_id):
+                old_status = str(x.get("status", ""))
+                x["status"] = new_status
+                x["director_comments"] = comments.strip()
+                x["director_decision_by"] = director_name
+                x["director_decision_date"] = now
+                # Force a fresh authorised PDF after a status change.
+                x["pdf_path"] = ""
+                changed = True
+                break
+
+        if changed:
+            save_all_work_orders(orders)
+            log_action(
+                action_name,
+                request_id,
+                old_data={"status": old_status},
+                new_data={"status": new_status},
+                decision_by=director_name,
+            )
+        return changed
 
     with tab_pending:
         items = search_list(pending, f"wo_director_pending_search_{director_name}")
@@ -1542,40 +1568,21 @@ def render_work_order_director_portal(director_name, final_director=False):
                         key=f"wo_director_app_{director_name}_{r.get('id')}",
                         type="primary",
                     ):
-                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        for x in orders:
-                            if str(x.get("id")) == str(r.get("id")):
-                                x["status"] = "approved_payment"
-                                x["director_comments"] = comments.strip()
-                                x["director_decision_by"] = director_name
-                                x["director_decision_date"] = now
-                                x["pdf_path"] = ""
-                                break
-                        save_all_work_orders(orders)
-                        log_action("WORK_ORDER_DIRECTOR_APPROVED", r.get("id"), decision_by=director_name)
-                        st.success(
-                            f"✅ {label} approved by {director_name} and sent to Payroll. "
-                            "The submitting manager can now see the approval."
-                        )
-                        st.rerun()
+                        if change_status(r.get("id"), "approved_payment", comments, "WORK_ORDER_DIRECTOR_APPROVED"):
+                            st.success(
+                                f"✅ {label} approved by {director_name} and sent to Payroll. "
+                                "The submitting manager can now see the approval."
+                            )
+                            st.rerun()
 
                 with c2:
                     if st.button(
                         "❌ Reject",
                         key=f"wo_director_rej_{director_name}_{r.get('id')}",
                     ):
-                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        for x in orders:
-                            if str(x.get("id")) == str(r.get("id")):
-                                x["status"] = "rejected_director"
-                                x["director_comments"] = comments.strip()
-                                x["director_decision_by"] = director_name
-                                x["director_decision_date"] = now
-                                break
-                        save_all_work_orders(orders)
-                        log_action("WORK_ORDER_DIRECTOR_REJECTED", r.get("id"), decision_by=director_name)
-                        st.warning(f"❌ {label} rejected by {director_name}.")
-                        st.rerun()
+                        if change_status(r.get("id"), "rejected_director", comments, "WORK_ORDER_DIRECTOR_REJECTED"):
+                            st.warning(f"❌ {label} rejected by {director_name}.")
+                            st.rerun()
 
     with tab_approved:
         items = search_list(approved, f"wo_director_approved_search_{director_name}")
@@ -1604,6 +1611,31 @@ def render_work_order_director_portal(director_name, final_director=False):
                 display_attachments(r)
                 display_work_order_pdf(r)
 
+                # Directors can change an approved work order later.
+                st.markdown("**🔄 Change Status**")
+                approved_change_comments = st.text_area(
+                    "Reason / comment (optional)",
+                    key=f"wo_director_approved_change_comm_{director_name}_{r.get('id')}",
+                    placeholder="Optional reason for changing this approved work order...",
+                )
+                ac1, ac2 = st.columns(2)
+                with ac1:
+                    if st.button(
+                        "↩️ Move back to Pending",
+                        key=f"wo_director_approved_pending_{director_name}_{r.get('id')}",
+                    ):
+                        if change_status(r.get("id"), "pending_director", approved_change_comments, "WORK_ORDER_STATUS_CHANGED"):
+                            st.success(f"↩️ {label} moved back to Director Pending by {director_name}.")
+                            st.rerun()
+                with ac2:
+                    if st.button(
+                        "❌ Change to Rejected",
+                        key=f"wo_director_approved_reject_{director_name}_{r.get('id')}",
+                    ):
+                        if change_status(r.get("id"), "rejected_director", approved_change_comments, "WORK_ORDER_STATUS_CHANGED"):
+                            st.warning(f"❌ {label} changed to Rejected by {director_name}.")
+                            st.rerun()
+
     with tab_rejected:
         items = search_list(rejected, f"wo_director_rejected_search_{director_name}")
         if not items:
@@ -1623,6 +1655,32 @@ def render_work_order_director_portal(director_name, final_director=False):
                     f"📅 **Decision:** {r.get('director_decision_date', '—')}"
                 )
                 st.error(r.get("director_comments") or "No reason supplied")
+                display_attachments(r)
+
+                # Directors can change a rejected work order later.
+                st.markdown("**🔄 Change Status**")
+                rejected_change_comments = st.text_area(
+                    "Reason / comment (optional)",
+                    key=f"wo_director_rejected_change_comm_{director_name}_{r.get('id')}",
+                    placeholder="Optional reason for changing this rejected work order...",
+                )
+                rc1, rc2 = st.columns(2)
+                with rc1:
+                    if st.button(
+                        "↩️ Move back to Pending",
+                        key=f"wo_director_rejected_pending_{director_name}_{r.get('id')}",
+                    ):
+                        if change_status(r.get("id"), "pending_director", rejected_change_comments, "WORK_ORDER_STATUS_CHANGED"):
+                            st.success(f"↩️ {label} moved back to Director Pending by {director_name}.")
+                            st.rerun()
+                with rc2:
+                    if st.button(
+                        "✅ Change to Approved",
+                        key=f"wo_director_rejected_approve_{director_name}_{r.get('id')}",
+                    ):
+                        if change_status(r.get("id"), "approved_payment", rejected_change_comments, "WORK_ORDER_STATUS_CHANGED"):
+                            st.success(f"✅ {label} changed to Approved for Payroll by {director_name}.")
+                            st.rerun()
 
     # Both directors can create totals from fully approved work orders.
     st.divider()
