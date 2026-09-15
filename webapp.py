@@ -1,8 +1,9 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.1
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.2
 # ============================================================
-# ✅ work_order_total_pdf parameter renamed to prepared_by (TypeError fixed)
-# ✅ Director Work Order view: Hours removed, "Approved By:" label
+# ✅ work_order_total_pdf: data rows + TOTAL now render correctly (ln=True fix)
+# ✅ work_order_total_pdf: filename contains employee, amount, and date range
+# ✅ work_order_total_pdf: company logo added at top
 # ✅ All prior fixes retained
 # ============================================================
 import streamlit as st
@@ -901,13 +902,6 @@ def _pdf_text(value):
     return str(value).replace("\x00", "")
 
 def work_order_pdf(req):
-    """Generate the Work Order PDF.
-
-    Uses cell(..., ln=True) for label/value rows so the cursor always
-    returns to the left margin. multi_cell is only used for genuinely
-    multi-line blocks, with X reset first — this prevents the
-    'Not enough horizontal space to render a single character' error.
-    """
     if not PDF_AVAILABLE:
         return None
     try:
@@ -1010,7 +1004,8 @@ def display_work_order_pdf(req):
             st.download_button("📄 Download Work Order PDF", f.read(), file_name=os.path.basename(path), key=f"wo_pdf_{req.get('id')}")
 
 def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_by=""):
-    # ✅ FIX: parameter renamed from created_by → prepared_by to match call sites
+    # ✅ FIX v3.2: proper ln=True on all rows, filename includes amount + date range,
+    #              company logo at top of PDF.
     if not PDF_AVAILABLE:
         return None
     try:
@@ -1031,9 +1026,20 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
+        # ✅ Company logo at the top (if it exists)
+        if os.path.exists(LOGO_PATH):
+            try:
+                pdf.image(LOGO_PATH, x=75, y=10, w=60)
+                pdf.ln(25)
+            except Exception:
+                pdf.ln(3)
+        else:
+            pdf.ln(3)
+
         pdf.set_font(family, "B", 15)
         pdf.cell(0, 9, safe("APPROVED WORK ORDER TOTAL"), ln=True, align="C")
         pdf.ln(3)
+
         pdf.set_font(family, "", 10)
         scope = employee_filter if employee_filter and employee_filter != "All Employees" else "All Employees"
         pdf.cell(0, 6, safe(f"Employee: {scope}"), ln=True)
@@ -1041,30 +1047,40 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_
         if prepared_by:
             pdf.cell(0, 6, safe(f"Prepared by: {prepared_by}"), ln=True)
         pdf.ln(3)
+
+        # ✅ Table header — last cell has ln=True so cursor returns to left margin
         pdf.set_font(family, "B", 9)
-        pdf.cell(48, 7, safe("Work Order No."), border=1)
+        pdf.cell(45, 7, safe("Work Order No."), border=1)
         pdf.cell(55, 7, safe("Employee"), border=1)
         pdf.cell(30, 7, safe("Work Date"), border=1)
-        pdf.cell(28, 7, safe("Amount (£)"), border=1, align="R")
-        pdf.cell(0, 7, safe("Approved By"), border=1, align="L")
+        pdf.cell(28, 7, safe("Amount"), border=1, align="R")
+        pdf.cell(0, 7, safe("Approved By"), border=1, align="L", ln=True)
+
+        # ✅ Data rows — every row ends with ln=True
         pdf.set_font(family, "", 9)
         total = 0.0
         for r in selected:
             amount = float(r.get("amount", 0) or 0)
             total += amount
-            pdf.cell(48, 7, safe(get_work_order_number(r)), border=1)
+            pdf.cell(45, 7, safe(get_work_order_number(r)), border=1)
             pdf.cell(55, 7, safe(r.get("emp_name", "")), border=1)
             pdf.cell(30, 7, safe(r.get("work_date", "")), border=1)
             pdf.cell(28, 7, safe(f"{amount:.2f}"), border=1, align="R")
-            pdf.cell(0, 7, safe(r.get("director_decision_by", "")), border=1)
+            pdf.cell(0, 7, safe(r.get("director_decision_by", "")), border=1, ln=True)
+
+        # ✅ TOTAL row
         pdf.set_font(family, "B", 10)
-        pdf.cell(133, 8, safe("TOTAL"), border=1)
+        pdf.cell(130, 8, safe("TOTAL"), border=1, align="R")
         pdf.cell(28, 8, safe(f"{total:.2f}"), border=1, align="R")
-        pdf.cell(0, 8, safe(""), border=1)
+        pdf.cell(0, 8, safe(""), border=1, ln=True)
+
         os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_emp = "all_employees" if scope == "All Employees" else "_".join(scope.split())
-        path = os.path.join(WORK_ORDER_PDF_DIR, f"Approved_Work_Order_Total_{safe_emp}_{stamp}.pdf")
+        filename = (
+            f"Approved_Work_Order_Total_{safe_emp}_"
+            f"GBP{total:.2f}_{from_date}_to_{to_date}.pdf"
+        )
+        path = os.path.join(WORK_ORDER_PDF_DIR, filename)
         pdf.output(path)
         upload_to_google_drive(path, os.path.basename(path))
         return path
@@ -1403,7 +1419,6 @@ def render_work_order_director_portal(director_name):
         return items
 
     def show_full_details(r):
-        """Show ALL work order information consistently."""
         st.write(f"🧾 **Work Order No.:** {get_work_order_number(r)}")
         st.write(f"👤 **Contractor / Employee Labour:** {r.get('emp_name','-')}")
         st.write(f"🏢 **Department:** {r.get('dept','-')}")
@@ -1427,7 +1442,6 @@ def render_work_order_director_portal(director_name):
         display_attachments(r)
 
     def apply_status_change(req_id, new_status, comments, old_status):
-        """Change a work order to a new status and record it."""
         for x in orders:
             if str(x.get("id")) == str(req_id):
                 x["status"] = new_status
@@ -1451,9 +1465,6 @@ def render_work_order_director_portal(director_name):
                    decision_by=director_name)
         st.success(f"✅ Work Order #{req_id} status changed to **{new_status.replace('_',' ').title()}**.")
 
-    # =========================================================
-    # TAB 1 — PENDING DIRECTOR
-    # =========================================================
     with t1:
         items = search_list(pending, "wo_dir_pending_search")
         if not items:
@@ -1478,9 +1489,6 @@ def render_work_order_director_portal(director_name):
                         apply_status_change(req_id, "rejected_director", comments, "pending_director")
                         st.rerun()
 
-    # =========================================================
-    # TAB 2 — APPROVED FOR PAYMENT
-    # =========================================================
     with t2:
         items = search_list(approved, "wo_dir_approved_search")
         if not items:
@@ -1512,9 +1520,6 @@ def render_work_order_director_portal(director_name):
                 st.markdown("#### 📄 Work Order PDF")
                 display_work_order_pdf(r)
 
-    # =========================================================
-    # TAB 3 — REJECTED
-    # =========================================================
     with t3:
         items = search_list(rejected, "wo_dir_rejected_search")
         if not items:
@@ -1543,9 +1548,6 @@ def render_work_order_director_portal(director_name):
                         apply_status_change(req_id, "approved_payment", new_comments, "rejected_director")
                         st.rerun()
 
-    # =========================================================
-    # Approved Work Order Total
-    # =========================================================
     st.divider()
     render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
 
