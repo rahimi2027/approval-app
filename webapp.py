@@ -1,11 +1,12 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.6
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.7
 # ============================================================
 # ✅ Director tab indentation fixed
 # ✅ Work Order Manager manual_work_order_no save key fixed
 # ✅ Duplicate Work Order check fixed
 # ✅ Site Address + Customer Job No. now persist
 # ✅ "Send to Director" field removed — Director auto-assigned
+# ✅ Director Work Order view: hours + manager comments removed, submitter shown
 # ============================================================
 import streamlit as st
 import os
@@ -1194,7 +1195,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                     height=150
                 )
 
-            # ✅ FIX: Director is assigned automatically — no user input required.
             _all_users = load_users()
             director_names = sorted({
                 str(u.get("full_name", "")).strip()
@@ -1222,7 +1222,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             if not site_address.strip(): errors.append("Site Address")
             if not customer_job_no.strip(): errors.append("Customer Job No.")
             if not description.strip(): errors.append("Description")
-            # ✅ Director check removed — director is assigned automatically
 
             duplicate=any(
                 str(r.get("manual_work_order_no","")).strip().lower()==work_order_no.strip().lower()
@@ -1371,12 +1370,19 @@ def render_work_order_director_portal(director_name):
     with t1:
         items=search_list(pending,"wo_dir_pending_search")
         for r in reversed(items):
-            with st.expander(f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Manager: {r.get('manager')}"):
+            # ✅ FIX: submitted_by now shown directly in the expander title
+            submitter = r.get('submitted_by') or r.get('manager') or "Unknown"
+            with st.expander(
+                f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"£{r.get('amount',0):.2f} | Submitted by: {submitter}"
+            ):
                 st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
-                st.write(f"📝 Submitted by: **{r.get('submitted_by')}** on {r.get('submitted_date')}")
-                st.write(f"👔 Manager review: **{r.get('manager_decision_by')}** on {r.get('manager_decision_date')}")
-                st.write(f"💷 £{r.get('amount',0):.2f} | ⏱️ {r.get('hours')} hours | 📅 {r.get('work_date')}"); st.info(r.get('desc',''))
-                st.info(f"Manager comments: {r.get('manager_comments') or 'None'}"); display_attachments(r)
+                st.write(f"📝 Submitted by: **{submitter}**")
+                # ✅ FIX: Removed manager review line and hours; kept amount + date only
+                st.write(f"💷 £{r.get('amount',0):.2f} | 📅 {r.get('work_date')}")
+                st.info(r.get('desc',''))
+                # ✅ FIX: Removed "Manager comments" info box
+                display_attachments(r)
                 comments=st.text_area("Director Comments", key=f"wo_dir_comm_{r.get('id')}")
                 c1,c2=st.columns(2)
                 with c1:
