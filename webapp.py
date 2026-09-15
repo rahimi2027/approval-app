@@ -1,8 +1,7 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.9
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.0
 # ============================================================
-# ✅ Director Work Order portal: full details + status change at any time
-# ✅ Work Order PDF "Not enough horizontal space" fixed
+# ✅ Director Work Order view: Hours removed, "Approved By:" label
 # ✅ All prior fixes retained
 # ============================================================
 import streamlit as st
@@ -1410,7 +1409,7 @@ def render_work_order_director_portal(director_name):
         st.write(f"📘 **Customer Job No.:** {r.get('customer_job_no','-')}")
         st.write(f"📅 **Work Date:** {r.get('work_date','-')}")
         st.write(f"💷 **Amount:** £{float(r.get('amount',0) or 0):.2f}")
-        st.write(f"⏱️ **Hours:** {r.get('hours',0)}")
+        # ✅ Hours line removed
         st.write(f"👔 **Manager:** {r.get('manager','-')}")
         st.write(f"📝 **Submitted by:** {r.get('submitted_by','-')} on {r.get('submitted_date','-')}")
         if r.get('manager_decision_by'):
@@ -1421,7 +1420,8 @@ def render_work_order_director_portal(director_name):
         if r.get('director_comments'):
             st.warning(f"💬 **Director Comments:** {r.get('director_comments')}")
         if r.get('director_decision_by'):
-            st.write(f"🎯 **Director Decision:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
+            # ✅ "Director Decision:" renamed to "Approved By:"
+            st.write(f"🎯 **Approved By:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
         st.divider()
         st.markdown("#### 📎 Attachments")
         display_attachments(r)
