@@ -3596,6 +3596,40 @@ elif role == "Super Admin":
                             st.rerun()
 
             with danger_col2:
+
+                reset_col1, reset_col2, reset_col3 = st.columns(3)
+
+                with reset_col3:
+                    if st.button(
+                        "🛠️ Clear All Work Orders",
+                        key="super_admin_clear_all_work_orders",
+                        type="secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["confirm_clear_all_work_orders"] = True
+
+                if st.session_state.get("confirm_clear_all_work_orders", False):
+                    st.warning("⚠️ This permanently removes ALL Work Order records.")
+                    confirm_col, cancel_col = st.columns(2)
+                    with confirm_col:
+                        if st.button(
+                            "✅ Confirm Clear Work Orders",
+                            key="super_admin_confirm_clear_all_work_orders",
+                            use_container_width=True,
+                        ):
+                            save_all_work_orders([])
+                            log_action("SUPER_ADMIN_CLEAR_WORK_ORDERS", "ALL", decision_by=full_name)
+                            st.session_state["confirm_clear_all_work_orders"] = False
+                            st.success("✅ All Work Order records have been cleared.")
+                            st.rerun()
+                    with cancel_col:
+                        if st.button(
+                            "Cancel",
+                            key="super_admin_cancel_clear_all_work_orders",
+                            use_container_width=True,
+                        ):
+                            st.session_state["confirm_clear_all_work_orders"] = False
+                            st.rerun()
                 if not st.session_state.get("confirm_clear_audit", False):
                     if st.button(
                         "🗑️ Clear Audit History",
@@ -3775,54 +3809,4 @@ else:
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
 
-    st.divider()
-    st.markdown("### 🛠️ Work Order Data Reset")
-    st.warning(
-        "This permanently removes ALL Work Order records. "
-        "User accounts, system settings and uploaded attachment files are NOT deleted."
-    )
-
-    # Use a two-step confirmation so the reset cannot happen accidentally.
-    if st.button(
-        "🗑️ Clear All Work Orders",
-        key="super_admin_clear_all_work_orders",
-        type="secondary",
-        use_container_width=True,
-    ):
-        st.session_state["confirm_clear_all_work_orders"] = True
-
-    if st.session_state.get("confirm_clear_all_work_orders", False):
-        st.error(
-            "⚠️ Permanent action: this will remove every Work Order record."
-        )
-        confirm_col, cancel_col = st.columns(2)
-
-        with confirm_col:
-            if st.button(
-                "✅ Yes, Clear All Work Orders",
-                key="super_admin_confirm_clear_all_work_orders",
-                type="primary",
-                use_container_width=True,
-            ):
-                try:
-                    save_all_work_orders([])
-                    log_action(
-                        "SUPER_ADMIN_CLEAR_WORK_ORDERS",
-                        "ALL",
-                        decision_by=full_name,
-                    )
-                    st.session_state["confirm_clear_all_work_orders"] = False
-                    st.success("✅ All Work Orders have been cleared successfully.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Could not clear Work Orders: {e}")
-
-        with cancel_col:
-            if st.button(
-                "Cancel",
-                key="super_admin_cancel_clear_all_work_orders",
-                use_container_width=True,
-            ):
-                st.session_state["confirm_clear_all_work_orders"] = False
-                st.rerun()
 
