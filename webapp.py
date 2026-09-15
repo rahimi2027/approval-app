@@ -1,5 +1,5 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.7
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.8
 # ============================================================
 # ✅ Director tab indentation fixed
 # ✅ Work Order Manager manual_work_order_no save key fixed
@@ -7,6 +7,7 @@
 # ✅ Site Address + Customer Job No. now persist
 # ✅ "Send to Director" field removed — Director auto-assigned
 # ✅ Director Work Order view: hours + manager comments removed, submitter shown
+# ✅ Work Order PDF "Not enough horizontal space" error fixed
 # ============================================================
 import streamlit as st
 import os
@@ -899,6 +900,13 @@ def _pdf_text(value):
     return str(value).replace("\x00", "")
 
 def work_order_pdf(req):
+    """Generate the Work Order PDF.
+
+    Uses cell(..., ln=True) for label/value rows so the cursor always
+    returns to the left margin. multi_cell is only used for genuinely
+    multi-line blocks, with X reset first — this prevents the
+    'Not enough horizontal space to render a single character' error.
+    """
     if not PDF_AVAILABLE:
         return None
     try:
@@ -918,52 +926,66 @@ def work_order_pdf(req):
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
+        label_width = 45
+        content_width = pdf.w - pdf.l_margin - pdf.r_margin
+        value_width = content_width - label_width
+
         pdf.set_font(font_family, "B", 16)
         pdf.cell(0, 10, safe("WORK ORDER - PAYMENT AUTHORISATION"), ln=True, align="C")
         pdf.ln(5)
+
         pdf.set_font(font_family, "", 10)
         rows = [
             ("Work Order No.", get_work_order_number(req)),
-            ("Employee", req.get("emp_name", "")),
-            ("Department", req.get("dept", "")),
-            ("Work Date", req.get("work_date", "")),
-            ("Hours", req.get("hours", "")),
-            ("Amount", f"GBP {float(req.get('amount', 0)):.2f}"),
-            ("Manager", req.get("manager", "")),
-            ("Submitted By", req.get("submitted_by", "")),
+            ("Employee",       req.get("emp_name", "")),
+            ("Department",     req.get("dept", "")),
+            ("Work Date",      req.get("work_date", "")),
+            ("Hours",          req.get("hours", "")),
+            ("Amount",         f"GBP {float(req.get('amount', 0)):.2f}"),
+            ("Manager",        req.get("manager", "")),
+            ("Submitted By",   req.get("submitted_by", "")),
             ("Submitted Date", req.get("submitted_date", "")),
         ]
+
         for label, value in rows:
             pdf.set_font(font_family, "B", 10)
-            pdf.cell(45, 6, safe(label + ":"), 0, 0)
+            pdf.cell(label_width, 6, safe(label + ":"), 0, 0)
             pdf.set_font(font_family, "", 10)
-            pdf.multi_cell(0, 6, safe(value))
+            pdf.cell(value_width, 6, safe(value), ln=True)
+
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Work Performed / Description:"), ln=True)
         pdf.set_font(font_family, "", 10)
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(req.get("desc", "")))
+
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Manager Review"), ln=True)
         pdf.set_font(font_family, "", 10)
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(
             f"Reviewed By: {req.get('manager_decision_by', '')}\n"
             f"Review Date: {req.get('manager_decision_date', '')}\n"
             f"Comments: {req.get('manager_comments', '')}"
         ))
+
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Director Final Approval"), ln=True)
         pdf.set_font(font_family, "", 10)
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(
             f"Approved By: {req.get('director_decision_by', '')}\n"
             f"Approval Date: {req.get('director_decision_date', '')}\n"
             f"Comments: {req.get('director_comments', '')}"
         ))
+
         pdf.ln(4)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"), ln=True)
+
         os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
         path = os.path.join(WORK_ORDER_PDF_DIR, f"{req.get('id', 'Work_Order')}.pdf")
         pdf.output(path)
@@ -1370,7 +1392,6 @@ def render_work_order_director_portal(director_name):
     with t1:
         items=search_list(pending,"wo_dir_pending_search")
         for r in reversed(items):
-            # ✅ FIX: submitted_by now shown directly in the expander title
             submitter = r.get('submitted_by') or r.get('manager') or "Unknown"
             with st.expander(
                 f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | "
@@ -1378,10 +1399,8 @@ def render_work_order_director_portal(director_name):
             ):
                 st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
                 st.write(f"📝 Submitted by: **{submitter}**")
-                # ✅ FIX: Removed manager review line and hours; kept amount + date only
                 st.write(f"💷 £{r.get('amount',0):.2f} | 📅 {r.get('work_date')}")
                 st.info(r.get('desc',''))
-                # ✅ FIX: Removed "Manager comments" info box
                 display_attachments(r)
                 comments=st.text_area("Director Comments", key=f"wo_dir_comm_{r.get('id')}")
                 c1,c2=st.columns(2)
