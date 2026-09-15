@@ -3778,43 +3778,51 @@ else:
     st.divider()
     st.markdown("### 🛠️ Work Order Data Reset")
     st.warning(
-        "This permanently removes all Work Order records. "
+        "This permanently removes ALL Work Order records. "
         "User accounts, system settings and uploaded attachment files are NOT deleted."
     )
 
+    # Use a two-step confirmation so the reset cannot happen accidentally.
     if st.button(
-        "🗑️ Clear all Work Orders",
+        "🗑️ Clear All Work Orders",
+        key="super_admin_clear_all_work_orders",
         type="secondary",
-        key="super_admin_clear_work_orders",
+        use_container_width=True,
     ):
-        st.session_state["confirm_clear_work_orders"] = True
+        st.session_state["confirm_clear_all_work_orders"] = True
 
-    if st.session_state.get("confirm_clear_work_orders", False):
+    if st.session_state.get("confirm_clear_all_work_orders", False):
         st.error(
-            "⚠️ This action is permanent and will remove ALL Work Order records."
+            "⚠️ Permanent action: this will remove every Work Order record."
         )
-        c1, c2 = st.columns(2)
-        with c1:
+        confirm_col, cancel_col = st.columns(2)
+
+        with confirm_col:
             if st.button(
-                "Yes, permanently clear Work Orders",
-                key="super_admin_confirm_clear_work_orders",
+                "✅ Yes, Clear All Work Orders",
+                key="super_admin_confirm_clear_all_work_orders",
+                type="primary",
+                use_container_width=True,
             ):
-                if clear_all_work_orders():
+                try:
+                    save_all_work_orders([])
                     log_action(
                         "SUPER_ADMIN_CLEAR_WORK_ORDERS",
                         "ALL",
                         decision_by=full_name,
                     )
-                    st.session_state["confirm_clear_work_orders"] = False
-                    st.success("✅ All Work Order records have been cleared.")
+                    st.session_state["confirm_clear_all_work_orders"] = False
+                    st.success("✅ All Work Orders have been cleared successfully.")
                     st.rerun()
-                else:
-                    st.error("❌ Unable to clear Work Order records.")
-        with c2:
+                except Exception as e:
+                    st.error(f"❌ Could not clear Work Orders: {e}")
+
+        with cancel_col:
             if st.button(
                 "Cancel",
-                key="super_admin_cancel_clear_work_orders",
+                key="super_admin_cancel_clear_all_work_orders",
+                use_container_width=True,
             ):
-                st.session_state["confirm_clear_work_orders"] = False
+                st.session_state["confirm_clear_all_work_orders"] = False
                 st.rerun()
 
