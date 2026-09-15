@@ -968,11 +968,39 @@ def _pdf_text(value):
     return str(value).replace("\x00", "")
 
 
+def _pdf_hard_wrap(text, max_chars=85):
+    """Hard-wrap very long tokens so fpdf2 never receives an unbreakable word."""
+    import textwrap
+    text = _pdf_text(text)
+    if not text:
+        return ""
+    lines = []
+    for paragraph in text.splitlines() or [""]:
+        # break_long_words=True is important for IDs, paths, email addresses, etc.
+        wrapped = textwrap.wrap(
+            paragraph,
+            width=max_chars,
+            break_long_words=True,
+            break_on_hyphens=False,
+            replace_whitespace=False,
+            drop_whitespace=False,
+        )
+        lines.extend(wrapped or [""])
+    return "\n".join(lines)
+
+
 def work_order_pdf(req):
+    """Generate a robust, downloadable Work Order PDF.
+
+    Uses a Unicode font when available and hard-wraps long values so fpdf2 does
+    not fail with 'Not enough horizontal space to render a single character'.
+    """
     if not PDF_AVAILABLE:
         return None
     try:
         pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_margins(15, 15, 15)
         pdf.add_page()
 
         regular_font, bold_font = _pdf_font_paths()
@@ -981,71 +1009,145 @@ def work_order_pdf(req):
             pdf.add_font("DejaVu", "B", bold_font)
             font_family = "DejaVu"
         else:
-            # Fallback for environments without a bundled/system Unicode font.
-            # Replace only characters unsupported by the built-in Helvetica font.
             font_family = "Helvetica"
 
         def safe(value):
-            text = _pdf_text(value)
+            text = _pdf_hard_wrap(value)
             if font_family == "Helvetica":
+                # Built-in PDF fonts are Latin-1 only.
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
+        def write_wrapped(text, height=6):
+            # Explicit full-width value prevents fpdf2 from calculating a tiny
+            # remaining width after previous cells.
+            pdf.multi_cell(
+                w=pdf.epw,
+                h=height,
+                text=safe(text),
+                border=0,
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+
         pdf.set_font(font_family, "B", 16)
-        pdf.cell(0, 10, safe("WORK ORDER - PAYMENT AUTHORISATION"), ln=True, align="C")
+        pdf.cell(
+            w=pdf.epw,
+            h=10,
+            text=safe("WORK ORDER - PAYMENT AUTHORISATION"),
+            border=0,
+            new_x="LMARGIN",
+            new_y="NEXT",
+            align="C",
+        )
         pdf.ln(5)
 
+        # Main work-order details.
         pdf.set_font(font_family, "", 10)
         rows = [
-            ("Work Order No", req.get("work_order_no", "")),
+            ("Work Order No", req.get("work_order_no", req.get("id", ""))),
             ("Contractor / Labour", req.get("contractor", req.get("emp_name", ""))),
             ("Department", req.get("dept", "")),
             ("Site Address", req.get("site_address", "")),
             ("Cust. Job No.", req.get("cust_job_no", "")),
             ("Work Date", req.get("work_date", "")),
-            ("Amount", f"GBP {float(req.get('amount', 0)):.2f}"),
+            ("Amount", f"GBP {float(req.get('amount', 0) or 0):.2f}"),
             ("Manager", req.get("manager", "")),
             ("Submitted By", req.get("submitted_by", "")),
         ]
+
+        label_w = 48
+        value_w = max(pdf.epw - label_w, 20)
         for label, value in rows:
             pdf.set_font(font_family, "B", 10)
-            pdf.cell(45, 6, safe(label + ":"), 0, 0)
+            pdf.cell(
+                w=label_w,
+                h=6,
+                text=safe(label + ":"),
+                border=0,
+                new_x="RIGHT",
+                new_y="TOP",
+            )
             pdf.set_font(font_family, "", 10)
-            pdf.multi_cell(0, 6, safe(value))
+            # Move to a known x/y and use an explicit width.
+            x = pdf.l_margin + label_w
+            y = pdf.get_y()
+            pdf.set_xy(x, y)
+            pdf.multi_cell(
+                w=value_w,
+                h=6,
+                text=safe(value),
+                border=0,
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
 
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe("Work Performed / Description:"), ln=True)
+        pdf.cell(
+            w=pdf.epw,
+            h=6,
+            text=safe("Work Performed / Description:"),
+            border=0,
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
         pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(req.get("desc", "")))
+        write_wrapped(req.get("desc", ""))
 
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe("Manager Review"), ln=True)
+        pdf.cell(
+            w=pdf.epw,
+            h=6,
+            text=safe("Manager Review"),
+            border=0,
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
         pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(
+        manager_review = (
             f"Reviewed By: {req.get('manager_decision_by', '')}\n"
             f"Review Date: {req.get('manager_decision_date', '')}\n"
             f"Comments: {req.get('manager_comments', '')}"
-        ))
+        )
+        write_wrapped(manager_review)
 
         pdf.ln(2)
         pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe("Director Final Approval"), ln=True)
+        pdf.cell(
+            w=pdf.epw,
+            h=6,
+            text=safe("Director Final Approval"),
+            border=0,
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
         pdf.set_font(font_family, "", 10)
-        pdf.multi_cell(0, 6, safe(
+        director_approval = (
             f"Approved By: {req.get('director_decision_by', '')}\n"
             f"Approval Date: {req.get('director_decision_date', '')}\n"
             f"Comments: {req.get('director_comments', '')}"
-        ))
+        )
+        write_wrapped(director_approval)
 
         pdf.ln(4)
         pdf.set_font(font_family, "B", 10)
-        pdf.cell(0, 6, safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"), ln=True)
+        pdf.cell(
+            w=pdf.epw,
+            h=6,
+            text=safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"),
+            border=0,
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
 
         os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
         path = os.path.join(WORK_ORDER_PDF_DIR, f"{req.get('id', 'Work_Order')}.pdf")
         pdf.output(path)
+
+        # Keep Google Drive as the persistent backup. upload_to_google_drive()
+        # updates a same-name file rather than creating duplicate copies.
         upload_to_google_drive(path, os.path.basename(path))
         return path
     except Exception as e:
@@ -1054,18 +1156,28 @@ def work_order_pdf(req):
 
 
 def display_work_order_pdf(req):
+    """Show the PDF download button and generate the PDF if needed."""
     path = req.get("pdf_path", "")
     if not path or not os.path.exists(path):
         path = work_order_pdf(req)
         if path:
             records = load_work_orders()
             for r in records:
-                if str(r.get("id")) == str(req.get("id")): r["pdf_path"] = path
+                if str(r.get("id")) == str(req.get("id")):
+                    r["pdf_path"] = path
+                    break
             save_all_work_orders(records)
+
     if path and os.path.exists(path):
         with open(path, "rb") as f:
-            st.download_button("📄 Download Work Order PDF", f.read(), file_name=os.path.basename(path), key=f"wo_pdf_{req.get('id')}")
-
+            pdf_bytes = f.read()
+        st.download_button(
+            "📄 Download Work Order PDF",
+            data=pdf_bytes,
+            file_name=os.path.basename(path),
+            mime="application/pdf",
+            key=f"wo_pdf_download_{req.get('id')}",
+        )
 
 def render_work_order_employee_portal(current_user, current_dept):
     st.subheader("🛠️ Work Orders — Employee")
