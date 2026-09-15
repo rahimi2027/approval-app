@@ -1243,13 +1243,13 @@ def render_work_order_employee_portal(current_user, current_dept):
     if q.strip():
         q=q.lower().strip(); mine=[r for r in mine if q in " ".join(str(v) for v in r.values()).lower()]
     for r in reversed(mine):
-        with st.expander(f"{get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {r.get('status').replace('_',' ').title()}"):
+        display_status = "Approved" if r.get("status") == "approved_payment" else r.get("status", "").replace("_", " ").title()
+        with st.expander(f"{get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {display_status}"):
             st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}** | 👔 Manager: {r.get('manager')} | 🏢 {r.get('dept')} | 📅 {r.get('work_date')}")
             st.write(f"💷 £{r.get('amount',0):.2f} | ⏱️ {r.get('hours',0)} hours")
             st.write(f"📝 {r.get('desc')}")
             if r.get("manager_decision_by"): st.write(f"👔 Manager reviewed by: {r.get('manager_decision_by')} on {r.get('manager_decision_date')}")
-            if r.get("director_decision_by"): st.write(f"🎯 Director: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
-            st.write(f"💳 Payment: {r.get('payroll_status')}")
+            if r.get("director_decision_by"): st.write(f"🎯 Approved By: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
 
 
 def render_work_order_manager_portal(manager_name, manager_dept, show_total=True):
@@ -1329,10 +1329,10 @@ def render_work_order_director_portal(director_name):
     with t2:
         items=search_list(approved,"wo_dir_approved_search")
         for r in reversed(items):
-            with st.expander(f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {r.get('payroll_status')}"):
+            with st.expander(f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Approved"):
                 st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
-                st.write(f"Submitted by: {r.get('submitted_by')} | Manager: {r.get('manager')} | Approved by: {r.get('director_decision_by')}")
-                st.write(f"📅 Director approval: {r.get('director_decision_date')} | 💳 Payment: {r.get('payroll_status')}")
+                st.write(f"Submitted by: {r.get('submitted_by')} | Manager: {r.get('manager')} | Approved By: {r.get('director_decision_by')}")
+                st.write(f"📅 Director approval: {r.get('director_decision_date')}")
                 display_work_order_pdf(r)
     with t3:
         items=search_list(rejected,"wo_dir_rejected_search")
