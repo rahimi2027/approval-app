@@ -1524,22 +1524,13 @@ def render_work_order_director_portal(director_name):
                 st.write(f"Submitted by: {r.get('submitted_by')} | Rejected by: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
                 st.error(r.get('director_comments') or "No reason supplied")
 
-    # The director's approved-total report is deliberately separated from
-    # the approval lists to keep the workflow screen compact.
+    # Approved Work Order Total is part of the Work Orders area.
     st.divider()
-    director_work_tab, director_total_tab = st.tabs([
-        "🛠️ Work Orders",
-        "💷 Approved Work Order Total"
-    ])
-
-    # The approval lists above are already rendered in the first section.
-    # The second tab contains only the total/reporting facility.
-    with director_total_tab:
-        render_work_order_total(
-            orders,
-            key_prefix="wo_dir_total_tab",
-            prepared_by=director_name
-        )
+    render_work_order_total(
+        orders,
+        key_prefix="wo_dir_total",
+        prepared_by=director_name
+    )
 
 
 def render_work_order_payroll_portal(payroll_name):
@@ -3152,10 +3143,16 @@ elif role in ["Manager", "Staff", "Team Member"]:
 
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
-    with st.expander("🛠️ Work Orders — Director Final Approval", expanded=True):
-        render_work_order_director_portal(full_name)
-    st.divider()
-    st.subheader("🎛️ Director Approval Portal — Andy Acoole")
+    # Director has two clear top-level areas:
+    # 1) Addition & Deduction
+    # 2) Work Orders
+    director_addition_tab, director_work_order_tab = st.tabs([
+        "➕ Addition & Deduction",
+        "🛠️ Work Orders"
+    ])
+
+    with director_addition_tab:
+        st.subheader("🎛️ Director Approval Portal — Andy Acoole")
     st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
     st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
     st.divider()
@@ -3356,6 +3353,9 @@ elif role == "Director":
                             log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                             st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
                             st.rerun()
+
+    with director_work_order_tab:
+        render_work_order_director_portal(full_name)
 
 # ─── SUPER ADMIN PORTAL ─────────────────────────────────────
 
