@@ -1,9 +1,8 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.2
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.3
 # ============================================================
-# ✅ work_order_total_pdf: data rows + TOTAL now render correctly (ln=True fix)
-# ✅ work_order_total_pdf: filename contains employee, amount, and date range
-# ✅ work_order_total_pdf: company logo added at top
+# ✅ Bulk ZIP download for approved Work Order PDFs (employee + date range)
+# ✅ Single PDF download in each approved Work Order expander
 # ✅ All prior fixes retained
 # ============================================================
 import streamlit as st
@@ -921,6 +920,16 @@ def work_order_pdf(req):
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
+        # Logo at top
+        if os.path.exists(LOGO_PATH):
+            try:
+                pdf.image(LOGO_PATH, x=75, y=10, w=60)
+                pdf.ln(25)
+            except Exception:
+                pdf.ln(3)
+        else:
+            pdf.ln(3)
+
         label_width = 45
         content_width = pdf.w - pdf.l_margin - pdf.r_margin
         value_width = content_width - label_width
@@ -934,8 +943,9 @@ def work_order_pdf(req):
             ("Work Order No.", get_work_order_number(req)),
             ("Employee",       req.get("emp_name", "")),
             ("Department",     req.get("dept", "")),
+            ("Site Address",   req.get("site_address", "")),
+            ("Customer Job No.", req.get("customer_job_no", "")),
             ("Work Date",      req.get("work_date", "")),
-            ("Hours",          req.get("hours", "")),
             ("Amount",         f"GBP {float(req.get('amount', 0)):.2f}"),
             ("Manager",        req.get("manager", "")),
             ("Submitted By",   req.get("submitted_by", "")),
@@ -982,7 +992,13 @@ def work_order_pdf(req):
         pdf.cell(0, 6, safe(f"Payment Status: {req.get('payroll_status', 'Pending')}"), ln=True)
 
         os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
-        path = os.path.join(WORK_ORDER_PDF_DIR, f"{req.get('id', 'Work_Order')}.pdf")
+        # ✅ Filename includes employee, amount, date
+        safe_emp = "_".join(str(req.get("emp_name", "Employee")).split()) or "Employee"
+        safe_wo = "_".join(str(get_work_order_number(req)).split()) or "WO"
+        safe_date = str(req.get("work_date", "")).replace("-", "")
+        safe_amount = f"GBP{float(req.get('amount', 0)):.2f}"
+        filename = f"Work_Order_{safe_wo}_{safe_emp}_{safe_amount}_{safe_date}.pdf"
+        path = os.path.join(WORK_ORDER_PDF_DIR, filename)
         pdf.output(path)
         upload_to_google_drive(path, os.path.basename(path))
         return path
@@ -1004,8 +1020,6 @@ def display_work_order_pdf(req):
             st.download_button("📄 Download Work Order PDF", f.read(), file_name=os.path.basename(path), key=f"wo_pdf_{req.get('id')}")
 
 def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_by=""):
-    # ✅ FIX v3.2: proper ln=True on all rows, filename includes amount + date range,
-    #              company logo at top of PDF.
     if not PDF_AVAILABLE:
         return None
     try:
@@ -1026,7 +1040,7 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
-        # ✅ Company logo at the top (if it exists)
+        # ✅ Company logo at the top
         if os.path.exists(LOGO_PATH):
             try:
                 pdf.image(LOGO_PATH, x=75, y=10, w=60)
@@ -1048,7 +1062,6 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_
             pdf.cell(0, 6, safe(f"Prepared by: {prepared_by}"), ln=True)
         pdf.ln(3)
 
-        # ✅ Table header — last cell has ln=True so cursor returns to left margin
         pdf.set_font(family, "B", 9)
         pdf.cell(45, 7, safe("Work Order No."), border=1)
         pdf.cell(55, 7, safe("Employee"), border=1)
@@ -1056,7 +1069,6 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_
         pdf.cell(28, 7, safe("Amount"), border=1, align="R")
         pdf.cell(0, 7, safe("Approved By"), border=1, align="L", ln=True)
 
-        # ✅ Data rows — every row ends with ln=True
         pdf.set_font(family, "", 9)
         total = 0.0
         for r in selected:
@@ -1068,7 +1080,6 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_
             pdf.cell(28, 7, safe(f"{amount:.2f}"), border=1, align="R")
             pdf.cell(0, 7, safe(r.get("director_decision_by", "")), border=1, ln=True)
 
-        # ✅ TOTAL row
         pdf.set_font(family, "B", 10)
         pdf.cell(130, 8, safe("TOTAL"), border=1, align="R")
         pdf.cell(28, 8, safe(f"{total:.2f}"), border=1, align="R")
@@ -1137,6 +1148,96 @@ def render_work_order_total(records, scope_department=None, key_prefix="wo_total
                     st.download_button("⬇️ Download Total PDF", f.read(), file_name=os.path.basename(path), key=f"{key_prefix}_download")
     else:
         st.info("No approved work orders match the selected employee and date range.")
+
+
+# ✅ NEW: Bulk ZIP download of approved Work Order PDFs
+def render_work_order_bulk_download(records, key_prefix="wo_bulk"):
+    """Bulk download approved Work Order PDFs as a single ZIP, filtered by employee and date range."""
+    st.markdown("### 📦 Download Multiple Work Order PDFs (ZIP)")
+    st.caption("Select an employee and date range, then generate a ZIP containing the matching approved Work Order PDFs.")
+
+    scoped = [r for r in records if r.get("status") in ("approved_payment", "approved")]
+    if not scoped:
+        st.info("No approved work orders available.")
+        return
+
+    employees = sorted({str(r.get("emp_name", "")).strip() for r in scoped if str(r.get("emp_name", "")).strip()})
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        employee = st.selectbox("👤 Employee", ["All Employees"] + employees, key=f"{key_prefix}_employee")
+    with c2:
+        from_date = st.date_input("📅 From Date", value=date.today().replace(day=1), key=f"{key_prefix}_from")
+    with c3:
+        to_date = st.date_input("📅 To Date", value=date.today(), key=f"{key_prefix}_to")
+
+    if from_date > to_date:
+        st.error("From Date cannot be after To Date.")
+        return
+
+    selected = []
+    for r in scoped:
+        try:
+            d = pd.to_datetime(str(r.get("work_date", "")), errors="coerce").date()
+        except Exception:
+            d = None
+        if d is None:
+            continue
+        if not (from_date <= d <= to_date):
+            continue
+        if employee != "All Employees" and str(r.get("emp_name", "")).strip() != employee:
+            continue
+        selected.append(r)
+
+    st.metric("📋 Work Orders Matching", len(selected))
+
+    if not selected:
+        st.info("No approved work orders match the selected employee and date range.")
+        return
+
+    if st.button("📦 Generate ZIP of Work Order PDFs", type="primary", key=f"{key_prefix}_gen"):
+        import zipfile
+        zip_buffer = io.BytesIO()
+        pdf_count = 0
+        failed = []
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for r in selected:
+                path = r.get("pdf_path", "")
+                if not path or not os.path.exists(path):
+                    path = work_order_pdf(r)
+                    if path:
+                        for x in records:
+                            if str(x.get("id")) == str(r.get("id")):
+                                x["pdf_path"] = path
+                if path and os.path.exists(path):
+                    with open(path, "rb") as f:
+                        zipf.writestr(os.path.basename(path), f.read())
+                    pdf_count += 1
+                else:
+                    failed.append(get_work_order_number(r))
+        zip_buffer.seek(0)
+        if pdf_count > 0:
+            save_all_work_orders(records)
+            safe_emp = "all_employees" if employee == "All Employees" else "_".join(employee.split())
+            filename = f"Work_Order_PDFs_{safe_emp}_{from_date}_to_{to_date}.zip"
+            st.session_state[f"{key_prefix}_data"] = zip_buffer.getvalue()
+            st.session_state[f"{key_prefix}_name"] = filename
+            st.success(f"✅ Generated {pdf_count} PDF(s). Click below to download.")
+            if failed:
+                st.warning(f"⚠️ Could not include: {', '.join(failed)}")
+        else:
+            st.error("❌ No PDFs could be generated.")
+
+    if st.session_state.get(f"{key_prefix}_data"):
+        st.download_button(
+            "⬇️ Download ZIP",
+            data=st.session_state[f"{key_prefix}_data"],
+            file_name=st.session_state.get(f"{key_prefix}_name", "Work_Order_PDFs.zip"),
+            mime="application/zip",
+            type="primary",
+            key=f"{key_prefix}_dl",
+        )
+
 
 def render_work_order_employee_portal(current_user, current_dept):
     st.subheader("🛠️ Work Orders — Employee")
@@ -1361,12 +1462,24 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
 
         with wo_approved:
             items=filter_orders(approved,"wo_mgr_approved_final_search")
-            if not items: st.info("✅ No approved work orders.")
-            for r in reversed(items):
-                wo=r.get("manual_work_order_no") or r.get("id")
-                with st.expander(f"✅ {wo} | {r.get('emp_name')} | £{float(r.get('amount',0) or 0):.2f}"):
-                    show_details(r)
-                    st.success("Approved — read only.")
+            if not items:
+                st.info("✅ No approved work orders.")
+            else:
+                for r in reversed(items):
+                    wo=r.get("manual_work_order_no") or r.get("id")
+                    with st.expander(f"✅ {wo} | {r.get('emp_name')} | £{float(r.get('amount',0) or 0):.2f}"):
+                        show_details(r)
+                        st.success("Approved — read only.")
+                        st.divider()
+                        st.markdown("#### 📄 Work Order PDF")
+                        display_work_order_pdf(r)
+
+                # ✅ Bulk ZIP download section (employee + date range)
+                st.divider()
+                render_work_order_bulk_download(
+                    load_work_orders(),
+                    key_prefix="wo_mgr_bulk"
+                )
 
         with wo_rejected:
             items=filter_orders(rejected,"wo_mgr_rejected_final_search")
@@ -1520,6 +1633,14 @@ def render_work_order_director_portal(director_name):
                 st.markdown("#### 📄 Work Order PDF")
                 display_work_order_pdf(r)
 
+        # ✅ Bulk ZIP download section (Director)
+        if items:
+            st.divider()
+            render_work_order_bulk_download(
+                load_work_orders(),
+                key_prefix="wo_dir_bulk"
+            )
+
     with t3:
         items = search_list(rejected, "wo_dir_rejected_search")
         if not items:
@@ -1587,6 +1708,13 @@ def render_work_order_payroll_portal(payroll_name):
             st.info(r.get('desc', ''))
             display_attachments(r)
             display_work_order_pdf(r)
+
+    # ✅ Bulk ZIP download section (Payroll)
+    st.divider()
+    render_work_order_bulk_download(
+        load_work_orders(),
+        key_prefix="wo_pay_bulk"
+    )
     st.divider()
     render_work_order_total(approved, key_prefix="wo_pay_total", prepared_by=payroll_name)
 
