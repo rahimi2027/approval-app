@@ -348,7 +348,7 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
 # DEFAULTS — ROLES, DEPARTMENTS, USERS, PERMISSIONS
 # ============================================================
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
-DEFAULT_ROLES = ["Manager", "Work Order Manager", "Staff", "Team Member", "Work Order Employee", "Director", "Payroll", "Super Admin"]
+DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Work Order Employee", "Director", "Payroll", "Super Admin"]
 DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
 EXCEL_COLUMNS = [
     "ID", "Employee Name", "Department", "Transaction Type", "Category Reason",
@@ -357,8 +357,8 @@ EXCEL_COLUMNS = [
     "Submitted By", "PDF File Path", "Edited From ID", "Old Data"
 ]
 WORK_ORDER_COLUMNS = [
-    "Work Order ID", "Work Order No.", "Employee Name", "Department", "Work Date", "Hours",
-    "Customer Job No.", "Site Address", "Amount (£)", "Manager", "Description", "Attachment Name", "Status",
+    "Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours",
+    "Amount (£)", "Manager", "Description", "Attachment Name", "Status",
     "Manager Comments", "Manager Decision Date", "Manager Decision By",
     "Director Comments", "Director Decision Date", "Director Decision By",
     "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date",
@@ -375,7 +375,6 @@ DEFAULT_USERS = [
 ]
 PERMISSION_DEFAULTS = {
     "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
-    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
     "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
     "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
     "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
@@ -869,14 +868,14 @@ def load_work_orders(force=False):
             except: hours = 0.0
             records.append({
                 "id": str(r.get("Work Order ID", "")).strip(),
-                "work_order_no": str(r.get("Work Order No.", "")).strip(),
+                # The manually entered work-order number is the number shown to users.
+                # Fall back to the old internal ID for records created before this field existed.
+                "manual_work_order_no": str(r.get("Manual Work Order No.", "")).strip()
+                    or str(r.get("Work Order ID", "")).strip(),
                 "emp_name": str(r.get("Employee Name", "")).strip(),
                 "dept": str(r.get("Department", "")).strip(),
                 "work_date": str(r.get("Work Date", "")).strip(),
-                "hours": hours,
-                "customer_job_no": str(r.get("Customer Job No.", "")).strip(),
-                "site_address": str(r.get("Site Address", "")).strip(),
-                "amount": amount,
+                "hours": hours, "amount": amount,
                 "manager": str(r.get("Manager", "")).strip(),
                 "desc": str(r.get("Description", "")).strip(),
                 "attachment_name": str(r.get("Attachment Name", "None")).strip(),
@@ -905,12 +904,11 @@ def save_all_work_orders(records):
     rows = []
     for r in records:
         rows.append({
-            "Work Order ID": str(r.get("id", "")), "Work Order No.": str(r.get("work_order_no", "")), "Employee Name": str(r.get("emp_name", "")),
+            "Work Order ID": str(r.get("id", "")),
+            "Manual Work Order No.": str(r.get("manual_work_order_no", "")).strip() or str(r.get("id", "")),
+            "Employee Name": str(r.get("emp_name", "")),
             "Department": str(r.get("dept", "")), "Work Date": str(r.get("work_date", "")),
-            "Hours": float(r.get("hours", 0)),
-            "Customer Job No.": str(r.get("customer_job_no", "")),
-            "Site Address": str(r.get("site_address", "")),
-            "Amount (£)": float(r.get("amount", 0)),
+            "Hours": float(r.get("hours", 0)), "Amount (£)": float(r.get("amount", 0)),
             "Manager": str(r.get("manager", "")), "Description": str(r.get("desc", "")),
             "Attachment Name": str(r.get("attachment_name", "None")), "Status": str(r.get("status", "pending_manager")),
             "Manager Comments": str(r.get("manager_comments", "")),
@@ -937,16 +935,14 @@ def get_next_work_order_id(records):
     return f"WO-{max(nums) + 1 if nums else 1:05d}"
 
 
-def _director_options():
-    """Return all users assigned the Director role."""
-    users = load_users()
-    names = []
-    for u in users.values():
-        if str(u.get("role", "")).strip().lower() == "director":
-            name = str(u.get("full_name", "")).strip()
-            if name:
-                names.append(name)
-    return sorted(set(names))
+def get_work_order_number(req):
+    """Return the manually entered work-order number for display.
+
+    Older records may not have the new field, so their internal ID is used as a
+    compatibility fallback. The internal software ID remains stored separately.
+    """
+    manual = str(req.get("manual_work_order_no", "") or "").strip()
+    return manual or str(req.get("id", "") or "").strip()
 
 
 def _manager_options_for_department(department):
@@ -1008,9 +1004,8 @@ def work_order_pdf(req):
 
         pdf.set_font(font_family, "", 10)
         rows = [
-            ("Internal Request ID", req.get("id", "")),
-            ("Work Order No.", req.get("work_order_no", "") or req.get("id", "")),
-            ("Employee / Labour", req.get("emp_name", "")),
+            ("Work Order No.", get_work_order_number(req)),
+            ("Employee", req.get("emp_name", "")),
             ("Department", req.get("dept", "")),
             ("Work Date", req.get("work_date", "")),
             ("Hours", req.get("hours", "")),
@@ -1079,6 +1074,133 @@ def display_work_order_pdf(req):
             st.download_button("📄 Download Work Order PDF", f.read(), file_name=os.path.basename(path), key=f"wo_pdf_{req.get('id')}")
 
 
+
+def work_order_total_pdf(records, employee_filter, from_date, to_date, created_by=""):
+    """Create a simple total-of-approved-work-orders PDF using manual WO numbers."""
+    if not PDF_AVAILABLE:
+        return None
+    try:
+        selected = list(records)
+        pdf = FPDF()
+        pdf.add_page()
+        regular_font, bold_font = _pdf_font_paths()
+        if regular_font and bold_font:
+            pdf.add_font("DejaVu", "", regular_font)
+            pdf.add_font("DejaVu", "B", bold_font)
+            family = "DejaVu"
+        else:
+            family = "Helvetica"
+
+        def safe(v):
+            text = _pdf_text(v)
+            if family == "Helvetica":
+                return text.encode("latin-1", "replace").decode("latin-1")
+            return text
+
+        pdf.set_font(family, "B", 15)
+        pdf.cell(0, 9, safe("APPROVED WORK ORDER TOTAL"), ln=True, align="C")
+        pdf.ln(3)
+        pdf.set_font(family, "", 10)
+        scope = employee_filter if employee_filter and employee_filter != "All Employees" else "All Employees"
+        pdf.cell(0, 6, safe(f"Employee: {scope}"), ln=True)
+        pdf.cell(0, 6, safe(f"Work date range: {from_date} to {to_date}"), ln=True)
+        if created_by:
+            pdf.cell(0, 6, safe(f"Prepared by: {created_by}"), ln=True)
+        pdf.ln(3)
+
+        pdf.set_font(family, "B", 9)
+        pdf.cell(48, 7, safe("Work Order No."), border=1)
+        pdf.cell(55, 7, safe("Employee"), border=1)
+        pdf.cell(30, 7, safe("Work Date"), border=1)
+        pdf.cell(28, 7, safe("Amount (£)"), border=1, align="R")
+        pdf.cell(0, 7, safe("Approved By"), border=1, align="L")
+
+        pdf.set_font(family, "", 9)
+        total = 0.0
+        for r in selected:
+            amount = float(r.get("amount", 0) or 0)
+            total += amount
+            pdf.cell(48, 7, safe(get_work_order_number(r)), border=1)
+            pdf.cell(55, 7, safe(r.get("emp_name", "")), border=1)
+            pdf.cell(30, 7, safe(r.get("work_date", "")), border=1)
+            pdf.cell(28, 7, safe(f"{amount:.2f}"), border=1, align="R")
+            pdf.cell(0, 7, safe(r.get("director_decision_by", "")), border=1)
+
+        pdf.set_font(family, "B", 10)
+        pdf.cell(133, 8, safe("TOTAL"), border=1)
+        pdf.cell(28, 8, safe(f"{total:.2f}"), border=1, align="R")
+        pdf.cell(0, 8, safe(""), border=1)
+
+        os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_emp = "all_employees" if scope == "All Employees" else "_".join(scope.split())
+        path = os.path.join(WORK_ORDER_PDF_DIR, f"Approved_Work_Order_Total_{safe_emp}_{stamp}.pdf")
+        pdf.output(path)
+        upload_to_google_drive(path, os.path.basename(path))
+        return path
+    except Exception as e:
+        st.error(f"Work Order Total PDF Error: {e}")
+        return None
+
+
+def render_work_order_total(records, scope_department=None, key_prefix="wo_total", prepared_by=""):
+    """Show approved work-order totals filtered by employee and work-date range."""
+    st.markdown("### 💷 Approved Work Order Total")
+    st.caption("Select an employee and work-date range. Only Director-approved work orders are included. Work Order No. is the manually entered number.")
+
+    scoped = [r for r in records if r.get("status") == "approved_payment"]
+    if scope_department:
+        scoped = [r for r in scoped if str(r.get("dept", "")) == str(scope_department)]
+
+    employees = sorted({str(r.get("emp_name", "")).strip() for r in scoped if str(r.get("emp_name", "")).strip()})
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        employee = st.selectbox("👤 Employee", ["All Employees"] + employees, key=f"{key_prefix}_employee")
+    with c2:
+        from_date = st.date_input("📅 From Date", value=date.today().replace(day=1), key=f"{key_prefix}_from")
+    with c3:
+        to_date = st.date_input("📅 To Date", value=date.today(), key=f"{key_prefix}_to")
+
+    if from_date > to_date:
+        st.error("From Date cannot be after To Date.")
+        return
+
+    selected = []
+    for r in scoped:
+        try:
+            d = pd.to_datetime(str(r.get("work_date", "")), errors="coerce").date()
+        except Exception:
+            d = None
+        if d is None:
+            continue
+        if not (from_date <= d <= to_date):
+            continue
+        if employee != "All Employees" and str(r.get("emp_name", "")).strip() != employee:
+            continue
+        selected.append(r)
+
+    total = sum(float(r.get("amount", 0) or 0) for r in selected)
+    st.metric("💷 Total Approved", f"£{total:,.2f}")
+    st.metric("📋 Work Orders Included", len(selected))
+
+    if selected:
+        rows = [{
+            "Work Order No.": get_work_order_number(r),
+            "Employee": r.get("emp_name", ""),
+            "Work Date": r.get("work_date", ""),
+            "Amount (£)": float(r.get("amount", 0) or 0),
+            "Approved By": r.get("director_decision_by", ""),
+        } for r in selected]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        if st.button("📄 Generate & Download Total PDF", key=f"{key_prefix}_pdf", type="primary"):
+            path = work_order_total_pdf(selected, employee, from_date, to_date, prepared_by=prepared_by)
+            if path and os.path.exists(path):
+                with open(path, "rb") as f:
+                    st.download_button("⬇️ Download Total PDF", f.read(), file_name=os.path.basename(path), key=f"{key_prefix}_download")
+    else:
+        st.info("No approved work orders match the selected employee and date range.")
+
+
 def render_work_order_employee_portal(current_user, current_dept):
     st.subheader("🛠️ Work Orders — Employee")
     st.info("Submit completed work for Manager review. Only Manager-approved work is sent to the Director.")
@@ -1086,9 +1208,14 @@ def render_work_order_employee_portal(current_user, current_dept):
     managers = _manager_options_for_department(current_dept)
     wid = get_next_work_order_id(orders)
     with st.form("new_work_order_form", clear_on_submit=True):
-        st.markdown(f"**🆔 Work Order ID:** `{wid}`")
+        st.markdown(f"**🔐 Internal Record ID:** `{wid}`")
         c1, c2 = st.columns(2)
         with c1:
+            manual_wo_no = st.text_input(
+                "🧾 Work Order No.",
+                placeholder="Enter the work order number from the original work-order sheet (e.g. 210366)",
+                help="This is the work-order number that will be shown on the work-order screens and PDF. It is separate from the portal's internal record ID."
+            )
             employee = st.text_input("👤 Employee Name", value=current_user)
             work_date = st.date_input("📅 Work Date", value=date.today())
             hours = st.number_input("⏱️ Hours Worked", min_value=0.0, step=0.5)
@@ -1099,24 +1226,24 @@ def render_work_order_employee_portal(current_user, current_dept):
             files = st.file_uploader("📎 Supporting Documents", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
             desc = st.text_area("📝 Work Performed / Details", height=150)
         if st.form_submit_button("📤 Send Work Order to Manager", type="primary"):
-            if employee.strip() and manager.strip() and desc.strip():
+            if manual_wo_no.strip() and employee.strip() and manager.strip() and desc.strip():
                 attachments=[]
                 for i,f in enumerate(files or [],1):
                     fn=f"{wid}_F{i}_{f.name}"; fp=os.path.join(UPLOAD_DIR,fn)
                     with open(fp,"wb") as out: out.write(f.getbuffer())
                     upload_to_google_drive(fp,fn); attachments.append(fn)
-                rec={"id":wid,"emp_name":employee.strip(),"dept":current_dept,"work_date":str(work_date),"hours":hours,"amount":amount,"manager":manager.strip(),"desc":desc.strip(),"attachment_name":", ".join(attachments) or "None","status":"pending_manager","manager_comments":"","manager_decision_date":"","manager_decision_by":"","director_comments":"","director_decision_date":"","director_decision_by":"","submitted_by":current_user,"submitted_date":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),"payroll_status":"Pending","payroll_date":"","payroll_by":"","pdf_path":""}
+                rec={"id":wid,"manual_work_order_no":manual_wo_no.strip(),"emp_name":employee.strip(),"dept":current_dept,"work_date":str(work_date),"hours":hours,"amount":amount,"manager":manager.strip(),"desc":desc.strip(),"attachment_name":", ".join(attachments) or "None","status":"pending_manager","manager_comments":"","manager_decision_date":"","manager_decision_by":"","director_comments":"","director_decision_date":"","director_decision_by":"","submitted_by":current_user,"submitted_date":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),"payroll_status":"Pending","payroll_date":"","payroll_by":"","pdf_path":""}
                 orders.append(rec); save_all_work_orders(orders); log_action("WORK_ORDER_CREATED", wid)
-                st.success(f"✅ {wid} sent to {manager} for review."); st.rerun()
-            else: st.error("Please fill in Employee Name, Manager and Work Performed / Details.")
+                st.success(f"✅ Work Order No. {manual_wo_no.strip()} sent to {manager} for review."); st.rerun()
+            else: st.error("Please fill in Work Order No., Employee Name, Manager and Work Performed / Details.")
     st.divider(); st.subheader("📋 My Work Orders")
     q=st.text_input("🔎 Search work orders", placeholder="Search by ID, employee, manager, status, amount, date or description...", key="wo_employee_search")
     mine=[r for r in orders if r.get("submitted_by")==current_user]
     if q.strip():
         q=q.lower().strip(); mine=[r for r in mine if q in " ".join(str(v) for v in r.values()).lower()]
     for r in reversed(mine):
-        with st.expander(f"{r.get('id')} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {r.get('status').replace('_',' ').title()}"):
-            st.write(f"👔 Manager: {r.get('manager')} | 🏢 {r.get('dept')} | 📅 {r.get('work_date')}")
+        with st.expander(f"{get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {r.get('status').replace('_',' ').title()}"):
+            st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}** | 👔 Manager: {r.get('manager')} | 🏢 {r.get('dept')} | 📅 {r.get('work_date')}")
             st.write(f"💷 £{r.get('amount',0):.2f} | ⏱️ {r.get('hours',0)} hours")
             st.write(f"📝 {r.get('desc')}")
             if r.get("manager_decision_by"): st.write(f"👔 Manager reviewed by: {r.get('manager_decision_by')} on {r.get('manager_decision_date')}")
@@ -1124,656 +1251,92 @@ def render_work_order_employee_portal(current_user, current_dept):
             st.write(f"💳 Payment: {r.get('payroll_status')}")
 
 
-def work_order_total_pdf(records, title="Approved Work Order Total"):
-    """Create a PDF summary of approved work orders grouped by employee.
-
-    Only approved_payment records supplied by the caller are included.  The PDF
-    intentionally does not use Work Order No. From/To filters; selection is by
-    employee and work-date range.
-    """
-    if not PDF_AVAILABLE:
-        st.error("PDF generation is not available in this environment.")
-        return None
-    try:
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-        regular_font, bold_font = _pdf_font_paths()
-        if regular_font and bold_font:
-            pdf.add_font("DejaVu", "", regular_font)
-            pdf.add_font("DejaVu", "B", bold_font)
-            family = "DejaVu"
-        else:
-            family = "Helvetica"
-
-        def safe(value):
-            text = _pdf_text(value)
-            return text if family == "DejaVu" else text.encode("latin-1", "replace").decode("latin-1")
-
-        pdf.set_font(family, "B", 16)
-        pdf.cell(0, 10, safe(title), ln=True, align="C")
-        pdf.ln(3)
-        pdf.set_font(family, "", 10)
-        pdf.cell(0, 7, safe(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"), ln=True)
-        pdf.cell(0, 7, safe(f"Approved work orders included: {len(records)}"), ln=True)
-        pdf.ln(4)
-
-        grouped = {}
-        for r in records:
-            employee = str(r.get("emp_name", "")).strip() or "Unknown Employee"
-            grouped.setdefault(employee, []).append(r)
-
-        pdf.set_font(family, "B", 10)
-        pdf.cell(75, 8, safe("Employee"), border=1)
-        pdf.cell(30, 8, safe("Work Orders"), border=1, align="C")
-        pdf.cell(40, 8, safe("Total"), border=1, align="R")
-        pdf.cell(45, 8, safe("Date Range"), border=1, align="C")
-        pdf.ln()
-
-        grand_total = 0.0
-        for employee in sorted(grouped):
-            rows = grouped[employee]
-            total = sum(float(r.get("amount", 0) or 0) for r in rows)
-            grand_total += total
-            dates = sorted(str(r.get("work_date", ""))[:10] for r in rows if r.get("work_date"))
-            date_range = dates[0] if len(dates) == 1 else (f"{dates[0]} to {dates[-1]}" if dates else "-")
-            pdf.set_font(family, "", 9)
-            pdf.cell(75, 8, safe(employee[:38]), border=1)
-            pdf.cell(30, 8, str(len(rows)), border=1, align="C")
-            pdf.cell(40, 8, safe(f"GBP {total:.2f}"), border=1, align="R")
-            pdf.cell(45, 8, safe(date_range[:24]), border=1, align="C")
-            pdf.ln()
-
-        pdf.set_font(family, "B", 10)
-        pdf.cell(105, 9, safe("GRAND TOTAL"), border=1)
-        pdf.cell(40, 9, safe(f"GBP {grand_total:.2f}"), border=1, align="R")
-        pdf.cell(45, 9, "", border=1)
-        pdf.ln(8)
-
-        pdf.set_font(family, "B", 10)
-        pdf.cell(0, 7, safe("Included Work Orders"), ln=True)
-        pdf.set_font(family, "", 8)
-        for r in sorted(records, key=lambda x: (str(x.get("emp_name", "")), str(x.get("work_date", "")), str(x.get("id", "")))):
-            line = (
-                f"{r.get('work_order_no') or r.get('id','-')} | {r.get('emp_name','-')} | "
-                f"{str(r.get('work_date','-'))[:10]} | GBP {float(r.get('amount',0) or 0):.2f} | "
-                f"Approved by {r.get('director_decision_by','-')}"
-            )
-            pdf.multi_cell(0, 5, safe(line))
-
-        os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
-        filename = f"Approved_Work_Order_Total_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        path = os.path.join(WORK_ORDER_PDF_DIR, filename)
-        pdf.output(path)
-        upload_to_google_drive(path, filename)
-        return path
-    except Exception as e:
-        st.error(f"Work Order Total PDF Error: {e}")
-        return None
-
-
-def render_work_order_total_summary(records, key_prefix, title="Approved Work Order Total"):
-    """Shared employee/date filtering and aggregate total/PDF controls."""
-    st.markdown("### 💷 Approved Work Order Total")
-    st.caption("Select an employee and work-date range. Work Order No. From/To is not used.")
-
-    approved_records = [r for r in records if r.get("status") == "approved_payment"]
-    if not approved_records:
-        st.info("No Director-approved work orders are available for a total.")
-        return
-
-    employees = sorted({str(r.get("emp_name", "")).strip() for r in approved_records if str(r.get("emp_name", "")).strip()})
-    c1, c2, c3 = st.columns([1.4, 1, 1])
-    with c1:
-        employee = st.selectbox("👤 Employee", ["All Employees"] + employees, key=f"{key_prefix}_employee")
-    with c2:
-        start_date = st.date_input("📅 From Date", value=date.today().replace(day=1), key=f"{key_prefix}_from")
-    with c3:
-        end_date = st.date_input("📅 To Date", value=date.today(), key=f"{key_prefix}_to")
-
-    if start_date > end_date:
-        st.error("From Date cannot be after To Date.")
-        return
-
-    selected = []
-    for r in approved_records:
-        if employee != "All Employees" and str(r.get("emp_name", "")).strip() != employee:
-            continue
-        try:
-            d = datetime.strptime(str(r.get("work_date", ""))[:10], "%Y-%m-%d").date()
-        except Exception:
-            continue
-        if start_date <= d <= end_date:
-            selected.append(r)
-
-    total = sum(float(r.get("amount", 0) or 0) for r in selected)
-    st.metric("💰 Total Approved", f"£{total:.2f}")
-    st.metric("📋 Work Orders Included", len(selected))
-
-    if selected:
-        summary_df = pd.DataFrame([
-            {"Work Order No.": r.get("work_order_no") or r.get("id"), "Employee": r.get("emp_name"), "Work Date": str(r.get("work_date", ""))[:10], "Amount (£)": float(r.get("amount", 0) or 0), "Approved By": r.get("director_decision_by", "")}
-            for r in selected
-        ])
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
-        if st.button("📄 Generate & Download Total PDF", key=f"{key_prefix}_pdf", type="primary"):
-            path = work_order_total_pdf(selected, title=title)
-            if path and os.path.exists(path):
-                with open(path, "rb") as f:
-                    st.download_button("⬇️ Download Total PDF", f.read(), file_name=os.path.basename(path), key=f"{key_prefix}_download")
-    else:
-        st.info("No approved work orders match the selected employee and date range.")
-
 def render_work_order_manager_portal(manager_name, manager_dept):
-    """Work Order Manager portal.
-
-    Only users with the Work Order Manager role reach this portal.
-    The manager can create work orders and can edit/resubmit Pending or
-    Director Rejected work orders. Approved work orders are read-only.
-    """
-    st.subheader("🛠️ Work Orders — Manager")
-    st.info(
-        "Work Order Managers can create and manage work orders assigned to them. "
-        "Pending and Director-rejected work orders can be edited. Approved work orders are read-only."
-    )
-
-    work_orders_tab, total_tab = st.tabs(["🛠️ Work Orders", "💷 Approved Work Order Total"])
-
-    with work_orders_tab:
-        orders = load_work_orders()
-
-        # ------------------------------------------------------------
-        # NEW WORK ORDER SUBMISSION
-        # Work Order Managers can raise a new work order directly from
-        # their Work Orders tab.  The manager is the submitter/reviewer
-        # and the selected Director gives the single final approval.
-        # ------------------------------------------------------------
-        st.markdown("### 📝 Submit New Work Order")
-        st.caption("Complete the work-order details below. No hours or time entry is required. The work order will be sent directly to the selected Director for final approval.")
-
-        director_options = _director_options()
-        new_wid = get_next_work_order_id(orders)
-
-        with st.form("manager_new_work_order_form", clear_on_submit=True):
-            st.markdown(f"**🆔 Internal Work Order ID:** `{new_wid}`")
-            c1, c2 = st.columns(2)
+    st.subheader("🛠️ Work Orders — Manager Review")
+    orders=load_work_orders()
+    pending=[r for r in orders if r.get("status")=="pending_manager" and (r.get("manager")==manager_name or (not r.get("manager") and r.get("dept")==manager_dept))]
+    search=st.text_input("🔎 Search Work Orders", placeholder="Search by ID, employee, manager, amount, date or description...", key="wo_manager_search")
+    if search.strip():
+        q=search.lower().strip(); pending=[r for r in pending if q in " ".join(str(v) for v in r.values()).lower()]
+    st.metric("⏳ Waiting for Manager Review",len(pending)); st.divider()
+    for r in reversed(pending):
+        with st.expander(f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {r.get('manager')}"):
+            st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
+            st.write(f"📝 Submitted by: **{r.get('submitted_by')}** on {r.get('submitted_date')}")
+            st.write(f"🏢 Department: {r.get('dept')} | 📅 Work Date: {r.get('work_date')} | ⏱️ Hours: {r.get('hours')}")
+            st.write(f"💷 Amount: £{r.get('amount',0):.2f}"); st.info(r.get("desc","")); display_attachments(r)
+            comments=st.text_area("Manager Review Comments", key=f"wo_mgr_comm_{r.get('id')}")
+            c1,c2=st.columns(2)
             with c1:
-                new_work_order_no = st.text_input(
-                    "🧾 Work Order No.",
-                    placeholder="e.g. 210366",
-                    key="manager_new_wo_no",
-                )
-                new_employee = st.text_input(
-                    "👤 Contractor / Employee Labour",
-                    placeholder="e.g. Employee Labour",
-                    key="manager_new_wo_employee",
-                )
-                new_site = st.text_area(
-                    "📍 Site Address",
-                    placeholder="Enter the full site address...",
-                    height=90,
-                    key="manager_new_wo_site",
-                )
-                new_work_date = st.date_input(
-                    "📅 Date",
-                    value=date.today(),
-                    key="manager_new_wo_date",
-                )
+                if st.button("✅ Approve & Send to Director", key=f"wo_mgr_app_{r.get('id')}", type="primary"):
+                    for x in orders:
+                        if str(x.get("id"))==str(r.get("id")):
+                            x["status"]="pending_director"; x["manager_comments"]=comments.strip(); x["manager_decision_by"]=manager_name; x["manager_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    save_all_work_orders(orders); log_action("WORK_ORDER_MANAGER_APPROVED", r.get("id"), decision_by=manager_name); st.success("Sent to Director."); st.rerun()
             with c2:
-                new_customer_job = st.text_input(
-                    "📘 Customer Job No.",
-                    placeholder="e.g. 116886",
-                    key="manager_new_wo_customer",
-                )
-                new_amount = st.number_input(
-                    "💷 Total (£)",
-                    min_value=0.01,
-                    value=0.01,
-                    step=1.0,
-                    format="%.2f",
-                    key="manager_new_wo_amount",
-                )
-                new_desc = st.text_area(
-                    "📝 Description / Work Performed",
-                    placeholder="Enter the work completed and any relevant details...",
-                    height=150,
-                    key="manager_new_wo_desc",
-                )
-                new_files = st.file_uploader(
-                    "📎 Work Order / Supporting Documents",
-                    type=["pdf", "png", "jpg", "jpeg"],
-                    accept_multiple_files=True,
-                    key="manager_new_wo_files",
-                )
+                if st.button("↩️ Return to Employee", key=f"wo_mgr_ret_{r.get('id')}"):
+                    for x in orders:
+                        if str(x.get("id"))==str(r.get("id")):
+                            x["status"]="returned_employee"; x["manager_comments"]=comments.strip(); x["manager_decision_by"]=manager_name; x["manager_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    save_all_work_orders(orders); log_action("WORK_ORDER_RETURNED", r.get("id")); st.success("Returned to employee."); st.rerun()
 
-            if director_options:
-                new_director = st.selectbox(
-                    "🎯 Send to Director for Final Approval",
-                    director_options,
-                    key="manager_new_wo_director",
-                )
-            else:
-                new_director = st.text_input(
-                    "🎯 Director",
-                    placeholder="Enter Director name",
-                    key="manager_new_wo_director_fallback",
-                )
+    st.divider()
+    render_work_order_total(orders, scope_department=manager_dept, key_prefix="wo_mgr_total", prepared_by=manager_name)
 
-            st.caption(
-                f"👤 Submitted by: **{manager_name}** | "
-                f"🏢 Department: **{manager_dept}** | "
-                f"👔 Manager: **{manager_name}**"
-            )
-
-            create_wo = st.form_submit_button(
-                "📤 Submit Work Order to Director",
-                type="primary",
-            )
-
-        if create_wo:
-            errors = []
-            if not new_work_order_no.strip():
-                errors.append("Work Order No.")
-            if not new_employee.strip():
-                errors.append("Contractor / Employee Labour")
-            if not new_site.strip():
-                errors.append("Site Address")
-            if not new_customer_job.strip():
-                errors.append("Customer Job No.")
-            if not new_desc.strip():
-                errors.append("Description / Work Performed")
-            if not str(new_director).strip():
-                errors.append("Director")
-
-            duplicate = any(
-                str(r.get("work_order_no", "")).strip().lower() == new_work_order_no.strip().lower()
-                for r in orders
-                if str(r.get("work_order_no", "")).strip()
-            )
-            if duplicate:
-                errors.append("Work Order No. already exists")
-
-            if errors:
-                st.error("Please correct: " + ", ".join(errors) + ".")
-            else:
-                attachments = []
-                for i, f in enumerate(new_files or [], 1):
-                    safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
-                    fn = f"{new_wid}_F{i}_{safe_name}"
-                    fp = os.path.join(UPLOAD_DIR, fn)
-                    with open(fp, "wb") as out:
-                        out.write(f.getbuffer())
-                    upload_to_google_drive(fp, fn)
-                    attachments.append(fn)
-
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                rec = {
-                    "id": new_wid,
-                    "work_order_no": new_work_order_no.strip(),
-                    "emp_name": new_employee.strip(),
-                    "dept": manager_dept,
-                    "work_date": str(new_work_date),
-                    "hours": 0.0,
-                    "customer_job_no": new_customer_job.strip(),
-                    "site_address": new_site.strip(),
-                    "amount": float(new_amount),
-                    "manager": manager_name,
-                    "desc": new_desc.strip(),
-                    "attachment_name": ", ".join(attachments) or "None",
-                    "status": "pending_director",
-                    "manager_comments": "",
-                    "manager_decision_date": "",
-                    "manager_decision_by": "",
-                    "director_comments": "",
-                    "director_decision_date": "",
-                    "director_decision_by": "",
-                    "submitted_by": manager_name,
-                    "submitted_date": now,
-                    "payroll_status": "Pending",
-                    "payroll_date": "",
-                    "payroll_by": "",
-                    "pdf_path": "",
-                    # Keep the selected director explicit in manager comments so the
-                    # existing workbook schema remains unchanged.
-                    "_selected_director": str(new_director).strip(),
-                }
-                orders.append(rec)
-                # The workbook schema has no separate Director Target column, so store
-                # the routing target in Manager Comments without changing the schema.
-                rec["manager_comments"] = f"Sent to Director: {str(new_director).strip()}"
-                save_all_work_orders(orders)
-                log_action(
-                    "WORK_ORDER_MANAGER_CREATED",
-                    new_wid,
-                    decision_by=manager_name,
-                    new_data={"director": str(new_director).strip(), "status": "pending_director"},
-                )
-                st.success(f"✅ {new_work_order_no.strip()} submitted to {str(new_director).strip()} for final approval.")
-                st.rerun()
-
-        assigned = [
-            r for r in orders
-            if r.get("manager") == manager_name
-            or (not r.get("manager") and r.get("dept") == manager_dept)
-        ]
-
-        # New workflow: managers submit directly to a Director for the single final approval.
-        # Keep legacy pending_manager records visible as Pending so older data is not hidden.
-        pending = [
-            r for r in assigned
-            if r.get("status") in ("pending_director", "pending_manager", "returned_employee")
-        ]
-        approved = [r for r in assigned if r.get("status") == "approved_payment"]
-        rejected = [r for r in assigned if r.get("status") == "rejected_director"]
-
-        # One search box for the complete manager work-order list.
-        search = st.text_input(
-            "🔎 Search Work Orders",
-            placeholder="Search by Work Order No., ID, employee, manager, amount, date, status or description...",
-            key="wo_manager_all_search",
-        )
-        if search.strip():
-            q = search.lower().strip()
-            def matches(r):
-                return q in " ".join(str(v) for v in r.values()).lower()
-            pending = [r for r in pending if matches(r)]
-            approved = [r for r in approved if matches(r)]
-            rejected = [r for r in rejected if matches(r)]
-
-        tab_pending, tab_approved, tab_rejected = st.tabs([
-            f"⏳ Pending ({len(pending)})",
-            f"✅ Approved ({len(approved)})",
-            f"❌ Rejected ({len(rejected)})",
-        ])
-
-        def edit_work_order_form(r, form_key, resubmit_label):
-            """Render an editable work-order form and return True when saved."""
-            wid = str(r.get("id"))
-            with st.form(form_key):
-                st.markdown("**✏️ Edit Work Order**")
-                c1, c2 = st.columns(2)
-                with c1:
-                    edit_work_order_no = st.text_input(
-                        "🧾 Work Order No.",
-                        value=str(r.get("work_order_no", "")),
-                        key=f"wo_edit_no_{form_key}",
-                    )
-                    edit_employee = st.text_input(
-                        "👤 Contractor / Employee Labour",
-                        value=str(r.get("emp_name", "")),
-                        key=f"wo_edit_emp_{form_key}",
-                    )
-                    edit_site = st.text_area(
-                        "📍 Site Address",
-                        value=str(r.get("site_address", "")),
-                        height=90,
-                        key=f"wo_edit_site_{form_key}",
-                    )
-                    edit_work_date = st.date_input(
-                        "📅 Date",
-                        value=_safe_work_order_date(r.get("work_date")),
-                        key=f"wo_edit_date_{form_key}",
-                    )
-                with c2:
-                    edit_cust_job = st.text_input(
-                        "📘 Customer Job No.",
-                        value=str(r.get("customer_job_no", "")),
-                        key=f"wo_edit_cust_{form_key}",
-                    )
-                    edit_amount = st.number_input(
-                        "💷 Total (£)",
-                        min_value=0.01,
-                        value=max(float(r.get("amount", 0) or 0), 0.01),
-                        step=1.0,
-                        format="%.2f",
-                        key=f"wo_edit_amount_{form_key}",
-                    )
-                    edit_desc = st.text_area(
-                        "📝 Description / Work Performed",
-                        value=str(r.get("desc", "")),
-                        height=150,
-                        key=f"wo_edit_desc_{form_key}",
-                    )
-
-                replace_files = st.file_uploader(
-                    "📎 Replace Supporting Documents (optional)",
-                    type=["pdf", "png", "jpg", "jpeg"],
-                    accept_multiple_files=True,
-                    key=f"wo_edit_files_{form_key}",
-                )
-
-                st.caption(
-                    f"Submitted by: {r.get('submitted_by') or manager_name} | "
-                    f"Current status: {r.get('status') or '-'}"
-                )
-                submitted = st.form_submit_button(resubmit_label, type="primary")
-
-            if not submitted:
-                return False
-
-            errors = []
-            if not edit_work_order_no.strip():
-                errors.append("Work Order No.")
-            if not edit_employee.strip():
-                errors.append("Contractor / Employee Labour")
-            if not edit_site.strip():
-                errors.append("Site Address")
-            if not edit_cust_job.strip():
-                errors.append("Customer Job No.")
-            if not edit_desc.strip():
-                errors.append("Description")
-
-            # Do not allow an edited work order to take another existing work-order number.
-            duplicate = any(
-                str(x.get("work_order_no", "")).strip().lower() == edit_work_order_no.strip().lower()
-                and str(x.get("id")) != wid
-                for x in orders
-                if str(x.get("work_order_no", "")).strip()
-            )
-            if duplicate:
-                errors.append("Work Order No. already exists on another work order")
-
-            if errors:
-                st.error("Please correct: " + ", ".join(errors) + ".")
-                return False
-
-            new_attachments = []
-            for i, f in enumerate(replace_files or [], 1):
-                safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
-                fn = f"{wid}_F{i}_{safe_name}"
-                fp = os.path.join(UPLOAD_DIR, fn)
-                with open(fp, "wb") as out:
-                    out.write(f.getbuffer())
-                upload_to_google_drive(fp, fn)
-                new_attachments.append(fn)
-
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            old_status = str(r.get("status") or "")
-            for x in orders:
-                if str(x.get("id")) == wid:
-                    x["work_order_no"] = edit_work_order_no.strip()
-                    x["emp_name"] = edit_employee.strip()
-                    x["work_date"] = str(edit_work_date)
-                    x["amount"] = float(edit_amount)
-                    x["customer_job_no"] = edit_cust_job.strip()
-                    x["site_address"] = edit_site.strip()
-                    x["desc"] = edit_desc.strip()
-                    if new_attachments:
-                        x["attachment_name"] = ", ".join(new_attachments)
-
-                    # Pending and rejected both return to the Director after editing.
-                    x["status"] = "pending_director"
-                    x["manager_comments"] = (
-                        f"Edited and resubmitted by {manager_name} after status {old_status}."
-                    )
-                    x["manager_decision_by"] = manager_name
-                    x["manager_decision_date"] = now
-                    x["director_comments"] = ""
-                    x["director_decision_by"] = ""
-                    x["director_decision_date"] = ""
-                    x["pdf_path"] = ""
-
-            save_all_work_orders(orders)
-            log_action(
-                "WORK_ORDER_MANAGER_EDITED_RESUBMITTED",
-                wid,
-                decision_by=manager_name,
-                new_data={"previous_status": old_status, "status": "pending_director"},
-            )
-            st.success(f"✅ {edit_work_order_no.strip()} updated and sent to the Director for approval.")
-            st.rerun()
-            return True
-
-        with tab_pending:
-            st.caption("Pending work orders are waiting for Director approval. You can edit and resubmit them.")
-            if not pending:
-                st.info("No pending work orders.")
-            for r in reversed(pending):
-                wid = str(r.get("id"))
-                with st.expander(
-                    f"🟡 {r.get('work_order_no') or wid} | {r.get('emp_name') or '-'} | "
-                    f"£{float(r.get('amount', 0) or 0):.2f} | Pending Director"
-                ):
-                    st.write(
-                        f"🧾 Work Order No.: **{r.get('work_order_no') or wid}** | "
-                        f"👤 Submitted by: **{r.get('submitted_by') or '-'}**"
-                    )
-                    st.write(
-                        f"🏢 Department: **{r.get('dept') or '-'}** | "
-                        f"📅 Work Date: **{r.get('work_date') or '-'}** | "
-                        f"💷 Total: **£{float(r.get('amount', 0) or 0):.2f}**"
-                    )
-                    st.info(r.get("desc") or "No description supplied.")
-                    display_attachments(r)
-                    edit_work_order_form(r, f"wo_pending_edit_{wid}", "📤 Save Changes & Resubmit to Director")
-
-        with tab_approved:
-            st.caption("Approved work orders are read-only. They cannot be edited by the manager.")
-            if not approved:
-                st.info("No approved work orders.")
-            for r in reversed(approved):
-                wid = str(r.get("id"))
-                with st.expander(
-                    f"🟢 {r.get('work_order_no') or wid} | {r.get('emp_name') or '-'} | "
-                    f"£{float(r.get('amount', 0) or 0):.2f} | Approved"
-                ):
-                    st.write(
-                        f"🧾 Work Order No.: **{r.get('work_order_no') or wid}** | "
-                        f"👤 Submitted by: **{r.get('submitted_by') or '-'}**"
-                    )
-                    st.write(
-                        f"📅 Work Date: **{r.get('work_date') or '-'}** | "
-                        f"💷 Total: **£{float(r.get('amount', 0) or 0):.2f}** | "
-                        f"🎯 Approved by: **{r.get('director_decision_by') or '-'}**"
-                    )
-                    if r.get("director_decision_date"):
-                        st.write(f"📅 Approval date: **{r.get('director_decision_date')}**")
-                    if r.get("director_comments"):
-                        st.info(f"Director comments: {r.get('director_comments')}")
-                    st.info(r.get("desc") or "No description supplied.")
-                    display_attachments(r)
-                    display_work_order_pdf(r)
-
-        with tab_rejected:
-            st.caption("Director-rejected work orders can be corrected and resubmitted. Approved work orders cannot be edited.")
-            if not rejected:
-                st.info("No rejected work orders.")
-            for r in reversed(rejected):
-                wid = str(r.get("id"))
-                with st.expander(
-                    f"🔴 {r.get('work_order_no') or wid} | {r.get('emp_name') or '-'} | "
-                    f"£{float(r.get('amount', 0) or 0):.2f} | Rejected"
-                ):
-                    st.write(
-                        f"❌ Rejected by: **{r.get('director_decision_by') or 'Director'}** on "
-                        f"**{r.get('director_decision_date') or '-'}**"
-                    )
-                    st.error(
-                        f"Director comments: {r.get('director_comments') or 'No reason supplied.'}"
-                    )
-                    display_attachments(r)
-                    edit_work_order_form(r, f"wo_rejected_edit_{wid}", "📤 Save Changes & Resubmit to Director")
-
-    with total_tab:
-        total_orders = load_work_orders()
-        total_assigned = [
-            r for r in total_orders
-            if r.get("manager") == manager_name
-            or (not r.get("manager") and r.get("dept") == manager_dept)
-        ]
-        render_work_order_total_summary(
-            [r for r in total_assigned if r.get("status") == "approved_payment"],
-            "wo_manager_total",
-            title=f"Approved Work Order Total — {manager_name}",
-        )
-def _safe_work_order_date(value):
-    """Convert stored work-order dates into a Streamlit date_input value."""
-    if isinstance(value, date):
-        return value
-    try:
-        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
-    except Exception:
-        return date.today()
 
 def render_work_order_director_portal(director_name):
     st.subheader("🛠️ Work Orders — Director Final Approval")
-    work_orders_tab, total_tab = st.tabs(["🛠️ Work Orders", "💷 Approved Work Order Total"])
+    orders=load_work_orders()
+    pending=[r for r in orders if r.get("status")=="pending_director"]
+    approved=[r for r in orders if r.get("status")=="approved_payment"]
+    rejected=[r for r in orders if r.get("status")=="rejected_director"]
+    t1,t2,t3=st.tabs(["⏳ Manager Approved / Awaiting Director","✅ Approved for Payment","❌ Rejected"])
+    def search_list(items,key):
+        q=st.text_input("🔎 Search Work Orders", placeholder="Search by ID, employee, manager, department, amount or date...", key=key)
+        if q.strip():
+            q=q.lower().strip(); items=[r for r in items if q in " ".join(str(v) for v in r.values()).lower()]
+        return items
+    with t1:
+        items=search_list(pending,"wo_dir_pending_search")
+        for r in reversed(items):
+            with st.expander(f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Manager: {r.get('manager')}"):
+                st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
+                st.write(f"📝 Submitted by: **{r.get('submitted_by')}** on {r.get('submitted_date')}")
+                st.write(f"👔 Manager review: **{r.get('manager_decision_by')}** on {r.get('manager_decision_date')}")
+                st.write(f"💷 £{r.get('amount',0):.2f} | ⏱️ {r.get('hours')} hours | 📅 {r.get('work_date')}"); st.info(r.get('desc',''))
+                st.info(f"Manager comments: {r.get('manager_comments') or 'None'}"); display_attachments(r)
+                comments=st.text_area("Director Comments", key=f"wo_dir_comm_{r.get('id')}")
+                c1,c2=st.columns(2)
+                with c1:
+                    if st.button("✅ Approve for Payment", key=f"wo_dir_app_{r.get('id')}", type="primary"):
+                        for x in orders:
+                            if str(x.get("id"))==str(r.get("id")):
+                                x["status"]="approved_payment"; x["director_comments"]=comments.strip(); x["director_decision_by"]=director_name; x["director_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        save_all_work_orders(orders); log_action("WORK_ORDER_DIRECTOR_APPROVED", r.get("id"), decision_by=director_name); st.success("Approved for payment."); st.rerun()
+                with c2:
+                    if st.button("❌ Reject", key=f"wo_dir_rej_{r.get('id')}"):
+                        for x in orders:
+                            if str(x.get("id"))==str(r.get("id")):
+                                x["status"]="rejected_director"; x["director_comments"]=comments.strip(); x["director_decision_by"]=director_name; x["director_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        save_all_work_orders(orders); log_action("WORK_ORDER_DIRECTOR_REJECTED", r.get("id"), decision_by=director_name); st.rerun()
+    with t2:
+        items=search_list(approved,"wo_dir_approved_search")
+        for r in reversed(items):
+            with st.expander(f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {r.get('payroll_status')}"):
+                st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
+                st.write(f"Submitted by: {r.get('submitted_by')} | Manager: {r.get('manager')} | Approved by: {r.get('director_decision_by')}")
+                st.write(f"📅 Director approval: {r.get('director_decision_date')} | 💳 Payment: {r.get('payroll_status')}")
+                display_work_order_pdf(r)
+    with t3:
+        items=search_list(rejected,"wo_dir_rejected_search")
+        for r in reversed(items):
+            with st.expander(f"🔴 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f}"):
+                st.write(f"Submitted by: {r.get('submitted_by')} | Rejected by: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
+                st.error(r.get('director_comments') or "No reason supplied")
 
-    with work_orders_tab:
-        orders=load_work_orders()
-        pending=[r for r in orders if r.get("status")=="pending_director"]
-        approved=[r for r in orders if r.get("status")=="approved_payment"]
-        rejected=[r for r in orders if r.get("status")=="rejected_director"]
-        t1,t2,t3=st.tabs(["⏳ Awaiting Director Approval","✅ Approved for Payment","❌ Rejected"])
-        def search_list(items,key):
-            q=st.text_input("🔎 Search Work Orders", placeholder="Search by ID, employee, manager, department, amount or date...", key=key)
-            if q.strip():
-                q=q.lower().strip(); items=[r for r in items if q in " ".join(str(v) for v in r.values()).lower()]
-            return items
-        with t1:
-            items=search_list(pending,"wo_dir_pending_search")
-            for r in reversed(items):
-                with st.expander(f"🟡 {r.get('id')} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Manager: {r.get('manager')}"):
-                    st.write(f"📝 Submitted by: **{r.get('submitted_by')}** on {r.get('submitted_date')}")
-                    st.write(f"👔 Submitted by Work Order Manager: **{r.get('submitted_by')}**")
-                    st.write(f"💷 £{r.get('amount',0):.2f} | 📅 {r.get('work_date')}"); st.info(r.get('desc',''))
-                    st.info(f"Manager comments: {r.get('manager_comments') or 'None'}"); display_attachments(r)
-                    comments=st.text_area("Director Comments", key=f"wo_dir_comm_{r.get('id')}")
-                    c1,c2=st.columns(2)
-                    with c1:
-                        if st.button("✅ Approve for Payment", key=f"wo_dir_app_{r.get('id')}", type="primary"):
-                            for x in orders:
-                                if str(x.get("id"))==str(r.get("id")):
-                                    x["status"]="approved_payment"; x["director_comments"]=comments.strip(); x["director_decision_by"]=director_name; x["director_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            save_all_work_orders(orders); log_action("WORK_ORDER_DIRECTOR_APPROVED", r.get("id"), decision_by=director_name); st.success("Approved for payment."); st.rerun()
-                    with c2:
-                        if st.button("❌ Reject", key=f"wo_dir_rej_{r.get('id')}"):
-                            for x in orders:
-                                if str(x.get("id"))==str(r.get("id")):
-                                    x["status"]="rejected_director"; x["director_comments"]=comments.strip(); x["director_decision_by"]=director_name; x["director_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            save_all_work_orders(orders); log_action("WORK_ORDER_DIRECTOR_REJECTED", r.get("id"), decision_by=director_name); st.rerun()
-        with t2:
-            items=search_list(approved,"wo_dir_approved_search")
-            for r in reversed(items):
-                with st.expander(f"🟢 {r.get('id')} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {r.get('payroll_status')}"):
-                    st.write(f"Submitted by: {r.get('submitted_by')} | Manager: {r.get('manager')} | Approved by: {r.get('director_decision_by')}")
-                    st.write(f"📅 Director approval: {r.get('director_decision_date')} | 💳 Payment: {r.get('payroll_status')}")
-                    display_work_order_pdf(r)
-        with t3:
-            items=search_list(rejected,"wo_dir_rejected_search")
-            for r in reversed(items):
-                with st.expander(f"🔴 {r.get('id')} | {r.get('emp_name')} | £{r.get('amount',0):.2f}"):
-                    st.write(f"Submitted by: {r.get('submitted_by')} | Rejected by: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
-                    st.error(r.get('director_comments') or "No reason supplied")
+    st.divider()
+    render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
 
-    with total_tab:
-        total_orders = load_work_orders()
-        total_approved = [r for r in total_orders if r.get("status") == "approved_payment"]
-        render_work_order_total_summary(
-            total_approved,
-            "wo_director_total",
-            title=f"Approved Work Order Total — {director_name}",
-        )
 
 def render_work_order_payroll_portal(payroll_name):
     st.subheader("🛠️ Work Orders — Payroll")
@@ -1802,6 +1365,7 @@ def render_work_order_payroll_portal(payroll_name):
             f"🟢 {r.get('id')} | {r.get('emp_name')} | "
             f"£{r.get('amount', 0):.2f} | Approved by {r.get('director_decision_by')}"
         ):
+            st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
             st.write(
                 f"📝 Submitted by: {r.get('submitted_by')} | "
                 f"👔 Manager: {r.get('manager')} | "
@@ -1817,6 +1381,9 @@ def render_work_order_payroll_portal(payroll_name):
             # Payroll only downloads the final authorised PDF.
             # There is deliberately no 'Mark as Paid' action here.
             display_work_order_pdf(r)
+
+    st.divider()
+    render_work_order_total(approved, key_prefix="wo_pay_total", prepared_by=payroll_name)
 
 # ============================================================
 # REQUESTS EXCEL
@@ -2933,449 +2500,425 @@ elif role == "Payroll":
         render_work_order_payroll_portal(full_name)
 
 # ─── MANAGER / STAFF PORTAL ───
-elif role in ["Manager", "Work Order Manager", "Staff", "Team Member"]:
+elif role in ["Manager", "Staff", "Team Member"]:
     dept_name = dept
-
-    def _render_standard_request_portal():
-        """Existing Addition/Deduction request portal, kept separate from Work Orders."""
-        if st.session_state.get("editing_request_id"):
-            eid = st.session_state.editing_request_id
-            rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
-            if rec:
-                st.subheader(f"✏️ Edit Request #{eid}")
-                show_old_new_comparison("{}", rec)
-                st.markdown("### 📎 Manage Attachments")
-                att_name_raw = rec.get("attachment_name", "None")
-                existing_files = []
-                if att_name_raw and str(att_name_raw).strip().lower() != "none":
-                    existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
-                files_to_keep = []
-                files_to_remove = []
-                if existing_files:
-                    st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
-                    for fname in existing_files:
-                        file_path = os.path.join(UPLOAD_DIR, fname)
-                        safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
-                        col_check, col_name, col_dl = st.columns([1, 5, 2])
-                        keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
-                        col_name.markdown(f"📄 `{fname}`")
-                        if os.path.exists(file_path):
-                            with open(file_path, "rb") as f:
-                                col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
-                        else:
-                            col_dl.caption("⚠️ Missing")
-                        if keep: files_to_keep.append(fname)
-                        else: files_to_remove.append(fname)
-                    if files_to_remove:
-                        st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
-                else:
-                    st.info("📋 No attachments currently attached.")
-                st.markdown("#### ➕ Attach New Files")
-                new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"],
-                    accept_multiple_files=True, key=f"new_upload_{eid}")
-                st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload or [])} new** = {len(files_to_keep)+len(new_files_upload or [])} total files")
-                with st.form("edit_form"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
-                        rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"],
-                            index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
-                        cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
-                        ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
-                        amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
-                    with c2:
-                        from datetime import datetime as dt
-                        try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
-                        except: d = dt.today()
-                        dt_val = st.date_input("📅 Date", d)
-                        mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
-                        desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
-                    if st.form_submit_button("✅ Submit Edit", type="primary"):
-                        final_attachments = list(files_to_keep)
-                        if new_files_upload:
-                            for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
-                                fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
-                                edit_path = os.path.join(UPLOAD_DIR, fn)
-                                with open(edit_path, "wb") as outfile:
-                                    outfile.write(f.getbuffer())
-                                upload_to_google_drive(edit_path, fn)
-                                final_attachments.append(fn)
-                        records = load_records_from_excel()
-                        old_data_dict = {
-                            "emp_name": rec.get("emp_name"), "dept": rec.get("dept"),
-                            "type": rec.get("type"), "category": rec.get("category"),
-                            "date": rec.get("date"), "amount": rec.get("amount"),
-                            "manager": rec.get("manager"), "desc": rec.get("desc")
-                        }
-                        new_data_dict = {
-                            "emp_name": en.strip(), "dept": dept_name, "type": rt,
-                            "category": ct, "date": str(dt_val), "amount": amt,
-                            "manager": mgr.strip(), "desc": desc.strip()
-                        }
-                        for r in records:
-                            if int(r.get("id", 0)) == int(eid):
-                                r["emp_name"] = en.strip()
-                                r["type"] = rt
-                                r["category"] = ct
-                                r["amount"] = amt
-                                r["date"] = str(dt_val)
-                                r["manager"] = mgr.strip()
-                                r["desc"] = desc.strip()
-                                r["status"] = "pending"
-                                r["attachment_name"] = ", ".join(final_attachments) or "None"
-                                r["old_data"] = json.dumps(old_data_dict)
-                                break
-                        log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
-                        save_all_records(records)
-                        st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload or [])}")
-                        st.session_state.editing_request_id = None
-                        st.rerun()
-                if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
-                    st.session_state.editing_request_id = None
-                    st.rerun()
-        else:
-            st.subheader(f"➕ New Request — {dept_name}")
-            nid = get_next_id(all_live_requests)
-            st.markdown(f"**🆔 Request ID:** `#{nid}`")
-            with st.form("new_req", clear_on_submit=True):
+    if role == "Manager":
+        with st.expander("🛠️ Work Orders — Manager Review", expanded=True):
+            render_work_order_manager_portal(full_name, dept_name)
+        st.divider()
+    if st.session_state.get("editing_request_id"):
+        eid = st.session_state.editing_request_id
+        rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
+        if rec:
+            st.subheader(f"✏️ Edit Request #{eid}")
+            show_old_new_comparison("{}", rec)
+            st.markdown("### 📎 Manage Attachments")
+            att_name_raw = rec.get("attachment_name", "None")
+            existing_files = []
+            if att_name_raw and str(att_name_raw).strip().lower() != "none":
+                existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
+            files_to_keep = []
+            files_to_remove = []
+            if existing_files:
+                st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
+                for fname in existing_files:
+                    file_path = os.path.join(UPLOAD_DIR, fname)
+                    safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
+                    col_check, col_name, col_dl = st.columns([1, 5, 2])
+                    keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
+                    col_name.markdown(f"📄 `{fname}`")
+                    if os.path.exists(file_path):
+                        with open(file_path, "rb") as f:
+                            col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
+                    else:
+                        col_dl.caption("⚠️ Missing")
+                    if keep: files_to_keep.append(fname)
+                    else: files_to_remove.append(fname)
+                if files_to_remove:
+                    st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
+            else:
+                st.info("📋 No attachments currently attached.")
+            st.markdown("#### ➕ Attach New Files")
+            new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True, key=f"new_upload_{eid}")
+            st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload or [])} new** = {len(files_to_keep)+len(new_files_upload or [])} total files")
+            with st.form("edit_form"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    en = st.text_input("👤 Employee Name")
-                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
-                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
-                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
+                    en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"],
+                        index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
+                    cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                    amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
                 with c2:
                     from datetime import datetime as dt
-                    dt_val = st.date_input("📅 Date", value=dt.today())
-                    mgr = st.text_input("👔 Line Manager")
-                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-                    desc = st.text_area("📝 Description / Justification")
-                if st.form_submit_button("📤 Send to Director", type="primary"):
-                    if en.strip() and mgr.strip() and desc.strip():
-                        att_list = []
-                        if files:
-                            for i, f in enumerate(files, 1):
-                                fn = f"ID_{nid}_F{i}_{f.name}"
-                                file_path = os.path.join(UPLOAD_DIR, fn)
-                                with open(file_path, "wb") as out:
-                                    out.write(f.getbuffer())
-                                att_list.append(fn)
-                                file_id = upload_to_google_drive(file_path, fn)
-                                # Drive is the permanent store; do not create duplicate files.
-                        payload = {
-                            "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
-                            "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
-                            "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
-                            "status": "pending", "director_comments": "", "decision_date": "",
-                            "decision_by": "", "submitted_by": full_name, "pdf_path": "",
-                            "edited_from_id": "", "old_data": ""
-                        }
-                        save_record_to_excel(payload)
-                        log_action("CREATED", nid)
-                        st.success(f"✅ Request #{nid} sent for approval!")
-                        st.rerun()
-                    else:
-                        st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
-            st.divider()
-            st.subheader("📋 My Department Requests")
-            my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+                    try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
+                    except: d = dt.today()
+                    dt_val = st.date_input("📅 Date", d)
+                    mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
+                    desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
+                if st.form_submit_button("✅ Submit Edit", type="primary"):
+                    final_attachments = list(files_to_keep)
+                    if new_files_upload:
+                        for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
+                            fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
+                            edit_path = os.path.join(UPLOAD_DIR, fn)
+                            with open(edit_path, "wb") as outfile:
+                                outfile.write(f.getbuffer())
+                            upload_to_google_drive(edit_path, fn)
+                            final_attachments.append(fn)
+                    records = load_records_from_excel()
+                    old_data_dict = {
+                        "emp_name": rec.get("emp_name"), "dept": rec.get("dept"),
+                        "type": rec.get("type"), "category": rec.get("category"),
+                        "date": rec.get("date"), "amount": rec.get("amount"),
+                        "manager": rec.get("manager"), "desc": rec.get("desc")
+                    }
+                    new_data_dict = {
+                        "emp_name": en.strip(), "dept": dept_name, "type": rt,
+                        "category": ct, "date": str(dt_val), "amount": amt,
+                        "manager": mgr.strip(), "desc": desc.strip()
+                    }
+                    for r in records:
+                        if int(r.get("id", 0)) == int(eid):
+                            r["emp_name"] = en.strip()
+                            r["type"] = rt
+                            r["category"] = ct
+                            r["amount"] = amt
+                            r["date"] = str(dt_val)
+                            r["manager"] = mgr.strip()
+                            r["desc"] = desc.strip()
+                            r["status"] = "pending"
+                            r["attachment_name"] = ", ".join(final_attachments) or "None"
+                            r["old_data"] = json.dumps(old_data_dict)
+                            break
+                    log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
+                    save_all_records(records)
+                    st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload or [])}")
+                    st.session_state.editing_request_id = None
+                    st.rerun()
+            if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
+                st.session_state.editing_request_id = None
+                st.rerun()
+    else:
+        st.subheader(f"➕ New Request — {dept_name}")
+        nid = get_next_id(all_live_requests)
+        st.markdown(f"**🆔 Request ID:** `#{nid}`")
+        with st.form("new_req", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                en = st.text_input("👤 Employee Name")
+                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
+                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
+                amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
+            with c2:
+                from datetime import datetime as dt
+                dt_val = st.date_input("📅 Date", value=dt.today())
+                mgr = st.text_input("👔 Line Manager")
+                files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+                desc = st.text_area("📝 Description / Justification")
+            if st.form_submit_button("📤 Send to Director", type="primary"):
+                if en.strip() and mgr.strip() and desc.strip():
+                    att_list = []
+                    if files:
+                        for i, f in enumerate(files, 1):
+                            fn = f"ID_{nid}_F{i}_{f.name}"
+                            file_path = os.path.join(UPLOAD_DIR, fn)
+                            with open(file_path, "wb") as out:
+                                out.write(f.getbuffer())
+                            att_list.append(fn)
+                            file_id = upload_to_google_drive(file_path, fn)
+                            # Drive is the permanent store; do not create duplicate files.
+                    payload = {
+                        "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
+                        "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
+                        "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None",
+                        "status": "pending", "director_comments": "", "decision_date": "",
+                        "decision_by": "", "submitted_by": full_name, "pdf_path": "",
+                        "edited_from_id": "", "old_data": ""
+                    }
+                    save_record_to_excel(payload)
+                    log_action("CREATED", nid)
+                    st.success(f"✅ Request #{nid} sent for approval!")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+        st.divider()
+        st.subheader("📋 My Department Requests")
+        my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
 
-            # 🔎 Search box for My Department Requests
-            # Searches across the fields users are most likely to use when locating a request.
-            my_dept_search = st.text_input(
-                "🔎 Search my department requests",
-                placeholder="Search by ID, employee, status, amount, manager, category, date, description, approver or comments...",
-                key="my_department_requests_search",
-            )
+        # 🔎 Search box for My Department Requests
+        # Searches across the fields users are most likely to use when locating a request.
+        my_dept_search = st.text_input(
+            "🔎 Search my department requests",
+            placeholder="Search by ID, employee, status, amount, manager, category, date, description, approver or comments...",
+            key="my_department_requests_search",
+        )
 
+        if my_dept_search.strip():
+            q = my_dept_search.strip().lower()
+            my_reqs = [
+                r for r in my_reqs
+                if q in " ".join([
+                    str(r.get("id", "")),
+                    str(r.get("emp_name", "")),
+                    str(r.get("dept", "")),
+                    str(r.get("status", "")),
+                    str(r.get("amount", "")),
+                    str(r.get("manager", "")),
+                    str(r.get("type", "")),
+                    str(r.get("category", "")),
+                    str(r.get("date", "")),
+                    str(r.get("desc", "")),
+                    str(r.get("decision_by", "")),
+                    str(r.get("approved_by", "")),
+                    str(r.get("submitted_by", "")),
+                    str(r.get("decision_date", "")),
+                    str(r.get("director_comments", "")),
+                    str(r.get("attachment_name", "")),
+                ]).lower()
+            ]
+            st.caption(f"🔎 Showing {len(my_reqs)} matching department request(s).")
+
+        if not my_reqs:
             if my_dept_search.strip():
-                q = my_dept_search.strip().lower()
-                my_reqs = [
-                    r for r in my_reqs
+                st.warning("No department requests match your search.")
+            else:
+                st.info("📋 No requests yet.")
+        else:
+            for req in reversed(my_reqs):
+                status = req.get("status", "pending").lower()
+                icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+                dec_by = req.get("decision_by", "")
+                dec_date = format_date(req.get("decision_date", ""))
+                if status in ["approved", "rejected"] and dec_by:
+                    title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date.replace(' ', ' 🕓 ')}"
+                else:
+                    title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
+                with st.expander(title):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
+                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                    st.info(f"📝 Description: {req.get('desc')}")
+                    display_attachments(req)
+                    if req.get("director_comments"):
+                        st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                    if status == "approved":
+                        display_pdf_button(req, can_generate=True)
+                    if status in ["pending", "rejected"]:
+                        if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                            st.session_state.editing_request_id = req.get("id")
+                            st.rerun()
+
+# ─── DIRECTOR PORTAL ───
+elif role == "Director":
+    with st.expander("🛠️ Work Orders — Director Final Approval", expanded=True):
+        render_work_order_director_portal(full_name)
+    st.divider()
+    st.subheader("🎛️ Director Approval Portal — Andy Acoole")
+    st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
+    st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
+    st.divider()
+    tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+    with tab_pending:
+        pending = [r for r in all_live_requests if r.get("status") == "pending"]
+        if not pending:
+            st.success("✅ No pending requests!")
+        else:
+            st.metric("⏳ Pending Requests", len(pending)); st.divider()
+            for req in reversed(pending):
+                req_id = req.get("id")
+                with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
+                    col_left, col_right = st.columns([2, 1])
+                    with col_left:
+                        st.write(f"👤 **Employee:** {req.get('emp_name')}")
+                        st.write(f"🏢 **Department:** {req.get('dept')}")
+                        st.write(f"🔄 **Type:** {req.get('type')}")
+                        st.write(f"🏷️ **Category:** {req.get('category')}")
+                        st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
+                        st.write(f"👔 **Line Manager:** {req.get('manager')}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by:
+                            st.write(f"📝 **Submitted by:** {submitted_by}")
+                        st.write(f"📅 **Date:** {format_date(req.get('date',''))}")
+                        st.info(f"📝 **Description / Justification:**\n{req.get('desc','')}")
+                        display_attachments(req)
+                        old_data_raw = req.get("old_data", "")
+                        if old_data_raw and old_data_raw not in ["", "{}", "None"]:
+                            st.divider()
+                            st.markdown("### 🔄 What Changed / Edits")
+                            show_old_new_comparison(old_data_raw, req)
+                        else:
+                            st.divider()
+                            st.success("✅ **New Request — No previous version**")
+                    with col_right:
+                        st.markdown("### ✍️ Decision")
+                        comments = st.text_area("Director Comments", key=f"comm_{req_id}")
+                        approve_btn = st.button("✅ APPROVE", type="primary", key=f"appr_{req_id}")
+                        reject_btn = st.button("❌ REJECT", type="secondary", key=f"rejt_{req_id}")
+                        if approve_btn:
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "approved"
+                                    r["approved_by"] = full_name
+                                    r["decision_by"] = full_name
+                                    r["director_comments"] = comments
+                                    r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    r["approved_date"] = r["decision_date"]
+                                    break
+                            save_all_records(records)
+                            log_action("APPROVED", req_id)
+                            st.success(f"✅ Request #{req_id} APPROVED.")
+                            st.rerun()
+                        if reject_btn:
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "rejected"
+                                    r["decision_by"] = full_name
+                                    r["director_comments"] = comments
+                                    r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    break
+                            save_all_records(records)
+                            log_action("REJECTED", req_id)
+                            st.error(f"❌ Request #{req_id} REJECTED.")
+                            st.rerun()
+    with tab_approved:
+        approved = [r for r in all_live_requests if r.get("status") == "approved"]
+        if not approved:
+            st.info("📋 No approved requests yet.")
+        else:
+            st.metric("✅ Approved Requests", len(approved))
+            approved_search = st.text_input(
+                "🔎 Search approved requests",
+                placeholder="Search by ID, employee, department, submitted by, approved by, amount, date or comments...",
+                key="director_approved_search",
+            )
+            if approved_search.strip():
+                q = approved_search.strip().lower()
+                approved = [
+                    r for r in approved
                     if q in " ".join([
                         str(r.get("id", "")),
                         str(r.get("emp_name", "")),
                         str(r.get("dept", "")),
-                        str(r.get("status", "")),
-                        str(r.get("amount", "")),
-                        str(r.get("manager", "")),
-                        str(r.get("type", "")),
-                        str(r.get("category", "")),
-                        str(r.get("date", "")),
-                        str(r.get("desc", "")),
                         str(r.get("decision_by", "")),
                         str(r.get("approved_by", "")),
                         str(r.get("submitted_by", "")),
+                        str(r.get("amount", "")),
                         str(r.get("decision_date", "")),
+                        str(r.get("date", "")),
                         str(r.get("director_comments", "")),
-                        str(r.get("attachment_name", "")),
                     ]).lower()
                 ]
-                st.caption(f"🔎 Showing {len(my_reqs)} matching department request(s).")
-
-            if not my_reqs:
-                if my_dept_search.strip():
-                    st.warning("No department requests match your search.")
-                else:
-                    st.info("📋 No requests yet.")
-            else:
-                for req in reversed(my_reqs):
-                    status = req.get("status", "pending").lower()
-                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-                    dec_by = req.get("decision_by", "")
-                    dec_date = format_date(req.get("decision_date", ""))
-                    if status in ["approved", "rejected"] and dec_by:
-                        title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date.replace(' ', ' 🕓 ')}"
-                    else:
-                        title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
-                    with st.expander(title):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
-                        submitted_by = get_submitted_by(req)
-                        if submitted_by:
-                            st.write(f"📝 **Submitted by:** {submitted_by}")
-                        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                        st.info(f"📝 Description: {req.get('desc')}")
-                        display_attachments(req)
-                        if req.get("director_comments"):
-                            st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                        if status == "approved":
-                            display_pdf_button(req, can_generate=True)
-                        if status in ["pending", "rejected"]:
-                            if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
-                                st.session_state.editing_request_id = req.get("id")
-                                st.rerun()
-
-    if role == "Work Order Manager":
-        # Work Order Managers get a compact two-tab workspace. The first tab
-        # contains the normal Addition/Deduction request portal; the second
-        # contains the complete Work Order Manager portal. Ordinary Managers
-        # keep the existing request portal and never see Work Orders.
-        request_tab, work_order_tab = st.tabs([
-            "🧾 New Requests — Addition / Deduction",
-            "🛠️ Work Orders",
-        ])
-        with request_tab:
-            _render_standard_request_portal()
-        with work_order_tab:
-            render_work_order_manager_portal(full_name, dept_name)
-    else:
-        _render_standard_request_portal()
-
-elif role == "Director":
-    # Directors have two separate workspaces so Addition/Deduction requests
-    # and Work Orders stay completely separate and easy to manage.
-    requests_tab, work_orders_tab = st.tabs([
-        "🧾 Addition & Deduction Requests",
-        "🛠️ Work Orders",
-    ])
-
-    with requests_tab:
-        st.divider()
-        st.subheader(f"🎛️ Director Approval Portal — {full_name}")
-        st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
-        st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
-        st.divider()
-        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-        with tab_pending:
-            pending = [r for r in all_live_requests if r.get("status") == "pending"]
-            if not pending:
-                st.success("✅ No pending requests!")
-            else:
-                st.metric("⏳ Pending Requests", len(pending)); st.divider()
-                for req in reversed(pending):
-                    req_id = req.get("id")
-                    with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
-                        col_left, col_right = st.columns([2, 1])
-                        with col_left:
-                            st.write(f"👤 **Employee:** {req.get('emp_name')}")
-                            st.write(f"🏢 **Department:** {req.get('dept')}")
-                            st.write(f"🔄 **Type:** {req.get('type')}")
-                            st.write(f"🏷️ **Category:** {req.get('category')}")
-                            st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
-                            st.write(f"👔 **Line Manager:** {req.get('manager')}")
-                            submitted_by = get_submitted_by(req)
-                            if submitted_by:
-                                st.write(f"📝 **Submitted by:** {submitted_by}")
-                            st.write(f"📅 **Date:** {format_date(req.get('date',''))}")
-                            st.info(f"📝 **Description / Justification:**\n{req.get('desc','')}")
-                            display_attachments(req)
-                            old_data_raw = req.get("old_data", "")
-                            if old_data_raw and old_data_raw not in ["", "{}", "None"]:
-                                st.divider()
-                                st.markdown("### 🔄 What Changed / Edits")
-                                show_old_new_comparison(old_data_raw, req)
-                            else:
-                                st.divider()
-                                st.success("✅ **New Request — No previous version**")
-                        with col_right:
-                            st.markdown("### ✍️ Decision")
-                            comments = st.text_area("Director Comments", key=f"comm_{req_id}")
-                            approve_btn = st.button("✅ APPROVE", type="primary", key=f"appr_{req_id}")
-                            reject_btn = st.button("❌ REJECT", type="secondary", key=f"rejt_{req_id}")
-                            if approve_btn:
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "approved"
-                                        r["approved_by"] = full_name
-                                        r["decision_by"] = full_name
-                                        r["director_comments"] = comments
-                                        r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        r["approved_date"] = r["decision_date"]
-                                        break
-                                save_all_records(records)
-                                log_action("APPROVED", req_id)
-                                st.success(f"✅ Request #{req_id} APPROVED.")
-                                st.rerun()
-                            if reject_btn:
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "rejected"
-                                        r["decision_by"] = full_name
-                                        r["director_comments"] = comments
-                                        r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        break
-                                save_all_records(records)
-                                log_action("REJECTED", req_id)
-                                st.error(f"❌ Request #{req_id} REJECTED.")
-                                st.rerun()
-        with tab_approved:
-            approved = [r for r in all_live_requests if r.get("status") == "approved"]
+                st.caption(f"🔎 Showing {len(approved)} matching approved request(s).")
+            st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Rejected")
+            st.divider()
             if not approved:
-                st.info("📋 No approved requests yet.")
-            else:
-                st.metric("✅ Approved Requests", len(approved))
-                approved_search = st.text_input(
-                    "🔎 Search approved requests",
-                    placeholder="Search by ID, employee, department, submitted by, approved by, amount, date or comments...",
-                    key="director_approved_search",
-                )
-                if approved_search.strip():
-                    q = approved_search.strip().lower()
-                    approved = [
-                        r for r in approved
-                        if q in " ".join([
-                            str(r.get("id", "")),
-                            str(r.get("emp_name", "")),
-                            str(r.get("dept", "")),
-                            str(r.get("decision_by", "")),
-                            str(r.get("approved_by", "")),
-                            str(r.get("submitted_by", "")),
-                            str(r.get("amount", "")),
-                            str(r.get("decision_date", "")),
-                            str(r.get("date", "")),
-                            str(r.get("director_comments", "")),
-                        ]).lower()
-                    ]
-                    st.caption(f"🔎 Showing {len(approved)} matching approved request(s).")
-                st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Rejected")
-                st.divider()
-                if not approved:
-                    st.warning("No approved requests match your search.")
-                for req in reversed(approved):
-                    req_id = req.get("id")
-                    dec_by = req.get('decision_by', 'Director')
-                    dec_date = format_date(req.get('decision_date',''))
-                    with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ✅ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
-                        submitted_by = get_submitted_by(req)
-                        if submitted_by:
-                            st.write(f"📝 **Submitted by:** {submitted_by}")
-                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                        st.write(f"🎯 Approved By: {dec_by}")
-                        st.write(f"📅 Approval Date: {dec_date}")
-                        st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
-                        display_attachments(req)
-                        st.divider()
-                        display_pdf_button(req, can_generate=True)
-                        st.markdown("### 🔄 Change Status")
-                        new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_app_{req_id}", placeholder="Reason for status change...")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("⏳ Move to Pending", key=f"app_to_pend_{req_id}"):
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "pending"
-                                        r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {full_name}: {new_comments}").strip()
-                                        r["decision_date"] = ""
-                                        r["decision_by"] = ""
-                                        break
-                                save_all_records(records)
-                                log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"pending"})
-                                st.success(f"✅ Request #{req_id} moved to Pending. Audit Log updated.")
-                                st.rerun()
-                        with col2:
-                            if st.button("❌ Change to REJECTED", key=f"app_to_rej_{req_id}"):
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "rejected"
-                                        r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ❌ Changed to Rejected by {full_name}: {new_comments}").strip()
-                                        r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        r["decision_by"] = full_name
-                                        break
-                                save_all_records(records)
-                                log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
-                                st.success(f"✅ Request #{req_id} changed to Rejected. Audit Log updated.")
-                                st.rerun()
-        with tab_rejected:
-            rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
-            if not rejected:
-                st.success("✅ No rejected requests!")
-            else:
-                st.metric("❌ Rejected Requests", len(rejected))
-                st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Approved")
-                st.divider()
-                for req in reversed(rejected):
-                    req_id = req.get("id")
-                    dec_by = req.get('decision_by', 'Director')
-                    dec_date = format_date(req.get('decision_date',''))
-                    with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ❌ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                        submitted_by = get_submitted_by(req)
-                        if submitted_by:
-                            st.write(f"📝 **Submitted by:** {submitted_by}")
-                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                        st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
-                        st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
-                        display_attachments(req)
-                        st.markdown("### 🔄 Change Status")
-                        new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_rej_{req_id}", placeholder="Reason for status change...")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("⏳ Move to Pending", key=f"rej_to_pend_{req_id}"):
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "pending"
-                                        r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {full_name}: {new_comments}").strip()
-                                        r["decision_date"] = ""
-                                        r["decision_by"] = ""
-                                        break
-                                save_all_records(records)
-                                log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"pending"})
-                                st.success(f"✅ Request #{req_id} moved to Pending. Audit Log updated.")
-                                st.rerun()
-                        with col2:
-                            if st.button("✅ Change to APPROVED", key=f"rej_to_app_{req_id}"):
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "approved"
-                                        r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ✅ Changed to Approved by {full_name}: {new_comments}").strip()
-                                        r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        r["decision_by"] = full_name
-                                        break
-                                save_all_records(records)
-                                log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
-                                st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
-                                st.rerun()
-
-
-    with work_orders_tab:
-        render_work_order_director_portal(full_name)
+                st.warning("No approved requests match your search.")
+            for req in reversed(approved):
+                req_id = req.get("id")
+                dec_by = req.get('decision_by', 'Director')
+                dec_date = format_date(req.get('decision_date',''))
+                with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ✅ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept','')}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
+                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                    st.write(f"🎯 Approved By: {dec_by}")
+                    st.write(f"📅 Approval Date: {dec_date}")
+                    st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
+                    display_attachments(req)
+                    st.divider()
+                    display_pdf_button(req, can_generate=True)
+                    st.markdown("### 🔄 Change Status")
+                    new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_app_{req_id}", placeholder="Reason for status change...")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("⏳ Move to Pending", key=f"app_to_pend_{req_id}"):
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "pending"
+                                    r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {full_name}: {new_comments}").strip()
+                                    r["decision_date"] = ""
+                                    r["decision_by"] = ""
+                                    break
+                            save_all_records(records)
+                            log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"pending"})
+                            st.success(f"✅ Request #{req_id} moved to Pending. Audit Log updated.")
+                            st.rerun()
+                    with col2:
+                        if st.button("❌ Change to REJECTED", key=f"app_to_rej_{req_id}"):
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "rejected"
+                                    r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ❌ Changed to Rejected by {full_name}: {new_comments}").strip()
+                                    r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    r["decision_by"] = full_name
+                                    break
+                            save_all_records(records)
+                            log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
+                            st.success(f"✅ Request #{req_id} changed to Rejected. Audit Log updated.")
+                            st.rerun()
+    with tab_rejected:
+        rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
+        if not rejected:
+            st.success("✅ No rejected requests!")
+        else:
+            st.metric("❌ Rejected Requests", len(rejected))
+            st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Approved")
+            st.divider()
+            for req in reversed(rejected):
+                req_id = req.get("id")
+                dec_by = req.get('decision_by', 'Director')
+                dec_date = format_date(req.get('decision_date',''))
+                with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ❌ {dec_by} — {dec_date[:10]} ⏰{dec_date[11:]}"):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                    submitted_by = get_submitted_by(req)
+                    if submitted_by:
+                        st.write(f"📝 **Submitted by:** {submitted_by}")
+                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                    st.error(f"❌ Rejected By: {dec_by} on {dec_date}")
+                    st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
+                    display_attachments(req)
+                    st.markdown("### 🔄 Change Status")
+                    new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_rej_{req_id}", placeholder="Reason for status change...")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("⏳ Move to Pending", key=f"rej_to_pend_{req_id}"):
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "pending"
+                                    r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {full_name}: {new_comments}").strip()
+                                    r["decision_date"] = ""
+                                    r["decision_by"] = ""
+                                    break
+                            save_all_records(records)
+                            log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"pending"})
+                            st.success(f"✅ Request #{req_id} moved to Pending. Audit Log updated.")
+                            st.rerun()
+                    with col2:
+                        if st.button("✅ Change to APPROVED", key=f"rej_to_app_{req_id}"):
+                            records = load_records_from_excel()
+                            for r in records:
+                                if int(r.get("id",0)) == int(req_id):
+                                    r["status"] = "approved"
+                                    r["director_comments"] = (r.get("director_comments","") + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ✅ Changed to Approved by {full_name}: {new_comments}").strip()
+                                    r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    r["decision_by"] = full_name
+                                    break
+                            save_all_records(records)
+                            log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
+                            st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated.")
+                            st.rerun()
 
 # ─── SUPER ADMIN PORTAL ─────────────────────────────────────
 
@@ -3858,6 +3401,7 @@ elif role == "Super Admin":
         st.caption(
             "💾 Save these files to your computer for backup"
         )
+
 
 # ============================================================
 # DEFAULT / FALLBACK
