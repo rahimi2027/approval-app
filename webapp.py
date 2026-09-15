@@ -2917,32 +2917,21 @@ elif role == "Work Order Manager":
 
     with work_order_tab:
         st.subheader("🛠️ Work Orders — Manager")
-        st.info("Only users assigned the Work Order Manager role can access work orders. You can submit work orders, review assigned work orders, edit rejected orders, and create approved totals/PDFs.")
+        st.info(
+            "Only users assigned the Work Order Manager role can access work orders. "
+            "You can submit work orders, review assigned work orders, edit rejected orders, "
+            "and create approved totals/PDFs."
+        )
 
-        # Keep the main work-order workflow and the approved-total report
-        # in separate tabs so the manager does not have to scroll through
-        # the work-order list to reach the totals/reporting area.
-        wo_main_tab, wo_total_tab = st.tabs([
-            "🛠️ Work Orders",
-            "💷 Approved Work Order Total"
-        ])
-
-        with wo_main_tab:
-            render_work_order_employee_portal(full_name, dept_name)
-            st.divider()
-            render_work_order_manager_portal(
-                full_name,
-                dept_name,
-                show_total=False
-            )
-
-        with wo_total_tab:
-            render_work_order_total(
-                load_work_orders(),
-                scope_department=dept_name,
-                key_prefix="wo_mgr_total_tab",
-                prepared_by=full_name
-            )
+        # Work Order Manager portal already contains the single final submission
+        # form plus its Pending / Approved / Rejected tabs and the separate
+        # Approved Work Order Total tab. Do NOT render the old employee portal
+        # here, otherwise two Work Order submission forms appear.
+        render_work_order_manager_portal(
+            full_name,
+            dept_name,
+            show_total=True
+        )
 
 # ─── MANAGER / STAFF PORTAL ───
 elif role in ["Manager", "Staff", "Team Member"]:
