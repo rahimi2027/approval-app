@@ -1577,6 +1577,17 @@ def render_work_order_director_portal(director_name, final_director=False):
                 st.write(f"Submitted by: {r.get('submitted_by')} | Rejected by: {r.get('director_decision_by') or r.get('manager_decision_by')}")
                 st.error(r.get('director_comments') or r.get('manager_comments') or "No reason supplied")
 
+    # Directors can create the same totals/report as the Work Order Manager and Payroll.
+    # Only fully approved work orders are included, so totals cannot include work that is
+    # still waiting for Andy or Gemma, or that was rejected.
+    st.divider()
+    render_work_order_summary(
+        orders,
+        key_prefix=f"wo_director_summary_{'gemma' if final_director else 'andy'}",
+        allowed_records=[r for r in orders if r.get("status") == "approved_payment"],
+        heading="📊 Work Order Totals — Director",
+    )
+
 
 def render_work_order_payroll_portal(payroll_name):
     st.subheader("🛠️ Work Orders — Payroll")
