@@ -1179,6 +1179,138 @@ def display_work_order_pdf(req):
             key=f"wo_pdf_download_{req.get('id')}",
         )
 
+def work_order_summary_pdf(records, title="WORK ORDER PAYMENT SUMMARY", employee_name="All Employees", from_date="", to_date="", wo_from="", wo_to=""):
+    """Create a printable PDF summary of matching approved work orders with a grand total."""
+    if not PDF_AVAILABLE:
+        return None
+    try:
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_margins(12, 12, 12)
+        pdf.add_page()
+        regular_font, bold_font = _pdf_font_paths()
+        if regular_font and bold_font:
+            pdf.add_font("DejaVu", "", regular_font)
+            pdf.add_font("DejaVu", "B", bold_font)
+            font_family = "DejaVu"
+        else:
+            font_family = "Helvetica"
+        def safe(value):
+            text = _pdf_hard_wrap(value, max_chars=60)
+            return text.encode("latin-1", "replace").decode("latin-1") if font_family == "Helvetica" else text
+        pdf.set_font(font_family, "B", 16)
+        pdf.cell(w=pdf.epw, h=9, text=safe(title), align="C", border=0, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(3)
+        pdf.set_font(font_family, "", 10)
+        for line in [
+            f"Employee: {employee_name or 'All Employees'}",
+            f"Work Date: {from_date or 'Any'} to {to_date or 'Any'}",
+            f"Work Order No.: {wo_from or 'Any'} to {wo_to or 'Any'}",
+            f"Number of Work Orders: {len(records)}",
+        ]:
+            pdf.cell(w=pdf.epw, h=6, text=safe(line), border=0, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(4)
+        col_no, col_emp, col_date = 38, 65, 38
+        col_amount = pdf.epw - col_no - col_emp - col_date
+        pdf.set_font(font_family, "B", 9)
+        for width, text in [(col_no, "Work Order No"), (col_emp, "Employee"), (col_date, "Date"), (col_amount, "Amount")]:
+            pdf.cell(w=width, h=8, text=safe(text), border=1, align="C")
+        pdf.ln(8)
+        total = 0.0
+        pdf.set_font(font_family, "", 9)
+        for r in records:
+            amount = float(r.get("amount", 0) or 0)
+            total += amount
+            values = [str(r.get("work_order_no") or r.get("id") or ""), str(r.get("emp_name") or r.get("contractor") or ""), str(r.get("work_date") or ""), f"GBP {amount:.2f}"]
+            for width, text in [(col_no, values[0]), (col_emp, values[1]), (col_date, values[2]), (col_amount, values[3])]:
+                pdf.cell(w=width, h=7, text=safe(text), border=1, align="C")
+            pdf.ln(7)
+        pdf.set_font(font_family, "B", 10)
+        pdf.cell(w=col_no + col_emp + col_date, h=9, text=safe("TOTAL"), border=1, align="R")
+        pdf.cell(w=col_amount, h=9, text=safe(f"GBP {total:.2f}"), border=1, align="C")
+        os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        employee_slug = "all_employees" if not employee_name or employee_name == "All Employees" else "".join(c if c.isalnum() else "_" for c in employee_name).strip("_")
+        path = os.path.join(WORK_ORDER_PDF_DIR, f"work_order_summary_{employee_slug}_{stamp}.pdf")
+        pdf.output(path)
+        return path
+    except Exception as e:
+        st.error(f"Work Order Summary PDF Error: {e}")
+        return None
+
+
+def _filter_work_orders_for_summary(records, employee_name="All Employees", from_date=None, to_date=None, wo_from="", wo_to=""):
+    filtered = list(records)
+    if employee_name and employee_name != "All Employees":
+        filtered = [r for r in filtered if str(r.get("emp_name") or r.get("contractor") or "").strip().lower() == employee_name.strip().lower()]
+    def parse_date(r):
+        raw = str(r.get("work_date", "")).strip()[:10]
+        try:
+            return datetime.fromisoformat(raw).date()
+        except Exception:
+            return None
+    if from_date or to_date:
+        filtered = [r for r in filtered if parse_date(r) is not None and (not from_date or parse_date(r) >= from_date) and (not to_date or parse_date(r) <= to_date)]
+    def wo_num(r):
+        try:
+            return int(str(r.get("work_order_no") or "").strip())
+        except Exception:
+            return None
+    if str(wo_from).strip():
+        try:
+            low = int(str(wo_from).strip()); filtered = [r for r in filtered if wo_num(r) is not None and wo_num(r) >= low]
+        except Exception:
+            q = str(wo_from).strip().lower(); filtered = [r for r in filtered if q in str(r.get("work_order_no", "")).lower()]
+    if str(wo_to).strip():
+        try:
+            high = int(str(wo_to).strip()); filtered = [r for r in filtered if wo_num(r) is not None and wo_num(r) <= high]
+        except Exception:
+            q = str(wo_to).strip().lower(); filtered = [r for r in filtered if q in str(r.get("work_order_no", "")).lower()]
+    return filtered
+
+
+def render_work_order_summary(records, key_prefix="wo_summary", allowed_records=None, heading="📊 Work Order Totals"):
+    """Build totals from fully approved work orders and offer a printable PDF."""
+    source = list(allowed_records if allowed_records is not None else records)
+    approved_source = [r for r in source if r.get("status") == "approved_payment"]
+    st.markdown(f"### {heading}")
+    st.caption("Create a total of approved work orders by employee, date range, or Work Order number and download it as a PDF.")
+    employees = sorted({str(r.get("emp_name") or r.get("contractor") or "").strip() for r in approved_source if str(r.get("emp_name") or r.get("contractor") or "").strip()})
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        employee = st.selectbox("👤 Employee", ["All Employees"] + employees, key=f"{key_prefix}_employee")
+    with c2:
+        from_date = st.date_input("📅 From date", value=None, key=f"{key_prefix}_from")
+    with c3:
+        to_date = st.date_input("📅 To date", value=None, key=f"{key_prefix}_to")
+    c4, c5 = st.columns(2)
+    with c4:
+        wo_from = st.text_input("🔢 Work Order No. from", placeholder="e.g. 210295", key=f"{key_prefix}_wo_from")
+    with c5:
+        wo_to = st.text_input("🔢 Work Order No. to", placeholder="e.g. 210320", key=f"{key_prefix}_wo_to")
+    if from_date and to_date and from_date > to_date:
+        st.error("From date cannot be after To date."); return
+    matching = _filter_work_orders_for_summary(approved_source, employee, from_date, to_date, wo_from, wo_to)
+    matching = sorted(matching, key=lambda r: (str(r.get("work_date", "")), str(r.get("work_order_no", ""))))
+    total = sum(float(r.get("amount", 0) or 0) for r in matching)
+    st.metric("💷 Total Approved", f"£{total:,.2f}")
+    st.write(f"**{len(matching)}** approved work order(s) match the selected filters.")
+    if not matching:
+        st.info("No approved work orders match the selected filters."); return
+    table = pd.DataFrame([{
+        "Work Order No": r.get("work_order_no") or r.get("id"),
+        "Employee": r.get("emp_name") or r.get("contractor"),
+        "Date": r.get("work_date", ""),
+        "Amount (£)": float(r.get("amount", 0) or 0),
+    } for r in matching])
+    st.dataframe(table, use_container_width=True, hide_index=True)
+    if st.button("📄 Create & Download Total PDF", key=f"{key_prefix}_pdf", type="primary"):
+        path = work_order_summary_pdf(matching, employee_name=employee, from_date=str(from_date) if from_date else "", to_date=str(to_date) if to_date else "", wo_from=wo_from, wo_to=wo_to)
+        if path and os.path.exists(path):
+            with open(path, "rb") as f:
+                st.download_button("⬇️ Download Work Order Total PDF", data=f.read(), file_name=os.path.basename(path), mime="application/pdf", key=f"{key_prefix}_download")
+
+
 def render_work_order_employee_portal(current_user, current_dept):
     st.subheader("🛠️ Work Orders — Employee")
     st.info("Submit completed work for Manager review. Only Manager-approved work is sent to the Director.")
@@ -1320,6 +1452,14 @@ def render_work_order_manager_portal(manager_name, manager_dept):
             display_attachments(r)
             if r.get("status") == "approved_payment":
                 display_work_order_pdf(r)
+
+    st.divider()
+    render_work_order_summary(
+        orders,
+        key_prefix=f"wo_manager_summary_{manager_name}",
+        allowed_records=[r for r in orders if r.get("submitted_by") == manager_name],
+        heading="📊 My Work Order Totals",
+    )
 
 
 def render_work_order_director_portal(director_name, final_director=False):
@@ -1481,6 +1621,14 @@ def render_work_order_payroll_portal(payroll_name):
             # Payroll only downloads the final authorised PDF.
             # There is deliberately no 'Mark as Paid' action here.
             display_work_order_pdf(r)
+
+    st.divider()
+    render_work_order_summary(
+        orders,
+        key_prefix="wo_payroll_summary",
+        allowed_records=approved,
+        heading="📊 Work Order Payment Totals",
+    )
 
 # ============================================================
 # REQUESTS EXCEL
