@@ -1,13 +1,9 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.8
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.9
 # ============================================================
-# ✅ Director tab indentation fixed
-# ✅ Work Order Manager manual_work_order_no save key fixed
-# ✅ Duplicate Work Order check fixed
-# ✅ Site Address + Customer Job No. now persist
-# ✅ "Send to Director" field removed — Director auto-assigned
-# ✅ Director Work Order view: hours + manager comments removed, submitter shown
-# ✅ Work Order PDF "Not enough horizontal space" error fixed
+# ✅ Director Work Order portal: full details + status change at any time
+# ✅ Work Order PDF "Not enough horizontal space" fixed
+# ✅ All prior fixes retained
 # ============================================================
 import streamlit as st
 import os
@@ -485,19 +481,24 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
     if action.startswith("WORK_ORDER_"):
         wo_labels = {
             "WORK_ORDER_CREATED": "🛠️ Work Order Created",
+            "WORK_ORDER_MANAGER_CREATED": "🛠️ Work Order Submitted to Director",
             "WORK_ORDER_MANAGER_APPROVED": "🛠️ Work Order Sent to Director",
             "WORK_ORDER_RETURNED": "🛠️ Work Order Returned to Employee",
             "WORK_ORDER_DIRECTOR_APPROVED": "🛠️ Work Order Approved for Payment",
             "WORK_ORDER_DIRECTOR_REJECTED": "🛠️ Work Order Rejected by Director",
+            "WORK_ORDER_STATUS_CHANGED": "🛠️ Work Order Status Changed",
             "WORK_ORDER_PAID": "🛠️ Work Order Paid",
         }
+        old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
+        new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
         save_audit_entry({
             "AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
             "User_Name": username, "User_Role": role, "Action": wo_labels.get(action, action),
             "Request_ID": str(req_id), "Department": dept, "Amount": amount,
             "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp,
-            "Field_Changed": "Work Order Status", "Old_Value": "-",
-            "New_Value": action.replace("WORK_ORDER_", "").replace("_", " ").title(),
+            "Field_Changed": "Work Order Status",
+            "Old_Value": old_v if old_data else "-",
+            "New_Value": new_v if new_data else action.replace("WORK_ORDER_", "").replace("_", " ").title(),
             "IP_Address": "Auto-Logged"
         })
         return
@@ -1379,57 +1380,172 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
 
 def render_work_order_director_portal(director_name):
     st.subheader("🛠️ Work Orders — Director Final Approval")
-    orders=load_work_orders()
-    pending=[r for r in orders if r.get("status")=="pending_director"]
-    approved=[r for r in orders if r.get("status")=="approved_payment"]
-    rejected=[r for r in orders if r.get("status")=="rejected_director"]
-    t1,t2,t3=st.tabs(["⏳ Manager Approved / Awaiting Director","✅ Approved for Payment","❌ Rejected"])
-    def search_list(items,key):
-        q=st.text_input("🔎 Search Work Orders", placeholder="Search by ID, employee, manager, department, amount or date...", key=key)
+    st.info("✅ Review all work orders, Approve, Reject, OR Change Status at any time. All changes are logged.")
+    orders = load_work_orders()
+    pending = [r for r in orders if r.get("status") == "pending_director"]
+    approved = [r for r in orders if r.get("status") == "approved_payment"]
+    rejected = [r for r in orders if r.get("status") == "rejected_director"]
+
+    t1, t2, t3 = st.tabs([
+        f"⏳ Manager Approved / Awaiting Director ({len(pending)})",
+        f"✅ Approved for Payment ({len(approved)})",
+        f"❌ Rejected ({len(rejected)})"
+    ])
+
+    def search_list(items, key):
+        q = st.text_input("🔎 Search Work Orders",
+                          placeholder="Search by Work Order No., employee, manager, submitter, amount, date, customer job no. or description...",
+                          key=key)
         if q.strip():
-            q=q.lower().strip(); items=[r for r in items if q in " ".join(str(v) for v in r.values()).lower()]
+            q = q.lower().strip()
+            items = [r for r in items if q in " ".join(str(v) for v in r.values()).lower()]
         return items
+
+    def show_full_details(r):
+        """Show ALL work order information consistently."""
+        st.write(f"🧾 **Work Order No.:** {get_work_order_number(r)}")
+        st.write(f"👤 **Contractor / Employee Labour:** {r.get('emp_name','-')}")
+        st.write(f"🏢 **Department:** {r.get('dept','-')}")
+        st.write(f"📍 **Site Address:** {r.get('site_address','-')}")
+        st.write(f"📘 **Customer Job No.:** {r.get('customer_job_no','-')}")
+        st.write(f"📅 **Work Date:** {r.get('work_date','-')}")
+        st.write(f"💷 **Amount:** £{float(r.get('amount',0) or 0):.2f}")
+        st.write(f"⏱️ **Hours:** {r.get('hours',0)}")
+        st.write(f"👔 **Manager:** {r.get('manager','-')}")
+        st.write(f"📝 **Submitted by:** {r.get('submitted_by','-')} on {r.get('submitted_date','-')}")
+        if r.get('manager_decision_by'):
+            st.write(f"👔 **Manager review:** {r.get('manager_decision_by')} on {r.get('manager_decision_date','')}")
+        st.info(f"📝 **Description:**\n{r.get('desc','')}")
+        if r.get('manager_comments'):
+            st.info(f"💬 **Manager Comments:** {r.get('manager_comments')}")
+        if r.get('director_comments'):
+            st.warning(f"💬 **Director Comments:** {r.get('director_comments')}")
+        if r.get('director_decision_by'):
+            st.write(f"🎯 **Director Decision:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
+        st.divider()
+        st.markdown("#### 📎 Attachments")
+        display_attachments(r)
+
+    def apply_status_change(req_id, new_status, comments, old_status):
+        """Change a work order to a new status and record it."""
+        for x in orders:
+            if str(x.get("id")) == str(req_id):
+                x["status"] = new_status
+                if new_status == "approved_payment":
+                    x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
+                    x["director_decision_by"] = director_name
+                    x["director_decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                elif new_status == "rejected_director":
+                    x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
+                    x["director_decision_by"] = director_name
+                    x["director_decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                elif new_status == "pending_director":
+                    x["director_comments"] = (str(x.get("director_comments","")) +
+                        f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {director_name}: {comments.strip()}").strip()
+                    x["director_decision_by"] = ""
+                    x["director_decision_date"] = ""
+                break
+        save_all_work_orders(orders)
+        log_action("WORK_ORDER_STATUS_CHANGED", req_id,
+                   old_data={"status": old_status}, new_data={"status": new_status},
+                   decision_by=director_name)
+        st.success(f"✅ Work Order #{req_id} status changed to **{new_status.replace('_',' ').title()}**.")
+
+    # =========================================================
+    # TAB 1 — PENDING DIRECTOR
+    # =========================================================
     with t1:
-        items=search_list(pending,"wo_dir_pending_search")
+        items = search_list(pending, "wo_dir_pending_search")
+        if not items:
+            st.info("⏳ No work orders awaiting Director approval.")
         for r in reversed(items):
+            req_id = r.get("id")
             submitter = r.get('submitted_by') or r.get('manager') or "Unknown"
             with st.expander(
                 f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | "
                 f"£{r.get('amount',0):.2f} | Submitted by: {submitter}"
             ):
-                st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
-                st.write(f"📝 Submitted by: **{submitter}**")
-                st.write(f"💷 £{r.get('amount',0):.2f} | 📅 {r.get('work_date')}")
-                st.info(r.get('desc',''))
-                display_attachments(r)
-                comments=st.text_area("Director Comments", key=f"wo_dir_comm_{r.get('id')}")
-                c1,c2=st.columns(2)
+                show_full_details(r)
+                st.markdown("### ✍️ Director Decision")
+                comments = st.text_area("Director Comments", key=f"wo_dir_comm_{req_id}")
+                c1, c2 = st.columns(2)
                 with c1:
-                    if st.button("✅ Approve for Payment", key=f"wo_dir_app_{r.get('id')}", type="primary"):
-                        for x in orders:
-                            if str(x.get("id"))==str(r.get("id")):
-                                x["status"]="approved_payment"; x["director_comments"]=comments.strip(); x["director_decision_by"]=director_name; x["director_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        save_all_work_orders(orders); log_action("WORK_ORDER_DIRECTOR_APPROVED", r.get("id"), decision_by=director_name); st.success("Approved for payment."); st.rerun()
+                    if st.button("✅ Approve for Payment", key=f"wo_dir_app_{req_id}", type="primary"):
+                        apply_status_change(req_id, "approved_payment", comments, "pending_director")
+                        st.rerun()
                 with c2:
-                    if st.button("❌ Reject", key=f"wo_dir_rej_{r.get('id')}"):
-                        for x in orders:
-                            if str(x.get("id"))==str(r.get("id")):
-                                x["status"]="rejected_director"; x["director_comments"]=comments.strip(); x["director_decision_by"]=director_name; x["director_decision_date"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        save_all_work_orders(orders); log_action("WORK_ORDER_DIRECTOR_REJECTED", r.get("id"), decision_by=director_name); st.rerun()
+                    if st.button("❌ Reject", key=f"wo_dir_rej_{req_id}"):
+                        apply_status_change(req_id, "rejected_director", comments, "pending_director")
+                        st.rerun()
+
+    # =========================================================
+    # TAB 2 — APPROVED FOR PAYMENT
+    # =========================================================
     with t2:
-        items=search_list(approved,"wo_dir_approved_search")
+        items = search_list(approved, "wo_dir_approved_search")
+        if not items:
+            st.info("✅ No Director-approved work orders.")
+        st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Rejected")
         for r in reversed(items):
-            with st.expander(f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Approved"):
-                st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}**")
-                st.write(f"Submitted by: {r.get('submitted_by')} | Manager: {r.get('manager')} | Approved By: {r.get('director_decision_by')}")
-                st.write(f"📅 Director approval: {r.get('director_decision_date')}")
+            req_id = r.get("id")
+            with st.expander(
+                f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"£{r.get('amount',0):.2f} | Approved by {r.get('director_decision_by','')}"
+            ):
+                show_full_details(r)
+                st.markdown("### 🔄 Change Status")
+                new_comments = st.text_area(
+                    "Add comment (optional)",
+                    key=f"wo_dir_chg_comm_app_{req_id}",
+                    placeholder="Reason for status change..."
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("⏳ Move to Pending", key=f"wo_dir_app_to_pend_{req_id}"):
+                        apply_status_change(req_id, "pending_director", new_comments, "approved_payment")
+                        st.rerun()
+                with c2:
+                    if st.button("❌ Change to Rejected", key=f"wo_dir_app_to_rej_{req_id}"):
+                        apply_status_change(req_id, "rejected_director", new_comments, "approved_payment")
+                        st.rerun()
+                st.divider()
+                st.markdown("#### 📄 Work Order PDF")
                 display_work_order_pdf(r)
+
+    # =========================================================
+    # TAB 3 — REJECTED
+    # =========================================================
     with t3:
-        items=search_list(rejected,"wo_dir_rejected_search")
+        items = search_list(rejected, "wo_dir_rejected_search")
+        if not items:
+            st.info("❌ No rejected work orders.")
+        st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Approved")
         for r in reversed(items):
-            with st.expander(f"🔴 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f}"):
-                st.write(f"Submitted by: {r.get('submitted_by')} | Rejected by: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
-                st.error(r.get('director_comments') or "No reason supplied")
+            req_id = r.get("id")
+            with st.expander(
+                f"🔴 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"£{r.get('amount',0):.2f} | Rejected by {r.get('director_decision_by','')}"
+            ):
+                show_full_details(r)
+                st.markdown("### 🔄 Change Status")
+                new_comments = st.text_area(
+                    "Add comment (optional)",
+                    key=f"wo_dir_chg_comm_rej_{req_id}",
+                    placeholder="Reason for status change..."
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("⏳ Move to Pending", key=f"wo_dir_rej_to_pend_{req_id}"):
+                        apply_status_change(req_id, "pending_director", new_comments, "rejected_director")
+                        st.rerun()
+                with c2:
+                    if st.button("✅ Change to Approved", key=f"wo_dir_rej_to_app_{req_id}", type="primary"):
+                        apply_status_change(req_id, "approved_payment", new_comments, "rejected_director")
+                        st.rerun()
+
+    # =========================================================
+    # Approved Work Order Total
+    # =========================================================
     st.divider()
     render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
 
