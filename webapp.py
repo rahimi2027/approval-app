@@ -1110,6 +1110,146 @@ def render_work_order_employee_portal(current_user, current_dept):
             st.write(f"💳 Payment: {r.get('payroll_status')}")
 
 
+def work_order_total_pdf(records, title="Approved Work Order Total"):
+    """Create a PDF summary of approved work orders grouped by employee.
+
+    Only approved_payment records supplied by the caller are included.  The PDF
+    intentionally does not use Work Order No. From/To filters; selection is by
+    employee and work-date range.
+    """
+    if not PDF_AVAILABLE:
+        st.error("PDF generation is not available in this environment.")
+        return None
+    try:
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+        regular_font, bold_font = _pdf_font_paths()
+        if regular_font and bold_font:
+            pdf.add_font("DejaVu", "", regular_font)
+            pdf.add_font("DejaVu", "B", bold_font)
+            family = "DejaVu"
+        else:
+            family = "Helvetica"
+
+        def safe(value):
+            text = _pdf_text(value)
+            return text if family == "DejaVu" else text.encode("latin-1", "replace").decode("latin-1")
+
+        pdf.set_font(family, "B", 16)
+        pdf.cell(0, 10, safe(title), ln=True, align="C")
+        pdf.ln(3)
+        pdf.set_font(family, "", 10)
+        pdf.cell(0, 7, safe(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"), ln=True)
+        pdf.cell(0, 7, safe(f"Approved work orders included: {len(records)}"), ln=True)
+        pdf.ln(4)
+
+        grouped = {}
+        for r in records:
+            employee = str(r.get("emp_name", "")).strip() or "Unknown Employee"
+            grouped.setdefault(employee, []).append(r)
+
+        pdf.set_font(family, "B", 10)
+        pdf.cell(75, 8, safe("Employee"), border=1)
+        pdf.cell(30, 8, safe("Work Orders"), border=1, align="C")
+        pdf.cell(40, 8, safe("Total"), border=1, align="R")
+        pdf.cell(45, 8, safe("Date Range"), border=1, align="C")
+        pdf.ln()
+
+        grand_total = 0.0
+        for employee in sorted(grouped):
+            rows = grouped[employee]
+            total = sum(float(r.get("amount", 0) or 0) for r in rows)
+            grand_total += total
+            dates = sorted(str(r.get("work_date", ""))[:10] for r in rows if r.get("work_date"))
+            date_range = dates[0] if len(dates) == 1 else (f"{dates[0]} to {dates[-1]}" if dates else "-")
+            pdf.set_font(family, "", 9)
+            pdf.cell(75, 8, safe(employee[:38]), border=1)
+            pdf.cell(30, 8, str(len(rows)), border=1, align="C")
+            pdf.cell(40, 8, safe(f"GBP {total:.2f}"), border=1, align="R")
+            pdf.cell(45, 8, safe(date_range[:24]), border=1, align="C")
+            pdf.ln()
+
+        pdf.set_font(family, "B", 10)
+        pdf.cell(105, 9, safe("GRAND TOTAL"), border=1)
+        pdf.cell(40, 9, safe(f"GBP {grand_total:.2f}"), border=1, align="R")
+        pdf.cell(45, 9, "", border=1)
+        pdf.ln(8)
+
+        pdf.set_font(family, "B", 10)
+        pdf.cell(0, 7, safe("Included Work Orders"), ln=True)
+        pdf.set_font(family, "", 8)
+        for r in sorted(records, key=lambda x: (str(x.get("emp_name", "")), str(x.get("work_date", "")), str(x.get("id", "")))):
+            line = (
+                f"{r.get('id','-')} | {r.get('emp_name','-')} | "
+                f"{str(r.get('work_date','-'))[:10]} | GBP {float(r.get('amount',0) or 0):.2f} | "
+                f"Approved by {r.get('director_decision_by','-')}"
+            )
+            pdf.multi_cell(0, 5, safe(line))
+
+        os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
+        filename = f"Approved_Work_Order_Total_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        path = os.path.join(WORK_ORDER_PDF_DIR, filename)
+        pdf.output(path)
+        upload_to_google_drive(path, filename)
+        return path
+    except Exception as e:
+        st.error(f"Work Order Total PDF Error: {e}")
+        return None
+
+
+def render_work_order_total_summary(records, key_prefix, title="Approved Work Order Total"):
+    """Shared employee/date filtering and aggregate total/PDF controls."""
+    st.markdown("### 💷 Approved Work Order Total")
+    st.caption("Select an employee and work-date range. Work Order No. From/To is not used.")
+
+    approved_records = [r for r in records if r.get("status") == "approved_payment"]
+    if not approved_records:
+        st.info("No Director-approved work orders are available for a total.")
+        return
+
+    employees = sorted({str(r.get("emp_name", "")).strip() for r in approved_records if str(r.get("emp_name", "")).strip()})
+    c1, c2, c3 = st.columns([1.4, 1, 1])
+    with c1:
+        employee = st.selectbox("👤 Employee", ["All Employees"] + employees, key=f"{key_prefix}_employee")
+    with c2:
+        start_date = st.date_input("📅 From Date", value=date.today().replace(day=1), key=f"{key_prefix}_from")
+    with c3:
+        end_date = st.date_input("📅 To Date", value=date.today(), key=f"{key_prefix}_to")
+
+    if start_date > end_date:
+        st.error("From Date cannot be after To Date.")
+        return
+
+    selected = []
+    for r in approved_records:
+        if employee != "All Employees" and str(r.get("emp_name", "")).strip() != employee:
+            continue
+        try:
+            d = datetime.strptime(str(r.get("work_date", ""))[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if start_date <= d <= end_date:
+            selected.append(r)
+
+    total = sum(float(r.get("amount", 0) or 0) for r in selected)
+    st.metric("💰 Total Approved", f"£{total:.2f}")
+    st.metric("📋 Work Orders Included", len(selected))
+
+    if selected:
+        summary_df = pd.DataFrame([
+            {"Work Order No.": r.get("id"), "Employee": r.get("emp_name"), "Work Date": str(r.get("work_date", ""))[:10], "Amount (£)": float(r.get("amount", 0) or 0), "Approved By": r.get("director_decision_by", "")}
+            for r in selected
+        ])
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        if st.button("📄 Generate & Download Total PDF", key=f"{key_prefix}_pdf", type="primary"):
+            path = work_order_total_pdf(selected, title=title)
+            if path and os.path.exists(path):
+                with open(path, "rb") as f:
+                    st.download_button("⬇️ Download Total PDF", f.read(), file_name=os.path.basename(path), key=f"{key_prefix}_download")
+    else:
+        st.info("No approved work orders match the selected employee and date range.")
+
 def render_work_order_manager_portal(manager_name, manager_dept):
     """Work Order Manager portal.
 
@@ -1347,6 +1487,13 @@ def render_work_order_manager_portal(manager_name, manager_dept):
                         st.success(f"✅ {wid} updated and resubmitted to the Director.")
                         st.rerun()
 
+    st.divider()
+    render_work_order_total_summary(
+        [r for r in assigned if r.get("status") == "approved_payment"],
+        "wo_manager_total",
+        title=f"Approved Work Order Total — {manager_name}",
+    )
+
 
 def _safe_work_order_date(value):
     """Convert stored work-order dates into a Streamlit date_input value."""
@@ -1404,6 +1551,13 @@ def render_work_order_director_portal(director_name):
             with st.expander(f"🔴 {r.get('id')} | {r.get('emp_name')} | £{r.get('amount',0):.2f}"):
                 st.write(f"Submitted by: {r.get('submitted_by')} | Rejected by: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
                 st.error(r.get('director_comments') or "No reason supplied")
+
+    st.divider()
+    render_work_order_total_summary(
+        approved,
+        "wo_director_total",
+        title=f"Approved Work Order Total — {director_name}",
+    )
 
 
 def render_work_order_payroll_portal(payroll_name):
