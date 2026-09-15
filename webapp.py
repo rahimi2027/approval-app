@@ -1,10 +1,11 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.5 (ERRORS FIXED)
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.6
 # ============================================================
 # ✅ Director tab indentation fixed
 # ✅ Work Order Manager manual_work_order_no save key fixed
 # ✅ Duplicate Work Order check fixed
 # ✅ Site Address + Customer Job No. now persist
+# ✅ "Send to Director" field removed — Director auto-assigned
 # ============================================================
 import streamlit as st
 import os
@@ -295,8 +296,6 @@ EXCEL_COLUMNS = [
     "Status", "Director Comments", "Decision Date", "Decision By",
     "Submitted By", "PDF File Path", "Edited From ID", "Old Data"
 ]
-
-# ✅ FIX: Added "Site Address" and "Customer Job No." so manager-entered values persist
 WORK_ORDER_COLUMNS = [
     "Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours",
     "Amount (£)", "Manager", "Description", "Attachment Name", "Status",
@@ -806,7 +805,6 @@ def load_work_orders(force=False):
                 "desc": str(r.get("Description", "")).strip(),
                 "attachment_name": str(r.get("Attachment Name", "None")).strip(),
                 "status": str(r.get("Status", "pending_manager")).strip().lower(),
-                # ✅ FIX: load Site Address + Customer Job No.
                 "site_address": str(r.get("Site Address", "")).strip(),
                 "customer_job_no": str(r.get("Customer Job No.", "")).strip(),
                 "manager_comments": str(r.get("Manager Comments", "")).strip(),
@@ -846,7 +844,6 @@ def save_all_work_orders(records):
             "Hours": float(r.get("hours", 0)), "Amount (£)": float(r.get("amount", 0)),
             "Manager": str(r.get("manager", "")), "Description": str(r.get("desc", "")),
             "Attachment Name": str(r.get("attachment_name", "None")), "Status": str(r.get("status", "pending_manager")),
-            # ✅ FIX: persist Site Address + Customer Job No.
             "Site Address": str(r.get("site_address", "")),
             "Customer Job No.": str(r.get("customer_job_no", "")),
             "Manager Comments": str(r.get("manager_comments", "")),
@@ -1166,7 +1163,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
         st.markdown("### 📤 Submit New Work Order")
         st.caption("Complete the work-order details below. No hours/time entry is required.")
 
-        director_options = _director_options() if "_director_options" in globals() else []
         with st.form("manager_new_work_order_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             with c1:
@@ -1197,13 +1193,16 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                     placeholder="Describe the work completed...",
                     height=150
                 )
-                if director_options:
-                    director = st.selectbox("🎯 Send to Director", director_options)
-                else:
-                    director = st.text_input(
-                        "🎯 Send to Director",
-                        placeholder="Andy Acoole or Gemma Coole"
-                    )
+
+            # ✅ FIX: Director is assigned automatically — no user input required.
+            _all_users = load_users()
+            director_names = sorted({
+                str(u.get("full_name", "")).strip()
+                for u in _all_users.values()
+                if str(u.get("role", "")).strip().lower() == "director"
+                and str(u.get("full_name", "")).strip()
+            })
+            director = director_names[0] if director_names else "Andy Acoole"
 
             files = st.file_uploader(
                 "📎 Supporting Work Order Document (optional)",
@@ -1211,7 +1210,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 accept_multiple_files=True
             )
             submitted = st.form_submit_button(
-                "📤 Submit Work Order to Director",
+                "📤 Submit Work Order",
                 type="primary",
                 use_container_width=True
             )
@@ -1223,9 +1222,8 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             if not site_address.strip(): errors.append("Site Address")
             if not customer_job_no.strip(): errors.append("Customer Job No.")
             if not description.strip(): errors.append("Description")
-            if not director.strip(): errors.append("Director")
+            # ✅ Director check removed — director is assigned automatically
 
-            # ✅ FIX: duplicate check now looks at the correct key
             duplicate=any(
                 str(r.get("manual_work_order_no","")).strip().lower()==work_order_no.strip().lower()
                 for r in orders if str(r.get("manual_work_order_no","")).strip()
@@ -1249,7 +1247,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 rec={
                     "id":wid,
-                    # ✅ FIX: key renamed so the manual WO number is saved
                     "manual_work_order_no":work_order_no.strip(),
                     "emp_name":contractor_employee.strip(),
                     "dept":manager_dept,
@@ -1278,7 +1275,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 orders.append(rec)
                 save_all_work_orders(orders)
                 log_action("WORK_ORDER_MANAGER_CREATED",wid,decision_by=manager_name)
-                st.success(f"✅ Work Order {work_order_no.strip()} submitted to {director.strip()} for final approval.")
+                st.success(f"✅ Work Order {work_order_no.strip()} submitted to {director} for final approval.")
                 st.rerun()
 
         st.divider()
@@ -1298,7 +1295,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             return [r for r in items if q in " ".join(str(v) for v in r.values()).lower()]
 
         def show_details(r):
-            # ✅ FIX: use manual_work_order_no (loaded key), not work_order_no
             wo=r.get("manual_work_order_no") or r.get("id") or "-"
             st.write(f"🧾 **Work Order No.: {wo}** | 👤 **Contractor / Employee Labour:** {r.get('emp_name','-')}")
             st.write(f"📍 **Site Address:** {r.get('site_address','-')}")
@@ -2318,11 +2314,9 @@ st.divider()
 # ============================================================
 # 📋 ROLE-BASED PORTALS
 # ============================================================
-# ─── WORK ORDER EMPLOYEE PORTAL ───
 if role == "Work Order Employee":
     render_work_order_employee_portal(full_name, dept)
 
-# ─── PAYROLL PORTAL ───
 elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
@@ -2431,7 +2425,6 @@ elif role == "Payroll":
     with st.expander("🛠️ Work Orders — Payroll", expanded=False):
         render_work_order_payroll_portal(full_name)
 
-# ─── WORK ORDER MANAGER PORTAL ───
 elif role == "Work Order Manager":
     dept_name = dept
     request_tab, work_order_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders"])
@@ -2642,7 +2635,6 @@ elif role == "Work Order Manager":
             show_total=True
         )
 
-# ─── MANAGER / STAFF PORTAL ───
 elif role in ["Manager", "Staff", "Team Member"]:
     dept_name = dept
     if st.session_state.get("editing_request_id"):
@@ -2836,14 +2828,12 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             st.session_state.editing_request_id = req.get("id")
                             st.rerun()
 
-# ─── DIRECTOR PORTAL ───
 elif role == "Director":
     director_addition_tab, director_work_order_tab = st.tabs([
         "➕ Addition & Deduction",
         "🛠️ Work Orders"
     ])
 
-    # ✅ FIX: ALL Addition & Deduction content is now INSIDE this tab
     with director_addition_tab:
         st.subheader("🎛️ Director Approval Portal — Andy Acoole")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -3048,7 +3038,6 @@ elif role == "Director":
     with director_work_order_tab:
         render_work_order_director_portal(full_name)
 
-# ─── SUPER ADMIN PORTAL ───
 elif role == "Super Admin":
     st.subheader("🛡️ Super Admin — All Requests")
     st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
@@ -3269,9 +3258,6 @@ elif role == "Super Admin":
             )
         st.caption("💾 Save these files to your computer for backup")
 
-# ============================================================
-# DEFAULT / FALLBACK
-# ============================================================
 else:
     st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
