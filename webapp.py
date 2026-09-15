@@ -375,6 +375,7 @@ DEFAULT_USERS = [
 ]
 PERMISSION_DEFAULTS = {
     "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
     "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
     "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
     "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
@@ -2499,13 +2500,25 @@ elif role == "Payroll":
     with st.expander("🛠️ Work Orders — Payroll", expanded=False):
         render_work_order_payroll_portal(full_name)
 
+# ─── WORK ORDER MANAGER PORTAL ───
+# Only users explicitly assigned the "Work Order Manager" role get work-order
+# access. Normal Managers remain on the normal request portal only.
+elif role == "Work Order Manager":
+    dept_name = dept
+    with st.expander("🛠️ Work Orders — Manager", expanded=True):
+        st.info("Only users assigned the Work Order Manager role can access work orders. This area includes work-order submission, manager review, rejected-order resubmission, and approved totals.")
+        # A Work Order Manager can create/submit their own work orders AND
+        # review work orders assigned to them.
+        render_work_order_employee_portal(full_name, dept_name)
+        st.divider()
+        render_work_order_manager_portal(full_name, dept_name)
+    st.divider()
+
 # ─── MANAGER / STAFF PORTAL ───
 elif role in ["Manager", "Staff", "Team Member"]:
     dept_name = dept
-    if role == "Manager":
-        with st.expander("🛠️ Work Orders — Manager Review", expanded=True):
-            render_work_order_manager_portal(full_name, dept_name)
-        st.divider()
+    # IMPORTANT: normal Manager role does NOT receive work-order access.
+    # Work-order access is reserved for the separate "Work Order Manager" role.
     if st.session_state.get("editing_request_id"):
         eid = st.session_state.editing_request_id
         rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
