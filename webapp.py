@@ -1,6 +1,7 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.0
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.1
 # ============================================================
+# ✅ work_order_total_pdf parameter renamed to prepared_by (TypeError fixed)
 # ✅ Director Work Order view: Hours removed, "Approved By:" label
 # ✅ All prior fixes retained
 # ============================================================
@@ -1008,7 +1009,8 @@ def display_work_order_pdf(req):
         with open(path, "rb") as f:
             st.download_button("📄 Download Work Order PDF", f.read(), file_name=os.path.basename(path), key=f"wo_pdf_{req.get('id')}")
 
-def work_order_total_pdf(records, employee_filter, from_date, to_date, created_by=""):
+def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_by=""):
+    # ✅ FIX: parameter renamed from created_by → prepared_by to match call sites
     if not PDF_AVAILABLE:
         return None
     try:
@@ -1036,8 +1038,8 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, created_b
         scope = employee_filter if employee_filter and employee_filter != "All Employees" else "All Employees"
         pdf.cell(0, 6, safe(f"Employee: {scope}"), ln=True)
         pdf.cell(0, 6, safe(f"Work date range: {from_date} to {to_date}"), ln=True)
-        if created_by:
-            pdf.cell(0, 6, safe(f"Prepared by: {created_by}"), ln=True)
+        if prepared_by:
+            pdf.cell(0, 6, safe(f"Prepared by: {prepared_by}"), ln=True)
         pdf.ln(3)
         pdf.set_font(family, "B", 9)
         pdf.cell(48, 7, safe("Work Order No."), border=1)
@@ -1409,7 +1411,6 @@ def render_work_order_director_portal(director_name):
         st.write(f"📘 **Customer Job No.:** {r.get('customer_job_no','-')}")
         st.write(f"📅 **Work Date:** {r.get('work_date','-')}")
         st.write(f"💷 **Amount:** £{float(r.get('amount',0) or 0):.2f}")
-        # ✅ Hours line removed
         st.write(f"👔 **Manager:** {r.get('manager','-')}")
         st.write(f"📝 **Submitted by:** {r.get('submitted_by','-')} on {r.get('submitted_date','-')}")
         if r.get('manager_decision_by'):
@@ -1420,7 +1421,6 @@ def render_work_order_director_portal(director_name):
         if r.get('director_comments'):
             st.warning(f"💬 **Director Comments:** {r.get('director_comments')}")
         if r.get('director_decision_by'):
-            # ✅ "Director Decision:" renamed to "Approved By:"
             st.write(f"🎯 **Approved By:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
         st.divider()
         st.markdown("#### 📎 Attachments")
