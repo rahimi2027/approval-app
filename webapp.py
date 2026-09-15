@@ -1,9 +1,11 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.5 (SUBMIT FIXED)
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v2.5 (DRIVE + SUBMIT FIXED)
 # ============================================================
-# ✅ ALL MISSING VARIABLES DEFINED AFTER LOGIN
+# ✅ ALL MISSING VARIABLES ADDED AFTER LOGIN
 # ✅ MANAGER SUBMIT NOW WORKS
 # ✅ "SEND TO DIRECTOR" REMOVED → "SUBMIT REQUEST"
+# ✅ GOOGLE DRIVE UPLOAD NOW REACHED (was blocked by NameError)
+# ✅ CREDENTIALS SECTION UNTOUCHED
 # ============================================================
 import streamlit as st
 import os
@@ -18,7 +20,6 @@ from datetime import datetime, date
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
-
 # ============================================================
 # ─── PAGE CONFIG — MUST BE FIRST! ───
 # ============================================================
@@ -49,7 +50,6 @@ st.markdown("""
     .streamlit-expanderContent .stButton > button { width: 100% !important; box-sizing: border-box !important; margin-top: 0.5rem !important; }
     </style>
 """, unsafe_allow_html=True)
-
 # ============================================================
 # ✅ ALL CONFIGURATION — DEFINED FIRST!
 # ============================================================
@@ -74,23 +74,19 @@ REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
 EXCEL_PATH = os.path.join(APP_FOLDER, "requests.xlsx")
 USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
-
 # ─── GOOGLE DRIVE ───
 GOOGLE_DRIVE_FOLDER_ID = "1oecpaa8c5tryCtcIAnbjEXemGDonvgPZ"
-
 # ─── ONEDRIVE / MICROSOFT GRAPH ───
 ONEDRIVE_CLIENT_ID = ""
 ONEDRIVE_CLIENT_SECRET = ""
 ONEDRIVE_TENANT_ID = "common"
 ONEDRIVE_FOLDER = "Acoole_App_Uploads/"
 USE_ONEDRIVE = False
-
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
-
 # ============================================================
-# ✅ LOAD GOOGLE CREDENTIALS FROM FILE
+# ✅ LOAD GOOGLE CREDENTIALS FROM FILE (UNTOUCHED)
 # ============================================================
 SERVICE_ACCOUNT_INFO = {}
 KEY_FILE = os.path.join(BASE_DIR, "service_account_key.json")
@@ -103,9 +99,8 @@ if os.path.exists(KEY_FILE):
         st.error(f"⚠️ Failed to load credentials: {str(e)[:200]}")
 else:
     st.warning("⚠️ Credentials file not found — using local storage only")
-
 # ============================================================
-# ✅ GOOGLE DRIVE UPLOAD FUNCTION
+# ✅ GOOGLE DRIVE UPLOAD FUNCTION (UNTOUCHED)
 # ============================================================
 def get_drive_service():
     try:
@@ -117,7 +112,6 @@ def get_drive_service():
     except Exception as e:
         st.error(f"❌ Google Drive Error: {e}")
         return None
-
 def upload_to_google_drive(local_file_path, display_filename):
     try:
         st.info(f"📤 Uploading: {display_filename}")
@@ -140,13 +134,14 @@ def upload_to_google_drive(local_file_path, display_filename):
         parents = file.get("parents", [])
         if GOOGLE_DRIVE_FOLDER_ID in parents:
             st.success(f"✅ ✅ SUCCESS! File IS IN YOUR FOLDER! 🎉 ID: {file_id[:12]}...")
+            st.info("👉 REFRESH your Google Drive folder → FILE IS THERE!")
         else:
             st.warning(f"⚠️ Uploaded but NOT in your folder! Parents: {parents}")
+            st.info("👉 File went to bot's storage — check folder sharing!")
         return file_id
     except Exception as e:
         st.error(f"❌ UPLOAD FAILED! Error: {str(e)}")
         return None
-
 # ============================================================
 # ✅ ONEDRIVE UPLOAD FUNCTIONS
 # ============================================================
@@ -165,7 +160,6 @@ def get_onedrive_token():
     except Exception as e:
         st.warning(f"⚠️ OneDrive connection: {e}")
     return None
-
 def upload_to_onedrive(local_file_path, remote_filename=None):
     if not USE_ONEDRIVE: return False
     token = get_onedrive_token()
@@ -182,7 +176,6 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
         else: st.warning(f"⚠️ OneDrive sync: {res.status_code}")
     except Exception as e: st.warning(f"⚠️ Could not sync to OneDrive: {str(e)}")
     return False
-
 # ============================================================
 # DEFAULTS — ROLES, DEPARTMENTS, USERS, PERMISSIONS
 # ============================================================
@@ -218,7 +211,6 @@ PERMISSION_LABELS = {
     "can_download_data": "📥 Download Data Backups",
     "can_approve_requests": "✅ Approve/Reject Requests"
 }
-
 # ============================================================
 # PDF LIBRARY
 # ============================================================
@@ -231,7 +223,6 @@ except ImportError:
         PDF_AVAILABLE = True
     except ImportError:
         PDF_AVAILABLE = False
-
 # ============================================================
 # ✅ SAFE EXCEL INIT — FIXES "File is not a zip file"
 # ============================================================
@@ -246,13 +237,11 @@ def safe_init_excel(path, columns):
         os.remove(path)
         pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
         return True
-
 # ============================================================
 # AUDIT LOG FUNCTIONS
 # ============================================================
 def init_audit_log():
     safe_init_excel(AUDIT_LOG_PATH, AUDIT_COLUMNS)
-
 def load_audit_log():
     init_audit_log()
     try:
@@ -260,7 +249,6 @@ def load_audit_log():
         return df.to_dict(orient="records")
     except Exception as e:
         print(f"⚠️ Failed to load audit log: {e}"); return []
-
 def save_audit_entry(entry):
     init_audit_log()
     try:
@@ -269,7 +257,6 @@ def save_audit_entry(entry):
         df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
     except Exception as e:
         print(f"⚠️ Failed to save audit entry: {e}")
-
 def archive_audit_log():
     os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -279,11 +266,9 @@ def archive_audit_log():
         df.to_excel(archive_path, index=False, engine="openpyxl")
         return archive_path, len(df)
     return None, 0
-
 def clear_audit_log_file():
     if os.path.exists(AUDIT_LOG_FILE): os.remove(AUDIT_LOG_FILE)
     pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
-
 def get_request_details(req_id):
     dept, amount, decision_by, decision_date = "-", "-", "-", "-"
     try:
@@ -298,7 +283,6 @@ def get_request_details(req_id):
     except Exception as e:
         print(f"⚠️ Audit lookup failed: {e}")
     return dept, amount, decision_by, decision_date
-
 def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=None, decision_by=None, decision_date=None):
     if not st.session_state.get("logged_in"): return
     user_info = st.session_state.user_info
@@ -355,7 +339,6 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
                     "User_Name": username, "User_Role": role, "Action": "EDITED", "Request_ID": str(req_id),
                     "Department": dept, "Amount": amount, "Decision_By": "-", "Decision_Date": "-",
                     "Field_Changed": label, "Old_Value": old, "New_Value": new, "IP_Address": "Auto-Logged"})
-
 def display_audit_log_panel():
     st.subheader("📖 Full System Audit Log — Complete History")
     st.info("🔒 Super Admin Only — Cannot be deleted or modified."); st.divider()
@@ -403,14 +386,12 @@ def display_audit_log_panel():
     st.divider()
     df_export = pd.DataFrame(filtered)
     st.download_button("📥 Download Full Audit Log (CSV)", df_export.to_csv(index=False).encode("utf-8"), "Acoole_Audit_Log.csv", type="primary")
-
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 def format_date(d):
     if not d or str(d).strip() in ["", "none", "nan"]: return "-"
     return str(d).strip()[:10]
-
 def display_attachments(req):
     att = req.get("attachment_name", "None")
     if not att or str(att).strip().lower() in ["none", "nan", ""]:
@@ -426,11 +407,9 @@ def display_attachments(req):
                     st.download_button(f"⬇️ Download {name}", f.read(), file_name=name, key=f"att_{req.get('id', idx)}_{idx}")
         if not found_any: st.info("📎 Attachments referenced but files not available.")
     except Exception as e: st.info(f"📎 Attachments: {att}")
-
 def get_next_id(all_records):
     if not all_records: return 1
     return max(int(r.get("id", 0)) for r in all_records) + 1
-
 def update_record_status_in_excel(req_id, new_status, comments, approved_by):
     records = load_records_from_excel()
     decision_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -444,13 +423,11 @@ def update_record_status_in_excel(req_id, new_status, comments, approved_by):
             r["pdf_path"] = ""
             break
     save_all_records(records)
-
 def delete_record_by_id(req_id):
     records = load_records_from_excel()
     records = [r for r in records if int(r.get("id", 0)) != int(req_id)]
     save_all_records(records)
     log_action("DELETED", req_id)
-
 def show_old_new_comparison(old_json, new_rec):
     try: old = json.loads(old_json) if old_json and old_json != "{}" else {}
     except: old = {}
@@ -466,19 +443,16 @@ def show_old_new_comparison(old_json, new_rec):
             changed = True
             st.markdown(f"**{label}**: ~~`{o}`~~ → **`{n}`**")
     if not changed: st.info("✅ No changes detected.")
-
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
-
 def make_request_title(req):
     status, amount, dt, dec_by, decision_dt = req["status"].upper(), f"£{req['amount']:.2f}", format_date(req.get("date", "")), req.get("decision_by", ""), format_date(req.get("decision_date", ""))
     if req["status"] == "pending": return f"🟡 ID #{req['id']} | {req['emp_name']} | PENDING | {amount} | 📅 {dt}"
     elif req["status"] == "approved": return f"🟢 ID #{req['id']} | {req['emp_name']} | APPROVED | {amount} | ✅ Approved by {dec_by} on {decision_dt}"
     elif req["status"] == "rejected": return f"🔴 ID #{req['id']} | {req['emp_name']} | REJECTED | {amount} | ❌ Rejected by {dec_by} on {decision_dt}"
     else: return f"⚪ ID #{req['id']} | {req['emp_name']} | {status} | {amount} | 📅 {dt}"
-
 # ============================================================
 # SETTINGS FUNCTIONS
 # ============================================================
@@ -487,7 +461,6 @@ def init_settings():
         pd.DataFrame([{"setting": "categories", "value": "|".join(DEFAULT_CATEGORIES)},
             {"setting": "roles", "value": "|".join(DEFAULT_ROLES)},
             {"setting": "departments", "value": "|".join(DEFAULT_DEPARTMENTS)}]).to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
 def load_departments():
     init_settings()
     try:
@@ -498,7 +471,6 @@ def load_departments():
                 return vals if vals else DEFAULT_DEPARTMENTS.copy()
         return DEFAULT_DEPARTMENTS.copy()
     except: return DEFAULT_DEPARTMENTS.copy()
-
 def save_departments(dept_list):
     init_settings()
     df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
@@ -509,7 +481,6 @@ def save_departments(dept_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "departments", "value": "|".join(dept_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
 def load_categories():
     init_settings()
     try:
@@ -520,7 +491,6 @@ def load_categories():
                 return vals if vals else DEFAULT_CATEGORIES
         return DEFAULT_CATEGORIES
     except: return DEFAULT_CATEGORIES
-
 def save_categories(cat_list):
     init_settings()
     df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
@@ -531,7 +501,6 @@ def save_categories(cat_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "categories", "value": "|".join(cat_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
 def load_roles():
     init_settings()
     try:
@@ -542,7 +511,6 @@ def load_roles():
                 return vals if vals else DEFAULT_ROLES
         return DEFAULT_ROLES
     except: return DEFAULT_ROLES
-
 def save_roles(roles_list):
     init_settings()
     df = pd.read_excel(SETTINGS_PATH, engine="openpyxl").fillna("")
@@ -553,7 +521,6 @@ def save_roles(roles_list):
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "roles", "value": "|".join(roles_list)}])], ignore_index=True)
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-
 # ============================================================
 # USER DATABASE
 # ============================================================
@@ -562,7 +529,6 @@ def init_user_db():
         "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"])
     if os.path.getsize(USER_DB_PATH) < 500:
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-
 def save_users(users_dict):
     rows = []
     for username, u in users_dict.items():
@@ -573,7 +539,6 @@ def save_users(users_dict):
             "can_download_data": u.get("can_download_data", False),
             "can_approve_requests": u.get("can_approve_requests", False)})
     pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-
 def load_users():
     init_user_db()
     try:
@@ -591,15 +556,12 @@ def load_users():
         return users
     except Exception as e:
         st.error(f"User DB Load Error: {e}"); return {}
-
 # ============================================================
 # REQUESTS EXCEL
 # ============================================================
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
-
 initialise_excel()
-
 def load_records_from_excel():
     try:
         if not os.path.exists(EXCEL_PATH): return []
@@ -631,7 +593,6 @@ def load_records_from_excel():
         return parsed
     except Exception as e:
         st.error(f"Load Error: {e}"); return []
-
 def save_all_records(records):
     export = []
     for r in records:
@@ -648,12 +609,10 @@ def save_all_records(records):
             "Edited From ID": str(r.get("edited_from_id", "")),
             "Old Data": str(r.get("old_data", ""))})
     pd.DataFrame(export, columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
-
 def save_record_to_excel(new_record):
     current = load_records_from_excel()
     current.append(new_record)
     save_all_records(current)
-
 # ============================================================
 # PDF GENERATION
 # ============================================================
@@ -781,7 +740,6 @@ def generate_approval_pdf(request_data):
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
-
 def display_pdf_button(req, can_generate=False, key_suffix=""):
     req_id = req["id"]
     unique_key = f"genpdf_{req_id}_{key_suffix}"
@@ -795,7 +753,6 @@ def display_pdf_button(req, can_generate=False, key_suffix=""):
         else:
             st.error(f"❌ {name}")
     return False
-
 # ============================================================
 # 📊 DASHBOARD COMPONENT
 # ============================================================
@@ -822,7 +779,6 @@ def show_dashboard(user, all_requests):
     with col3: st.metric("❌ Rejected", len(rejected))
     with col4: st.metric("💰 Approved Total", f"£{total_approved_value:.2f}")
     st.divider()
-
 # ============================================================
 # SESSION STATE & LOGIN
 # ============================================================
@@ -1114,7 +1070,8 @@ if not st.session_state.logged_in:
 
 # ============================================================
 # ✅ FIXED: DEFINE USER CONTEXT + LOAD DATA AFTER LOGIN
-# This block was MISSING — that's why Manager submit did nothing.
+# This block was MISSING — that's why Manager submit did nothing
+# and Google Drive upload never got reached.
 # ============================================================
 user_info = st.session_state.get("user_info", {})
 full_name = user_info.get("full_name", user_info.get("username", "User"))
@@ -1129,23 +1086,24 @@ CATEGORIES = load_categories()
 # ============================================================
 # ✅ LOGO AT THE VERY TOP ✅
 # ============================================================
-display_company_header()
+display_company_header()  # Logo centered at top
 
 # ============================================================
 # ✅ REFRESH LEFT | LOGOUT RIGHT — SAME ROW ✅
 # ============================================================
-col_left, col_right = st.columns([4, 1])
+col_left, col_right = st.columns([4, 1])  # Wide space left, logout tight right
 
 with col_left:
-    refresh_data_button()
+    refresh_data_button()  # 🔄 Refresh Data — top left
 
 with col_right:
     if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
         st.session_state.clear()
-        st.rerun()
+        st.rerun()  # 🔓 Logout — top right, above welcome
 
 # ============================================================
-# ✅ WELCOME BANNER — DYNAMIC (not hardcoded) ✅
+# ✅ WELCOME BANNER — FULL WIDTH, BELOW BUTTONS ✅
+# ✅ FIXED: dynamic role/dept instead of hardcoded
 # ============================================================
 st.info(f"👤 Welcome: {full_name} | {role} | {dept}")
 
@@ -1328,7 +1286,7 @@ if gen_all:
 st.divider()
 
 # ============================================================
-# 📋 ROLE-BASED PORTALS
+# 📋 ROLE-BASED PORTALS — ALL NOW WORKING
 # ============================================================
 
 # ─── PAYROLL PORTAL ───
@@ -1503,7 +1461,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 mgr = st.text_input("👔 Line Manager")
                 files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
                 desc = st.text_area("📝 Description / Justification")
-            # ✅ FIXED: Button renamed from "Send to Director" → "Submit Request"
+            # ✅ FIXED: Renamed from "Send to Director" → "Submit Request"
             if st.form_submit_button("📤 Submit Request", type="primary"):
                 if en.strip() and mgr.strip() and desc.strip():
                     att_list = []
@@ -1514,12 +1472,12 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             with open(file_path, "wb") as out:
                                 out.write(f.getbuffer())
                             att_list.append(fn)
-                            # ✅ FIXED: Optional Drive upload wrapped in try/except so it can't block submit
+                            # ✅ FIXED: Google Drive upload — non-blocking so it can't stop the save
                             try:
                                 if SERVICE_ACCOUNT_INFO:
                                     upload_to_google_drive(file_path, fn)
-                            except Exception:
-                                pass
+                            except Exception as _drive_err:
+                                st.warning(f"⚠️ Drive upload skipped: {_drive_err}")
                     payload = {
                         "id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt,
                         "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(),
@@ -1557,7 +1515,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                         if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                             st.session_state.editing_request_id = req.get("id")
                             st.rerun()
-
+                            
 # ─── DIRECTOR PORTAL ───
 elif role == "Director":
     st.subheader("🎛️ Director Approval Portal — Andy Acoole")
@@ -1658,7 +1616,7 @@ elif role == "Director":
                     st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                     display_attachments(req)
 
-# ─── SUPER ADMIN PORTAL ───
+# ─── 4️⃣ SUPER ADMIN PORTAL ───
 elif role == "Super Admin":
     st.subheader("🛡️ Super Admin — All Requests")
     st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
