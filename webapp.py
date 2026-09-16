@@ -1,7 +1,9 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.6
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.7
 # ============================================================
-# ✅ v3.6: Added National Grid Inspector Bonus Approval Tab (Manager + Permission controlled)
+# ✅ v3.7: Inspector Bonus — removed checkbox, added Director approval workflow,
+#           PDF download with company logo, logo at top of the form
+# ✅ v3.6: Added National Grid Inspector Bonus Approval Tab (Permission controlled)
 # ✅ v3.5: Work Order PDF: removed "Manager Review" and "Payment Status" sections
 # ✅ All prior fixes retained
 # ============================================================
@@ -78,6 +80,7 @@ SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
 WORK_ORDERS_PATH = os.path.join(APP_FOLDER, "work_orders.xlsx")
 WORK_ORDER_PDF_DIR = os.path.join(APP_FOLDER, "work_order_pdfs")
 INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
+INSPECTOR_BONUS_PDF_DIR = os.path.join(APP_FOLDER, "inspector_bonus_pdfs")
 # ─── GOOGLE DRIVE ───
 GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
 
@@ -92,6 +95,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(ARCHIVE_FOLDER, exist_ok=True)
 os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
+os.makedirs(INSPECTOR_BONUS_PDF_DIR, exist_ok=True)
 
 # ============================================================
 # GOOGLE DRIVE — YOUR PERSONAL GOOGLE ACCOUNT
@@ -307,8 +311,10 @@ WORK_ORDER_COLUMNS = [
 ]
 INSPECTOR_BONUS_COLUMNS = [
     "ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence",
-    "Total Jobs Completed", "Bonus Amount (£)", "Andy Approved",
-    "Submitted By", "Submitted Date", "Status"
+    "Total Jobs Completed", "Bonus Amount (£)",
+    "Status",
+    "Director Comments", "Director Decision Date", "Director Decision By",
+    "Submitted By", "Submitted Date", "PDF File Path"
 ]
 DEFAULT_USERS = [
     {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True},
@@ -465,14 +471,20 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
     SETTING_ACTIONS = ["CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
         "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED",
         "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED",
-        "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET"]
+        "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET",
+        "INSPECTOR_BONUS_CREATED", "INSPECTOR_BONUS_APPROVED", "INSPECTOR_BONUS_REJECTED",
+        "INSPECTOR_BONUS_STATUS_CHANGED"]
     if action in SETTING_ACTIONS:
         action_labels = {
             "CATEGORY_ADDED": "🏷️ Category Added", "CATEGORY_EDITED": "🏷️ Category Edited", "CATEGORY_DELETED": "🏷️ Category Deleted",
             "DEPARTMENT_ADDED": "🏢 Department Added", "DEPARTMENT_EDITED": "🏢 Department Edited", "DEPARTMENT_DELETED": "🏢 Department Deleted",
             "ROLE_ADDED": "🎖️ Role Added", "ROLE_EDITED": "🎖️ Role/Permissions Edited", "ROLE_DELETED": "🎖️ Role Deleted",
             "USER_CREATED": "👤 User Account Created", "USER_EDITED": "👤 User Account Edited",
-            "USER_DELETED": "👤 User Account Deleted", "PASSWORD_CHANGED": "🔑 Password Changed", "PASSWORD_RESET": "🔑 Password Reset"
+            "USER_DELETED": "👤 User Account Deleted", "PASSWORD_CHANGED": "🔑 Password Changed", "PASSWORD_RESET": "🔑 Password Reset",
+            "INSPECTOR_BONUS_CREATED": "💰 Inspector Bonus Submitted",
+            "INSPECTOR_BONUS_APPROVED": "💰 Inspector Bonus Approved",
+            "INSPECTOR_BONUS_REJECTED": "💰 Inspector Bonus Rejected",
+            "INSPECTOR_BONUS_STATUS_CHANGED": "💰 Inspector Bonus Status Changed"
         }
         display_action = action_labels.get(action, action)
         old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
@@ -480,7 +492,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
             "User_Name": username, "User_Role": role, "Action": display_action,
             "Request_ID": str(req_id), "Department": "-", "Amount": "-",
-            "Decision_By": "-", "Decision_Date": "-", "Field_Changed": "System Configuration",
+            "Decision_By": decision_by or "-", "Decision_Date": decision_date or "-",
+            "Field_Changed": "Inspector Bonus",
             "Old_Value": old_val, "New_Value": new_val, "IP_Address": "Auto-Logged"})
         return
     dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
@@ -912,7 +925,7 @@ def _pdf_text(value):
 
 def work_order_pdf(req):
     """
-    v3.6 — Generates the Work Order PDF.
+    v3.7 — Generates the Work Order PDF.
     REMOVED: 'Manager Review' section and 'Payment Status' line.
     RETAINED: Director Final Approval section.
     """
@@ -980,9 +993,6 @@ def work_order_pdf(req):
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(req.get("desc", "")))
 
-        # ✅ v3.5: Manager Review section removed (was previously printed here)
-        # ✅ v3.5: Payment Status line removed (was previously printed here)
-
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Director Final Approval"), ln=True)
@@ -1009,11 +1019,6 @@ def work_order_pdf(req):
         return None
 
 def display_work_order_pdf(req, force_regenerate=False):
-    """
-    v3.6 — Displays the Work Order PDF download button.
-    If force_regenerate=True, always rebuilds the PDF (useful after layout changes).
-    Otherwise uses cached path and only rebuilds if the file is missing.
-    """
     path = req.get("pdf_path", "")
     if force_regenerate or not path or not os.path.exists(path):
         path = work_order_pdf(req)
@@ -1200,7 +1205,6 @@ def render_work_order_bulk_download(records, key_prefix="wo_bulk"):
         failed = []
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
             for r in selected:
-                # v3.6 — force regenerate so any layout changes are included
                 path = work_order_pdf(r)
                 if path:
                     for x in records:
@@ -1643,10 +1647,13 @@ def load_inspector_bonus(force=False):
                 "reasons": str(r.get("Reasons for Absence", "")).strip(),
                 "total_jobs": jobs,
                 "bonus_amount": amount,
-                "andy_approved": str(r.get("Andy Approved", "")).strip(),
+                "status": str(r.get("Status", "pending_director")).strip().lower(),
+                "director_comments": str(r.get("Director Comments", "")).strip(),
+                "director_decision_date": str(r.get("Director Decision Date", "")).strip(),
+                "director_decision_by": str(r.get("Director Decision By", "")).strip(),
                 "submitted_by": str(r.get("Submitted By", "")).strip(),
                 "submitted_date": str(r.get("Submitted Date", "")).strip(),
-                "status": str(r.get("Status", "Pending")).strip()
+                "pdf_path": str(r.get("PDF File Path", "")).strip(),
             })
         _set_data_cache("_inspector_bonus_cache", records)
         return list(records)
@@ -1665,10 +1672,13 @@ def save_all_inspector_bonus(records):
             "Reasons for Absence": str(r.get("reasons", "")),
             "Total Jobs Completed": float(r.get("total_jobs", 0)),
             "Bonus Amount (£)": float(r.get("bonus_amount", 0)),
-            "Andy Approved": str(r.get("andy_approved", "")),
+            "Status": str(r.get("status", "pending_director")),
+            "Director Comments": str(r.get("director_comments", "")),
+            "Director Decision Date": str(r.get("director_decision_date", "")),
+            "Director Decision By": str(r.get("director_decision_by", "")),
             "Submitted By": str(r.get("submitted_by", "")),
             "Submitted Date": str(r.get("submitted_date", "")),
-            "Status": str(r.get("status", "Pending"))
+            "PDF File Path": str(r.get("pdf_path", "")),
         })
     pd.DataFrame(rows, columns=INSPECTOR_BONUS_COLUMNS).to_excel(INSPECTOR_BONUS_PATH, index=False, engine="openpyxl")
     _set_data_cache("_inspector_bonus_cache", list(records))
@@ -1682,14 +1692,173 @@ def get_next_inspector_bonus_id(records):
         except: pass
     return f"IB-{max(nums) + 1 if nums else 1:04d}"
 
+def inspector_bonus_pdf(req, force_regenerate=False):
+    """
+    v3.7 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
+    Includes the company logo at the top.
+    """
+    if not PDF_AVAILABLE:
+        return None
+    try:
+        # Reuse cached file unless forced
+        cached_path = req.get("pdf_path", "")
+        if not force_regenerate and cached_path and os.path.exists(cached_path):
+            return cached_path
+
+        pdf = FPDF()
+        pdf.add_page()
+        regular_font, bold_font = _pdf_font_paths()
+        if regular_font and bold_font:
+            pdf.add_font("DejaVu", "", regular_font)
+            pdf.add_font("DejaVu", "B", bold_font)
+            family = "DejaVu"
+        else:
+            family = "Helvetica"
+
+        def safe(v):
+            text = _pdf_text(v)
+            if family == "Helvetica":
+                return text.encode("latin-1", "replace").decode("latin-1")
+            return text
+
+        # ---------- Company Logo at top ----------
+        if os.path.exists(LOGO_PATH):
+            try:
+                pdf.image(LOGO_PATH, x=75, y=10, w=60)
+                pdf.ln(28)
+            except Exception:
+                pdf.ln(5)
+        else:
+            pdf.ln(5)
+
+        # ---------- Title ----------
+        pdf.set_font(family, "B", 16)
+        pdf.cell(0, 10, safe("National Grid Inspector Bonus Approval Sheet"), ln=True, align="C")
+        pdf.ln(4)
+
+        # ---------- Subtitle ----------
+        pdf.set_font(family, "", 10)
+        pdf.multi_cell(
+            0, 6,
+            safe("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month."),
+            align="C"
+        )
+        pdf.ln(8)
+
+        # ---------- Fields ----------
+        def field(label, value, label_w=60, value_h=10):
+            pdf.set_font(family, "B", 11)
+            pdf.cell(label_w, value_h, safe(label), border=1)
+            pdf.set_font(family, "", 11)
+            pdf.cell(0, value_h, safe("   " + str(value)), border=1, ln=True)
+            pdf.ln(2)
+
+        field("Inspector Name:", req.get("inspector_name", ""))
+        field("Month & Year:", req.get("month_year", ""))
+        field("Days Absent:", req.get("days_absent", "") or "-")
+        field("Reasons for Absence:", req.get("reasons", "") or "-")
+        field("Total Jobs Completed", f"{float(req.get('total_jobs', 0)):.2f}")
+        field("Bonus Amount:", f"£{float(req.get('bonus_amount', 0)):.2f}")
+
+        # ---------- Andy Approved (decision from Director) ----------
+        pdf.set_font(family, "B", 11)
+        pdf.cell(60, 10, safe("Andy Approved"), border=1)
+        pdf.set_font(family, "", 11)
+        status = str(req.get("status", "")).strip().lower()
+        if status == "approved":
+            approved_by = req.get("director_decision_by", "") or "Andy Acoole"
+            decision_date = req.get("director_decision_date", "")
+            pdf.cell(0, 10, safe(f"   ✅ Approved — {approved_by} on {decision_date}"), border=1, ln=True)
+        elif status == "rejected":
+            pdf.cell(0, 10, safe("   ❌ Rejected"), border=1, ln=True)
+        else:
+            pdf.cell(0, 10, safe("   (Pending Director signature)"), border=1, ln=True)
+        pdf.ln(6)
+
+        # ---------- Director comments (if any) ----------
+        if req.get("director_comments"):
+            pdf.set_font(family, "B", 10)
+            pdf.cell(0, 6, safe("Director Comments:"), ln=True)
+            pdf.set_font(family, "", 10)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(0, 6, safe(req.get("director_comments", "")))
+            pdf.ln(4)
+
+        # ---------- Footer info ----------
+        pdf.set_font(family, "", 9)
+        pdf.cell(0, 5, safe(f"Submitted By: {req.get('submitted_by', '')}"), ln=True)
+        pdf.cell(0, 5, safe(f"Submitted Date: {req.get('submitted_date', '')}"), ln=True)
+        pdf.cell(0, 5, safe(f"Record ID: {req.get('id', '')}"), ln=True)
+
+        os.makedirs(INSPECTOR_BONUS_PDF_DIR, exist_ok=True)
+        safe_id = "".join(str(req.get("id", "IB")).split()) or "IB"
+        safe_name = "_".join(str(req.get("inspector_name", "Inspector")).split()) or "Inspector"
+        safe_month = "_".join(str(req.get("month_year", "")).split()) or "Month"
+        filename = f"Inspector_Bonus_{safe_id}_{safe_name}_{safe_month}.pdf"
+        path = os.path.join(INSPECTOR_BONUS_PDF_DIR, filename)
+        pdf.output(path)
+        upload_to_google_drive(path, os.path.basename(path))
+        return path
+    except Exception as e:
+        st.error(f"Inspector Bonus PDF Error: {e}")
+        return None
+
+def display_inspector_bonus_pdf_button(req, key_prefix="ib"):
+    """Show a Generate/Download PDF button for an approved inspector bonus."""
+    if not PDF_AVAILABLE:
+        st.warning("⚠️ PDF generation is unavailable. Please install fpdf2.")
+        return
+    status = str(req.get("status", "")).strip().lower()
+    if status != "approved":
+        st.info("📄 PDF download is available once the Director approves this bonus.")
+        return
+    req_id = str(req.get("id", "unknown"))
+    state_key = f"{key_prefix}_pdf_state_{req_id}"
+    gen_key = f"{key_prefix}_gen_{req_id}"
+    dl_key = f"{key_prefix}_dl_{req_id}"
+    if st.button(f"📄 Generate PDF for {req_id}", key=gen_key, type="primary"):
+        path = inspector_bonus_pdf(req, force_regenerate=True)
+        if path and os.path.exists(path):
+            with open(path, "rb") as f:
+                st.session_state[state_key] = {"data": f.read(), "filename": os.path.basename(path)}
+            # Persist path in records
+            records = load_inspector_bonus()
+            for r in records:
+                if str(r.get("id")) == req_id:
+                    r["pdf_path"] = path
+            save_all_inspector_bonus(records)
+            st.success("✅ PDF ready. Click below to download.")
+        else:
+            st.error("❌ Could not generate PDF.")
+    result = st.session_state.get(state_key)
+    if result:
+        st.download_button(
+            "⬇️ Download Bonus Approval PDF",
+            data=result["data"],
+            file_name=result["filename"],
+            mime="application/pdf",
+            type="primary",
+            key=dl_key
+        )
+
 def render_inspector_bonus_portal(user_name, user_dept):
     st.subheader("💰 National Grid Inspector Bonus Approval")
     st.info("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month.")
     st.divider()
-    
+
+    # ---------- Company Logo at top ----------
+    if os.path.exists(LOGO_PATH):
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
+            st.image(LOGO_PATH, width=300)
+    else:
+        st.markdown("### ⚡ ACOOLE ELECTRICAL LTD")
+
+    st.divider()
+
     bonus_records = load_inspector_bonus()
     new_id = get_next_inspector_bonus_id(bonus_records)
-    
+
     with st.form("inspector_bonus_form", clear_on_submit=True):
         st.markdown(f"**🔐 Internal Record ID:** `{new_id}`")
         c1, c2 = st.columns(2)
@@ -1701,11 +1870,10 @@ def render_inspector_bonus_portal(user_name, user_dept):
         with c2:
             total_jobs = st.number_input("Total Jobs Completed:", min_value=0.0, step=1.0, format="%.2f")
             bonus_amount = st.number_input("Bonus Amount (£):", min_value=0.01, step=1.0, format="%.2f")
-            andy_approved = st.checkbox("Andy Approved (Signature)")
-            st.caption("Tick to confirm Andy has approved this bonus.")
-        
-        submitted = st.form_submit_button("📤 Submit Bonus Approval", type="primary", use_container_width=True)
-        
+            st.caption("ℹ️ After submission, this will be sent to the Director for approval. You'll see the result below once Andy signs off.")
+
+        submitted = st.form_submit_button("📤 Submit for Director Approval", type="primary", use_container_width=True)
+
         if submitted:
             if not inspector_name.strip():
                 st.error("❌ Inspector Name is required.")
@@ -1720,38 +1888,136 @@ def render_inspector_bonus_portal(user_name, user_dept):
                     "reasons": reasons.strip(),
                     "total_jobs": float(total_jobs),
                     "bonus_amount": float(bonus_amount),
-                    "andy_approved": "Yes" if andy_approved else "No",
+                    "status": "pending_director",
+                    "director_comments": "",
+                    "director_decision_date": "",
+                    "director_decision_by": "",
                     "submitted_by": user_name,
                     "submitted_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "status": "Approved" if andy_approved else "Pending"
+                    "pdf_path": ""
                 }
                 bonus_records.append(rec)
                 save_all_inspector_bonus(bonus_records)
                 log_action("INSPECTOR_BONUS_CREATED", new_id, new_data=rec)
-                st.success(f"✅ Bonus Approval {new_id} for {inspector_name} submitted successfully.")
+                st.success(f"✅ Bonus Approval {new_id} for {inspector_name} submitted to Director for approval.")
                 st.rerun()
-    
+
     st.divider()
     st.subheader("📋 Submitted Bonus Approvals")
     search = st.text_input("🔎 Search records", placeholder="Search by ID, inspector, month, amount...", key="ib_search")
+    filtered = list(bonus_records)
     if search.strip():
         q = search.lower().strip()
-        bonus_records = [r for r in bonus_records if q in " ".join(str(v) for v in r.values()).lower()]
-    
-    if not bonus_records:
+        filtered = [r for r in filtered if q in " ".join(str(v) for v in r.values()).lower()]
+
+    if not filtered:
         st.info("📋 No bonus approval records found.")
     else:
-        for r in reversed(bonus_records):
-            status_icon = "🟢" if r.get("status") == "Approved" else "🟡"
-            with st.expander(f"{status_icon} {r.get('id')} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
+        for r in reversed(filtered):
+            status_raw = str(r.get("status", "")).strip().lower()
+            if status_raw == "approved":
+                icon = "🟢"
+                status_label = "APPROVED"
+            elif status_raw == "rejected":
+                icon = "🔴"
+                status_label = "REJECTED"
+            else:
+                icon = "🟡"
+                status_label = "PENDING DIRECTOR"
+
+            with st.expander(f"{icon} {r.get('id')} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f} | {status_label}"):
                 st.write(f"**Inspector:** {r.get('inspector_name')} | **Month:** {r.get('month_year')}")
-                st.write(f"**Days Absent:** {r.get('days_absent')}")
-                st.write(f"**Reasons:** {r.get('reasons')}")
+                st.write(f"**Days Absent:** {r.get('days_absent') or '-'}")
+                st.write(f"**Reasons:** {r.get('reasons') or '-'}")
                 st.write(f"**Total Jobs Completed:** {r.get('total_jobs')}")
                 st.write(f"**Bonus Amount:** £{r.get('bonus_amount',0):.2f}")
-                st.write(f"**Andy Approved:** {r.get('andy_approved')}")
-                st.write(f"**Status:** {r.get('status')}")
+                st.write(f"**Status:** {status_label}")
+                if r.get("director_decision_by"):
+                    st.write(f"**Director:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
+                if r.get("director_comments"):
+                    st.info(f"💬 **Director Comments:** {r.get('director_comments')}")
                 st.caption(f"Submitted by {r.get('submitted_by')} on {r.get('submitted_date')}")
+                # PDF download (only when approved)
+                display_inspector_bonus_pdf_button(r, key_prefix="ib_mgr")
+
+def render_inspector_bonus_director_portal(director_name):
+    st.subheader("💰 National Grid Inspector Bonus — Director Approval")
+    st.info("Review Inspector Bonus submissions from Managers. Approve or Reject. Approved records become downloadable as PDFs by the submitting manager.")
+    st.divider()
+
+    records = load_inspector_bonus()
+    pending = [r for r in records if str(r.get("status", "")).strip().lower() == "pending_director"]
+    approved = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+    rejected = [r for r in records if str(r.get("status", "")).strip().lower() == "rejected"]
+
+    t1, t2, t3 = st.tabs([
+        f"⏳ Pending ({len(pending)})",
+        f"✅ Approved ({len(approved)})",
+        f"❌ Rejected ({len(rejected)})"
+    ])
+
+    def apply_decision(rec_id, new_status, comments):
+        for x in records:
+            if str(x.get("id")) == str(rec_id):
+                x["status"] = new_status
+                x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
+                x["director_decision_by"] = director_name
+                x["director_decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                x["pdf_path"] = ""  # force regenerate after decision
+                break
+        save_all_inspector_bonus(records)
+        action = "INSPECTOR_BONUS_APPROVED" if new_status == "approved" else "INSPECTOR_BONUS_REJECTED"
+        log_action(action, rec_id, new_data={"status": new_status, "comments": comments}, decision_by=director_name)
+        st.success(f"✅ Record {rec_id} → **{new_status.upper()}**.")
+
+    def show_details(r):
+        st.write(f"**Inspector:** {r.get('inspector_name')} | **Month:** {r.get('month_year')}")
+        st.write(f"**Days Absent:** {r.get('days_absent') or '-'}")
+        st.write(f"**Reasons:** {r.get('reasons') or '-'}")
+        st.write(f"**Total Jobs Completed:** {r.get('total_jobs')}")
+        st.write(f"**Bonus Amount:** £{r.get('bonus_amount',0):.2f}")
+        st.caption(f"Submitted by {r.get('submitted_by')} on {r.get('submitted_date')}")
+        if r.get("director_decision_by"):
+            st.write(f"**Decision By:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
+        if r.get("director_comments"):
+            st.info(f"💬 **Director Comments:** {r.get('director_comments')}")
+
+    with t1:
+        if not pending:
+            st.success("✅ No pending Inspector Bonus submissions.")
+        for r in reversed(pending):
+            rec_id = r.get("id")
+            with st.expander(f"🟡 {rec_id} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
+                show_details(r)
+                st.divider()
+                comments = st.text_area("Director Comments", key=f"ib_dir_comm_{rec_id}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ Approve", key=f"ib_dir_app_{rec_id}", type="primary"):
+                        apply_decision(rec_id, "approved", comments)
+                        st.rerun()
+                with c2:
+                    if st.button("❌ Reject", key=f"ib_dir_rej_{rec_id}"):
+                        apply_decision(rec_id, "rejected", comments)
+                        st.rerun()
+
+    with t2:
+        if not approved:
+            st.info("✅ No approved Inspector Bonus records yet.")
+        for r in reversed(approved):
+            rec_id = r.get("id")
+            with st.expander(f"🟢 {rec_id} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
+                show_details(r)
+                st.divider()
+                display_inspector_bonus_pdf_button(r, key_prefix="ib_dir")
+
+    with t3:
+        if not rejected:
+            st.info("❌ No rejected Inspector Bonus records.")
+        for r in reversed(rejected):
+            rec_id = r.get("id")
+            with st.expander(f"🔴 {rec_id} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
+                show_details(r)
 
 # ============================================================
 # REQUESTS EXCEL
@@ -2830,15 +3096,15 @@ elif role == "Work Order Manager":
                                 st.session_state.editing_request_id = req.get("id"); st.rerun()
     with work_order_tab:
         st.subheader("🛠️ Work Orders — Manager")
-        st.info("Only users assigned the Work Order Manager role can access work orders. You can submit work orders, review assigned work orders, edit rejected orders, and create approved totals/PDFs.")
+        st.info("Only users assigned the Work Order Manager role can access work orders.")
         render_work_order_manager_portal(full_name, dept_name, show_total=True)
 
 elif role in ["Manager", "Staff", "Team Member"]:
     dept_name = dept
-    
-    # v3.6 — Check for Inspector Bonus permission
+
+    # v3.6 / v3.7 — Check for Inspector Bonus permission
     has_inspector_bonus = user_info.get("can_access_inspector_bonus", False)
-    
+
     if has_inspector_bonus:
         tab_main, tab_bonus = st.tabs(["➕ Addition & Deduction", "💰 National Grid Inspector Bonus"])
     else:
@@ -2982,13 +3248,17 @@ elif role in ["Manager", "Staff", "Team Member"]:
                         if status in ["pending", "rejected"]:
                             if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                                 st.session_state.editing_request_id = req.get("id"); st.rerun()
-    
+
     if tab_bonus:
         with tab_bonus:
             render_inspector_bonus_portal(full_name, dept_name)
 
 elif role == "Director":
-    director_addition_tab, director_work_order_tab, director_inspector_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"])
+    director_addition_tab, director_work_order_tab, director_inspector_tab = st.tabs([
+        "➕ Addition & Deduction",
+        "🛠️ Work Orders",
+        "💰 National Grid Inspector Bonus"
+    ])
     with director_addition_tab:
         st.subheader("🎛️ Director Approval Portal — Andy Acoole")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -3140,7 +3410,7 @@ elif role == "Director":
     with director_work_order_tab:
         render_work_order_director_portal(full_name)
     with director_inspector_tab:
-        render_inspector_bonus_portal(full_name, dept)
+        render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
     st.subheader("🛡️ Super Admin — All Requests")
