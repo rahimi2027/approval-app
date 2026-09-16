@@ -1,8 +1,8 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.5
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.6
 # ============================================================
-# ✅ Work Order PDF: removed "Manager Review" and "Payment Status" sections
-# ✅ Added force-regenerate option so cached old PDFs don't persist
+# ✅ v3.6: Added National Grid Inspector Bonus Approval Tab (Manager + Permission controlled)
+# ✅ v3.5: Work Order PDF: removed "Manager Review" and "Payment Status" sections
 # ✅ All prior fixes retained
 # ============================================================
 import streamlit as st
@@ -77,6 +77,7 @@ USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
 WORK_ORDERS_PATH = os.path.join(APP_FOLDER, "work_orders.xlsx")
 WORK_ORDER_PDF_DIR = os.path.join(APP_FOLDER, "work_order_pdfs")
+INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
 # ─── GOOGLE DRIVE ───
 GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
 
@@ -237,10 +238,11 @@ def initialise_drive_storage():
     targets = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, ["full_name","username","password","role","dept",
-            "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"]),
+            "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests","can_access_inspector_bonus"]),
         (SETTINGS_PATH, ["setting", "value"]),
         (AUDIT_LOG_PATH, AUDIT_COLUMNS),
         (WORK_ORDERS_PATH, WORK_ORDER_COLUMNS),
+        (INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS),
     ]
     for path, columns in targets:
         sync_persistent_file(path, columns)
@@ -303,8 +305,13 @@ WORK_ORDER_COLUMNS = [
     "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date",
     "Payroll By", "PDF File Path"
 ]
+INSPECTOR_BONUS_COLUMNS = [
+    "ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence",
+    "Total Jobs Completed", "Bonus Amount (£)", "Andy Approved",
+    "Submitted By", "Submitted Date", "Status"
+]
 DEFAULT_USERS = [
-    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid"},
+    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True},
     {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator"},
     {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project"},
     {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts"},
@@ -313,20 +320,21 @@ DEFAULT_USERS = [
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department"}
 ]
 PERMISSION_DEFAULTS = {
-    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
-    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
-    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
-    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False},
-    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False},
-    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True},
-    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False},
-    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True}
+    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False},
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False},
+    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False},
+    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False},
+    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True},
+    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": False},
+    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True}
 }
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
     "can_generate_pdf": "📄 Generate & Download PDFs",
     "can_download_data": "📥 Download Data Backups",
-    "can_approve_requests": "✅ Approve/Reject Requests"
+    "can_approve_requests": "✅ Approve/Reject Requests",
+    "can_access_inspector_bonus": "💰 National Grid Inspector Bonus"
 }
 
 # ============================================================
@@ -628,11 +636,11 @@ def show_old_new_comparison(old_json, new_rec):
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         if drive_service is not None:
-            for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH):
+            for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH):
                 remote = _drive_find_file(os.path.basename(path))
                 if remote:
                     _drive_download_file(remote["id"], path)
-        _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache")
+        _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache")
         st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 
@@ -728,7 +736,7 @@ initialise_drive_storage()
 # ============================================================
 def init_user_db():
     safe_init_excel(USER_DB_PATH, ["full_name","username","password","role","dept",
-        "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests"])
+        "can_view_all_dept","can_generate_pdf","can_download_data","can_approve_requests","can_access_inspector_bonus"])
     try:
         df = pd.read_excel(USER_DB_PATH, engine="openpyxl")
         if df.empty:
@@ -746,7 +754,8 @@ def save_users(users_dict):
             "dept": u.get("dept", ""), "can_view_all_dept": u.get("can_view_all_dept", False),
             "can_generate_pdf": u.get("can_generate_pdf", False),
             "can_download_data": u.get("can_download_data", False),
-            "can_approve_requests": u.get("can_approve_requests", False)})
+            "can_approve_requests": u.get("can_approve_requests", False),
+            "can_access_inspector_bonus": u.get("can_access_inspector_bonus", False)})
     pd.DataFrame(rows).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
     _invalidate_data_cache("_users_cache")
     sync_saved_file_to_drive(USER_DB_PATH)
@@ -771,6 +780,7 @@ def load_users(force=False):
                 "can_generate_pdf": str(r.get("can_generate_pdf", "False")).lower() == "true",
                 "can_download_data": str(r.get("can_download_data", "False")).lower() == "true",
                 "can_approve_requests": str(r.get("can_approve_requests", "False")).lower() == "true",
+                "can_access_inspector_bonus": str(r.get("can_access_inspector_bonus", "False")).lower() == "true",
             }
         _set_data_cache("_users_cache", users)
         return dict(users)
@@ -902,7 +912,7 @@ def _pdf_text(value):
 
 def work_order_pdf(req):
     """
-    v3.5 — Generates the Work Order PDF.
+    v3.6 — Generates the Work Order PDF.
     REMOVED: 'Manager Review' section and 'Payment Status' line.
     RETAINED: Director Final Approval section.
     """
@@ -1000,7 +1010,7 @@ def work_order_pdf(req):
 
 def display_work_order_pdf(req, force_regenerate=False):
     """
-    v3.5 — Displays the Work Order PDF download button.
+    v3.6 — Displays the Work Order PDF download button.
     If force_regenerate=True, always rebuilds the PDF (useful after layout changes).
     Otherwise uses cached path and only rebuilds if the file is missing.
     """
@@ -1190,7 +1200,7 @@ def render_work_order_bulk_download(records, key_prefix="wo_bulk"):
         failed = []
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
             for r in selected:
-                # v3.5 — force regenerate so any layout changes are included
+                # v3.6 — force regenerate so any layout changes are included
                 path = work_order_pdf(r)
                 if path:
                     for x in records:
@@ -1608,6 +1618,142 @@ def render_work_order_payroll_portal(payroll_name):
     render_work_order_total(approved, key_prefix="wo_pay_total", prepared_by=payroll_name)
 
 # ============================================================
+# NATIONAL GRID INSPECTOR BONUS
+# ============================================================
+def initialise_inspector_bonus():
+    safe_init_excel(INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS)
+
+def load_inspector_bonus(force=False):
+    if not force and "_inspector_bonus_cache" in st.session_state:
+        return list(st.session_state["_inspector_bonus_cache"])
+    initialise_inspector_bonus()
+    try:
+        df = _read_excel_records(INSPECTOR_BONUS_PATH)
+        records = []
+        for r in df.to_dict(orient="records"):
+            try: amount = float(r.get("Bonus Amount (£)", 0) or 0)
+            except: amount = 0.0
+            try: jobs = float(r.get("Total Jobs Completed", 0) or 0)
+            except: jobs = 0.0
+            records.append({
+                "id": str(r.get("ID", "")).strip(),
+                "inspector_name": str(r.get("Inspector Name", "")).strip(),
+                "month_year": str(r.get("Month & Year", "")).strip(),
+                "days_absent": str(r.get("Days Absent", "")).strip(),
+                "reasons": str(r.get("Reasons for Absence", "")).strip(),
+                "total_jobs": jobs,
+                "bonus_amount": amount,
+                "andy_approved": str(r.get("Andy Approved", "")).strip(),
+                "submitted_by": str(r.get("Submitted By", "")).strip(),
+                "submitted_date": str(r.get("Submitted Date", "")).strip(),
+                "status": str(r.get("Status", "Pending")).strip()
+            })
+        _set_data_cache("_inspector_bonus_cache", records)
+        return list(records)
+    except Exception as e:
+        st.error(f"Inspector Bonus Load Error: {e}")
+        return []
+
+def save_all_inspector_bonus(records):
+    rows = []
+    for r in records:
+        rows.append({
+            "ID": str(r.get("id", "")),
+            "Inspector Name": str(r.get("inspector_name", "")),
+            "Month & Year": str(r.get("month_year", "")),
+            "Days Absent": str(r.get("days_absent", "")),
+            "Reasons for Absence": str(r.get("reasons", "")),
+            "Total Jobs Completed": float(r.get("total_jobs", 0)),
+            "Bonus Amount (£)": float(r.get("bonus_amount", 0)),
+            "Andy Approved": str(r.get("andy_approved", "")),
+            "Submitted By": str(r.get("submitted_by", "")),
+            "Submitted Date": str(r.get("submitted_date", "")),
+            "Status": str(r.get("status", "Pending"))
+        })
+    pd.DataFrame(rows, columns=INSPECTOR_BONUS_COLUMNS).to_excel(INSPECTOR_BONUS_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_inspector_bonus_cache", list(records))
+    sync_saved_file_to_drive(INSPECTOR_BONUS_PATH)
+
+def get_next_inspector_bonus_id(records):
+    nums = []
+    for r in records:
+        raw = str(r.get("id", ""))
+        try: nums.append(int(raw.replace("IB-", "")))
+        except: pass
+    return f"IB-{max(nums) + 1 if nums else 1:04d}"
+
+def render_inspector_bonus_portal(user_name, user_dept):
+    st.subheader("💰 National Grid Inspector Bonus Approval")
+    st.info("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month.")
+    st.divider()
+    
+    bonus_records = load_inspector_bonus()
+    new_id = get_next_inspector_bonus_id(bonus_records)
+    
+    with st.form("inspector_bonus_form", clear_on_submit=True):
+        st.markdown(f"**🔐 Internal Record ID:** `{new_id}`")
+        c1, c2 = st.columns(2)
+        with c1:
+            inspector_name = st.text_input("Inspector Name:", placeholder="e.g. Abdul Ali")
+            month_year = st.text_input("Month & Year:", placeholder="e.g. Jul-26")
+            days_absent = st.text_input("Days Absent:", placeholder="e.g. 2 days, None")
+            reasons = st.text_area("Reasons for Absence:", placeholder="Reason details...", height=100)
+        with c2:
+            total_jobs = st.number_input("Total Jobs Completed:", min_value=0.0, step=1.0, format="%.2f")
+            bonus_amount = st.number_input("Bonus Amount (£):", min_value=0.01, step=1.0, format="%.2f")
+            andy_approved = st.checkbox("Andy Approved (Signature)")
+            st.caption("Tick to confirm Andy has approved this bonus.")
+        
+        submitted = st.form_submit_button("📤 Submit Bonus Approval", type="primary", use_container_width=True)
+        
+        if submitted:
+            if not inspector_name.strip():
+                st.error("❌ Inspector Name is required.")
+            elif not month_year.strip():
+                st.error("❌ Month & Year is required.")
+            else:
+                rec = {
+                    "id": new_id,
+                    "inspector_name": inspector_name.strip(),
+                    "month_year": month_year.strip(),
+                    "days_absent": days_absent.strip(),
+                    "reasons": reasons.strip(),
+                    "total_jobs": float(total_jobs),
+                    "bonus_amount": float(bonus_amount),
+                    "andy_approved": "Yes" if andy_approved else "No",
+                    "submitted_by": user_name,
+                    "submitted_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": "Approved" if andy_approved else "Pending"
+                }
+                bonus_records.append(rec)
+                save_all_inspector_bonus(bonus_records)
+                log_action("INSPECTOR_BONUS_CREATED", new_id, new_data=rec)
+                st.success(f"✅ Bonus Approval {new_id} for {inspector_name} submitted successfully.")
+                st.rerun()
+    
+    st.divider()
+    st.subheader("📋 Submitted Bonus Approvals")
+    search = st.text_input("🔎 Search records", placeholder="Search by ID, inspector, month, amount...", key="ib_search")
+    if search.strip():
+        q = search.lower().strip()
+        bonus_records = [r for r in bonus_records if q in " ".join(str(v) for v in r.values()).lower()]
+    
+    if not bonus_records:
+        st.info("📋 No bonus approval records found.")
+    else:
+        for r in reversed(bonus_records):
+            status_icon = "🟢" if r.get("status") == "Approved" else "🟡"
+            with st.expander(f"{status_icon} {r.get('id')} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
+                st.write(f"**Inspector:** {r.get('inspector_name')} | **Month:** {r.get('month_year')}")
+                st.write(f"**Days Absent:** {r.get('days_absent')}")
+                st.write(f"**Reasons:** {r.get('reasons')}")
+                st.write(f"**Total Jobs Completed:** {r.get('total_jobs')}")
+                st.write(f"**Bonus Amount:** £{r.get('bonus_amount',0):.2f}")
+                st.write(f"**Andy Approved:** {r.get('andy_approved')}")
+                st.write(f"**Status:** {r.get('status')}")
+                st.caption(f"Submitted by {r.get('submitted_by')} on {r.get('submitted_date')}")
+
+# ============================================================
 # REQUESTS EXCEL
 # ============================================================
 def initialise_excel():
@@ -1615,6 +1761,7 @@ def initialise_excel():
 
 initialise_excel()
 initialise_work_orders()
+initialise_inspector_bonus()
 
 def load_records_from_excel(force=False):
     if not force and "_records_cache" in st.session_state:
@@ -2122,10 +2269,11 @@ def user_management_panel():
             st.caption(f"Defaults for **{new_role}** are pre-selected")
             defaults = PERMISSION_DEFAULTS.get(new_role, PERMISSION_DEFAULTS["Staff"])
             col1, col2 = st.columns(2)
-            perm_view_all = col1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=defaults["can_view_all_dept"])
-            perm_pdf = col1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=defaults["can_generate_pdf"])
-            perm_download = col2.checkbox(PERMISSION_LABELS["can_download_data"], value=defaults["can_download_data"])
-            perm_approve = col2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=defaults["can_approve_requests"])
+            perm_view_all = col1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=defaults.get("can_view_all_dept", False))
+            perm_pdf = col1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=defaults.get("can_generate_pdf", False))
+            perm_download = col2.checkbox(PERMISSION_LABELS["can_download_data"], value=defaults.get("can_download_data", False))
+            perm_approve = col2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=defaults.get("can_approve_requests", False))
+            perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
             if st.form_submit_button("✅ Create User Account", type="primary"):
                 if not new_full_name.strip() or not new_username or not new_password:
@@ -2137,14 +2285,16 @@ def user_management_panel():
                         "full_name": new_full_name.strip(), "password": new_password,
                         "role": new_role, "dept": new_dept,
                         "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf,
-                        "can_download_data": perm_download, "can_approve_requests": perm_approve
+                        "can_download_data": perm_download, "can_approve_requests": perm_approve,
+                        "can_access_inspector_bonus": perm_inspector
                     }
                     save_users(USERS)
                     log_action("USER_CREATED", new_data={
                         "username": new_username, "full_name": new_full_name.strip(),
                         "role": new_role, "department": new_dept,
                         "permissions": {"can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf,
-                        "can_download_data": perm_download, "can_approve_requests": perm_approve}
+                        "can_download_data": perm_download, "can_approve_requests": perm_approve,
+                        "can_access_inspector_bonus": perm_inspector}
                     })
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
     with tab2:
@@ -2165,11 +2315,13 @@ def user_management_panel():
                 curr_perm_pdf = str(curr.get("can_generate_pdf", "False")).lower() == "true"
                 curr_perm_dl = str(curr.get("can_download_data", "False")).lower() == "true"
                 curr_perm_app = str(curr.get("can_approve_requests", "False")).lower() == "true"
+                curr_perm_ib = str(curr.get("can_access_inspector_bonus", "False")).lower() == "true"
                 ecol1, ecol2 = st.columns(2)
                 edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
                 edit_pdf = ecol1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=curr_perm_pdf)
                 edit_dl = ecol2.checkbox(PERMISSION_LABELS["can_download_data"], value=curr_perm_dl)
                 edit_app = ecol2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=curr_perm_app)
+                edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 if st.form_submit_button("🔄 Update User", type="primary"):
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
@@ -2180,7 +2332,8 @@ def user_management_panel():
                             "password": upd_password if upd_password else curr["password"],
                             "role": upd_role, "dept": upd_dept,
                             "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf,
-                            "can_download_data": edit_dl, "can_approve_requests": edit_app
+                            "can_download_data": edit_dl, "can_approve_requests": edit_app,
+                            "can_access_inspector_bonus": edit_ib
                         }
                         del USERS[edit_user_sel]
                     else:
@@ -2192,12 +2345,14 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_generate_pdf"] = edit_pdf
                         USERS[edit_user_sel]["can_download_data"] = edit_dl
                         USERS[edit_user_sel]["can_approve_requests"] = edit_app
+                        USERS[edit_user_sel]["can_access_inspector_bonus"] = edit_ib
                     save_users(USERS)
                     log_action("USER_EDITED", old_data=curr, new_data={
                         "full_name": upd_full_name.strip(), "username": upd_username_new,
                         "role": upd_role, "department": upd_dept,
                         "permissions": {"can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf,
-                        "can_download_data": edit_dl, "can_approve_requests": edit_app}
+                        "can_download_data": edit_dl, "can_approve_requests": edit_app,
+                        "can_access_inspector_bonus": edit_ib}
                     })
                     st.success(f"✅ User updated: **{upd_full_name}**"); st.rerun()
     with tab3:
@@ -2680,145 +2835,160 @@ elif role == "Work Order Manager":
 
 elif role in ["Manager", "Staff", "Team Member"]:
     dept_name = dept
-    if st.session_state.get("editing_request_id"):
-        eid = st.session_state.editing_request_id
-        rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
-        if rec:
-            st.subheader(f"✏️ Edit Request #{eid}")
-            show_old_new_comparison("{}", rec)
-            st.markdown("### 📎 Manage Attachments")
-            att_name_raw = rec.get("attachment_name", "None")
-            existing_files = []
-            if att_name_raw and str(att_name_raw).strip().lower() != "none":
-                existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
-            files_to_keep = []; files_to_remove = []
-            if existing_files:
-                st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
-                for fname in existing_files:
-                    file_path = os.path.join(UPLOAD_DIR, fname)
-                    safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
-                    col_check, col_name, col_dl = st.columns([1, 5, 2])
-                    keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
-                    col_name.markdown(f"📄 `{fname}`")
-                    if os.path.exists(file_path):
-                        with open(file_path, "rb") as f:
-                            col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
-                    else: col_dl.caption("⚠️ Missing")
-                    if keep: files_to_keep.append(fname)
-                    else: files_to_remove.append(fname)
-                if files_to_remove: st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
-            else: st.info("📋 No attachments currently attached.")
-            st.markdown("#### ➕ Attach New Files")
-            new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
-            st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload or [])} new** = {len(files_to_keep)+len(new_files_upload or [])} total files")
-            with st.form("edit_form"):
+    
+    # v3.6 — Check for Inspector Bonus permission
+    has_inspector_bonus = user_info.get("can_access_inspector_bonus", False)
+    
+    if has_inspector_bonus:
+        tab_main, tab_bonus = st.tabs(["➕ Addition & Deduction", "💰 National Grid Inspector Bonus"])
+    else:
+        tab_main = st.container()
+        tab_bonus = None
+
+    with tab_main:
+        if st.session_state.get("editing_request_id"):
+            eid = st.session_state.editing_request_id
+            rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
+            if rec:
+                st.subheader(f"✏️ Edit Request #{eid}")
+                show_old_new_comparison("{}", rec)
+                st.markdown("### 📎 Manage Attachments")
+                att_name_raw = rec.get("attachment_name", "None")
+                existing_files = []
+                if att_name_raw and str(att_name_raw).strip().lower() != "none":
+                    existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
+                files_to_keep = []; files_to_remove = []
+                if existing_files:
+                    st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
+                    for fname in existing_files:
+                        file_path = os.path.join(UPLOAD_DIR, fname)
+                        safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
+                        col_check, col_name, col_dl = st.columns([1, 5, 2])
+                        keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
+                        col_name.markdown(f"📄 `{fname}`")
+                        if os.path.exists(file_path):
+                            with open(file_path, "rb") as f:
+                                col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
+                        else: col_dl.caption("⚠️ Missing")
+                        if keep: files_to_keep.append(fname)
+                        else: files_to_remove.append(fname)
+                    if files_to_remove: st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
+                else: st.info("📋 No attachments currently attached.")
+                st.markdown("#### ➕ Attach New Files")
+                new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
+                st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload or [])} new** = {len(files_to_keep)+len(new_files_upload or [])} total files")
+                with st.form("edit_form"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
+                        rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
+                        cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
+                        ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                        amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
+                    with c2:
+                        from datetime import datetime as dt
+                        try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
+                        except: d = dt.today()
+                        dt_val = st.date_input("📅 Date", d)
+                        mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
+                        desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
+                    if st.form_submit_button("✅ Submit Edit", type="primary"):
+                        final_attachments = list(files_to_keep)
+                        if new_files_upload:
+                            for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
+                                fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
+                                edit_path = os.path.join(UPLOAD_DIR, fn)
+                                with open(edit_path, "wb") as outfile:
+                                    outfile.write(f.getbuffer())
+                                upload_to_google_drive(edit_path, fn)
+                                final_attachments.append(fn)
+                        records = load_records_from_excel()
+                        old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
+                        new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
+                        for r in records:
+                            if int(r.get("id", 0)) == int(eid):
+                                r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt
+                                r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip()
+                                r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"
+                                r["old_data"] = json.dumps(old_data_dict); break
+                        log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
+                        save_all_records(records)
+                        st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload or [])}")
+                        st.session_state.editing_request_id = None; st.rerun()
+                if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
+                    st.session_state.editing_request_id = None; st.rerun()
+        else:
+            st.subheader(f"➕ New Request — {dept_name}")
+            nid = get_next_id(all_live_requests)
+            st.markdown(f"**🆔 Request ID:** `#{nid}`")
+            with st.form("new_req", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 with c1:
-                    en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
-                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
-                    cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
-                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
-                    amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
+                    en = st.text_input("👤 Employee Name")
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
+                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
                 with c2:
                     from datetime import datetime as dt
-                    try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
-                    except: d = dt.today()
-                    dt_val = st.date_input("📅 Date", d)
-                    mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
-                    desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
-                if st.form_submit_button("✅ Submit Edit", type="primary"):
-                    final_attachments = list(files_to_keep)
-                    if new_files_upload:
-                        for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
-                            fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
-                            edit_path = os.path.join(UPLOAD_DIR, fn)
-                            with open(edit_path, "wb") as outfile:
-                                outfile.write(f.getbuffer())
-                            upload_to_google_drive(edit_path, fn)
-                            final_attachments.append(fn)
-                    records = load_records_from_excel()
-                    old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
-                    new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
-                    for r in records:
-                        if int(r.get("id", 0)) == int(eid):
-                            r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt
-                            r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip()
-                            r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"
-                            r["old_data"] = json.dumps(old_data_dict); break
-                    log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
-                    save_all_records(records)
-                    st.success(f"✅ Updated! Removed {len(files_to_remove)} | Kept {len(files_to_keep)} | Added {len(new_files_upload or [])}")
-                    st.session_state.editing_request_id = None; st.rerun()
-            if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
-                st.session_state.editing_request_id = None; st.rerun()
-    else:
-        st.subheader(f"➕ New Request — {dept_name}")
-        nid = get_next_id(all_live_requests)
-        st.markdown(f"**🆔 Request ID:** `#{nid}`")
-        with st.form("new_req", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                en = st.text_input("👤 Employee Name")
-                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
-                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
-                amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
-            with c2:
-                from datetime import datetime as dt
-                dt_val = st.date_input("📅 Date", value=dt.today())
-                mgr = st.text_input("👔 Line Manager")
-                files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-                desc = st.text_area("📝 Description / Justification")
-            if st.form_submit_button("📤 Send to Director", type="primary"):
-                if en.strip() and mgr.strip() and desc.strip():
-                    att_list = []
-                    if files:
-                        for i, f in enumerate(files, 1):
-                            fn = f"ID_{nid}_F{i}_{f.name}"
-                            file_path = os.path.join(UPLOAD_DIR, fn)
-                            with open(file_path, "wb") as out:
-                                out.write(f.getbuffer())
-                            att_list.append(fn)
-                            upload_to_google_drive(file_path, fn)
-                    payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
-                    save_record_to_excel(payload)
-                    log_action("CREATED", nid)
-                    st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
-                else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
-        st.divider()
-        st.subheader("📋 My Department Requests")
-        my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
-        my_dept_search = st.text_input("🔎 Search my department requests", placeholder="Search by ID, employee, status, amount, manager, category, date, description, approver or comments...", key="my_department_requests_search")
-        if my_dept_search.strip():
-            q = my_dept_search.strip().lower()
-            my_reqs = [r for r in my_reqs if q in " ".join([str(r.get("id", "")), str(r.get("emp_name", "")), str(r.get("dept", "")), str(r.get("status", "")), str(r.get("amount", "")), str(r.get("manager", "")), str(r.get("type", "")), str(r.get("category", "")), str(r.get("date", "")), str(r.get("desc", "")), str(r.get("decision_by", "")), str(r.get("approved_by", "")), str(r.get("submitted_by", "")), str(r.get("decision_date", "")), str(r.get("director_comments", "")), str(r.get("attachment_name", ""))]).lower()]
-            st.caption(f"🔎 Showing {len(my_reqs)} matching department request(s).")
-        if not my_reqs:
-            if my_dept_search.strip(): st.warning("No department requests match your search.")
-            else: st.info("📋 No requests yet.")
-        else:
-            for req in reversed(my_reqs):
-                status = req.get("status", "pending").lower()
-                icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-                dec_by = req.get("decision_by", ""); dec_date = format_date(req.get("decision_date", ""))
-                if status in ["approved", "rejected"] and dec_by:
-                    title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date.replace(' ', ' 🕓 ')}"
-                else:
-                    title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
-                with st.expander(title):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
-                    submitted_by = get_submitted_by(req)
-                    if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                    st.info(f"📝 Description: {req.get('desc')}")
-                    display_attachments(req)
-                    if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                    if status == "approved": display_pdf_button(req, can_generate=True)
-                    if status in ["pending", "rejected"]:
-                        if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
-                            st.session_state.editing_request_id = req.get("id"); st.rerun()
+                    dt_val = st.date_input("📅 Date", value=dt.today())
+                    mgr = st.text_input("👔 Line Manager")
+                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+                    desc = st.text_area("📝 Description / Justification")
+                if st.form_submit_button("📤 Send to Director", type="primary"):
+                    if en.strip() and mgr.strip() and desc.strip():
+                        att_list = []
+                        if files:
+                            for i, f in enumerate(files, 1):
+                                fn = f"ID_{nid}_F{i}_{f.name}"
+                                file_path = os.path.join(UPLOAD_DIR, fn)
+                                with open(file_path, "wb") as out:
+                                    out.write(f.getbuffer())
+                                att_list.append(fn)
+                                upload_to_google_drive(file_path, fn)
+                        payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                        save_record_to_excel(payload)
+                        log_action("CREATED", nid)
+                        st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
+                    else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+            st.divider()
+            st.subheader("📋 My Department Requests")
+            my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+            my_dept_search = st.text_input("🔎 Search my department requests", placeholder="Search by ID, employee, status, amount, manager, category, date, description, approver or comments...", key="my_department_requests_search")
+            if my_dept_search.strip():
+                q = my_dept_search.strip().lower()
+                my_reqs = [r for r in my_reqs if q in " ".join([str(r.get("id", "")), str(r.get("emp_name", "")), str(r.get("dept", "")), str(r.get("status", "")), str(r.get("amount", "")), str(r.get("manager", "")), str(r.get("type", "")), str(r.get("category", "")), str(r.get("date", "")), str(r.get("desc", "")), str(r.get("decision_by", "")), str(r.get("approved_by", "")), str(r.get("submitted_by", "")), str(r.get("decision_date", "")), str(r.get("director_comments", "")), str(r.get("attachment_name", ""))]).lower()]
+                st.caption(f"🔎 Showing {len(my_reqs)} matching department request(s).")
+            if not my_reqs:
+                if my_dept_search.strip(): st.warning("No department requests match your search.")
+                else: st.info("📋 No requests yet.")
+            else:
+                for req in reversed(my_reqs):
+                    status = req.get("status", "pending").lower()
+                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+                    dec_by = req.get("decision_by", ""); dec_date = format_date(req.get("decision_date", ""))
+                    if status in ["approved", "rejected"] and dec_by:
+                        title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by} — {dec_date.replace(' ', ' 🕓 ')}"
+                    else:
+                        title = f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f} | 📅 {format_date(req.get('date', ''))}"
+                    with st.expander(title):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Manager: {req.get('manager')}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                        st.info(f"📝 Description: {req.get('desc')}")
+                        display_attachments(req)
+                        if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                        if status == "approved": display_pdf_button(req, can_generate=True)
+                        if status in ["pending", "rejected"]:
+                            if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                                st.session_state.editing_request_id = req.get("id"); st.rerun()
+    
+    if tab_bonus:
+        with tab_bonus:
+            render_inspector_bonus_portal(full_name, dept_name)
 
 elif role == "Director":
-    director_addition_tab, director_work_order_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders"])
+    director_addition_tab, director_work_order_tab, director_inspector_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"])
     with director_addition_tab:
         st.subheader("🎛️ Director Approval Portal — Andy Acoole")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -2969,6 +3139,8 @@ elif role == "Director":
                                 st.success(f"✅ Request #{req_id} changed to Approved. Audit Log updated."); st.rerun()
     with director_work_order_tab:
         render_work_order_director_portal(full_name)
+    with director_inspector_tab:
+        render_inspector_bonus_portal(full_name, dept)
 
 elif role == "Super Admin":
     st.subheader("🛡️ Super Admin — All Requests")
@@ -3123,6 +3295,8 @@ elif role == "Super Admin":
                     st.download_button("📥 Download Settings", f.read(), file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_settings")
         if os.path.exists(WORK_ORDERS_PATH):
             st.download_button("📥 Download Work Orders", open(WORK_ORDERS_PATH, "rb").read(), file_name=f"BACKUP_work_orders_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_work_orders")
+        if os.path.exists(INSPECTOR_BONUS_PATH):
+            st.download_button("📥 Download Inspector Bonus", open(INSPECTOR_BONUS_PATH, "rb").read(), file_name=f"BACKUP_inspector_bonus_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_inspector_bonus")
         st.caption("💾 Save these files to your computer for backup")
 
 else:
