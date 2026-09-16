@@ -1,9 +1,9 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.7
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.8
 # ============================================================
-# ✅ v3.7: Inspector Bonus — removed checkbox, added Director approval workflow,
-#           PDF download with company logo, logo at top of the form
-# ✅ v3.6: Added National Grid Inspector Bonus Approval Tab (Permission controlled)
+# ✅ v3.8: Inspector Bonus PDF — "Approved By:" label, Director name + date/time,
+#           and Approved Stamp added below.
+# ✅ v3.7: Inspector Bonus — Director approval workflow + PDF download with logo.
 # ✅ v3.5: Work Order PDF: removed "Manager Review" and "Payment Status" sections
 # ✅ All prior fixes retained
 # ============================================================
@@ -925,7 +925,7 @@ def _pdf_text(value):
 
 def work_order_pdf(req):
     """
-    v3.7 — Generates the Work Order PDF.
+    v3.8 — Generates the Work Order PDF.
     REMOVED: 'Manager Review' section and 'Payment Status' line.
     RETAINED: Director Final Approval section.
     """
@@ -1694,8 +1694,9 @@ def get_next_inspector_bonus_id(records):
 
 def inspector_bonus_pdf(req, force_regenerate=False):
     """
-    v3.7 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
-    Includes the company logo at the top.
+    v3.8 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
+    Includes company logo at top.
+    "Approved By:" row now shows Director name, date & time, and the Approved Stamp below.
     """
     if not PDF_AVAILABLE:
         return None
@@ -1760,20 +1761,37 @@ def inspector_bonus_pdf(req, force_regenerate=False):
         field("Total Jobs Completed", f"{float(req.get('total_jobs', 0)):.2f}")
         field("Bonus Amount:", f"£{float(req.get('bonus_amount', 0)):.2f}")
 
-        # ---------- Andy Approved (decision from Director) ----------
+        # ---------- Approved By (decision from Director) ----------
         pdf.set_font(family, "B", 11)
-        pdf.cell(60, 10, safe("Andy Approved"), border=1)
+        pdf.cell(60, 10, safe("Approved By:"), border=1)
         pdf.set_font(family, "", 11)
         status = str(req.get("status", "")).strip().lower()
         if status == "approved":
             approved_by = req.get("director_decision_by", "") or "Andy Acoole"
             decision_date = req.get("director_decision_date", "")
-            pdf.cell(0, 10, safe(f"   ✅ Approved — {approved_by} on {decision_date}"), border=1, ln=True)
+            pdf.cell(0, 10, safe(f"   {approved_by} on {decision_date}"), border=1, ln=True)
         elif status == "rejected":
-            pdf.cell(0, 10, safe("   ❌ Rejected"), border=1, ln=True)
+            pdf.cell(0, 10, safe("   Rejected"), border=1, ln=True)
         else:
             pdf.cell(0, 10, safe("   (Pending Director signature)"), border=1, ln=True)
-        pdf.ln(6)
+        pdf.ln(4)
+
+        # ---------- Approved Stamp ----------
+        if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
+            try:
+                # Center the stamp below the field
+                pdf.image(APPROVED_STAMP_PATH, x=75, y=pdf.get_y(), w=60)
+                pdf.ln(25)  # Give space for the stamp
+            except Exception:
+                pdf.ln(2)
+        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
+            try:
+                pdf.image(REJECTED_STAMP_PATH, x=75, y=pdf.get_y(), w=60)
+                pdf.ln(25)
+            except Exception:
+                pdf.ln(2)
+        else:
+            pdf.ln(2)
 
         # ---------- Director comments (if any) ----------
         if req.get("director_comments"):
