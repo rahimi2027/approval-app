@@ -1,6 +1,7 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.2
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.3
 # ============================================================
+# ✅ v4.3: Removed duplicate logo from Inspector Bonus Portal tab.
 # ✅ v4.2: Work Order PDF — Added Approved Stamp next to "Approved By".
 #           Inspector Bonus PDF — Enlarged the Approved Stamp size.
 # ✅ v4.1: Inspector Bonus PDF — Approved Stamp placed next to Director's name.
@@ -929,7 +930,7 @@ def _pdf_text(value):
 
 def work_order_pdf(req):
     """
-    v4.2 — Generates the Work Order PDF.
+    v4.3 — Generates the Work Order PDF.
     REMOVED: 'Manager Review' section and 'Payment Status' line.
     RETAINED: Director Final Approval section.
     ADDED: Approved Stamp next to "Approved By:" name.
@@ -999,8 +1000,8 @@ def work_order_pdf(req):
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(req.get("desc", "")))
 
-        # ✅ v4.2: Manager Review section removed
-        # ✅ v4.2: Payment Status line removed
+        # ✅ v4.3: Manager Review section removed
+        # ✅ v4.3: Payment Status line removed
 
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
@@ -1046,7 +1047,7 @@ def work_order_pdf(req):
 
 def display_work_order_pdf(req, force_regenerate=True):
     """
-    v4.2 — Always regenerates the PDF to ensure the latest layout (no cached old PDFs).
+    v4.3 — Always regenerates the PDF to ensure the latest layout (no cached old PDFs).
     """
     path = work_order_pdf(req)  # Force regenerate
     if path:
@@ -1721,7 +1722,7 @@ def get_next_inspector_bonus_id(records):
 
 def inspector_bonus_pdf(req, force_regenerate=False):
     """
-    v4.2 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
+    v4.3 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
     Includes company logo at top.
     "Approved By:" row shows Director name, date & time, and an enlarged Approved Stamp.
     """
@@ -1899,15 +1900,7 @@ def render_inspector_bonus_portal(user_name, user_dept):
     st.info("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month.")
     st.divider()
 
-    # ---------- Company Logo at top ----------
-    if os.path.exists(LOGO_PATH):
-        c1, c2, c3 = st.columns([1, 2, 1])
-        with c2:
-            st.image(LOGO_PATH, width=300)
-    else:
-        st.markdown("### ⚡ ACOOLE ELECTRICAL LTD")
-
-    st.divider()
+    # v4.3 — Duplicate logo removed from here
 
     bonus_records = load_inspector_bonus()
     new_id = get_next_inspector_bonus_id(bonus_records)
