@@ -1,8 +1,8 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.8
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.9
 # ============================================================
-# ✅ v3.8: Inspector Bonus PDF — "Approved By:" label, Director name + date/time,
-#           and Approved Stamp added below.
+# ✅ v3.9: Payroll Portal restructured into 3 tabs (Addition/Deduction, Work Orders, Inspector Bonus)
+# ✅ v3.8: Inspector Bonus PDF — "Approved By:" label, Director name + date/time, Approved Stamp
 # ✅ v3.7: Inspector Bonus — Director approval workflow + PDF download with logo.
 # ✅ v3.5: Work Order PDF: removed "Manager Review" and "Payment Status" sections
 # ✅ All prior fixes retained
@@ -332,7 +332,7 @@ PERMISSION_DEFAULTS = {
     "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False},
     "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True},
     "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True},
-    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": False},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True},
     "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True}
 }
 PERMISSION_LABELS = {
@@ -925,7 +925,7 @@ def _pdf_text(value):
 
 def work_order_pdf(req):
     """
-    v3.8 — Generates the Work Order PDF.
+    v3.9 — Generates the Work Order PDF.
     REMOVED: 'Manager Review' section and 'Payment Status' line.
     RETAINED: Director Final Approval section.
     """
@@ -1694,7 +1694,7 @@ def get_next_inspector_bonus_id(records):
 
 def inspector_bonus_pdf(req, force_regenerate=False):
     """
-    v3.8 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
+    v3.9 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
     Includes company logo at top.
     "Approved By:" row now shows Director name, date & time, and the Approved Stamp below.
     """
@@ -2036,6 +2036,42 @@ def render_inspector_bonus_director_portal(director_name):
             rec_id = r.get("id")
             with st.expander(f"🔴 {rec_id} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
                 show_details(r)
+
+def render_inspector_bonus_payroll_portal(payroll_name):
+    """Read-only view for Payroll to see approved Inspector Bonuses and download PDFs."""
+    st.subheader("💰 National Grid Inspector Bonus — Payroll")
+    st.info("View Director-approved Inspector Bonuses and download the authorised PDF.")
+    st.divider()
+
+    records = load_inspector_bonus()
+    approved = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+
+    search = st.text_input("🔎 Search approved Inspector Bonuses", placeholder="Search by ID, inspector, month, amount...", key="ib_payroll_search")
+    if search.strip():
+        q = search.lower().strip()
+        approved = [r for r in approved if q in " ".join(str(v) for v in r.values()).lower()]
+
+    st.metric("✅ Approved Bonuses", len(approved))
+    st.divider()
+
+    if not approved:
+        st.success("✅ No approved Inspector Bonuses found.")
+        return
+
+    for r in reversed(approved):
+        rec_id = r.get("id")
+        with st.expander(f"🟢 {rec_id} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
+            st.write(f"**Inspector:** {r.get('inspector_name')} | **Month:** {r.get('month_year')}")
+            st.write(f"**Days Absent:** {r.get('days_absent') or '-'}")
+            st.write(f"**Reasons:** {r.get('reasons') or '-'}")
+            st.write(f"**Total Jobs Completed:** {r.get('total_jobs')}")
+            st.write(f"**Bonus Amount:** £{r.get('bonus_amount',0):.2f}")
+            st.write(f"**Approved By:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
+            if r.get("director_comments"):
+                st.info(f"💬 **Director Comments:** {r.get('director_comments')}")
+            st.caption(f"Submitted by {r.get('submitted_by')} on {r.get('submitted_date')}")
+            st.divider()
+            display_inspector_bonus_pdf_button(r, key_prefix="ib_payroll")
 
 # ============================================================
 # REQUESTS EXCEL
@@ -2893,83 +2929,95 @@ elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-    with tab_pending:
-        pending = [r for r in all_live_requests if r.get("status") == "pending"]
-        if not pending: st.success("✅ No pending requests!")
-        else:
-            st.metric("⏳ Pending", len(pending)); st.divider()
-            for req in reversed(pending):
-                with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                    st.write(f"👔 **Line Manager:** {req.get('manager')}")
-                    submitted_by = get_submitted_by(req)
-                    if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                    st.write(f"📅 **Date:** {req.get('date')}")
-                    st.info(f"📝 **Description:** {req.get('desc')}")
-                    display_attachments(req)
-                    old_data_raw = req.get("old_data", "")
-                    if old_data_raw and old_data_raw not in ["", "{}", "None"]:
-                        st.divider(); st.markdown("### 🔄 What Changed / Edits"); show_old_new_comparison(old_data_raw, req)
-                    else:
-                        st.divider(); st.success("✅ **New Request — No previous version**")
-                    st.divider(); display_pdf_button(req, can_generate=True)
-    with tab_approved:
-        approved = [r for r in all_live_requests if r.get("status") == "approved"]
-        if not approved: st.info("📋 No approved requests.")
-        else:
-            st.metric("✅ Approved", len(approved))
-            approved_search = st.text_input("🔎 Search approved requests", placeholder="Search by ID, employee, department, submitted by, approved by, amount, date or comments...", key="payroll_approved_search")
-            if approved_search.strip():
-                q = approved_search.strip().lower()
-                approved = [r for r in approved if q in " ".join([
-                    str(r.get("id", "")), str(r.get("emp_name", "")), str(r.get("dept", "")),
-                    str(r.get("decision_by", "")), str(r.get("approved_by", "")),
-                    str(r.get("amount", "")), str(r.get("decision_date", "")),
-                    str(r.get("date", "")), str(r.get("director_comments", "")),
-                ]).lower()]
-                st.caption(f"🔎 Showing {len(approved)} matching approved request(s).")
-            st.divider()
-            if not approved: st.warning("No approved requests match your search.")
-            for req in reversed(approved):
-                dec_by = req.get('decision_by', 'Director')
-                dec_date = req.get('decision_date', '')
-                if dec_date and " " in dec_date:
-                    date_part, time_part = dec_date.split(" ", 1)
-                    display_date = f"{date_part} ⏰ {time_part}"
-                else: display_date = dec_date if dec_date else ""
-                extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
-                title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')}{extra_text}"
-                with st.expander(title):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
-                    submitted_by = get_submitted_by(req)
-                    if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                    st.write(f"🎯 Approved By: {dec_by}")
-                    if display_date: st.write(f"📅 Approval Date: {display_date}")
-                    st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
-                    display_attachments(req)
-                    st.divider(); display_pdf_button(req, can_generate=True)
-    with tab_rejected:
-        rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
-        if not rejected: st.success("✅ No rejected requests!")
-        else:
-            st.metric("❌ Rejected", len(rejected)); st.divider()
-            for req in reversed(rejected):
-                with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    submitted_by = get_submitted_by(req)
-                    if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                    st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
-                    st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
-                    display_attachments(req)
-                    st.divider(); display_pdf_button(req, can_generate=True)
-    st.divider()
-    with st.expander("🛠️ Work Orders — Payroll", expanded=False):
+    
+    # v3.9 — Three main tabs for Payroll
+    tab_add_ded, tab_work_orders, tab_inspector_bonus = st.tabs([
+        "➕ Addition & Deduction",
+        "🛠️ Work Orders",
+        "💰 National Grid Inspector Bonus"
+    ])
+    
+    with tab_add_ded:
+        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+        with tab_pending:
+            pending = [r for r in all_live_requests if r.get("status") == "pending"]
+            if not pending: st.success("✅ No pending requests!")
+            else:
+                st.metric("⏳ Pending", len(pending)); st.divider()
+                for req in reversed(pending):
+                    with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                        st.write(f"👔 **Line Manager:** {req.get('manager')}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                        st.write(f"📅 **Date:** {req.get('date')}")
+                        st.info(f"📝 **Description:** {req.get('desc')}")
+                        display_attachments(req)
+                        old_data_raw = req.get("old_data", "")
+                        if old_data_raw and old_data_raw not in ["", "{}", "None"]:
+                            st.divider(); st.markdown("### 🔄 What Changed / Edits"); show_old_new_comparison(old_data_raw, req)
+                        else:
+                            st.divider(); st.success("✅ **New Request — No previous version**")
+                        st.divider(); display_pdf_button(req, can_generate=True)
+        with tab_approved:
+            approved = [r for r in all_live_requests if r.get("status") == "approved"]
+            if not approved: st.info("📋 No approved requests.")
+            else:
+                st.metric("✅ Approved", len(approved))
+                approved_search = st.text_input("🔎 Search approved requests", placeholder="Search by ID, employee, department, submitted by, approved by, amount, date or comments...", key="payroll_approved_search")
+                if approved_search.strip():
+                    q = approved_search.strip().lower()
+                    approved = [r for r in approved if q in " ".join([
+                        str(r.get("id", "")), str(r.get("emp_name", "")), str(r.get("dept", "")),
+                        str(r.get("decision_by", "")), str(r.get("approved_by", "")),
+                        str(r.get("amount", "")), str(r.get("decision_date", "")),
+                        str(r.get("date", "")), str(r.get("director_comments", "")),
+                    ]).lower()]
+                    st.caption(f"🔎 Showing {len(approved)} matching approved request(s).")
+                st.divider()
+                if not approved: st.warning("No approved requests match your search.")
+                for req in reversed(approved):
+                    dec_by = req.get('decision_by', 'Director')
+                    dec_date = req.get('decision_date', '')
+                    if dec_date and " " in dec_date:
+                        date_part, time_part = dec_date.split(" ", 1)
+                        display_date = f"{date_part} ⏰ {time_part}"
+                    else: display_date = dec_date if dec_date else ""
+                    extra_text = f" | ✅ Approved by {dec_by} on {display_date}" if display_date else f" | ✅ Approved by {dec_by}"
+                    title = f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')}{extra_text}"
+                    with st.expander(title):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                        st.write(f"🎯 Approved By: {dec_by}")
+                        if display_date: st.write(f"📅 Approval Date: {display_date}")
+                        st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider(); display_pdf_button(req, can_generate=True)
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
+            if not rejected: st.success("✅ No rejected requests!")
+            else:
+                st.metric("❌ Rejected", len(rejected)); st.divider()
+                for req in reversed(rejected):
+                    with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                        st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
+                        st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider(); display_pdf_button(req, can_generate=True)
+                        
+    with tab_work_orders:
         render_work_order_payroll_portal(full_name)
+        
+    with tab_inspector_bonus:
+        render_inspector_bonus_payroll_portal(full_name)
 
 elif role == "Work Order Manager":
     dept_name = dept
