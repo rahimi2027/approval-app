@@ -1,6 +1,8 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.0
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.1
 # ============================================================
+# ✅ v4.1: Inspector Bonus PDF — Approved Stamp is now placed 
+#           right next to the Director's name in the "Approved By:" row.
 # ✅ v4.0: Forced PDF regeneration on download to clear old cached layouts.
 #           Removed "— Manager Review" from UI header.
 # ✅ v3.9: Payroll Portal restructured into 3 tabs.
@@ -927,7 +929,7 @@ def _pdf_text(value):
 
 def work_order_pdf(req):
     """
-    v4.0 — Generates the Work Order PDF.
+    v4.1 — Generates the Work Order PDF.
     REMOVED: 'Manager Review' section and 'Payment Status' line.
     RETAINED: Director Final Approval section.
     INCLUDES: Company Logo at top.
@@ -996,8 +998,8 @@ def work_order_pdf(req):
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(req.get("desc", "")))
 
-        # ✅ v4.0: Manager Review section removed
-        # ✅ v4.0: Payment Status line removed
+        # ✅ v4.1: Manager Review section removed
+        # ✅ v4.1: Payment Status line removed
 
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
@@ -1026,7 +1028,7 @@ def work_order_pdf(req):
 
 def display_work_order_pdf(req, force_regenerate=True):
     """
-    v4.0 — Always regenerates the PDF to ensure the latest layout (no cached old PDFs).
+    v4.1 — Always regenerates the PDF to ensure the latest layout (no cached old PDFs).
     """
     path = work_order_pdf(req)  # Force regenerate
     if path:
@@ -1701,9 +1703,10 @@ def get_next_inspector_bonus_id(records):
 
 def inspector_bonus_pdf(req, force_regenerate=False):
     """
-    v4.0 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
+    v4.1 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
     Includes company logo at top.
-    "Approved By:" row now shows Director name, date & time, and the Approved Stamp below.
+    "Approved By:" row now shows Director name, date & time, and the Approved Stamp
+    placed directly inside the same cell, next to the text.
     """
     if not PDF_AVAILABLE:
         return None
@@ -1768,37 +1771,46 @@ def inspector_bonus_pdf(req, force_regenerate=False):
         field("Total Jobs Completed", f"{float(req.get('total_jobs', 0)):.2f}")
         field("Bonus Amount:", f"£{float(req.get('bonus_amount', 0)):.2f}")
 
-        # ---------- Approved By (decision from Director) ----------
-        pdf.set_font(family, "B", 11)
-        pdf.cell(60, 10, safe("Approved By:"), border=1)
-        pdf.set_font(family, "", 11)
+        # ---------- Approved By (decision from Director) + Stamp ----------
         status = str(req.get("status", "")).strip().lower()
+        
+        # Determine text and stamp
+        text_content = ""
+        stamp_path = None
+        
         if status == "approved":
             approved_by = req.get("director_decision_by", "") or "Andy Acoole"
             decision_date = req.get("director_decision_date", "")
-            pdf.cell(0, 10, safe(f"   {approved_by} on {decision_date}"), border=1, ln=True)
+            text_content = f"   {approved_by} on {decision_date}"
+            stamp_path = APPROVED_STAMP_PATH
         elif status == "rejected":
-            pdf.cell(0, 10, safe("   Rejected"), border=1, ln=True)
+            text_content = "   Rejected"
+            stamp_path = REJECTED_STAMP_PATH
         else:
-            pdf.cell(0, 10, safe("   (Pending Director signature)"), border=1, ln=True)
-        pdf.ln(4)
+            text_content = "   (Pending Director signature)"
 
-        # ---------- Approved Stamp ----------
-        if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
+        # Label cell
+        pdf.set_font(family, "B", 11)
+        pdf.cell(60, 10, safe("Approved By:"), border=1)
+        
+        # Text cell (width 90mm)
+        pdf.set_font(family, "", 11)
+        pdf.cell(90, 10, safe(text_content), border=1)
+        
+        # Stamp cell (width 40mm) - draw border and capture position
+        current_x = pdf.get_x()
+        current_y = pdf.get_y()
+        pdf.cell(40, 10, "", border=1, ln=True)
+        
+        # Insert stamp image inside the stamp cell
+        if stamp_path and os.path.exists(stamp_path):
             try:
-                # Center the stamp below the field
-                pdf.image(APPROVED_STAMP_PATH, x=75, y=pdf.get_y(), w=60)
-                pdf.ln(25)  # Give space for the stamp
+                # x = current_x + 5 (padding), y = current_y + 1 (padding), h=8 (fit inside 10mm cell)
+                pdf.image(stamp_path, x=current_x + 5, y=current_y + 1, h=8)
             except Exception:
-                pdf.ln(2)
-        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
-            try:
-                pdf.image(REJECTED_STAMP_PATH, x=75, y=pdf.get_y(), w=60)
-                pdf.ln(25)
-            except Exception:
-                pdf.ln(2)
-        else:
-            pdf.ln(2)
+                pass
+                
+        pdf.ln(4)
 
         # ---------- Director comments (if any) ----------
         if req.get("director_comments"):
