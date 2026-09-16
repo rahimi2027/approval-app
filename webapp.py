@@ -1,7 +1,9 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.9
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.0
 # ============================================================
-# ✅ v3.9: Payroll Portal restructured into 3 tabs (Addition/Deduction, Work Orders, Inspector Bonus)
+# ✅ v4.0: Forced PDF regeneration on download to clear old cached layouts.
+#           Removed "— Manager Review" from UI header.
+# ✅ v3.9: Payroll Portal restructured into 3 tabs.
 # ✅ v3.8: Inspector Bonus PDF — "Approved By:" label, Director name + date/time, Approved Stamp
 # ✅ v3.7: Inspector Bonus — Director approval workflow + PDF download with logo.
 # ✅ v3.5: Work Order PDF: removed "Manager Review" and "Payment Status" sections
@@ -925,9 +927,10 @@ def _pdf_text(value):
 
 def work_order_pdf(req):
     """
-    v3.9 — Generates the Work Order PDF.
+    v4.0 — Generates the Work Order PDF.
     REMOVED: 'Manager Review' section and 'Payment Status' line.
     RETAINED: Director Final Approval section.
+    INCLUDES: Company Logo at top.
     """
     if not PDF_AVAILABLE:
         return None
@@ -948,7 +951,7 @@ def work_order_pdf(req):
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
-        # Logo at top
+        # ---------- Company Logo at top ----------
         if os.path.exists(LOGO_PATH):
             try:
                 pdf.image(LOGO_PATH, x=75, y=10, w=60)
@@ -993,6 +996,9 @@ def work_order_pdf(req):
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(req.get("desc", "")))
 
+        # ✅ v4.0: Manager Review section removed
+        # ✅ v4.0: Payment Status line removed
+
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Director Final Approval"), ln=True)
@@ -1018,16 +1024,17 @@ def work_order_pdf(req):
         st.error(f"Work Order PDF Error: {e}")
         return None
 
-def display_work_order_pdf(req, force_regenerate=False):
-    path = req.get("pdf_path", "")
-    if force_regenerate or not path or not os.path.exists(path):
-        path = work_order_pdf(req)
-        if path:
-            records = load_work_orders()
-            for r in records:
-                if str(r.get("id")) == str(req.get("id")):
-                    r["pdf_path"] = path
-            save_all_work_orders(records)
+def display_work_order_pdf(req, force_regenerate=True):
+    """
+    v4.0 — Always regenerates the PDF to ensure the latest layout (no cached old PDFs).
+    """
+    path = work_order_pdf(req)  # Force regenerate
+    if path:
+        records = load_work_orders()
+        for r in records:
+            if str(r.get("id")) == str(req.get("id")):
+                r["pdf_path"] = path
+        save_all_work_orders(records)
     if path and os.path.exists(path):
         with open(path, "rb") as f:
             st.download_button(
@@ -1284,7 +1291,7 @@ def render_work_order_employee_portal(current_user, current_dept):
             if r.get("director_decision_by"): st.write(f"🎯 Approved By: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
 
 def render_work_order_manager_portal(manager_name, manager_dept, show_total=True):
-    st.subheader("🛠️ Work Orders — Manager Review")
+    st.subheader("🛠️ Work Orders")
     orders = load_work_orders()
     manager_orders = [
         r for r in orders
@@ -1694,7 +1701,7 @@ def get_next_inspector_bonus_id(records):
 
 def inspector_bonus_pdf(req, force_regenerate=False):
     """
-    v3.9 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
+    v4.0 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
     Includes company logo at top.
     "Approved By:" row now shows Director name, date & time, and the Approved Stamp below.
     """
