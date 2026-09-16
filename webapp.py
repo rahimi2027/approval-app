@@ -2466,14 +2466,13 @@ def display_company_header():
                 "<h1 style='text-align: center;'>⚡ ACOOLE ELECTRICAL LTD</h1>",
                 unsafe_allow_html=True
             )
-        # Centered caption — aligned under the logo
         st.markdown(
-            "<p style='text-align: center; color: #888; font-size: 0.95rem; margin-top: -10px;'>"
+            "<p style='text-align: center; color: #888; font-size: 0.95rem; "
+            "margin-top: -18px; margin-bottom: 20px;'>"
             "Approvals, Work Orders &amp; Inspector Bonuses"
             "</p>",
             unsafe_allow_html=True
         )
-        st.divider()
 
 def change_my_password_form():
     if not st.session_state.get("logged_in") or not st.session_state.get("user_info"):
