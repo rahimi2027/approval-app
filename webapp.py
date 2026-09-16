@@ -2461,7 +2461,7 @@ def display_company_header():
     with c2:
         if os.path.exists(LOGO_PATH): st.image(LOGO_PATH, width=300)
         else: st.title("⚡ ACOOLE ELECTRICAL LTD")
-        st.caption("Addition & Deduction Approval Platform")
+        st.caption("Acoole Operations & Authorisation Portal")
         st.divider()
 
 def change_my_password_form():
