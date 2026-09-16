@@ -2459,9 +2459,20 @@ if "editing_request_id" not in st.session_state:
 def display_company_header():
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        if os.path.exists(LOGO_PATH): st.image(LOGO_PATH, width=300)
-        else: st.title("⚡ ACOOLE ELECTRICAL LTD")
-        st.caption("Acoole Operations & Authorisation Portal")
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=300)
+        else:
+            st.markdown(
+                "<h1 style='text-align: center;'>⚡ ACOOLE ELECTRICAL LTD</h1>",
+                unsafe_allow_html=True
+            )
+        # Centered caption — aligned under the logo
+        st.markdown(
+            "<p style='text-align: center; color: #888; font-size: 0.95rem; margin-top: -10px;'>"
+            "Approvals, Work Orders &amp; Inspector Bonuses"
+            "</p>",
+            unsafe_allow_html=True
+        )
         st.divider()
 
 def change_my_password_form():
