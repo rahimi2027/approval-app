@@ -1,7 +1,8 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.4
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v3.5
 # ============================================================
 # ✅ Work Order PDF: removed "Manager Review" and "Payment Status" sections
+# ✅ Added force-regenerate option so cached old PDFs don't persist
 # ✅ All prior fixes retained
 # ============================================================
 import streamlit as st
@@ -900,6 +901,11 @@ def _pdf_text(value):
     return str(value).replace("\x00", "")
 
 def work_order_pdf(req):
+    """
+    v3.5 — Generates the Work Order PDF.
+    REMOVED: 'Manager Review' section and 'Payment Status' line.
+    RETAINED: Director Final Approval section.
+    """
     if not PDF_AVAILABLE:
         return None
     try:
@@ -964,7 +970,8 @@ def work_order_pdf(req):
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(req.get("desc", "")))
 
-        # ✅ FIX v3.4: Manager Review section removed
+        # ✅ v3.5: Manager Review section removed (was previously printed here)
+        # ✅ v3.5: Payment Status line removed (was previously printed here)
 
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
@@ -976,8 +983,6 @@ def work_order_pdf(req):
             f"Approval Date: {req.get('director_decision_date', '')}\n"
             f"Comments: {req.get('director_comments', '')}"
         ))
-
-        # ✅ FIX v3.4: Payment Status line removed
 
         os.makedirs(WORK_ORDER_PDF_DIR, exist_ok=True)
         safe_emp = "_".join(str(req.get("emp_name", "Employee")).split()) or "Employee"
@@ -993,18 +998,29 @@ def work_order_pdf(req):
         st.error(f"Work Order PDF Error: {e}")
         return None
 
-def display_work_order_pdf(req):
+def display_work_order_pdf(req, force_regenerate=False):
+    """
+    v3.5 — Displays the Work Order PDF download button.
+    If force_regenerate=True, always rebuilds the PDF (useful after layout changes).
+    Otherwise uses cached path and only rebuilds if the file is missing.
+    """
     path = req.get("pdf_path", "")
-    if not path or not os.path.exists(path):
+    if force_regenerate or not path or not os.path.exists(path):
         path = work_order_pdf(req)
         if path:
             records = load_work_orders()
             for r in records:
-                if str(r.get("id")) == str(req.get("id")): r["pdf_path"] = path
+                if str(r.get("id")) == str(req.get("id")):
+                    r["pdf_path"] = path
             save_all_work_orders(records)
     if path and os.path.exists(path):
         with open(path, "rb") as f:
-            st.download_button("📄 Download Work Order PDF", f.read(), file_name=os.path.basename(path), key=f"wo_pdf_{req.get('id')}")
+            st.download_button(
+                "📄 Download Work Order PDF",
+                f.read(),
+                file_name=os.path.basename(path),
+                key=f"wo_pdf_{req.get('id')}"
+            )
 
 def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_by=""):
     if not PDF_AVAILABLE:
@@ -1174,13 +1190,12 @@ def render_work_order_bulk_download(records, key_prefix="wo_bulk"):
         failed = []
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
             for r in selected:
-                path = r.get("pdf_path", "")
-                if not path or not os.path.exists(path):
-                    path = work_order_pdf(r)
-                    if path:
-                        for x in records:
-                            if str(x.get("id")) == str(r.get("id")):
-                                x["pdf_path"] = path
+                # v3.5 — force regenerate so any layout changes are included
+                path = work_order_pdf(r)
+                if path:
+                    for x in records:
+                        if str(x.get("id")) == str(r.get("id")):
+                            x["pdf_path"] = path
                 if path and os.path.exists(path):
                     with open(path, "rb") as f:
                         zipf.writestr(os.path.basename(path), f.read())
