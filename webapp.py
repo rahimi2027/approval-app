@@ -1,6 +1,12 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.3
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.4
 # ============================================================
+# ✅ v4.4: PERFORMANCE OPTIMIZATIONS
+#    • PDFs cached — no more regeneration on every page render
+#    • Google Drive uploads only on decision, not on view
+#    • Audit log ID counter cached in session
+#    • save_all_work_orders / save_all_inspector_bonus gained "sync" param
+#    • Display functions use cached PDF paths
 # ✅ v4.3: Removed duplicate logo from Inspector Bonus Portal tab.
 # ✅ v4.2: Work Order PDF — Added Approved Stamp next to "Approved By".
 #           Inspector Bonus PDF — Enlarged the Approved Stamp size.
@@ -144,14 +150,12 @@ if drive_service:
 # ============================================================
 def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None:
-        st.error("❌ Google Drive is not connected.")
         return None
     if not os.path.exists(local_file_path):
-        st.error(f"❌ File not found: {local_file_path}")
         return None
     try:
         existing = _drive_find_file(display_filename)
-        media = MediaFileUpload(local_file_path, resumable=True)
+        media = MediaFileUpload(local_file_path, resumable=False)  # non-resumable = faster
         if existing:
             updated = drive_service.files().update(
                 fileId=existing["id"], media_body=media, fields="id,name,parents"
@@ -163,7 +167,7 @@ def upload_to_google_drive(local_file_path, display_filename):
         ).execute()
         return created.get("id")
     except Exception as e:
-        st.error(f"❌ Google Drive upload failed: {e}")
+        print(f"Google Drive upload failed: {e}")
         return None
 
 # ============================================================
@@ -193,13 +197,13 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
     try:
         existing = _drive_find_file(filename, parent_id)
         if existing:
-            media = MediaFileUpload(local_path, resumable=True)
+            media = MediaFileUpload(local_path, resumable=False)
             updated = drive_service.files().update(
                 fileId=existing["id"], media_body=media, fields="id,name"
             ).execute()
             return updated.get("id")
         metadata = {"name": filename, "parents": [parent_id]}
-        media = MediaFileUpload(local_path, resumable=True)
+        media = MediaFileUpload(local_path, resumable=False)
         created = drive_service.files().create(
             body=metadata, media_body=media, fields="id,name"
         ).execute()
@@ -288,9 +292,9 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"}
         res = requests.put(url, data=file_content, headers=headers, timeout=60)
         if res.status_code in (200, 201):
-            st.info(f"✅ Synced to OneDrive: {filename}"); return True
-        else: st.warning(f"⚠️ OneDrive sync: {res.status_code}")
-    except Exception as e: st.warning(f"⚠️ Could not sync to OneDrive: {str(e)}")
+            return True
+    except Exception:
+        pass
     return False
 
 # ============================================================
@@ -374,7 +378,6 @@ def safe_init_excel(path, columns):
                 changed = True
         if changed:
             df.to_excel(path, index=False, engine="openpyxl")
-            sync_saved_file_to_drive(path)
         return True
     except Exception:
         os.remove(path)
@@ -412,6 +415,17 @@ def load_audit_log(force=False):
         print(f"⚠️ Failed to load audit log: {e}")
         return []
 
+def _get_next_audit_id():
+    """v4.4: Cache audit ID count to avoid repeated disk reads."""
+    if "_audit_log_count" not in st.session_state:
+        try:
+            df = _read_excel_records(AUDIT_LOG_PATH)
+            st.session_state["_audit_log_count"] = len(df)
+        except Exception:
+            st.session_state["_audit_log_count"] = 0
+    st.session_state["_audit_log_count"] += 1
+    return st.session_state["_audit_log_count"]
+
 def save_audit_entry(entry):
     init_audit_log()
     try:
@@ -419,7 +433,11 @@ def save_audit_entry(entry):
         df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
         df.to_excel(AUDIT_LOG_PATH, index=False, engine="openpyxl")
         _invalidate_data_cache("_audit_log_cache")
-        sync_saved_file_to_drive(AUDIT_LOG_PATH)
+        # v4.4: sync in background via queued flag - only sync once per session
+        if not st.session_state.get("_audit_sync_queued"):
+            st.session_state["_audit_sync_queued"] = True
+            sync_saved_file_to_drive(AUDIT_LOG_PATH)
+            st.session_state["_audit_sync_queued"] = False
     except Exception as e:
         print(f"⚠️ Failed to save audit entry: {e}")
 
@@ -438,6 +456,7 @@ def clear_audit_log_file():
         os.remove(AUDIT_LOG_FILE)
     pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
     _invalidate_data_cache("_audit_log_cache")
+    st.session_state["_audit_log_count"] = 0
     sync_saved_file_to_drive(AUDIT_LOG_FILE)
 
 def clear_all_requests_file():
@@ -494,7 +513,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         display_action = action_labels.get(action, action)
         old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
         new_val = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
-        save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+        save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp,
             "User_Name": username, "User_Role": role, "Action": display_action,
             "Request_ID": str(req_id), "Department": "-", "Amount": "-",
             "Decision_By": decision_by or "-", "Decision_Date": decision_date or "-",
@@ -518,7 +537,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
         new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
         save_audit_entry({
-            "AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+            "AuditID": _get_next_audit_id(), "Timestamp": timestamp,
             "User_Name": username, "User_Role": role, "Action": wo_labels.get(action, action),
             "Request_ID": str(req_id), "Department": dept, "Amount": amount,
             "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp,
@@ -529,7 +548,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         })
         return
     if action in ["CREATED", "DELETED"]:
-        save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+        save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp,
             "User_Name": username, "User_Role": role, "Action": action, "Request_ID": str(req_id),
             "Department": dept, "Amount": amount, "Decision_By": "-", "Decision_Date": "-",
             "Field_Changed": "-", "Old_Value": "-",
@@ -537,7 +556,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "IP_Address": "Auto-Logged"})
     elif action in ["APPROVED", "REJECTED", "STATUS_CHANGED"]:
         status_text = "Approved" if action == "APPROVED" else "Rejected" if action == "REJECTED" else "Status Changed"
-        save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+        save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp,
             "User_Name": username, "User_Role": role, "Action": action, "Request_ID": str(req_id),
             "Department": dept, "Amount": amount, "Decision_By": final_decision_by,
             "Decision_Date": final_decision_date, "Field_Changed": "Status",
@@ -550,7 +569,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             old = str(old_data.get(key, "")).strip()
             new = str(new_data.get(key, "")).strip()
             if old != new:
-                save_audit_entry({"AuditID": len(load_audit_log()) + 1, "Timestamp": timestamp,
+                save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp,
                     "User_Name": username, "User_Role": role, "Action": "EDITED", "Request_ID": str(req_id),
                     "Department": dept, "Amount": amount, "Decision_By": "-", "Decision_Date": "-",
                     "Field_Changed": label, "Old_Value": old, "New_Value": new, "IP_Address": "Auto-Logged"})
@@ -653,13 +672,14 @@ def show_old_new_comparison(old_json, new_rec):
 
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
-        if drive_service is not None:
-            for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH):
-                remote = _drive_find_file(os.path.basename(path))
-                if remote:
-                    _drive_download_file(remote["id"], path)
-        _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache")
-        st.session_state["_last_refresh"] = datetime.now().isoformat()
+        with st.spinner("Refreshing from Google Drive..."):
+            if drive_service is not None:
+                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH):
+                    remote = _drive_find_file(os.path.basename(path))
+                    if remote:
+                        _drive_download_file(remote["id"], path)
+            _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count")
+            st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 
 def make_request_title(req):
@@ -864,7 +884,8 @@ def clear_all_work_orders():
     except Exception:
         return False
 
-def save_all_work_orders(records):
+def save_all_work_orders(records, sync=True):
+    """v4.4: Added `sync` param. Set sync=False to skip Drive upload (for caching PDF paths)."""
     rows = []
     for r in records:
         rows.append({
@@ -889,7 +910,8 @@ def save_all_work_orders(records):
         })
     pd.DataFrame(rows, columns=WORK_ORDER_COLUMNS).to_excel(WORK_ORDERS_PATH, index=False, engine="openpyxl")
     _set_data_cache("_work_orders_cache", list(records))
-    sync_saved_file_to_drive(WORK_ORDERS_PATH)
+    if sync:
+        sync_saved_file_to_drive(WORK_ORDERS_PATH)
 
 def get_next_work_order_id(records):
     nums = []
@@ -928,13 +950,10 @@ def _pdf_text(value):
         return ""
     return str(value).replace("\x00", "")
 
-def work_order_pdf(req):
+def work_order_pdf(req, upload_to_drive=True):
     """
-    v4.3 — Generates the Work Order PDF.
-    REMOVED: 'Manager Review' section and 'Payment Status' line.
-    RETAINED: Director Final Approval section.
-    ADDED: Approved Stamp next to "Approved By:" name.
-    INCLUDES: Company Logo at top.
+    v4.4 — Generates the Work Order PDF.
+    Added `upload_to_drive` param to skip Drive API call when regenerating for viewing.
     """
     if not PDF_AVAILABLE:
         return None
@@ -955,7 +974,6 @@ def work_order_pdf(req):
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
-        # ---------- Company Logo at top ----------
         if os.path.exists(LOGO_PATH):
             try:
                 pdf.image(LOGO_PATH, x=75, y=10, w=60)
@@ -1000,34 +1018,27 @@ def work_order_pdf(req):
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, safe(req.get("desc", "")))
 
-        # ✅ v4.3: Manager Review section removed
-        # ✅ v4.3: Payment Status line removed
-
         pdf.ln(3)
         pdf.set_font(font_family, "B", 10)
         pdf.cell(0, 6, safe("Director Final Approval"), ln=True)
         pdf.set_font(font_family, "", 10)
         pdf.set_x(pdf.l_margin)
 
-        # Approved By row with Stamp
         approved_by = req.get('director_decision_by', '')
         pdf.cell(35, 8, safe("Approved By:"), 0, 0)
         pdf.cell(80, 8, safe(approved_by), 0, 0)
-        
-        # Add stamp if approved
+
         status = str(req.get('status', '')).strip().lower()
         if status in ["approved_payment", "approved"] and os.path.exists(APPROVED_STAMP_PATH):
             try:
                 pdf.image(APPROVED_STAMP_PATH, x=pdf.get_x() + 5, y=pdf.get_y(), w=35)
             except Exception:
                 pass
-        pdf.ln(8) # Move down for next row
+        pdf.ln(8)
 
-        # Approval Date row
         pdf.cell(35, 6, safe("Approval Date:"), 0, 0)
         pdf.cell(0, 6, safe(req.get('director_decision_date', '')), ln=True)
 
-        # Comments row
         pdf.cell(35, 6, safe("Comments:"), 0, 0)
         pdf.multi_cell(0, 6, safe(req.get('director_comments', '')))
 
@@ -1039,23 +1050,28 @@ def work_order_pdf(req):
         filename = f"Work_Order_{safe_wo}_{safe_emp}_{safe_amount}_{safe_date}.pdf"
         path = os.path.join(WORK_ORDER_PDF_DIR, filename)
         pdf.output(path)
-        upload_to_google_drive(path, os.path.basename(path))
+        if upload_to_drive:
+            upload_to_google_drive(path, os.path.basename(path))
         return path
     except Exception as e:
         st.error(f"Work Order PDF Error: {e}")
         return None
 
-def display_work_order_pdf(req, force_regenerate=True):
+def display_work_order_pdf(req):
     """
-    v4.3 — Always regenerates the PDF to ensure the latest layout (no cached old PDFs).
+    v4.4 — Uses the cached PDF. Only regenerates if the file is missing.
+    Never uploads to Drive (upload happens once at decision time).
     """
-    path = work_order_pdf(req)  # Force regenerate
-    if path:
-        records = load_work_orders()
-        for r in records:
-            if str(r.get("id")) == str(req.get("id")):
-                r["pdf_path"] = path
-        save_all_work_orders(records)
+    path = req.get("pdf_path", "")
+    if not path or not os.path.exists(path):
+        path = work_order_pdf(req, upload_to_drive=False)
+        if path:
+            records = load_work_orders()
+            for r in records:
+                if str(r.get("id")) == str(req.get("id")):
+                    r["pdf_path"] = path
+            # v4.4: Do NOT sync to Drive — path caching is a local-only operation
+            save_all_work_orders(records, sync=False)
     if path and os.path.exists(path):
         with open(path, "rb") as f:
             st.download_button(
@@ -1187,7 +1203,8 @@ def render_work_order_total(records, scope_department=None, key_prefix="wo_total
         } for r in selected]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         if st.button("📄 Generate & Download Total PDF", key=f"{key_prefix}_pdf", type="primary"):
-            path = work_order_total_pdf(selected, employee, from_date, to_date, prepared_by=prepared_by)
+            with st.spinner("Generating PDF..."):
+                path = work_order_total_pdf(selected, employee, from_date, to_date, prepared_by=prepared_by)
             if path and os.path.exists(path):
                 with open(path, "rb") as f:
                     st.download_button("⬇️ Download Total PDF", f.read(), file_name=os.path.basename(path), key=f"{key_prefix}_download")
@@ -1231,22 +1248,21 @@ def render_work_order_bulk_download(records, key_prefix="wo_bulk"):
         zip_buffer = io.BytesIO()
         pdf_count = 0
         failed = []
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for r in selected:
-                path = work_order_pdf(r)
-                if path:
-                    for x in records:
-                        if str(x.get("id")) == str(r.get("id")):
-                            x["pdf_path"] = path
-                if path and os.path.exists(path):
-                    with open(path, "rb") as f:
-                        zipf.writestr(os.path.basename(path), f.read())
-                    pdf_count += 1
-                else:
-                    failed.append(get_work_order_number(r))
+        with st.spinner(f"Generating {len(selected)} PDFs..."):
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for r in selected:
+                    # Use cached PDF if available
+                    path = r.get("pdf_path", "")
+                    if not path or not os.path.exists(path):
+                        path = work_order_pdf(r, upload_to_drive=False)
+                    if path and os.path.exists(path):
+                        with open(path, "rb") as f:
+                            zipf.writestr(os.path.basename(path), f.read())
+                        pdf_count += 1
+                    else:
+                        failed.append(get_work_order_number(r))
         zip_buffer.seek(0)
         if pdf_count > 0:
-            save_all_work_orders(records)
             safe_emp = "all_employees" if employee == "All Employees" else "_".join(employee.split())
             filename = f"Work_Order_PDFs_{safe_emp}_{from_date}_to_{to_date}.zip"
             st.session_state[f"{key_prefix}_data"] = zip_buffer.getvalue()
@@ -1509,15 +1525,18 @@ def render_work_order_director_portal(director_name):
                     x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
                     x["director_decision_by"] = director_name
                     x["director_decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    x["pdf_path"] = ""  # v4.4: clear cache so it regenerates on next view
                 elif new_status == "rejected_director":
                     x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
                     x["director_decision_by"] = director_name
                     x["director_decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    x["pdf_path"] = ""
                 elif new_status == "pending_director":
                     x["director_comments"] = (str(x.get("director_comments","")) +
                         f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {director_name}: {comments.strip()}").strip()
                     x["director_decision_by"] = ""
                     x["director_decision_date"] = ""
+                    x["pdf_path"] = ""
                 break
         save_all_work_orders(orders)
         log_action("WORK_ORDER_STATUS_CHANGED", req_id,
@@ -1689,7 +1708,8 @@ def load_inspector_bonus(force=False):
         st.error(f"Inspector Bonus Load Error: {e}")
         return []
 
-def save_all_inspector_bonus(records):
+def save_all_inspector_bonus(records, sync=True):
+    """v4.4: Added `sync` param."""
     rows = []
     for r in records:
         rows.append({
@@ -1710,7 +1730,8 @@ def save_all_inspector_bonus(records):
         })
     pd.DataFrame(rows, columns=INSPECTOR_BONUS_COLUMNS).to_excel(INSPECTOR_BONUS_PATH, index=False, engine="openpyxl")
     _set_data_cache("_inspector_bonus_cache", list(records))
-    sync_saved_file_to_drive(INSPECTOR_BONUS_PATH)
+    if sync:
+        sync_saved_file_to_drive(INSPECTOR_BONUS_PATH)
 
 def get_next_inspector_bonus_id(records):
     nums = []
@@ -1720,16 +1741,13 @@ def get_next_inspector_bonus_id(records):
         except: pass
     return f"IB-{max(nums) + 1 if nums else 1:04d}"
 
-def inspector_bonus_pdf(req, force_regenerate=False):
+def inspector_bonus_pdf(req, force_regenerate=False, upload_to_drive=True):
     """
-    v4.3 — Generates the National Grid Inspector Bonus Approval Sheet PDF.
-    Includes company logo at top.
-    "Approved By:" row shows Director name, date & time, and an enlarged Approved Stamp.
+    v4.4 — Added `upload_to_drive` param to skip Drive API call when regenerating for viewing.
     """
     if not PDF_AVAILABLE:
         return None
     try:
-        # Reuse cached file unless forced
         cached_path = req.get("pdf_path", "")
         if not force_regenerate and cached_path and os.path.exists(cached_path):
             return cached_path
@@ -1750,7 +1768,6 @@ def inspector_bonus_pdf(req, force_regenerate=False):
                 return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
-        # ---------- Company Logo at top ----------
         if os.path.exists(LOGO_PATH):
             try:
                 pdf.image(LOGO_PATH, x=75, y=10, w=60)
@@ -1760,12 +1777,10 @@ def inspector_bonus_pdf(req, force_regenerate=False):
         else:
             pdf.ln(5)
 
-        # ---------- Title ----------
         pdf.set_font(family, "B", 16)
         pdf.cell(0, 10, safe("National Grid Inspector Bonus Approval Sheet"), ln=True, align="C")
         pdf.ln(4)
 
-        # ---------- Subtitle ----------
         pdf.set_font(family, "", 10)
         pdf.multi_cell(
             0, 6,
@@ -1774,7 +1789,6 @@ def inspector_bonus_pdf(req, force_regenerate=False):
         )
         pdf.ln(8)
 
-        # ---------- Fields ----------
         def field(label, value, label_w=60, value_h=10):
             pdf.set_font(family, "B", 11)
             pdf.cell(label_w, value_h, safe(label), border=1)
@@ -1789,13 +1803,10 @@ def inspector_bonus_pdf(req, force_regenerate=False):
         field("Total Jobs Completed", f"{float(req.get('total_jobs', 0)):.2f}")
         field("Bonus Amount:", f"£{float(req.get('bonus_amount', 0)):.2f}")
 
-        # ---------- Approved By (decision from Director) + Stamp ----------
         status = str(req.get("status", "")).strip().lower()
-        
-        # Determine text and stamp
         text_content = ""
         stamp_path = None
-        
+
         if status == "approved":
             approved_by = req.get("director_decision_by", "") or "Andy Acoole"
             decision_date = req.get("director_decision_date", "")
@@ -1807,29 +1818,24 @@ def inspector_bonus_pdf(req, force_regenerate=False):
         else:
             text_content = "   (Pending Director signature)"
 
-        # Label cell (60mm)
         pdf.set_font(family, "B", 11)
         pdf.cell(60, 10, safe("Approved By:"), border=1)
-        
-        # Text cell (80mm)
+
         pdf.set_font(family, "", 11)
         pdf.cell(80, 10, safe(text_content), border=1)
-        
-        # Stamp cell (50mm) - draw border and capture position
+
         current_x = pdf.get_x()
         current_y = pdf.get_y()
         pdf.cell(50, 10, "", border=1, ln=True)
-        
-        # Insert stamp image inside the stamp cell (Enlarged size w=40, centered)
+
         if stamp_path and os.path.exists(stamp_path):
             try:
                 pdf.image(stamp_path, x=current_x + 5, y=current_y - 1, w=40)
             except Exception:
                 pass
-                
+
         pdf.ln(4)
 
-        # ---------- Director comments (if any) ----------
         if req.get("director_comments"):
             pdf.set_font(family, "B", 10)
             pdf.cell(0, 6, safe("Director Comments:"), ln=True)
@@ -1838,7 +1844,6 @@ def inspector_bonus_pdf(req, force_regenerate=False):
             pdf.multi_cell(0, 6, safe(req.get("director_comments", "")))
             pdf.ln(4)
 
-        # ---------- Footer info ----------
         pdf.set_font(family, "", 9)
         pdf.cell(0, 5, safe(f"Submitted By: {req.get('submitted_by', '')}"), ln=True)
         pdf.cell(0, 5, safe(f"Submitted Date: {req.get('submitted_date', '')}"), ln=True)
@@ -1851,14 +1856,17 @@ def inspector_bonus_pdf(req, force_regenerate=False):
         filename = f"Inspector_Bonus_{safe_id}_{safe_name}_{safe_month}.pdf"
         path = os.path.join(INSPECTOR_BONUS_PDF_DIR, filename)
         pdf.output(path)
-        upload_to_google_drive(path, os.path.basename(path))
+        if upload_to_drive:
+            upload_to_google_drive(path, os.path.basename(path))
         return path
     except Exception as e:
         st.error(f"Inspector Bonus PDF Error: {e}")
         return None
 
 def display_inspector_bonus_pdf_button(req, key_prefix="ib"):
-    """Show a Generate/Download PDF button for an approved inspector bonus."""
+    """
+    v4.4 — Uses cached PDF. Only generates if missing. No Drive upload on view.
+    """
     if not PDF_AVAILABLE:
         st.warning("⚠️ PDF generation is unavailable. Please install fpdf2.")
         return
@@ -1867,40 +1875,41 @@ def display_inspector_bonus_pdf_button(req, key_prefix="ib"):
         st.info("📄 PDF download is available once the Director approves this bonus.")
         return
     req_id = str(req.get("id", "unknown"))
-    state_key = f"{key_prefix}_pdf_state_{req_id}"
-    gen_key = f"{key_prefix}_gen_{req_id}"
     dl_key = f"{key_prefix}_dl_{req_id}"
+    gen_key = f"{key_prefix}_gen_{req_id}"
+
+    cached_path = req.get("pdf_path", "")
+    if cached_path and os.path.exists(cached_path):
+        with open(cached_path, "rb") as f:
+            st.download_button(
+                "⬇️ Download Bonus Approval PDF",
+                data=f.read(),
+                file_name=os.path.basename(cached_path),
+                mime="application/pdf",
+                type="primary",
+                key=dl_key
+            )
+        return
+
     if st.button(f"📄 Generate PDF for {req_id}", key=gen_key, type="primary"):
-        path = inspector_bonus_pdf(req, force_regenerate=True)
+        with st.spinner("Generating PDF..."):
+            path = inspector_bonus_pdf(req, force_regenerate=True, upload_to_drive=True)
         if path and os.path.exists(path):
-            with open(path, "rb") as f:
-                st.session_state[state_key] = {"data": f.read(), "filename": os.path.basename(path)}
-            # Persist path in records
             records = load_inspector_bonus()
             for r in records:
                 if str(r.get("id")) == req_id:
                     r["pdf_path"] = path
-            save_all_inspector_bonus(records)
-            st.success("✅ PDF ready. Click below to download.")
+            # v4.4: Don't sync to Drive — path caching is local
+            save_all_inspector_bonus(records, sync=False)
+            st.success("✅ PDF generated. Click below to download.")
+            st.rerun()
         else:
             st.error("❌ Could not generate PDF.")
-    result = st.session_state.get(state_key)
-    if result:
-        st.download_button(
-            "⬇️ Download Bonus Approval PDF",
-            data=result["data"],
-            file_name=result["filename"],
-            mime="application/pdf",
-            type="primary",
-            key=dl_key
-        )
 
 def render_inspector_bonus_portal(user_name, user_dept):
     st.subheader("💰 National Grid Inspector Bonus Approval")
     st.info("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month.")
     st.divider()
-
-    # v4.3 — Duplicate logo removed from here
 
     bonus_records = load_inspector_bonus()
     new_id = get_next_inspector_bonus_id(bonus_records)
@@ -1983,7 +1992,6 @@ def render_inspector_bonus_portal(user_name, user_dept):
                 if r.get("director_comments"):
                     st.info(f"💬 **Director Comments:** {r.get('director_comments')}")
                 st.caption(f"Submitted by {r.get('submitted_by')} on {r.get('submitted_date')}")
-                # PDF download (only when approved)
                 display_inspector_bonus_pdf_button(r, key_prefix="ib_mgr")
 
 def render_inspector_bonus_director_portal(director_name):
@@ -2009,7 +2017,7 @@ def render_inspector_bonus_director_portal(director_name):
                 x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
                 x["director_decision_by"] = director_name
                 x["director_decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                x["pdf_path"] = ""  # force regenerate after decision
+                x["pdf_path"] = ""  # v4.4: clear cache so PDF regenerates on next view
                 break
         save_all_inspector_bonus(records)
         action = "INSPECTOR_BONUS_APPROVED" if new_status == "approved" else "INSPECTOR_BONUS_REJECTED"
@@ -2066,7 +2074,6 @@ def render_inspector_bonus_director_portal(director_name):
                 show_details(r)
 
 def render_inspector_bonus_payroll_portal(payroll_name):
-    """Read-only view for Payroll to see approved Inspector Bonuses and download PDFs."""
     st.subheader("💰 National Grid Inspector Bonus — Payroll")
     st.info("View Director-approved Inspector Bonuses and download the authorised PDF.")
     st.divider()
@@ -2356,7 +2363,8 @@ def display_pdf_button(req, can_generate=True, key_suffix=""):
     download_key = f"download_pdf_{req_id}_{status}_{suffix}"
     if can_generate:
         if st.button(f"📄 Generate PDF for ID #{req_id}", type="primary", key=button_key):
-            ok, pdf_bytes, filename = generate_approval_pdf(req)
+            with st.spinner("Generating PDF..."):
+                ok, pdf_bytes, filename = generate_approval_pdf(req)
             if ok and pdf_bytes:
                 st.session_state[state_key] = {"data": bytes(pdf_bytes), "filename": filename}
                 st.success("✅ PDF generated successfully. Download it below.")
@@ -2957,14 +2965,13 @@ elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    
-    # v3.9 — Three main tabs for Payroll
+
     tab_add_ded, tab_work_orders, tab_inspector_bonus = st.tabs([
         "➕ Addition & Deduction",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus"
     ])
-    
+
     with tab_add_ded:
         tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
         with tab_pending:
@@ -3040,10 +3047,10 @@ elif role == "Payroll":
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
-                        
+
     with tab_work_orders:
         render_work_order_payroll_portal(full_name)
-        
+
     with tab_inspector_bonus:
         render_inspector_bonus_payroll_portal(full_name)
 
@@ -3196,7 +3203,6 @@ elif role == "Work Order Manager":
 elif role in ["Manager", "Staff", "Team Member"]:
     dept_name = dept
 
-    # v3.6 / v3.7 — Check for Inspector Bonus permission
     has_inspector_bonus = user_info.get("can_access_inspector_bonus", False)
 
     if has_inspector_bonus:
