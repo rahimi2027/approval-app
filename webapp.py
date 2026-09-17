@@ -1,6 +1,12 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.9
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.9.1
 # ============================================================
+# ✅ v4.9.1 (FORM RESET FIX):
+#    • Employee "Submit New Work Order" form now clears reliably after a
+#      SUCCESSFUL submission. Uses a form-version counter that changes all
+#      widget keys on success, forcing Streamlit to render a fresh form.
+#    • On duplicate Work Order No. / validation errors, the version is NOT
+#      bumped, so all form data (including file uploads) is preserved.
 # ✅ v4.9 (PERFORMANCE):
 #    • Google Drive uploads now run in the BACKGROUND — UI no longer waits
 #      for the network on post / edit / approve / PDF generation.
@@ -13,9 +19,7 @@
 #    • Employee can see their department's work orders before submitting,
 #      preventing duplicate Work Order No. submissions.
 #    • On duplicate Work Order No. submission, the form data is KEPT
-#      (no clearing) and the message "Work Order No. already Exist." is shown,
-#      so the user can change only the Work Order No. and resubmit.
-#    • Form is only cleared on SUCCESSFUL submission (not on duplicate).
+#      and the message "Work Order No. already Exist." is shown.
 # ✅ v4.7:
 #    • Employee Work Order form matches Manager's layout
 #    • Employee can edit pending / returned / rejected work orders
@@ -1375,19 +1379,21 @@ def render_work_order_bulk_download(records, key_prefix="wo_bulk"):
             key=f"{key_prefix}_dl",
         )
 
-# ✅ v4.8 — Employee portal:
+# ✅ v4.9.1 — Employee portal:
 #   • Two tabs: "My Work Orders" AND "Department Work Orders" (own dept, incl. manager-submitted)
-#   • Duplicate Work Order No. shows "Work Order No. already Exist." and KEEPS all form data
-#   • Form is only cleared after a SUCCESSFUL submission
+#   • Duplicate Work Order No. → error message + form data PRESERVED (version not bumped)
+#   • Successful submission → form-version bumped → next render is a FRESH form
 def render_work_order_employee_portal(current_user, current_dept):
     st.subheader("🛠️ Work Orders")
     orders = load_work_orders()
     managers = _manager_options_for_department(current_dept)
 
+    # ─── Success message (shown once after a successful submission) ───
     _success_msg = st.session_state.pop("emp_new_wo_success", None)
     if _success_msg:
         st.success(_success_msg)
 
+    # ─── Edit mode — employee can edit pending / returned / rejected work orders ───
     editing_id = st.session_state.get("editing_work_order_id_emp")
     if editing_id:
         rec = next((r for r in orders if str(r.get("id")) == str(editing_id)), None)
@@ -1510,27 +1516,27 @@ def render_work_order_employee_portal(current_user, current_dept):
         else:
             st.session_state.editing_work_order_id_emp = None
 
+    # ─── New Submission Form ───
     st.markdown("### 📤 Submit New Work Order")
     st.caption("Complete the work-order details below. No hours/time entry is required.")
     wid = get_next_work_order_id(orders)
 
-    K_WO    = "emp_new_wo_no"
-    K_EMP   = "emp_new_contractor"
-    K_SITE  = "emp_new_site"
-    K_CJNO  = "emp_new_cjno"
-    K_DATE  = "emp_new_date"
-    K_AMT   = "emp_new_amount"
-    K_DESC  = "emp_new_desc"
-    K_MGR   = "emp_new_manager"
-    K_FILES = "emp_new_files"
+    # ✅ Form version — bumped ONLY on successful submission.
+    #    Bumping changes every widget key → Streamlit renders a fresh, empty form.
+    #    On duplicate / validation errors, version is unchanged → all data preserved.
+    form_version = st.session_state.get("emp_new_wo_form_version", 0)
 
-    # Only reset the form after a SUCCESSFUL submission (not on duplicate / validation error)
-    if st.session_state.get("emp_new_form_reset"):
-        for k in (K_WO, K_EMP, K_SITE, K_CJNO, K_DATE, K_AMT, K_DESC, K_MGR, K_FILES):
-            st.session_state.pop(k, None)
-        st.session_state["emp_new_form_reset"] = False
+    K_WO    = f"emp_new_wo_no_v{form_version}"
+    K_EMP   = f"emp_new_contractor_v{form_version}"
+    K_SITE  = f"emp_new_site_v{form_version}"
+    K_CJNO  = f"emp_new_cjno_v{form_version}"
+    K_DATE  = f"emp_new_date_v{form_version}"
+    K_AMT   = f"emp_new_amount_v{form_version}"
+    K_DESC  = f"emp_new_desc_v{form_version}"
+    K_MGR   = f"emp_new_manager_v{form_version}"
+    K_FILES = f"emp_new_files_v{form_version}"
 
-    with st.form("employee_new_work_order_form", clear_on_submit=False):
+    with st.form(f"employee_new_work_order_form_v{form_version}", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
             work_order_no = st.text_input(
@@ -1600,11 +1606,13 @@ def render_work_order_employee_portal(current_user, current_dept):
             )
 
             if duplicate:
+                # ❗ Do NOT bump form version → widget keys stay the same → data preserved
                 st.error(
                     "❌ **Work Order No. already Exist.** "
                     "Please change the Work Order No. and submit again — your form data has been kept."
                 )
             elif errors:
+                # ❗ Do NOT bump form version → data preserved
                 st.error("Please correct: " + ", ".join(errors) + ".")
             else:
                 attachments = []
@@ -1648,18 +1656,25 @@ def render_work_order_employee_portal(current_user, current_dept):
                 orders.append(rec)
                 save_all_work_orders(orders)
                 log_action("WORK_ORDER_CREATED", wid, decision_by=current_user)
+
+                # ✅ Bump form version → all widget keys change → next render is a fresh form.
+                # Also pop the old version's keys to keep session_state tidy (optional but clean).
+                for k in (K_WO, K_EMP, K_SITE, K_CJNO, K_DATE, K_AMT, K_DESC, K_MGR, K_FILES):
+                    st.session_state.pop(k, None)
+                st.session_state["emp_new_wo_form_version"] = form_version + 1
                 st.session_state["emp_new_wo_success"] = (
                     f"✅ Work Order No. {work_order_no.strip()} submitted to {manager} for review."
                 )
-                st.session_state["emp_new_form_reset"] = True
                 st.rerun()
 
+    # ─── Work Order Lists (My Orders + Department Orders) ───
     st.divider()
     tab_mine, tab_dept = st.tabs([
         "📋 My Work Orders",
         f"🏢 Department Work Orders ({current_dept})"
     ])
 
+    # ═══ TAB 1 — My Work Orders ═══
     with tab_mine:
         q = st.text_input(
             "🔎 Search my work orders",
@@ -1731,6 +1746,7 @@ def render_work_order_employee_portal(current_user, current_dept):
                             st.session_state.editing_work_order_id_emp = r.get("id")
                             st.rerun()
 
+    # ═══ TAB 2 — Department Work Orders (for duplicate-checking) ═══
     with tab_dept:
         st.caption(
             "Work orders already recorded for your department (including those submitted by managers). "
