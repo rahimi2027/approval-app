@@ -1,30 +1,22 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.10
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.10.1
 # ============================================================
+# ✅ v4.10.1 (SUPER ADMIN TAB LAYOUT):
+#    • Super Admin portal now has FOUR top-level tabs:
+#         ➕ Addition & Deduction | 🛠️ Work Orders | 💰 National Grid Inspector Bonus | 🔧 System Management
+#    • "System Management" promoted out of the Addition & Deduction sub-tabs
+#      and placed next to National Grid Inspector Bonus.
 # ✅ v4.10 (SUPER ADMIN EXPANSION):
-#    • Super Admin portal now has THREE tabs:
-#         ➕ Addition & Deduction   |   🛠️ Work Orders   |   💰 National Grid Inspector Bonus
+#    • Super Admin portal now has THREE top-level tabs for content.
 #    • Read-only views for Work Orders and Inspector Bonus.
-#    • Approvals remain Director-only.
 # ✅ v4.9.1 (FORM RESET FIX):
 #    • Employee "Submit New Work Order" form now clears reliably after a
-#      SUCCESSFUL submission. Uses a form-version counter that changes all
-#      widget keys on success, forcing Streamlit to render a fresh form.
-#    • On duplicate Work Order No. / validation errors, the version is NOT
-#      bumped, so all form data (including file uploads) is preserved.
+#      SUCCESSFUL submission. Uses a form-version counter.
 # ✅ v4.9 (PERFORMANCE):
 #    • Google Drive uploads now run in the BACKGROUND.
-#    • Drive file-ID cache skips the slow "list files" query on every upload.
-#    • Sync fingerprinting skips uploading files that haven't changed.
-#    • Startup download skips files whose LOCAL copy is newer than Drive's.
-# ✅ v4.8:
-#    • Employee Work Order portal now has TWO tabs.
-#    • Employee can see their department's work orders before submitting.
-#    • Duplicate Work Order No. → message + form data preserved.
-# ✅ v4.7:
-#    • Employee Work Order form matches Manager's layout.
-# ✅ v4.6:
-#    • Work Order Manager can APPROVE / REJECT employee-submitted work orders.
+# ✅ v4.8: Employee Work Order portal has TWO tabs.
+# ✅ v4.7: Employee Work Order form matches Manager's layout.
+# ✅ v4.6: Work Order Manager can APPROVE / REJECT employee submissions.
 # ✅ All prior fixes retained
 # ============================================================
 import streamlit as st
@@ -1097,7 +1089,7 @@ def render_work_order_bulk_download(records, key_prefix="wo_bulk"):
     if st.session_state.get(f"{key_prefix}_data"):
         st.download_button("⬇️ Download ZIP", data=st.session_state[f"{key_prefix}_data"], file_name=st.session_state.get(f"{key_prefix}_name", "Work_Order_PDFs.zip"), mime="application/zip", type="primary", key=f"{key_prefix}_dl")
 
-# ✅ v4.10 — NEW: Super Admin read-only view of ALL Work Orders
+# ✅ v4.10 — Super Admin read-only view of ALL Work Orders
 def render_work_orders_super_admin():
     st.subheader("🛠️ Work Orders — Super Admin (View Only)")
     st.info("✅ View all work orders across ALL departments. **Approval → Director only.**")
@@ -1120,11 +1112,7 @@ def render_work_orders_super_admin():
     with c4: st.metric("🔴 Rejected / Returned", len(rejected))
     st.divider()
 
-    t1, t2, t3 = st.tabs([
-        f"⏳ Pending ({len(pending_mgr) + len(pending_dir)})",
-        f"✅ Approved ({len(approved)})",
-        f"❌ Rejected / Returned ({len(rejected)})",
-    ])
+    t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending_mgr) + len(pending_dir)})", f"✅ Approved ({len(approved)})", f"❌ Rejected / Returned ({len(rejected)})"])
 
     def show_wo_details(r):
         st.write(f"🧾 **Work Order No.:** {get_work_order_number(r)}")
@@ -1184,7 +1172,7 @@ def render_work_orders_super_admin():
     st.divider()
     render_work_order_total(orders, key_prefix="wo_super_admin_total", prepared_by="Super Admin")
 
-# ✅ v4.9.1 — Employee portal with reliable form reset (version-bumped keys)
+# ✅ v4.9.1 — Employee portal with reliable form reset
 def render_work_order_employee_portal(current_user, current_dept):
     st.subheader("🛠️ Work Orders")
     orders = load_work_orders()
@@ -1890,7 +1878,7 @@ def display_inspector_bonus_pdf_button(req, key_prefix="ib"):
             st.rerun()
         else: st.error("❌ Could not generate PDF.")
 
-# ✅ v4.10 — NEW: Super Admin read-only view of ALL Inspector Bonuses
+# ✅ v4.10 — Super Admin read-only view of ALL Inspector Bonuses
 def render_inspector_bonus_super_admin():
     st.subheader("💰 National Grid Inspector Bonus — Super Admin (View Only)")
     st.info("✅ View all Inspector Bonus records across ALL departments. **Approval → Director only.**")
@@ -3381,19 +3369,22 @@ elif role == "Director":
     with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
-    # ✅ v4.10 — Super Admin now has three tabs matching Director's layout
-    super_add_ded_tab, super_work_orders_tab, super_inspector_bonus_tab = st.tabs([
+    # ✅ v4.10.1 — Super Admin now has FOUR top-level tabs.
+    # "🔧 System Management" promoted out of Addition & Deduction sub-tabs,
+    # placed next to National Grid Inspector Bonus.
+    super_add_ded_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
         "➕ Addition & Deduction",
         "🛠️ Work Orders",
-        "💰 National Grid Inspector Bonus"
+        "💰 National Grid Inspector Bonus",
+        "🔧 System Management"
     ])
 
-    # ─── TAB 1: Addition & Deduction (existing content + System Management) ───
+    # ─── TAB 1: Addition & Deduction (Pending / Approved / Rejected only) ───
     with super_add_ded_tab:
         st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
         st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
         st.divider()
-        tab_pending, tab_approved, tab_rejected, tab_manage = st.tabs(["⏳ All Pending", "✅ All Approved", "❌ All Rejected", "🔧 System Management"])
+        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ All Pending", "✅ All Approved", "❌ All Rejected"])
         with tab_pending:
             pending = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "pending"]
             if not pending: st.success("✅ No pending requests.")
@@ -3451,126 +3442,131 @@ elif role == "Super Admin":
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
-        with tab_manage:
-            tab_settings, tab_users, tab_audit = st.tabs(["⚙️ System Settings", "👤 User Management", "📖 Audit History"])
-            with tab_settings: settings_management_panel()
-            with tab_users: user_management_panel()
-            with tab_audit:
-                if "display_audit_log_panel" in globals(): display_audit_log_panel()
-                else: st.info("📖 Audit log panel not defined — skipping")
-                st.divider()
-                st.subheader("⚠️ Super Admin — Data Reset / Live Launch")
-                st.warning("These controls are permanent. They are intended for preparing the portal for live use. Clearing requests removes all request records from requests.xlsx. Clearing the audit history removes all audit entries. User accounts, system settings and uploaded attachment files are NOT deleted by these controls.")
-                danger_col1, danger_col2 = st.columns(2)
-                with danger_col1:
-                    if not st.session_state.get("confirm_clear_requests", False):
-                        if st.button("🧹 Clear All Submitted Requests", type="secondary", key="clear_all_requests_btn"):
-                            st.session_state["confirm_clear_requests"] = True; st.rerun()
-                    else:
-                        st.error("⚠️ This will permanently remove ALL request records from the application.")
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("✅ Yes, Clear Requests", type="primary", key="confirm_clear_all_requests_btn"):
-                                clear_all_requests_file(); st.session_state["confirm_clear_requests"] = False
-                                st.success("✅ All submitted request records have been cleared."); st.rerun()
-                        with c2:
-                            if st.button("↩️ Cancel", key="cancel_clear_all_requests_btn"):
-                                st.session_state["confirm_clear_requests"] = False; st.rerun()
-                with danger_col2:
-                    reset_col1, reset_col2, reset_col3 = st.columns(3)
-                    with reset_col1:
-                        if not st.session_state.get("confirm_clear_inspector_bonus", False):
-                            if st.button("💰 Clear All Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", use_container_width=True):
-                                st.session_state["confirm_clear_inspector_bonus"] = True
-                        else:
-                            st.warning("⚠️ This permanently removes ALL Inspector Bonus records.")
-                            cc1, cc2 = st.columns(2)
-                            with cc1:
-                                if st.button("✅ Confirm Clear Bonuses", key="super_admin_confirm_clear_inspector_bonus", use_container_width=True):
-                                    clear_all_inspector_bonus()
-                                    log_action("SUPER_ADMIN_CLEAR_INSPECTOR_BONUS", "ALL", decision_by=full_name)
-                                    st.session_state["confirm_clear_inspector_bonus"] = False
-                                    st.success("✅ All Inspector Bonus records have been cleared."); st.rerun()
-                            with cc2:
-                                if st.button("Cancel", key="super_admin_cancel_clear_inspector_bonus", use_container_width=True):
-                                    st.session_state["confirm_clear_inspector_bonus"] = False; st.rerun()
-                    with reset_col2:
-                        if not st.session_state.get("confirm_clear_all_work_orders", False):
-                            if st.button("🛠️ Clear All Work Orders", key="super_admin_clear_all_work_orders", type="secondary", use_container_width=True):
-                                st.session_state["confirm_clear_all_work_orders"] = True
-                        else:
-                            st.warning("⚠️ This permanently removes ALL Work Order records.")
-                            confirm_col, cancel_col = st.columns(2)
-                            with confirm_col:
-                                if st.button("✅ Confirm Clear Work Orders", key="super_admin_confirm_clear_all_work_orders", use_container_width=True):
-                                    save_all_work_orders([])
-                                    log_action("SUPER_ADMIN_CLEAR_WORK_ORDERS", "ALL", decision_by=full_name)
-                                    st.session_state["confirm_clear_all_work_orders"] = False
-                                    st.success("✅ All Work Order records have been cleared."); st.rerun()
-                            with cancel_col:
-                                if st.button("Cancel", key="super_admin_cancel_clear_all_work_orders", use_container_width=True):
-                                    st.session_state["confirm_clear_all_work_orders"] = False; st.rerun()
-                    with reset_col3:
-                        if not st.session_state.get("confirm_clear_audit", False):
-                            if st.button("🗑️ Clear Audit History", type="secondary", key="clear_audit_history_btn"):
-                                st.session_state["confirm_clear_audit"] = True; st.rerun()
-                        else:
-                            st.error("⚠️ This will permanently remove the entire audit history.")
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                if st.button("✅ Yes, Clear Audit", type="primary", key="confirm_clear_audit_btn"):
-                                    clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
-                                    st.success("✅ Audit history has been cleared."); st.rerun()
-                            with c2:
-                                if st.button("↩️ Cancel", key="cancel_clear_audit_btn"):
-                                    st.session_state["confirm_clear_audit"] = False; st.rerun()
-                st.divider()
-                st.markdown("**🚀 Fresh Live Start**")
-                st.caption("Use this when you are ready to go live and want both the request history and audit history to start empty. This does not delete users, departments, categories, permissions or uploaded files.")
-                if not st.session_state.get("confirm_live_reset", False):
-                    if st.button("🚀 Prepare System for Live Use", type="primary", key="prepare_live_use_btn"):
-                        st.session_state["confirm_live_reset"] = True; st.rerun()
-                else:
-                    st.error("🚨 FINAL CONFIRMATION: All submitted requests AND the entire audit history will be permanently cleared.")
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("🚀 Yes, Prepare for Live Use", type="primary", key="confirm_live_reset_btn"):
-                            clear_live_request_and_audit_data()
-                            st.session_state["confirm_live_reset"] = False
-                            st.session_state["confirm_clear_requests"] = False
-                            st.session_state["confirm_clear_audit"] = False
-                            st.success("✅ Live launch reset complete. Request and audit history are now empty."); st.rerun()
-                    with c2:
-                        if st.button("↩️ Cancel", key="cancel_live_reset_btn"):
-                            st.session_state["confirm_live_reset"] = False; st.rerun()
-            st.divider()
-            st.subheader("📥 Download Data Backups")
-            backup_col1, backup_col2, backup_col3 = st.columns(3)
-            with backup_col1:
-                if "EXCEL_PATH" in globals() and os.path.exists(EXCEL_PATH):
-                    with open(EXCEL_PATH, "rb") as f:
-                        st.download_button("📥 Download Requests", f.read(), file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_requests")
-            with backup_col2:
-                if "USER_DB_PATH" in globals() and os.path.exists(USER_DB_PATH):
-                    with open(USER_DB_PATH, "rb") as f:
-                        st.download_button("📥 Download Users", f.read(), file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_users")
-            with backup_col3:
-                if "SETTINGS_PATH" in globals() and os.path.exists(SETTINGS_PATH):
-                    with open(SETTINGS_PATH, "rb") as f:
-                        st.download_button("📥 Download Settings", f.read(), file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_settings")
-            if os.path.exists(WORK_ORDERS_PATH):
-                st.download_button("📥 Download Work Orders", open(WORK_ORDERS_PATH, "rb").read(), file_name=f"BACKUP_work_orders_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_work_orders")
-            if os.path.exists(INSPECTOR_BONUS_PATH):
-                st.download_button("📥 Download Inspector Bonus", open(INSPECTOR_BONUS_PATH, "rb").read(), file_name=f"BACKUP_inspector_bonus_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_inspector_bonus")
-            st.caption("💾 Save these files to your computer for backup")
 
-    # ─── TAB 2: Work Orders (new read-only view) ───
+    # ─── TAB 2: Work Orders ───
     with super_work_orders_tab:
         render_work_orders_super_admin()
 
-    # ─── TAB 3: Inspector Bonus (new read-only view) ───
+    # ─── TAB 3: Inspector Bonus ───
     with super_inspector_bonus_tab:
         render_inspector_bonus_super_admin()
+
+    # ─── TAB 4: System Management ───
+    with super_system_mgmt_tab:
+        st.subheader("🔧 System Management — Super Admin")
+        st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
+        st.divider()
+        tab_settings, tab_users, tab_audit = st.tabs(["⚙️ System Settings", "👤 User Management", "📖 Audit History"])
+        with tab_settings: settings_management_panel()
+        with tab_users: user_management_panel()
+        with tab_audit:
+            if "display_audit_log_panel" in globals(): display_audit_log_panel()
+            else: st.info("📖 Audit log panel not defined — skipping")
+            st.divider()
+            st.subheader("⚠️ Super Admin — Data Reset / Live Launch")
+            st.warning("These controls are permanent. They are intended for preparing the portal for live use. Clearing requests removes all request records from requests.xlsx. Clearing the audit history removes all audit entries. User accounts, system settings and uploaded attachment files are NOT deleted by these controls.")
+            danger_col1, danger_col2 = st.columns(2)
+            with danger_col1:
+                if not st.session_state.get("confirm_clear_requests", False):
+                    if st.button("🧹 Clear All Submitted Requests", type="secondary", key="clear_all_requests_btn"):
+                        st.session_state["confirm_clear_requests"] = True; st.rerun()
+                else:
+                    st.error("⚠️ This will permanently remove ALL request records from the application.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("✅ Yes, Clear Requests", type="primary", key="confirm_clear_all_requests_btn"):
+                            clear_all_requests_file(); st.session_state["confirm_clear_requests"] = False
+                            st.success("✅ All submitted request records have been cleared."); st.rerun()
+                    with c2:
+                        if st.button("↩️ Cancel", key="cancel_clear_all_requests_btn"):
+                            st.session_state["confirm_clear_requests"] = False; st.rerun()
+            with danger_col2:
+                reset_col1, reset_col2, reset_col3 = st.columns(3)
+                with reset_col1:
+                    if not st.session_state.get("confirm_clear_inspector_bonus", False):
+                        if st.button("💰 Clear All Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", use_container_width=True):
+                            st.session_state["confirm_clear_inspector_bonus"] = True
+                    else:
+                        st.warning("⚠️ This permanently removes ALL Inspector Bonus records.")
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            if st.button("✅ Confirm Clear Bonuses", key="super_admin_confirm_clear_inspector_bonus", use_container_width=True):
+                                clear_all_inspector_bonus()
+                                log_action("SUPER_ADMIN_CLEAR_INSPECTOR_BONUS", "ALL", decision_by=full_name)
+                                st.session_state["confirm_clear_inspector_bonus"] = False
+                                st.success("✅ All Inspector Bonus records have been cleared."); st.rerun()
+                        with cc2:
+                            if st.button("Cancel", key="super_admin_cancel_clear_inspector_bonus", use_container_width=True):
+                                st.session_state["confirm_clear_inspector_bonus"] = False; st.rerun()
+                with reset_col2:
+                    if not st.session_state.get("confirm_clear_all_work_orders", False):
+                        if st.button("🛠️ Clear All Work Orders", key="super_admin_clear_all_work_orders", type="secondary", use_container_width=True):
+                            st.session_state["confirm_clear_all_work_orders"] = True
+                    else:
+                        st.warning("⚠️ This permanently removes ALL Work Order records.")
+                        confirm_col, cancel_col = st.columns(2)
+                        with confirm_col:
+                            if st.button("✅ Confirm Clear Work Orders", key="super_admin_confirm_clear_all_work_orders", use_container_width=True):
+                                save_all_work_orders([])
+                                log_action("SUPER_ADMIN_CLEAR_WORK_ORDERS", "ALL", decision_by=full_name)
+                                st.session_state["confirm_clear_all_work_orders"] = False
+                                st.success("✅ All Work Order records have been cleared."); st.rerun()
+                        with cancel_col:
+                            if st.button("Cancel", key="super_admin_cancel_clear_all_work_orders", use_container_width=True):
+                                st.session_state["confirm_clear_all_work_orders"] = False; st.rerun()
+                with reset_col3:
+                    if not st.session_state.get("confirm_clear_audit", False):
+                        if st.button("🗑️ Clear Audit History", type="secondary", key="clear_audit_history_btn"):
+                            st.session_state["confirm_clear_audit"] = True; st.rerun()
+                    else:
+                        st.error("⚠️ This will permanently remove the entire audit history.")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.button("✅ Yes, Clear Audit", type="primary", key="confirm_clear_audit_btn"):
+                                clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
+                                st.success("✅ Audit history has been cleared."); st.rerun()
+                        with c2:
+                            if st.button("↩️ Cancel", key="cancel_clear_audit_btn"):
+                                st.session_state["confirm_clear_audit"] = False; st.rerun()
+            st.divider()
+            st.markdown("**🚀 Fresh Live Start**")
+            st.caption("Use this when you are ready to go live and want both the request history and audit history to start empty. This does not delete users, departments, categories, permissions or uploaded files.")
+            if not st.session_state.get("confirm_live_reset", False):
+                if st.button("🚀 Prepare System for Live Use", type="primary", key="prepare_live_use_btn"):
+                    st.session_state["confirm_live_reset"] = True; st.rerun()
+            else:
+                st.error("🚨 FINAL CONFIRMATION: All submitted requests AND the entire audit history will be permanently cleared.")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("🚀 Yes, Prepare for Live Use", type="primary", key="confirm_live_reset_btn"):
+                        clear_live_request_and_audit_data()
+                        st.session_state["confirm_live_reset"] = False
+                        st.session_state["confirm_clear_requests"] = False
+                        st.session_state["confirm_clear_audit"] = False
+                        st.success("✅ Live launch reset complete. Request and audit history are now empty."); st.rerun()
+                with c2:
+                    if st.button("↩️ Cancel", key="cancel_live_reset_btn"):
+                        st.session_state["confirm_live_reset"] = False; st.rerun()
+        st.divider()
+        st.subheader("📥 Download Data Backups")
+        backup_col1, backup_col2, backup_col3 = st.columns(3)
+        with backup_col1:
+            if "EXCEL_PATH" in globals() and os.path.exists(EXCEL_PATH):
+                with open(EXCEL_PATH, "rb") as f:
+                    st.download_button("📥 Download Requests", f.read(), file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_requests")
+        with backup_col2:
+            if "USER_DB_PATH" in globals() and os.path.exists(USER_DB_PATH):
+                with open(USER_DB_PATH, "rb") as f:
+                    st.download_button("📥 Download Users", f.read(), file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_users")
+        with backup_col3:
+            if "SETTINGS_PATH" in globals() and os.path.exists(SETTINGS_PATH):
+                with open(SETTINGS_PATH, "rb") as f:
+                    st.download_button("📥 Download Settings", f.read(), file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_settings")
+        if os.path.exists(WORK_ORDERS_PATH):
+            st.download_button("📥 Download Work Orders", open(WORK_ORDERS_PATH, "rb").read(), file_name=f"BACKUP_work_orders_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_work_orders")
+        if os.path.exists(INSPECTOR_BONUS_PATH):
+            st.download_button("📥 Download Inspector Bonus", open(INSPECTOR_BONUS_PATH, "rb").read(), file_name=f"BACKUP_inspector_bonus_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_inspector_bonus")
+        st.caption("💾 Save these files to your computer for backup")
 
 else:
     st.subheader("🔐 Access Restricted")
