@@ -1,6 +1,12 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.8
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.9
 # ============================================================
+# ✅ v4.9 (PERFORMANCE):
+#    • Google Drive uploads now run in the BACKGROUND — UI no longer waits
+#      for the network on post / edit / approve / PDF generation.
+#    • Drive file-ID cache skips the slow "list files" query on every upload.
+#    • Sync fingerprinting skips uploading files that haven't changed.
+#    • Startup download skips files whose LOCAL copy is newer than Drive's.
 # ✅ v4.8:
 #    • Employee Work Order portal now has TWO tabs:
 #         📋 My Work Orders   |   🏢 Department Work Orders (own dept, incl. manager-submitted)
@@ -28,6 +34,7 @@ import subprocess
 import pandas as pd
 import io
 import requests
+import threading
 from datetime import datetime, date
 
 from googleapiclient.discovery import build
@@ -115,6 +122,11 @@ os.makedirs(INSPECTOR_BONUS_PDF_DIR, exist_ok=True)
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 drive_service = None
 
+# ─── Background sync caches (module-level, safe to share across threads) ───
+_DRIVE_ID_CACHE = {}            # "parent_id::filename"  ->  Drive file_id
+_DRIVE_SYNC_FINGERPRINTS = {}   # local_path             ->  "size:mtime"
+_DRIVE_SYNC_LOCK = threading.Lock()
+
 try:
     gdrive = st.secrets["gdrive"]
     credentials = Credentials(
@@ -150,22 +162,38 @@ if drive_service:
 # GOOGLE DRIVE UPLOAD
 # ============================================================
 def upload_to_google_drive(local_file_path, display_filename):
-    if drive_service is None:
+    """Upload/update a file on Google Drive. Reuses a cached file ID so we
+    don't have to run a slow 'list files' query on every upload."""
+    if drive_service is None or not os.path.exists(local_file_path):
         return None
-    if not os.path.exists(local_file_path):
-        return None
-    try:
-        existing = _drive_find_file(display_filename)
+    cache_key = f"{GOOGLE_DRIVE_FOLDER_ID}::{display_filename}"
+
+    def _do(file_id=None):
         media = MediaFileUpload(local_file_path, resumable=False)
-        if existing:
-            updated = drive_service.files().update(
-                fileId=existing["id"], media_body=media, fields="id,name,parents"
+        if file_id:
+            return drive_service.files().update(
+                fileId=file_id, media_body=media, fields="id,name,parents"
             ).execute()
-            return updated.get("id")
         metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
-        created = drive_service.files().create(
+        return drive_service.files().create(
             body=metadata, media_body=media, fields="id,name,parents"
         ).execute()
+
+    try:
+        cached_id = _DRIVE_ID_CACHE.get(cache_key)
+        if cached_id:
+            try:
+                return _do(cached_id).get("id")
+            except Exception:
+                _DRIVE_ID_CACHE.pop(cache_key, None)   # stale ID → fall through
+
+        existing = _drive_find_file(display_filename)
+        if existing:
+            _DRIVE_ID_CACHE[cache_key] = existing["id"]
+            return _do(existing["id"]).get("id")
+
+        created = _do(None)
+        _DRIVE_ID_CACHE[cache_key] = created.get("id")
         return created.get("id")
     except Exception as e:
         print(f"Google Drive upload failed: {e}")
@@ -195,19 +223,34 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
     if drive_service is None or not os.path.exists(local_path):
         return None
     filename = filename or os.path.basename(local_path)
-    try:
-        existing = _drive_find_file(filename, parent_id)
-        if existing:
-            media = MediaFileUpload(local_path, resumable=False)
-            updated = drive_service.files().update(
-                fileId=existing["id"], media_body=media, fields="id,name"
-            ).execute()
-            return updated.get("id")
-        metadata = {"name": filename, "parents": [parent_id]}
+    cache_key = f"{parent_id}::{filename}"
+
+    def _do(file_id=None):
         media = MediaFileUpload(local_path, resumable=False)
-        created = drive_service.files().create(
+        if file_id:
+            return drive_service.files().update(
+                fileId=file_id, media_body=media, fields="id,name"
+            ).execute()
+        metadata = {"name": filename, "parents": [parent_id]}
+        return drive_service.files().create(
             body=metadata, media_body=media, fields="id,name"
         ).execute()
+
+    try:
+        cached_id = _DRIVE_ID_CACHE.get(cache_key)
+        if cached_id:
+            try:
+                return _do(cached_id).get("id")
+            except Exception:
+                _DRIVE_ID_CACHE.pop(cache_key, None)
+
+        existing = _drive_find_file(filename, parent_id)
+        if existing:
+            _DRIVE_ID_CACHE[cache_key] = existing["id"]
+            return _do(existing["id"]).get("id")
+
+        created = _do(None)
+        _DRIVE_ID_CACHE[cache_key] = created.get("id")
         return created.get("id")
     except Exception as e:
         print(f"Drive upload failed for {filename}: {e}")
@@ -234,8 +277,24 @@ def sync_persistent_file(local_path, columns=None):
     filename = os.path.basename(local_path)
     remote = _drive_find_file(filename)
     if remote:
-        if not _drive_download_file(remote["id"], local_path):
-            print(f"Using local copy of {filename} because Drive download failed")
+        # Only download if Drive is newer than local — otherwise keep local.
+        try:
+            rmt = str(remote.get("modifiedTime", "")).rstrip("Z")
+            local_newer = False
+            if os.path.exists(local_path) and rmt:
+                if "." in rmt:
+                    remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S.%f")
+                else:
+                    remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S")
+                local_dt = datetime.utcfromtimestamp(os.path.getmtime(local_path))
+                if local_dt > remote_dt:
+                    local_newer = True
+            if not local_newer:
+                if not _drive_download_file(remote["id"], local_path):
+                    print(f"Using local copy of {filename} (Drive download failed)")
+        except Exception as e:
+            print(f"mtime compare failed for {filename} ({e}); downloading anyway")
+            _drive_download_file(remote["id"], local_path)
     elif os.path.exists(local_path):
         _drive_upload_path(local_path, filename)
     elif columns is not None:
@@ -243,8 +302,42 @@ def sync_persistent_file(local_path, columns=None):
         _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
-    if drive_service is not None and os.path.exists(local_path):
-        _drive_upload_path(local_path)
+    """Non-blocking upload — spawns a background thread so the UI is never
+    blocked waiting on Google Drive. Also skips the upload if the file has
+    not changed since the last successful sync."""
+    if drive_service is None or not os.path.exists(local_path):
+        return
+    try:
+        st_info = os.stat(local_path)
+        fingerprint = f"{st_info.st_size}:{int(st_info.st_mtime)}"
+    except Exception:
+        return
+    if _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint:
+        return  # unchanged → nothing to upload
+    _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
+
+    def _worker(path):
+        with _DRIVE_SYNC_LOCK:
+            try:
+                if _drive_upload_path(path) is None:
+                    _DRIVE_SYNC_FINGERPRINTS.pop(path, None)  # retry next save
+            except Exception as e:
+                print(f"Background drive sync failed for {path}: {e}")
+                _DRIVE_SYNC_FINGERPRINTS.pop(path, None)
+
+    threading.Thread(target=_worker, args=(local_path,), daemon=True).start()
+
+def _upload_to_drive_bg(local_path, filename):
+    """Fire-and-forget upload for one-off files (attachments, generated PDFs).
+    The local file is kept on disk so downloads still work immediately."""
+    if drive_service is None or not os.path.exists(local_path):
+        return
+    def _worker(path, name):
+        try:
+            upload_to_google_drive(path, name)
+        except Exception as e:
+            print(f"Background upload failed for {name}: {e}")
+    threading.Thread(target=_worker, args=(local_path, filename), daemon=True).start()
 
 def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"):
@@ -1057,7 +1150,7 @@ def work_order_pdf(req, upload_to_drive=True):
         path = os.path.join(WORK_ORDER_PDF_DIR, filename)
         pdf.output(path)
         if upload_to_drive:
-            upload_to_google_drive(path, os.path.basename(path))
+            _upload_to_drive_bg(path, os.path.basename(path))
         return path
     except Exception as e:
         st.error(f"Work Order PDF Error: {e}")
@@ -1155,7 +1248,7 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_
         )
         path = os.path.join(WORK_ORDER_PDF_DIR, filename)
         pdf.output(path)
-        upload_to_google_drive(path, os.path.basename(path))
+        _upload_to_drive_bg(path, os.path.basename(path))
         return path
     except Exception as e:
         st.error(f"Work Order Total PDF Error: {e}")
@@ -1359,7 +1452,7 @@ def render_work_order_employee_portal(current_user, current_dept):
                                 fp = os.path.join(UPLOAD_DIR, fn)
                                 with open(fp, "wb") as out_file:
                                     out_file.write(f.getbuffer())
-                                upload_to_google_drive(fp, fn)
+                                _upload_to_drive_bg(fp, fn)
                                 new_attachments.append(fn)
 
                         old_data = {
@@ -1525,7 +1618,7 @@ def render_work_order_employee_portal(current_user, current_dept):
                     fp = os.path.join(UPLOAD_DIR, fn)
                     with open(fp, "wb") as out_file:
                         out_file.write(f.getbuffer())
-                    upload_to_google_drive(fp, fn)
+                    _upload_to_drive_bg(fp, fn)
                     attachments.append(fn)
 
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1848,7 +1941,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                     fp=os.path.join(UPLOAD_DIR,fn)
                     with open(fp,"wb") as out_file:
                         out_file.write(f.getbuffer())
-                    upload_to_google_drive(fp,fn)
+                    _upload_to_drive_bg(fp,fn)
                     attachments.append(fn)
                 now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 rec={
@@ -2372,7 +2465,7 @@ def inspector_bonus_pdf(req, force_regenerate=False, upload_to_drive=True):
         path = os.path.join(INSPECTOR_BONUS_PDF_DIR, filename)
         pdf.output(path)
         if upload_to_drive:
-            upload_to_google_drive(path, os.path.basename(path))
+            _upload_to_drive_bg(path, os.path.basename(path))
         return path
     except Exception as e:
         st.error(f"Inspector Bonus PDF Error: {e}")
@@ -2976,7 +3069,7 @@ def generate_approval_pdf(request_data):
         os.makedirs(PDF_DIR, exist_ok=True)
         full_pdf_path = os.path.join(PDF_DIR, filename)
         with open(full_pdf_path, "wb") as f: f.write(pdf_bytes)
-        _drive_upload_path(full_pdf_path, filename)
+        _upload_to_drive_bg(full_pdf_path, filename)
         return True, pdf_bytes, filename
     except Exception as e:
         return False, None, f"PDF Error: {str(e)}"
@@ -3749,7 +3842,7 @@ elif role == "Work Order Manager":
                                 edit_path = os.path.join(UPLOAD_DIR, fn)
                                 with open(edit_path, "wb") as outfile:
                                     outfile.write(f.getbuffer())
-                                upload_to_google_drive(edit_path, fn)
+                                _upload_to_drive_bg(edit_path, fn)
                                 final_attachments.append(fn)
                         records = load_records_from_excel()
                         old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
@@ -3793,7 +3886,7 @@ elif role == "Work Order Manager":
                                 with open(file_path, "wb") as out:
                                     out.write(f.getbuffer())
                                 att_list.append(fn)
-                                upload_to_google_drive(file_path, fn)
+                                _upload_to_drive_bg(file_path, fn)
                         payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
@@ -3902,7 +3995,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 edit_path = os.path.join(UPLOAD_DIR, fn)
                                 with open(edit_path, "wb") as outfile:
                                     outfile.write(f.getbuffer())
-                                upload_to_google_drive(edit_path, fn)
+                                _upload_to_drive_bg(edit_path, fn)
                                 final_attachments.append(fn)
                         records = load_records_from_excel()
                         old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
@@ -3946,7 +4039,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 with open(file_path, "wb") as out:
                                     out.write(f.getbuffer())
                                 att_list.append(fn)
-                                upload_to_google_drive(file_path, fn)
+                                _upload_to_drive_bg(file_path, fn)
                         payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
