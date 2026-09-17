@@ -1,9 +1,13 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.5
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.6
 # ============================================================
-# ✅ v4.5: Inspector Bonus — Manager can EDIT pending submissions.
-#          Director can CHANGE STATUS at any time (Pending ↔ Approved ↔ Rejected).
-# ✅ All prior fixes retained (v4.4 performance, v4.3 logo, etc.)
+# ✅ v4.6 FIXES:
+#    • Work Order Manager can APPROVE / REJECT employee-submitted work orders
+#    • Manager-approved work orders automatically go to Director (pending_director)
+#    • Rejected work orders return to employee (returned_to_employee)
+#    • "Edit Work Order" button in Manager pending tab now opens a working edit form
+#    • Super Admin can Clear All Inspector Bonus records (Danger Zone)
+# ✅ All prior fixes retained (v4.5, v4.4, v4.3 …)
 # ============================================================
 import streamlit as st
 import os
@@ -452,6 +456,14 @@ def clear_all_requests_file():
     sync_saved_file_to_drive(EXCEL_PATH)
     st.session_state["_live_data_reset"] = datetime.now().isoformat()
 
+# ✅ NEW v4.6: Clear all Inspector Bonus records
+def clear_all_inspector_bonus():
+    if os.path.exists(INSPECTOR_BONUS_PATH):
+        os.remove(INSPECTOR_BONUS_PATH)
+    pd.DataFrame(columns=INSPECTOR_BONUS_COLUMNS).to_excel(INSPECTOR_BONUS_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_inspector_bonus_cache", [])
+    sync_saved_file_to_drive(INSPECTOR_BONUS_PATH)
+
 def clear_live_request_and_audit_data():
     clear_all_requests_file()
     clear_audit_log_file()
@@ -482,7 +494,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED",
         "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET",
         "INSPECTOR_BONUS_CREATED", "INSPECTOR_BONUS_APPROVED", "INSPECTOR_BONUS_REJECTED",
-        "INSPECTOR_BONUS_EDITED", "INSPECTOR_BONUS_STATUS_CHANGED"]
+        "INSPECTOR_BONUS_EDITED", "INSPECTOR_BONUS_STATUS_CHANGED",
+        "SUPER_ADMIN_CLEAR_INSPECTOR_BONUS"]
     if action in SETTING_ACTIONS:
         action_labels = {
             "CATEGORY_ADDED": "🏷️ Category Added", "CATEGORY_EDITED": "🏷️ Category Edited", "CATEGORY_DELETED": "🏷️ Category Deleted",
@@ -494,7 +507,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "INSPECTOR_BONUS_APPROVED": "💰 Inspector Bonus Approved",
             "INSPECTOR_BONUS_REJECTED": "💰 Inspector Bonus Rejected",
             "INSPECTOR_BONUS_EDITED": "💰 Inspector Bonus Edited",
-            "INSPECTOR_BONUS_STATUS_CHANGED": "💰 Inspector Bonus Status Changed"
+            "INSPECTOR_BONUS_STATUS_CHANGED": "💰 Inspector Bonus Status Changed",
+            "SUPER_ADMIN_CLEAR_INSPECTOR_BONUS": "🧹 Super Admin — All Inspector Bonuses Cleared",
         }
         display_action = action_labels.get(action, action)
         old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
@@ -513,11 +527,13 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         wo_labels = {
             "WORK_ORDER_CREATED": "🛠️ Work Order Created",
             "WORK_ORDER_MANAGER_CREATED": "🛠️ Work Order Submitted to Director",
-            "WORK_ORDER_MANAGER_APPROVED": "🛠️ Work Order Sent to Director",
+            "WORK_ORDER_MANAGER_APPROVED": "🛠️ Work Order Approved by Manager → Director",
+            "WORK_ORDER_MANAGER_REJECTED": "🛠️ Work Order Rejected by Manager → Returned to Employee",
             "WORK_ORDER_RETURNED": "🛠️ Work Order Returned to Employee",
             "WORK_ORDER_DIRECTOR_APPROVED": "🛠️ Work Order Approved for Payment",
             "WORK_ORDER_DIRECTOR_REJECTED": "🛠️ Work Order Rejected by Director",
             "WORK_ORDER_STATUS_CHANGED": "🛠️ Work Order Status Changed",
+            "WORK_ORDER_EDITED": "🛠️ Work Order Edited",
             "WORK_ORDER_PAID": "🛠️ Work Order Paid",
         }
         old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
@@ -1294,17 +1310,107 @@ def render_work_order_employee_portal(current_user, current_dept):
     if q.strip():
         q=q.lower().strip(); mine=[r for r in mine if q in " ".join(str(v) for v in r.values()).lower()]
     for r in reversed(mine):
-        display_status = "Approved" if r.get("status") == "approved_payment" else r.get("status", "").replace("_", " ").title()
+        status_raw = str(r.get("status", "")).strip().lower()
+        display_status = {
+            "pending_manager": "PENDING MANAGER",
+            "pending_director": "PENDING DIRECTOR",
+            "approved_payment": "APPROVED",
+            "rejected_director": "REJECTED",
+            "returned_to_employee": "RETURNED — NEEDS EDITS",
+        }.get(status_raw, status_raw.replace("_", " ").upper())
         with st.expander(f"{get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | {display_status}"):
             st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}** | 👔 Manager: {r.get('manager')} | 🏢 {r.get('dept')} | 📅 {r.get('work_date')}")
             st.write(f"💷 £{r.get('amount',0):.2f} | ⏱️ {r.get('hours',0)} hours")
             st.write(f"📝 {r.get('desc')}")
-            if r.get("manager_decision_by"): st.write(f"👔 Manager reviewed by: {r.get('manager_decision_by')} on {r.get('manager_decision_date')}")
-            if r.get("director_decision_by"): st.write(f"🎯 Approved By: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
+            if r.get("manager_decision_by"):
+                st.write(f"👔 Manager reviewed by: {r.get('manager_decision_by')} on {r.get('manager_decision_date')}")
+            if r.get("manager_comments"):
+                if status_raw == "returned_to_employee":
+                    st.error(f"❌ Manager Comments: {r.get('manager_comments')}")
+                else:
+                    st.info(f"💬 Manager Comments: {r.get('manager_comments')}")
+            if r.get("director_decision_by"):
+                st.write(f"🎯 Approved By: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
 
 def render_work_order_manager_portal(manager_name, manager_dept, show_total=True):
     st.subheader("🛠️ Work Orders")
     orders = load_work_orders()
+
+    # ✅ v4.6 FIX: Edit mode — renders an actual working edit form
+    editing_id = st.session_state.get("editing_work_order_id")
+    if editing_id:
+        rec = next((r for r in orders if str(r.get("id")) == str(editing_id)), None)
+        editable_statuses = ("pending_manager", "pending_director", "rejected_director", "returned_to_employee", "pending")
+        if rec and str(rec.get("status", "")).strip().lower() in editable_statuses:
+            st.warning(f"✏️ **Editing Work Order {get_work_order_number(rec)}** — save changes to update.")
+            with st.form("work_order_edit_form", clear_on_submit=False):
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    e_wo_no = st.text_input("🧾 Work Order No.", value=str(rec.get("manual_work_order_no", "") or rec.get("id", "")))
+                    e_emp = st.text_input("👤 Contractor / Employee Labour", value=str(rec.get("emp_name", "")))
+                    e_site = st.text_area("📍 Site Address", value=str(rec.get("site_address", "")), height=90)
+                    e_cjno = st.text_input("📘 Customer Job No.", value=str(rec.get("customer_job_no", "")))
+                with ec2:
+                    try:
+                        _d = datetime.strptime(str(rec.get("work_date", ""))[:10], "%Y-%m-%d").date()
+                    except Exception:
+                        _d = date.today()
+                    e_date = st.date_input("📅 Date", value=_d)
+                    e_amount = st.number_input(
+                        "💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f",
+                        value=max(float(rec.get("amount", 0.01) or 0.01), 0.01)
+                    )
+                    e_desc = st.text_area("📝 Description", value=str(rec.get("desc", "")), height=150)
+
+                csave, ccancel = st.columns(2)
+                with csave:
+                    save_edit = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+                with ccancel:
+                    cancel_edit = st.form_submit_button("❌ Cancel", use_container_width=True)
+
+                if save_edit:
+                    old_data = {
+                        "manual_work_order_no": rec.get("manual_work_order_no"),
+                        "emp_name": rec.get("emp_name"),
+                        "site_address": rec.get("site_address"),
+                        "customer_job_no": rec.get("customer_job_no"),
+                        "work_date": rec.get("work_date"),
+                        "amount": rec.get("amount"),
+                        "desc": rec.get("desc"),
+                    }
+                    for x in orders:
+                        if str(x.get("id")) == str(editing_id):
+                            x["manual_work_order_no"] = e_wo_no.strip() or str(x.get("id"))
+                            x["emp_name"] = e_emp.strip()
+                            x["site_address"] = e_site.strip()
+                            x["customer_job_no"] = e_cjno.strip()
+                            x["work_date"] = str(e_date)
+                            x["amount"] = float(e_amount)
+                            x["desc"] = e_desc.strip()
+                            x["pdf_path"] = ""  # invalidate cache
+                            break
+                    save_all_work_orders(orders)
+                    new_data = {
+                        "manual_work_order_no": e_wo_no.strip(),
+                        "emp_name": e_emp.strip(),
+                        "site_address": e_site.strip(),
+                        "customer_job_no": e_cjno.strip(),
+                        "work_date": str(e_date),
+                        "amount": float(e_amount),
+                        "desc": e_desc.strip(),
+                    }
+                    log_action("WORK_ORDER_EDITED", editing_id, old_data=old_data, new_data=new_data)
+                    st.session_state.editing_work_order_id = None
+                    st.success("✅ Work Order updated.")
+                    st.rerun()
+
+                if cancel_edit:
+                    st.session_state.editing_work_order_id = None
+                    st.rerun()
+            st.divider()
+        else:
+            st.session_state.editing_work_order_id = None
+
     manager_orders = [
         r for r in orders
         if str(r.get("manager", "")).strip() == str(manager_name).strip()
@@ -1312,7 +1418,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
     ]
     pending = [r for r in manager_orders if r.get("status") in ("pending_director", "pending_manager", "pending")]
     approved = [r for r in manager_orders if r.get("status") in ("approved_payment", "approved")]
-    rejected = [r for r in manager_orders if r.get("status") in ("rejected_director", "rejected")]
+    rejected = [r for r in manager_orders if r.get("status") in ("rejected_director", "rejected", "returned_to_employee")]
 
     main_tab, total_tab = st.tabs(["🛠️ Work Orders", "💷 Approved Work Order Total"])
 
@@ -1384,7 +1490,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 st.rerun()
         st.divider()
         wo_pending, wo_approved, wo_rejected = st.tabs([
-            f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"
+            f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Returned / Rejected ({len(rejected)})"
         ])
         def filter_orders(items,key):
             q=st.text_input("🔎 Search Work Orders", placeholder="Search by Work Order No., employee, date, amount or description...", key=key).strip().lower()
@@ -1398,22 +1504,71 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             st.write(f"💷 **Amount:** £{float(r.get('amount',0) or 0):.2f}")
             st.info(f"📝 **Description:**\n{r.get('desc','')}")
             st.write(f"👔 **Manager:** {r.get('manager') or manager_name}")
+            if r.get("manager_decision_by"):
+                st.write(f"👔 **Manager Review:** {r.get('manager_decision_by')} on {r.get('manager_decision_date','')}")
+            if r.get("manager_comments"):
+                st.info(f"💬 **Manager Comments:** {r.get('manager_comments')}")
             if r.get("director_decision_by"):
                 st.write(f"🎯 **Approved By:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
             if r.get("director_comments"):
                 st.warning(f"💬 Director Comments: {r.get('director_comments')}")
             display_attachments(r)
+
+        # ═══ PENDING TAB — Approve/Reject for employee submissions ═══
         with wo_pending:
-            items=filter_orders(pending,"wo_mgr_pending_final_search")
-            if not items: st.info("⏳ No pending work orders.")
+            items = filter_orders(pending, "wo_mgr_pending_final_search")
+            if not items:
+                st.info("⏳ No pending work orders.")
             for r in reversed(items):
-                wo=r.get("manual_work_order_no") or r.get("id")
-                with st.expander(f"🟡 {wo} | {r.get('emp_name')} | £{float(r.get('amount',0) or 0):.2f}"):
+                wo = r.get("manual_work_order_no") or r.get("id")
+                st_raw = str(r.get("status", "")).strip().lower()
+                label = "AWAITING MANAGER" if st_raw == "pending_manager" else ("AWAITING DIRECTOR" if st_raw == "pending_director" else st_raw.upper())
+                with st.expander(f"🟡 {wo} | {r.get('emp_name')} | £{float(r.get('amount',0) or 0):.2f} | {label}"):
                     show_details(r)
-                    st.caption("Pending work orders are editable.")
-                    if st.button(f"✏️ Edit Work Order {wo}",key=f"wo_mgr_pending_edit_{r.get('id')}"):
-                        st.session_state.editing_work_order_id=r.get("id")
-                        st.rerun()
+                    st.divider()
+
+                    # ✅ v4.6: Employee-submitted work orders — Manager Approve / Reject
+                    if st_raw in ("pending_manager", "pending"):
+                        st.info("👤 This work order was submitted by an employee and is awaiting **your review**.")
+                        mgr_comment = st.text_area("Manager Comments (optional)", key=f"wo_mgr_comment_{r.get('id')}", placeholder="Any notes for the Director or employee...")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.button("✅ Approve & Send to Director", key=f"wo_mgr_approve_{r.get('id')}", type="primary"):
+                                for x in orders:
+                                    if str(x.get("id")) == str(r.get("id")):
+                                        x["status"] = "pending_director"
+                                        x["manager_comments"] = mgr_comment.strip()
+                                        x["manager_decision_by"] = manager_name
+                                        x["manager_decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        x["pdf_path"] = ""
+                                        break
+                                save_all_work_orders(orders)
+                                log_action("WORK_ORDER_MANAGER_APPROVED", r.get("id"), decision_by=manager_name)
+                                st.success(f"✅ Work Order {wo} approved and sent to Director.")
+                                st.rerun()
+                        with c2:
+                            if st.button("❌ Reject & Return to Employee", key=f"wo_mgr_reject_{r.get('id')}"):
+                                for x in orders:
+                                    if str(x.get("id")) == str(r.get("id")):
+                                        x["status"] = "returned_to_employee"
+                                        x["manager_comments"] = mgr_comment.strip()
+                                        x["manager_decision_by"] = manager_name
+                                        x["manager_decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        x["pdf_path"] = ""
+                                        break
+                                save_all_work_orders(orders)
+                                log_action("WORK_ORDER_MANAGER_REJECTED", r.get("id"), decision_by=manager_name)
+                                st.warning(f"❌ Work Order {wo} returned to employee for corrections.")
+                                st.rerun()
+
+                    # pending_director — just show Edit
+                    else:
+                        st.caption("Awaiting Director approval. You may still edit this record.")
+                        if st.button(f"✏️ Edit Work Order {wo}", key=f"wo_mgr_pending_edit_{r.get('id')}"):
+                            st.session_state.editing_work_order_id = r.get("id")
+                            st.rerun()
+
+        # ═══ APPROVED TAB ═══
         with wo_approved:
             items=filter_orders(approved,"wo_mgr_approved_final_search")
             if not items:
@@ -1429,17 +1584,22 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                         display_work_order_pdf(r)
                 st.divider()
                 render_work_order_bulk_download(load_work_orders(), key_prefix="wo_mgr_bulk")
+
+        # ═══ REJECTED / RETURNED TAB ═══
         with wo_rejected:
             items=filter_orders(rejected,"wo_mgr_rejected_final_search")
-            if not items: st.info("❌ No rejected work orders.")
+            if not items: st.info("❌ No rejected or returned work orders.")
             for r in reversed(items):
                 wo=r.get("manual_work_order_no") or r.get("id")
-                with st.expander(f"❌ {wo} | {r.get('emp_name')} | £{float(r.get('amount',0) or 0):.2f}"):
+                st_raw = str(r.get("status", "")).strip().lower()
+                lbl = "RETURNED TO EMPLOYEE" if st_raw == "returned_to_employee" else "REJECTED BY DIRECTOR"
+                with st.expander(f"❌ {wo} | {r.get('emp_name')} | £{float(r.get('amount',0) or 0):.2f} | {lbl}"):
                     show_details(r)
-                    st.warning("Rejected — editable and can be resubmitted.")
+                    st.warning("Editable — you can update and resubmit.")
                     if st.button(f"✏️ Edit & Resubmit {wo}",key=f"wo_mgr_rejected_edit_{r.get('id')}"):
                         st.session_state.editing_work_order_id=r.get("id")
                         st.rerun()
+
     with total_tab:
         if show_total:
             renderer = globals().get("render_work_order_total")
@@ -1873,7 +2033,6 @@ def display_inspector_bonus_pdf_button(req, key_prefix="ib"):
         else:
             st.error("❌ Could not generate PDF.")
 
-# ✅ FIX v4.5: Manager can EDIT pending submissions
 def render_inspector_bonus_portal(user_name, user_dept):
     st.subheader("💰 National Grid Inspector Bonus Approval")
     st.info("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month.")
@@ -1881,7 +2040,6 @@ def render_inspector_bonus_portal(user_name, user_dept):
 
     bonus_records = load_inspector_bonus()
 
-    # ─── EDIT MODE (pending records only) ───
     editing_id = st.session_state.get("editing_inspector_bonus_id")
     if editing_id:
         rec = next((r for r in bonus_records if str(r.get("id")) == str(editing_id)), None)
@@ -1950,10 +2108,8 @@ def render_inspector_bonus_portal(user_name, user_dept):
                     st.rerun()
             st.divider()
         else:
-            # Not pending anymore, clear edit mode
             st.session_state.editing_inspector_bonus_id = None
 
-    # ─── NEW SUBMISSION FORM ───
     new_id = get_next_inspector_bonus_id(bonus_records)
 
     with st.form("inspector_bonus_form", clear_on_submit=True):
@@ -2036,14 +2192,12 @@ def render_inspector_bonus_portal(user_name, user_dept):
                 st.caption(f"Submitted by {r.get('submitted_by')} on {r.get('submitted_date')}")
                 display_inspector_bonus_pdf_button(r, key_prefix="ib_mgr")
 
-                # ✅ NEW v4.5: Edit button for pending records
                 if status_raw == "pending_director":
                     st.divider()
                     if st.button(f"✏️ Edit Bonus Record {r.get('id')}", key=f"ib_edit_{r.get('id')}", type="secondary"):
                         st.session_state.editing_inspector_bonus_id = r.get("id")
                         st.rerun()
 
-# ✅ FIX v4.5: Director can change status at any time
 def render_inspector_bonus_director_portal(director_name):
     st.subheader("💰 National Grid Inspector Bonus — Director Approval")
     st.info("Review Inspector Bonus submissions. Approve, Reject, OR Change Status at any time. All changes are logged.")
@@ -2097,7 +2251,6 @@ def render_inspector_bonus_director_portal(director_name):
         if r.get("director_comments"):
             st.info(f"💬 **Director Comments:** {r.get('director_comments')}")
 
-    # ─── PENDING TAB ───
     with t1:
         if not pending:
             st.success("✅ No pending Inspector Bonus submissions.")
@@ -2117,7 +2270,6 @@ def render_inspector_bonus_director_portal(director_name):
                         apply_decision(rec_id, "rejected", comments, "pending_director")
                         st.rerun()
 
-    # ─── APPROVED TAB ───
     with t2:
         if not approved:
             st.info("✅ No approved Inspector Bonus records yet.")
@@ -2129,7 +2281,6 @@ def render_inspector_bonus_director_portal(director_name):
                 show_details(r)
                 st.divider()
                 display_inspector_bonus_pdf_button(r, key_prefix="ib_dir")
-                # ✅ NEW v4.5: Change Status controls
                 st.divider()
                 st.markdown("### 🔄 Change Status")
                 new_comments = st.text_area(
@@ -2146,7 +2297,6 @@ def render_inspector_bonus_director_portal(director_name):
                         apply_decision(rec_id, "rejected", new_comments, "approved")
                         st.rerun()
 
-    # ─── REJECTED TAB ───
     with t3:
         if not rejected:
             st.info("❌ No rejected Inspector Bonus records.")
@@ -2156,7 +2306,6 @@ def render_inspector_bonus_director_portal(director_name):
             rec_id = r.get("id")
             with st.expander(f"🔴 {rec_id} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
                 show_details(r)
-                # ✅ NEW v4.5: Change Status controls
                 st.divider()
                 st.markdown("### 🔄 Change Status")
                 new_comments = st.text_area(
@@ -2557,6 +2706,8 @@ if "editing_request_id" not in st.session_state:
     st.session_state.editing_request_id = None
 if "editing_inspector_bonus_id" not in st.session_state:
     st.session_state.editing_inspector_bonus_id = None
+if "editing_work_order_id" not in st.session_state:
+    st.session_state.editing_work_order_id = None  # ✅ v4.6
 
 def display_company_header():
     c1, c2, c3 = st.columns([1, 2, 1])
@@ -3703,34 +3854,53 @@ elif role == "Super Admin":
                             st.session_state["confirm_clear_requests"] = False; st.rerun()
             with danger_col2:
                 reset_col1, reset_col2, reset_col3 = st.columns(3)
+                with reset_col1:
+                    # ✅ v4.6: Clear All Inspector Bonus
+                    if not st.session_state.get("confirm_clear_inspector_bonus", False):
+                        if st.button("💰 Clear All Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", use_container_width=True):
+                            st.session_state["confirm_clear_inspector_bonus"] = True
+                    else:
+                        st.warning("⚠️ This permanently removes ALL Inspector Bonus records.")
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            if st.button("✅ Confirm Clear Bonuses", key="super_admin_confirm_clear_inspector_bonus", use_container_width=True):
+                                clear_all_inspector_bonus()
+                                log_action("SUPER_ADMIN_CLEAR_INSPECTOR_BONUS", "ALL", decision_by=full_name)
+                                st.session_state["confirm_clear_inspector_bonus"] = False
+                                st.success("✅ All Inspector Bonus records have been cleared."); st.rerun()
+                        with cc2:
+                            if st.button("Cancel", key="super_admin_cancel_clear_inspector_bonus", use_container_width=True):
+                                st.session_state["confirm_clear_inspector_bonus"] = False; st.rerun()
+                with reset_col2:
+                    if not st.session_state.get("confirm_clear_all_work_orders", False):
+                        if st.button("🛠️ Clear All Work Orders", key="super_admin_clear_all_work_orders", type="secondary", use_container_width=True):
+                            st.session_state["confirm_clear_all_work_orders"] = True
+                    else:
+                        st.warning("⚠️ This permanently removes ALL Work Order records.")
+                        confirm_col, cancel_col = st.columns(2)
+                        with confirm_col:
+                            if st.button("✅ Confirm Clear Work Orders", key="super_admin_confirm_clear_all_work_orders", use_container_width=True):
+                                save_all_work_orders([])
+                                log_action("SUPER_ADMIN_CLEAR_WORK_ORDERS", "ALL", decision_by=full_name)
+                                st.session_state["confirm_clear_all_work_orders"] = False
+                                st.success("✅ All Work Order records have been cleared."); st.rerun()
+                        with cancel_col:
+                            if st.button("Cancel", key="super_admin_cancel_clear_all_work_orders", use_container_width=True):
+                                st.session_state["confirm_clear_all_work_orders"] = False; st.rerun()
                 with reset_col3:
-                    if st.button("🛠️ Clear All Work Orders", key="super_admin_clear_all_work_orders", type="secondary", use_container_width=True):
-                        st.session_state["confirm_clear_all_work_orders"] = True
-                if st.session_state.get("confirm_clear_all_work_orders", False):
-                    st.warning("⚠️ This permanently removes ALL Work Order records.")
-                    confirm_col, cancel_col = st.columns(2)
-                    with confirm_col:
-                        if st.button("✅ Confirm Clear Work Orders", key="super_admin_confirm_clear_all_work_orders", use_container_width=True):
-                            save_all_work_orders([])
-                            log_action("SUPER_ADMIN_CLEAR_WORK_ORDERS", "ALL", decision_by=full_name)
-                            st.session_state["confirm_clear_all_work_orders"] = False
-                            st.success("✅ All Work Order records have been cleared."); st.rerun()
-                    with cancel_col:
-                        if st.button("Cancel", key="super_admin_cancel_clear_all_work_orders", use_container_width=True):
-                            st.session_state["confirm_clear_all_work_orders"] = False; st.rerun()
-                if not st.session_state.get("confirm_clear_audit", False):
-                    if st.button("🗑️ Clear Audit History", type="secondary", key="clear_audit_history_btn"):
-                        st.session_state["confirm_clear_audit"] = True; st.rerun()
-                else:
-                    st.error("⚠️ This will permanently remove the entire audit history.")
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("✅ Yes, Clear Audit", type="primary", key="confirm_clear_audit_btn"):
-                            clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
-                            st.success("✅ Audit history has been cleared."); st.rerun()
-                    with c2:
-                        if st.button("↩️ Cancel", key="cancel_clear_audit_btn"):
-                            st.session_state["confirm_clear_audit"] = False; st.rerun()
+                    if not st.session_state.get("confirm_clear_audit", False):
+                        if st.button("🗑️ Clear Audit History", type="secondary", key="clear_audit_history_btn"):
+                            st.session_state["confirm_clear_audit"] = True; st.rerun()
+                    else:
+                        st.error("⚠️ This will permanently remove the entire audit history.")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.button("✅ Yes, Clear Audit", type="primary", key="confirm_clear_audit_btn"):
+                                clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
+                                st.success("✅ Audit history has been cleared."); st.rerun()
+                        with c2:
+                            if st.button("↩️ Cancel", key="cancel_clear_audit_btn"):
+                                st.session_state["confirm_clear_audit"] = False; st.rerun()
             st.divider()
             st.markdown("**🚀 Fresh Live Start**")
             st.caption("Use this when you are ready to go live and want both the request history and audit history to start empty. This does not delete users, departments, categories, permissions or uploaded files.")
