@@ -1,23 +1,22 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.11
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.11.2
 # ============================================================
+# ✅ v4.11.2 (DIRECTOR WORK ORDER TABS):
+#    • "💷 Approved Work Order Total" is now its own tab in the Director's
+#      Work Order portal (4 tabs total: Pending | Approved | Rejected | Total).
+#    • The Total is no longer shown inside Pending/Approved/Rejected tabs.
+# ✅ v4.11.1 (DIRECTOR PORTAL HEADER FIX):
+#    • Director portal header now uses the logged-in director's name.
 # ✅ v4.11 (GRANULAR MODULE PERMISSIONS):
 #    • Two NEW per-user permission flags:
 #         ➕ can_access_addition_deduction
 #         🛠️ can_access_work_orders
-#    • Toggle them in Create User and Edit User panels.
-#    • Manager / Staff / Team Member portals now build their tabs
-#      dynamically based on these flags (plus existing Inspector Bonus flag).
-#    • Existing users automatically inherit sensible defaults from
-#      PERMISSION_DEFAULTS based on their role.
-# ✅ v4.10.1:
-#    • Super Admin has FOUR top-level tabs:
-#         ➕ Addition & Deduction | 🛠️ Work Orders | 💰 Inspector Bonus | 🔧 System Management
+#    • Manager / Staff / Team Member portals build tabs dynamically.
+# ✅ v4.10.1: Super Admin has FOUR top-level tabs.
 # ✅ v4.10: Super Admin read-only views for Work Orders and Inspector Bonus.
 # ✅ v4.9.1: Reliable form reset via versioned widget keys.
 # ✅ v4.9: Background Drive syncs.
-# ✅ v4.8: Employee Work Order portal has TWO tabs.
-# ✅ v4.7, v4.6: retentions.
+# ✅ v4.8, v4.7, v4.6: retentions.
 # ============================================================
 import streamlit as st
 import os
@@ -85,7 +84,6 @@ INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
 INSPECTOR_BONUS_PDF_DIR = os.path.join(APP_FOLDER, "inspector_bonus_pdfs")
 GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
 
-# ✅ v4.11 — User DB now stores two extra permissions
 USER_DB_COLUMNS = [
     "full_name", "username", "password", "role", "dept",
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
@@ -310,7 +308,6 @@ EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Categ
 WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours", "Amount (£)", "Manager", "Description", "Attachment Name", "Status", "Site Address", "Customer Job No.", "Manager Comments", "Manager Decision Date", "Manager Decision By", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date", "Payroll By", "PDF File Path"]
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
 
-# ✅ v4.11 — DEFAULT_USERS now include the two new permission columns
 DEFAULT_USERS = [
     {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False},
     {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator"},
@@ -320,8 +317,6 @@ DEFAULT_USERS = [
     {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration"},
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department"}
 ]
-
-# ✅ v4.11 — extended defaults with the two new flags
 PERMISSION_DEFAULTS = {
     "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True},
     "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True},
@@ -332,8 +327,6 @@ PERMISSION_DEFAULTS = {
     "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True},
     "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True}
 }
-
-# ✅ v4.11 — two new labels
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
     "can_generate_pdf": "📄 Generate & Download PDFs",
@@ -679,7 +672,6 @@ def init_user_db():
         pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
         sync_saved_file_to_drive(USER_DB_PATH)
 
-# ✅ v4.11 — save_users persists the two new flags
 def save_users(users_dict):
     rows = []
     for username, u in users_dict.items():
@@ -699,13 +691,10 @@ def save_users(users_dict):
     _invalidate_data_cache("_users_cache")
     sync_saved_file_to_drive(USER_DB_PATH)
 
-# ✅ v4.11 — load_users reads the two new flags, falling back to role defaults
-# when the value is empty (i.e. legacy DB rows that were migrated).
 def _flag_or_default(raw_value, role, key):
     s = str(raw_value).strip().lower()
     if s in ("true", "false"):
         return s == "true"
-    # Fall back to role default (used for legacy rows missing this column value)
     return PERMISSION_DEFAULTS.get(role, PERMISSION_DEFAULTS["Staff"]).get(key, False)
 
 def load_users(force=False):
@@ -987,7 +976,7 @@ def work_order_total_pdf(records, employee_filter, from_date, to_date, prepared_
 
 def render_work_order_total(records, scope_department=None, key_prefix="wo_total", prepared_by=""):
     st.markdown("### 💷 Approved Work Order Total")
-    st.caption("Select an employee and work-date range. Only Director-approved work orders are included. Work Order No. is the manually entered number.")
+    st.caption("Select an employee and work-date range. Only Director-approved work orders are included.")
     scoped = [r for r in records if r.get("status") in ("approved_payment", "approved")]
     if scope_department: scoped = [r for r in scoped if str(r.get("dept", "")) == str(scope_department)]
     employees = sorted({str(r.get("emp_name", "")).strip() for r in scoped if str(r.get("emp_name", "")).strip()})
@@ -1023,7 +1012,6 @@ def render_work_order_total(records, scope_department=None, key_prefix="wo_total
 
 def render_work_order_bulk_download(records, key_prefix="wo_bulk"):
     st.markdown("### 📦 Download Multiple Work Order PDFs (ZIP)")
-    st.caption("Select an employee and date range, then generate a ZIP containing the matching approved Work Order PDFs.")
     scoped = [r for r in records if r.get("status") in ("approved_payment", "approved")]
     if not scoped:
         st.info("No approved work orders available.")
@@ -1092,7 +1080,12 @@ def render_work_orders_super_admin():
     with c3: st.metric("🟢 Approved", len(approved))
     with c4: st.metric("🔴 Rejected / Returned", len(rejected))
     st.divider()
-    t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending_mgr) + len(pending_dir)})", f"✅ Approved ({len(approved)})", f"❌ Rejected / Returned ({len(rejected)})"])
+    t1, t2, t3, t4 = st.tabs([
+        f"⏳ Pending ({len(pending_mgr) + len(pending_dir)})",
+        f"✅ Approved ({len(approved)})",
+        f"❌ Rejected / Returned ({len(rejected)})",
+        "💷 Approved Work Order Total"
+    ])
     def show_wo_details(r):
         st.write(f"🧾 **Work Order No.:** {get_work_order_number(r)}")
         st.write(f"👤 **Contractor / Employee Labour:** {r.get('emp_name','-')}")
@@ -1132,8 +1125,8 @@ def render_work_orders_super_admin():
             submitter = str(r.get("submitted_by", "") or "").strip() or "Unknown"
             with st.expander(f"🔴 {get_work_order_number(r)} | {r.get('emp_name')} | £{float(r.get('amount',0) or 0):.2f} | {label} | Submitted by: {submitter}"):
                 show_wo_details(r)
-    st.divider()
-    render_work_order_total(orders, key_prefix="wo_super_admin_total", prepared_by="Super Admin")
+    with t4:
+        render_work_order_total(orders, key_prefix="wo_super_admin_total", prepared_by="Super Admin")
 
 def render_work_order_employee_portal(current_user, current_dept):
     st.subheader("🛠️ Work Orders")
@@ -1380,7 +1373,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 description = st.text_area("📝 Description", placeholder="Describe the work completed...", height=150)
             _all_users = load_users()
             director_names = sorted({str(u.get("full_name", "")).strip() for u in _all_users.values() if str(u.get("role", "")).strip().lower() == "director" and str(u.get("full_name", "")).strip()})
-            director = director_names[0] if director_names else "Andy Acoole"
+            director = director_names[0] if director_names else "Director"
             files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
             submitted = st.form_submit_button("📤 Submit Work Order", type="primary", use_container_width=True)
         if submitted:
@@ -1504,6 +1497,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             else: st.info("Approved Work Order Total is available in this tab.")
         else: st.info("Approved Work Order Total is available from the Work Orders total tab.")
 
+# ✅ v4.11.2 — Director portal: 4 tabs; Approved Work Order Total is its own tab.
 def render_work_order_director_portal(director_name):
     st.subheader("🛠️ Work Orders — Director Final Approval")
     st.info("✅ Review all work orders, Approve, Reject, OR Change Status at any time. All changes are logged.")
@@ -1511,13 +1505,21 @@ def render_work_order_director_portal(director_name):
     pending = [r for r in orders if r.get("status") == "pending_director"]
     approved = [r for r in orders if r.get("status") == "approved_payment"]
     rejected = [r for r in orders if r.get("status") == "rejected_director"]
-    t1, t2, t3 = st.tabs([f"⏳ Manager Approved / Awaiting Director ({len(pending)})", f"✅ Approved for Payment ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
+
+    t1, t2, t3, t4 = st.tabs([
+        f"⏳ Manager Approved / Awaiting Director ({len(pending)})",
+        f"✅ Approved for Payment ({len(approved)})",
+        f"❌ Rejected ({len(rejected)})",
+        "💷 Approved Work Order Total"
+    ])
+
     def search_list(items, key):
         q = st.text_input("🔎 Search Work Orders", placeholder="Search by Work Order No., employee, manager, submitter, amount, date, customer job no. or description...", key=key)
         if q.strip():
             q = q.lower().strip()
             items = [r for r in items if q in " ".join(str(v) for v in r.values()).lower()]
         return items
+
     def show_full_details(r):
         st.write(f"🧾 **Work Order No.:** {get_work_order_number(r)}")
         st.write(f"👤 **Contractor / Employee Labour:** {r.get('emp_name','-')}")
@@ -1533,7 +1535,10 @@ def render_work_order_director_portal(director_name):
         if r.get('manager_comments'): st.info(f"💬 **Manager Comments:** {r.get('manager_comments')}")
         if r.get('director_comments'): st.warning(f"💬 **Director Comments:** {r.get('director_comments')}")
         if r.get('director_decision_by'): st.write(f"🎯 **Approved By:** {r.get('director_decision_by')} on {r.get('director_decision_date','')}")
-        st.divider(); st.markdown("#### 📎 Attachments"); display_attachments(r)
+        st.divider()
+        st.markdown("#### 📎 Attachments")
+        display_attachments(r)
+
     def apply_status_change(req_id, new_status, comments, old_status):
         for x in orders:
             if str(x.get("id")) == str(req_id):
@@ -1550,67 +1555,102 @@ def render_work_order_director_portal(director_name):
                     x["pdf_path"] = ""
                 elif new_status == "pending_director":
                     x["director_comments"] = (str(x.get("director_comments","")) + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] ⏳ Changed to Pending by {director_name}: {comments.strip()}").strip()
-                    x["director_decision_by"] = ""; x["director_decision_date"] = ""; x["pdf_path"] = ""
+                    x["director_decision_by"] = ""
+                    x["director_decision_date"] = ""
+                    x["pdf_path"] = ""
                 break
         save_all_work_orders(orders)
-        log_action("WORK_ORDER_STATUS_CHANGED", req_id, old_data={"status": old_status}, new_data={"status": new_status}, decision_by=director_name)
+        log_action("WORK_ORDER_STATUS_CHANGED", req_id,
+                   old_data={"status": old_status}, new_data={"status": new_status},
+                   decision_by=director_name)
         st.success(f"✅ Work Order #{req_id} status changed to **{new_status.replace('_',' ').title()}**.")
+
     with t1:
         items = search_list(pending, "wo_dir_pending_search")
-        if not items: st.info("⏳ No work orders awaiting Director approval.")
+        if not items:
+            st.info("⏳ No work orders awaiting Director approval.")
         for r in reversed(items):
             req_id = r.get("id")
             submitter = r.get('submitted_by') or r.get('manager') or "Unknown"
-            with st.expander(f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Submitted by: {submitter}"):
+            with st.expander(
+                f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"£{r.get('amount',0):.2f} | Submitted by: {submitter}"
+            ):
                 show_full_details(r)
                 st.markdown("### ✍️ Director Decision")
                 comments = st.text_area("Director Comments", key=f"wo_dir_comm_{req_id}")
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("✅ Approve for Payment", key=f"wo_dir_app_{req_id}", type="primary"):
-                        apply_status_change(req_id, "approved_payment", comments, "pending_director"); st.rerun()
+                        apply_status_change(req_id, "approved_payment", comments, "pending_director")
+                        st.rerun()
                 with c2:
                     if st.button("❌ Reject", key=f"wo_dir_rej_{req_id}"):
-                        apply_status_change(req_id, "rejected_director", comments, "pending_director"); st.rerun()
+                        apply_status_change(req_id, "rejected_director", comments, "pending_director")
+                        st.rerun()
+
     with t2:
         items = search_list(approved, "wo_dir_approved_search")
-        if not items: st.info("✅ No Director-approved work orders.")
+        if not items:
+            st.info("✅ No Director-approved work orders.")
         st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Rejected")
         for r in reversed(items):
             req_id = r.get("id")
-            with st.expander(f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Approved by {r.get('director_decision_by','')}"):
+            with st.expander(
+                f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"£{r.get('amount',0):.2f} | Approved by {r.get('director_decision_by','')}"
+            ):
                 show_full_details(r)
                 st.markdown("### 🔄 Change Status")
-                new_comments = st.text_area("Add comment (optional)", key=f"wo_dir_chg_comm_app_{req_id}", placeholder="Reason for status change...")
+                new_comments = st.text_area(
+                    "Add comment (optional)", key=f"wo_dir_chg_comm_app_{req_id}",
+                    placeholder="Reason for status change..."
+                )
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("⏳ Move to Pending", key=f"wo_dir_app_to_pend_{req_id}"):
-                        apply_status_change(req_id, "pending_director", new_comments, "approved_payment"); st.rerun()
+                        apply_status_change(req_id, "pending_director", new_comments, "approved_payment")
+                        st.rerun()
                 with c2:
                     if st.button("❌ Change to Rejected", key=f"wo_dir_app_to_rej_{req_id}"):
-                        apply_status_change(req_id, "rejected_director", new_comments, "approved_payment"); st.rerun()
-                st.divider(); st.markdown("#### 📄 Work Order PDF"); display_work_order_pdf(r)
+                        apply_status_change(req_id, "rejected_director", new_comments, "approved_payment")
+                        st.rerun()
+                st.divider()
+                st.markdown("#### 📄 Work Order PDF")
+                display_work_order_pdf(r)
         if items:
-            st.divider(); render_work_order_bulk_download(load_work_orders(), key_prefix="wo_dir_bulk")
+            st.divider()
+            render_work_order_bulk_download(load_work_orders(), key_prefix="wo_dir_bulk")
+
     with t3:
         items = search_list(rejected, "wo_dir_rejected_search")
-        if not items: st.info("❌ No rejected work orders.")
+        if not items:
+            st.info("❌ No rejected work orders.")
         st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Approved")
         for r in reversed(items):
             req_id = r.get("id")
-            with st.expander(f"🔴 {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount',0):.2f} | Rejected by {r.get('director_decision_by','')}"):
+            with st.expander(
+                f"🔴 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"£{r.get('amount',0):.2f} | Rejected by {r.get('director_decision_by','')}"
+            ):
                 show_full_details(r)
                 st.markdown("### 🔄 Change Status")
-                new_comments = st.text_area("Add comment (optional)", key=f"wo_dir_chg_comm_rej_{req_id}", placeholder="Reason for status change...")
+                new_comments = st.text_area(
+                    "Add comment (optional)", key=f"wo_dir_chg_comm_rej_{req_id}",
+                    placeholder="Reason for status change..."
+                )
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("⏳ Move to Pending", key=f"wo_dir_rej_to_pend_{req_id}"):
-                        apply_status_change(req_id, "pending_director", new_comments, "rejected_director"); st.rerun()
+                        apply_status_change(req_id, "pending_director", new_comments, "rejected_director")
+                        st.rerun()
                 with c2:
                     if st.button("✅ Change to Approved", key=f"wo_dir_rej_to_app_{req_id}", type="primary"):
-                        apply_status_change(req_id, "approved_payment", new_comments, "rejected_director"); st.rerun()
-    st.divider()
-    render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
+                        apply_status_change(req_id, "approved_payment", new_comments, "rejected_director")
+                        st.rerun()
+
+    with t4:
+        render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
 
 def render_work_order_payroll_portal(payroll_name):
     st.subheader("🛠️ Work Orders — Payroll")
@@ -1729,7 +1769,7 @@ def inspector_bonus_pdf(req, force_regenerate=False, upload_to_drive=True):
         status = str(req.get("status", "")).strip().lower()
         text_content = ""; stamp_path = None
         if status == "approved":
-            approved_by = req.get("director_decision_by", "") or "Andy Acoole"
+            approved_by = req.get("director_decision_by", "") or "Director"
             decision_date = req.get("director_decision_date", "")
             text_content = f"   {approved_by} on {decision_date}"
             stamp_path = APPROVED_STAMP_PATH
@@ -2438,7 +2478,6 @@ def settings_management_panel():
                     with col2:
                         if st.form_submit_button("❌ Cancel"): st.session_state[f"editing_role_{i}"] = False; st.rerun()
 
-# ✅ v4.11 — Create + Edit User panels now include the two new permission checkboxes
 def user_management_panel():
     st.subheader("👤 User Management — Create & Manage System Users")
     st.info("🛡️ Super Admin Only — Create, edit, or delete user accounts."); st.divider()
@@ -2459,7 +2498,6 @@ def user_management_panel():
             perm_pdf = col1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=defaults.get("can_generate_pdf", False))
             perm_download = col2.checkbox(PERMISSION_LABELS["can_download_data"], value=defaults.get("can_download_data", False))
             perm_approve = col2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=defaults.get("can_approve_requests", False))
-            # ✅ v4.11 — two new module access checkboxes
             st.markdown("### 🧩 Module Access")
             mcol1, mcol2 = st.columns(2)
             perm_ad = mcol1.checkbox(PERMISSION_LABELS["can_access_addition_deduction"], value=defaults.get("can_access_addition_deduction", True))
@@ -2493,7 +2531,6 @@ def user_management_panel():
                 curr_perm_dl = bool(curr.get("can_download_data", False))
                 curr_perm_app = bool(curr.get("can_approve_requests", False))
                 curr_perm_ib = bool(curr.get("can_access_inspector_bonus", False))
-                # ✅ v4.11 — two new flags
                 curr_perm_ad = bool(curr.get("can_access_addition_deduction", False))
                 curr_perm_wo = bool(curr.get("can_access_work_orders", False))
                 ecol1, ecol2 = st.columns(2)
@@ -2501,7 +2538,6 @@ def user_management_panel():
                 edit_pdf = ecol1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=curr_perm_pdf)
                 edit_dl = ecol2.checkbox(PERMISSION_LABELS["can_download_data"], value=curr_perm_dl)
                 edit_app = ecol2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=curr_perm_app)
-                # ✅ v4.11 — two new module access checkboxes
                 st.markdown("### 🧩 Module Access")
                 mcol1, mcol2 = st.columns(2)
                 edit_ad = mcol1.checkbox(PERMISSION_LABELS["can_access_addition_deduction"], value=curr_perm_ad)
@@ -2615,9 +2651,9 @@ elif role == "Payroll":
             else:
                 st.metric("✅ Approved", len(approved)); st.divider()
                 for req in reversed(approved):
-                    dec_by = req.get('decision_by', 'Director'); dec_date = req.get('decision_date', '')
-                    with st.expander(f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept','')} | ✅ {dec_by}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept', '')}")
+                    dec_by = req.get('decision_by', 'Director')
+                    with st.expander(f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')}")
                         submitted_by = get_submitted_by(req)
                         if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
                         st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
@@ -2630,9 +2666,8 @@ elif role == "Payroll":
             else:
                 st.metric("❌ Rejected", len(rejected)); st.divider()
                 for req in reversed(rejected):
-                    with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                    with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')}")
                         st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
@@ -2674,7 +2709,6 @@ elif role == "Work Order Manager":
                 else: st.info("📋 No attachments currently attached.")
                 st.markdown("#### ➕ Attach New Files")
                 new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
-                st.info(f"✅ Result: **{len(files_to_keep)} kept** + **{len(new_files_upload or [])} new** = {len(files_to_keep)+len(new_files_upload or [])} total files")
                 with st.form("edit_form"):
                     c1, c2 = st.columns(2)
                     with c1:
@@ -2714,7 +2748,6 @@ elif role == "Work Order Manager":
         else:
             st.subheader(f"➕ New Request — {dept_name}")
             nid = get_next_id(all_live_requests)
-            st.markdown(f"**🆔 Request ID:** `#{nid}`")
             with st.form("new_req", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 with c1:
@@ -2752,7 +2785,8 @@ elif role == "Work Order Manager":
                     status = req.get("status", "pending").lower()
                     icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
                     with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f}"):
-                        st.write(f"👤 {req.get('emp_name')} | 🔄 {req.get('type')} | 🏷️ {req.get('category')}")
+                        st.write(f"👤 {req.get('emp_name')} | 👔 {req.get('manager')}")
+                        st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')}")
                         st.info(f"📝 {req.get('desc')}")
                         display_attachments(req)
                         if status == "approved": display_pdf_button(req, can_generate=True)
@@ -2762,12 +2796,9 @@ elif role == "Work Order Manager":
     with work_order_tab:
         render_work_order_manager_portal(full_name, dept_name, show_total=True)
 
-# ✅ v4.11 — Manager / Staff / Team Member portal builds tabs dynamically
-# based on the two new flags (plus existing inspector-bonus flag).
 elif role in ["Manager", "Staff", "Team Member"]:
     dept_name = dept
     has_inspector_bonus = user_info.get("can_access_inspector_bonus", False)
-    # Default True for these roles when flag is missing
     has_addition_deduction = user_info.get("can_access_addition_deduction", True)
     has_work_orders = user_info.get("can_access_work_orders", False)
 
@@ -2782,8 +2813,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
     else:
         tabs = st.tabs(labels)
         tab_idx = 0
-
-        # ─── Addition & Deduction tab ───
         if has_addition_deduction:
             with tabs[tab_idx]:
                 if st.session_state.get("editing_request_id"):
@@ -2791,7 +2820,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
                     if rec:
                         st.subheader(f"✏️ Edit Request #{eid}")
-                        show_old_new_comparison("{}", rec)
                         st.markdown("### 📎 Manage Attachments")
                         att_name_raw = rec.get("attachment_name", "None")
                         existing_files = []
@@ -2854,7 +2882,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 else:
                     st.subheader(f"➕ New Request — {dept_name}")
                     nid = get_next_id(all_live_requests)
-                    st.markdown(f"**🆔 Request ID:** `#{nid}`")
                     with st.form("new_req", clear_on_submit=True):
                         c1, c2 = st.columns(2)
                         with c1:
@@ -2902,14 +2929,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                                         st.session_state.editing_request_id = req.get("id"); st.rerun()
             tab_idx += 1
-
-        # ─── Work Orders tab (new in v4.11) ───
         if has_work_orders:
             with tabs[tab_idx]:
                 render_work_order_employee_portal(full_name, dept_name)
             tab_idx += 1
-
-        # ─── Inspector Bonus tab ───
         if has_inspector_bonus:
             with tabs[tab_idx]:
                 render_inspector_bonus_portal(full_name, dept_name)
@@ -2918,7 +2941,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
 elif role == "Director":
     director_addition_tab, director_work_order_tab, director_inspector_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"])
     with director_addition_tab:
-        st.subheader("🎛️ Director Approval Portal — Andy Acoole")
+        st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
         st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
         st.divider()
@@ -3058,7 +3081,6 @@ elif role == "Super Admin":
                         st.write(f"💷 Amount: £{amount:.2f}")
                         submitted_by = get_submitted_by(req)
                         if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                        st.write(f"👔 Line Manager: {req.get('manager')} | 📅 Date: {format_date(req.get('date',''))}")
                         st.info(f"📝 Description: {req.get('desc')}")
                         display_attachments(req)
                         if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
@@ -3074,8 +3096,6 @@ elif role == "Super Admin":
                     with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f} | ✅ {dec_by}"):
                         st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
                         st.write(f"💷 Amount: £{amount:.2f}")
-                        submitted_by = get_submitted_by(req)
-                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
                         st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
