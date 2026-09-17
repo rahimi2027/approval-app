@@ -15,6 +15,7 @@
 #    • On duplicate Work Order No. submission, the form data is KEPT
 #      (no clearing) and the message "Work Order No. already Exist." is shown,
 #      so the user can change only the Work Order No. and resubmit.
+#    • Form is only cleared on SUCCESSFUL submission (not on duplicate).
 # ✅ v4.7:
 #    • Employee Work Order form matches Manager's layout
 #    • Employee can edit pending / returned / rejected work orders
@@ -185,7 +186,7 @@ def upload_to_google_drive(local_file_path, display_filename):
             try:
                 return _do(cached_id).get("id")
             except Exception:
-                _DRIVE_ID_CACHE.pop(cache_key, None)   # stale ID → fall through
+                _DRIVE_ID_CACHE.pop(cache_key, None)
 
         existing = _drive_find_file(display_filename)
         if existing:
@@ -277,7 +278,6 @@ def sync_persistent_file(local_path, columns=None):
     filename = os.path.basename(local_path)
     remote = _drive_find_file(filename)
     if remote:
-        # Only download if Drive is newer than local — otherwise keep local.
         try:
             rmt = str(remote.get("modifiedTime", "")).rstrip("Z")
             local_newer = False
@@ -313,14 +313,14 @@ def sync_saved_file_to_drive(local_path):
     except Exception:
         return
     if _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint:
-        return  # unchanged → nothing to upload
+        return
     _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
 
     def _worker(path):
         with _DRIVE_SYNC_LOCK:
             try:
                 if _drive_upload_path(path) is None:
-                    _DRIVE_SYNC_FINGERPRINTS.pop(path, None)  # retry next save
+                    _DRIVE_SYNC_FINGERPRINTS.pop(path, None)
             except Exception as e:
                 print(f"Background drive sync failed for {path}: {e}")
                 _DRIVE_SYNC_FINGERPRINTS.pop(path, None)
@@ -1384,12 +1384,10 @@ def render_work_order_employee_portal(current_user, current_dept):
     orders = load_work_orders()
     managers = _manager_options_for_department(current_dept)
 
-    # ─── Success message (shown once after a successful submission) ───
     _success_msg = st.session_state.pop("emp_new_wo_success", None)
     if _success_msg:
         st.success(_success_msg)
 
-    # ─── Edit mode — employee can edit pending / returned / rejected work orders ───
     editing_id = st.session_state.get("editing_work_order_id_emp")
     if editing_id:
         rec = next((r for r in orders if str(r.get("id")) == str(editing_id)), None)
@@ -1512,7 +1510,6 @@ def render_work_order_employee_portal(current_user, current_dept):
         else:
             st.session_state.editing_work_order_id_emp = None
 
-    # ─── New Submission Form ───
     st.markdown("### 📤 Submit New Work Order")
     st.caption("Complete the work-order details below. No hours/time entry is required.")
     wid = get_next_work_order_id(orders)
@@ -1603,7 +1600,6 @@ def render_work_order_employee_portal(current_user, current_dept):
             )
 
             if duplicate:
-                # ❗ Do NOT clear the form — leave all data so the user can change the Work Order No.
                 st.error(
                     "❌ **Work Order No. already Exist.** "
                     "Please change the Work Order No. and submit again — your form data has been kept."
@@ -1658,14 +1654,12 @@ def render_work_order_employee_portal(current_user, current_dept):
                 st.session_state["emp_new_form_reset"] = True
                 st.rerun()
 
-    # ─── Work Order Lists (My Orders + Department Orders) ───
     st.divider()
     tab_mine, tab_dept = st.tabs([
         "📋 My Work Orders",
         f"🏢 Department Work Orders ({current_dept})"
     ])
 
-    # ═══ TAB 1 — My Work Orders ═══
     with tab_mine:
         q = st.text_input(
             "🔎 Search my work orders",
@@ -1737,7 +1731,6 @@ def render_work_order_employee_portal(current_user, current_dept):
                             st.session_state.editing_work_order_id_emp = r.get("id")
                             st.rerun()
 
-    # ═══ TAB 2 — Department Work Orders (for duplicate-checking) ═══
     with tab_dept:
         st.caption(
             "Work orders already recorded for your department (including those submitted by managers). "
@@ -1761,7 +1754,6 @@ def render_work_order_employee_portal(current_user, current_dept):
         if not dept_orders:
             st.info("📋 No work orders recorded for your department yet.")
         else:
-            # Quick reference table — easy to scan for existing Work Order Nos.
             rows = []
             for r in sorted(dept_orders, key=lambda x: str(x.get("work_date", "")), reverse=True):
                 rows.append({
@@ -1808,7 +1800,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
     st.subheader("🛠️ Work Orders")
     orders = load_work_orders()
 
-    # Edit mode — Manager can edit any pending/returned/rejected
     editing_id = st.session_state.get("editing_work_order_id")
     if editing_id:
         rec = next((r for r in orders if str(r.get("id")) == str(editing_id)), None)
@@ -1974,7 +1965,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             st.write(f"📍 **Site Address:** {r.get('site_address','-')}")
             st.write(f"📘 **Customer Job No.:** {r.get('customer_job_no','-')} | 📅 **Date:** {r.get('work_date','-')}")
             st.write(f"💷 **Amount:** £{float(r.get('amount',0) or 0):.2f}")
-            # ✅ v4.7: Show who submitted the work order
             submitter = str(r.get("submitted_by", "") or "").strip() or "Unknown"
             sub_date = str(r.get("submitted_date", "") or "").strip()
             st.write(f"📝 **Submitted by:** {submitter}" + (f" on {sub_date}" if sub_date else ""))
@@ -1990,7 +1980,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 st.warning(f"💬 Director Comments: {r.get('director_comments')}")
             display_attachments(r)
 
-        # ═══ PENDING TAB — Approve/Reject for employee submissions ═══
         with wo_pending:
             items = filter_orders(pending, "wo_mgr_pending_final_search")
             if not items:
@@ -2000,7 +1989,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 st_raw = str(r.get("status", "")).strip().lower()
                 submitter = str(r.get("submitted_by", "") or "").strip() or "Unknown"
                 label = "AWAITING MANAGER" if st_raw == "pending_manager" else ("AWAITING DIRECTOR" if st_raw == "pending_director" else st_raw.upper())
-                # ✅ v4.7: show submitter in expander title
                 with st.expander(f"🟡 {wo} | {r.get('emp_name')} | £{float(r.get('amount',0) or 0):.2f} | {label} | Submitted by: {submitter}"):
                     show_details(r)
                     st.divider()
@@ -2043,7 +2031,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                             st.session_state.editing_work_order_id = r.get("id")
                             st.rerun()
 
-        # ═══ APPROVED TAB ═══
         with wo_approved:
             items=filter_orders(approved,"wo_mgr_approved_final_search")
             if not items:
@@ -2061,7 +2048,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 st.divider()
                 render_work_order_bulk_download(load_work_orders(), key_prefix="wo_mgr_bulk")
 
-        # ═══ REJECTED / RETURNED TAB ═══
         with wo_rejected:
             items=filter_orders(rejected,"wo_mgr_rejected_final_search")
             if not items: st.info("❌ No rejected or returned work orders.")
@@ -3506,7 +3492,6 @@ change_my_password_form()
 all_live_requests = load_records_from_excel()
 CATEGORIES = load_categories()
 
-# Sidebar PDF section
 with st.sidebar:
     st.divider()
     SHOW_PDF_SECTION = False
