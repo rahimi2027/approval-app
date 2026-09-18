@@ -1,10 +1,13 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.14
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.15
 # ============================================================
+# ✅ v4.15 (WORK ORDER TOTAL TAB RESTRUCTURE):
+#    • Moved "Approved Work Order Total" to be a TOP-LEVEL tab
+#      inside the Work Orders portal for Employees / Team Members.
+#      It is no longer a sibling to "My Work Orders" / "Department".
 # ✅ v4.14 (WORK ORDER TOTAL FOR EMPLOYEES/TEAM MEMBERS):
 #    • Fixed: "Approved Work Order Total" tab now appears for
-#      Team Members / Staff / Work Order Employees if the
-#      can_access_wo_total permission is granted.
+#      Team Members / Staff / Work Order Employees if granted.
 # ✅ v4.13 (GRANULAR WORK ORDER TOTAL PERMISSION):
 #    • NEW per-user flag: can_access_wo_total.
 # ✅ v4.12 (USER ACTIVE / INACTIVE + SUPER ADMIN FULL ACCESS):
@@ -726,7 +729,7 @@ def load_users(force=False):
                 "can_access_wo_total": _flag_or_default(r.get("can_access_wo_total", ""), user_role, "can_access_wo_total"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
-            # ✅ v4.14 — Super Admin ALWAYS gets full access, no matter what
+            # ✅ v4.15 — Super Admin ALWAYS gets full access, no matter what
             if user_role == "Super Admin":
                 users[username].update({
                     "can_view_all_dept": True,
@@ -1153,201 +1156,201 @@ def render_work_order_employee_portal(current_user, current_dept):
     _success_msg = st.session_state.pop("emp_new_wo_success", None)
     if _success_msg: st.success(_success_msg)
     editing_id = st.session_state.get("editing_work_order_id_emp")
-    if editing_id:
-        rec = next((r for r in orders if str(r.get("id")) == str(editing_id)), None)
-        editable_statuses = ("pending_manager", "returned_to_employee", "rejected_director", "pending")
-        if rec and str(rec.get("status", "")).strip().lower() in editable_statuses:
-            st.warning(f"✏️ **Editing Work Order {get_work_order_number(rec)}** — save changes to resubmit.")
-            with st.form("work_order_emp_edit_form", clear_on_submit=False):
-                ec1, ec2 = st.columns(2)
-                with ec1:
-                    e_wo_no = st.text_input("🧾 Work Order No.", value=str(rec.get("manual_work_order_no", "") or rec.get("id", "")))
-                    e_emp = st.text_input("👤 Contractor / Employee Labour", value=str(rec.get("emp_name", "")))
-                    e_site = st.text_area("📍 Site Address", value=str(rec.get("site_address", "")), height=90)
-                    e_cjno = st.text_input("📘 Customer Job No.", value=str(rec.get("customer_job_no", "")))
-                with ec2:
-                    try: _d = datetime.strptime(str(rec.get("work_date", ""))[:10], "%Y-%m-%d").date()
-                    except Exception: _d = date.today()
-                    e_date = st.date_input("📅 Date", value=_d)
-                    e_amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", value=max(float(rec.get("amount", 0.01) or 0.01), 0.01))
-                    e_desc = st.text_area("📝 Description", value=str(rec.get("desc", "")), height=150)
-                if managers:
-                    current_mgr = str(rec.get("manager", "") or "")
-                    mgr_idx = managers.index(current_mgr) if current_mgr in managers else 0
-                    e_manager = st.selectbox("👔 Send to Manager", managers, index=mgr_idx)
-                else:
-                    e_manager = st.text_input("👔 Manager Name", value=str(rec.get("manager", "")))
-                e_files = st.file_uploader("📎 Add New Attachments (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"emp_edit_files_{editing_id}")
-                existing_att = str(rec.get("attachment_name", "None") or "None")
-                if existing_att and existing_att.lower() not in ("none", "nan", ""):
-                    st.caption(f"📎 Existing attachments: {existing_att}")
-                csave, ccancel = st.columns(2)
-                with csave: save_edit = st.form_submit_button("💾 Save Changes & Resubmit", type="primary", use_container_width=True)
-                with ccancel: cancel_edit = st.form_submit_button("❌ Cancel", use_container_width=True)
-                if save_edit:
-                    if not e_wo_no.strip() or not e_emp.strip() or not e_manager.strip() or not e_desc.strip():
-                        st.error("❌ Work Order No., Employee, Manager and Description are required.")
-                    else:
-                        existing_list = [n.strip() for n in existing_att.split(",") if n.strip() and n.strip().lower() not in ("none", "nan")]
-                        new_attachments = list(existing_list)
-                        if e_files:
-                            for i, f in enumerate(e_files, start=len(new_attachments) + 1):
-                                safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
-                                fn = f"{editing_id}_EDIT_F{i}_{safe_name}"
-                                fp = os.path.join(UPLOAD_DIR, fn)
-                                with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
-                                _upload_to_drive_bg(fp, fn)
-                                new_attachments.append(fn)
-                        old_data = {"manual_work_order_no": rec.get("manual_work_order_no"), "emp_name": rec.get("emp_name"), "site_address": rec.get("site_address"), "customer_job_no": rec.get("customer_job_no"), "work_date": rec.get("work_date"), "amount": rec.get("amount"), "desc": rec.get("desc"), "manager": rec.get("manager"), "status": rec.get("status")}
-                        for x in orders:
-                            if str(x.get("id")) == str(editing_id):
-                                x["manual_work_order_no"] = e_wo_no.strip(); x["emp_name"] = e_emp.strip(); x["site_address"] = e_site.strip(); x["customer_job_no"] = e_cjno.strip(); x["work_date"] = str(e_date); x["amount"] = float(e_amount); x["desc"] = e_desc.strip(); x["manager"] = e_manager.strip(); x["attachment_name"] = ", ".join(new_attachments) or "None"; x["status"] = "pending_manager"; x["manager_comments"] = ""; x["manager_decision_date"] = ""; x["manager_decision_by"] = ""; x["director_comments"] = ""; x["director_decision_date"] = ""; x["director_decision_by"] = ""; x["pdf_path"] = ""; x["submitted_by"] = current_user; x["submitted_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                break
-                        save_all_work_orders(orders)
-                        new_data = {"manual_work_order_no": e_wo_no.strip(), "emp_name": e_emp.strip(), "site_address": e_site.strip(), "customer_job_no": e_cjno.strip(), "work_date": str(e_date), "amount": float(e_amount), "desc": e_desc.strip(), "manager": e_manager.strip(), "status": "pending_manager"}
-                        log_action("WORK_ORDER_EDITED", editing_id, old_data=old_data, new_data=new_data)
-                        st.session_state.editing_work_order_id_emp = None
-                        st.success("✅ Work Order updated and re-sent to Manager for review.")
-                        st.rerun()
-                if cancel_edit:
-                    st.session_state.editing_work_order_id_emp = None; st.rerun()
-            st.divider()
-        else: st.session_state.editing_work_order_id_emp = None
-    st.markdown("### 📤 Submit New Work Order")
-    st.caption("Complete the work-order details below. No hours/time entry is required.")
-    wid = get_next_work_order_id(orders)
-    form_version = st.session_state.get("emp_new_wo_form_version", 0)
-    K_WO = f"emp_new_wo_no_v{form_version}"
-    K_EMP = f"emp_new_contractor_v{form_version}"
-    K_SITE = f"emp_new_site_v{form_version}"
-    K_CJNO = f"emp_new_cjno_v{form_version}"
-    K_DATE = f"emp_new_date_v{form_version}"
-    K_AMT = f"emp_new_amount_v{form_version}"
-    K_DESC = f"emp_new_desc_v{form_version}"
-    K_MGR = f"emp_new_manager_v{form_version}"
-    K_FILES = f"emp_new_files_v{form_version}"
-    with st.form(f"employee_new_work_order_form_v{form_version}", clear_on_submit=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            work_order_no = st.text_input("🧾 Work Order No.", key=K_WO, placeholder="Enter the Work Order No. from the work-order sheet")
-            contractor_employee = st.text_input("👤 Contractor / Employee Labour", key=K_EMP, value=current_user, placeholder="Enter contractor or employee name")
-            site_address = st.text_area("📍 Site Address", key=K_SITE, placeholder="Enter the full site address", height=90)
-            customer_job_no = st.text_input("📘 Customer Job No.", key=K_CJNO, placeholder="Enter Customer Job No.")
-        with c2:
-            work_date = st.date_input("📅 Date", key=K_DATE, value=date.today())
-            amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", key=K_AMT, value=0.01)
-            description = st.text_area("📝 Description", key=K_DESC, placeholder="Describe the work completed...", height=150)
-        if managers: manager = st.selectbox("👔 Send to Manager", managers, key=K_MGR)
-        else: manager = st.text_input("👔 Manager Name", key=K_MGR, placeholder="Enter manager name")
-        files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=K_FILES)
-        submitted = st.form_submit_button("📤 Submit Work Order to Manager", type="primary", use_container_width=True)
-        if submitted:
-            errors = []
-            if not work_order_no.strip(): errors.append("Work Order No.")
-            if not contractor_employee.strip(): errors.append("Contractor / Employee Labour")
-            if not site_address.strip(): errors.append("Site Address")
-            if not customer_job_no.strip(): errors.append("Customer Job No.")
-            if not description.strip(): errors.append("Description")
-            if not manager.strip(): errors.append("Manager")
-            duplicate = any(str(r.get("manual_work_order_no", "")).strip().lower() == work_order_no.strip().lower() for r in orders if str(r.get("manual_work_order_no", "")).strip())
-            if duplicate:
-                st.error("❌ **Work Order No. already Exist.** Please change the Work Order No. and submit again — your form data has been kept.")
-            elif errors:
-                st.error("Please correct: " + ", ".join(errors) + ".")
-            else:
-                attachments = []
-                for i, f in enumerate(files or [], 1):
-                    safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
-                    fn = f"{wid}_F{i}_{safe_name}"
-                    fp = os.path.join(UPLOAD_DIR, fn)
-                    with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
-                    _upload_to_drive_bg(fp, fn)
-                    attachments.append(fn)
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                rec = {"id": wid, "manual_work_order_no": work_order_no.strip(), "emp_name": contractor_employee.strip(), "dept": current_dept, "work_date": str(work_date), "hours": 0.0, "customer_job_no": customer_job_no.strip(), "site_address": site_address.strip(), "amount": float(amount), "manager": manager.strip(), "desc": description.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending_manager", "manager_comments": "", "manager_decision_date": "", "manager_decision_by": "", "director_comments": "", "director_decision_date": "", "director_decision_by": "", "submitted_by": current_user, "submitted_date": now, "payroll_status": "Pending", "payroll_date": "", "payroll_by": "", "pdf_path": ""}
-                orders.append(rec)
-                save_all_work_orders(orders)
-                log_action("WORK_ORDER_CREATED", wid, decision_by=current_user)
-                for k in (K_WO, K_EMP, K_SITE, K_CJNO, K_DATE, K_AMT, K_DESC, K_MGR, K_FILES):
-                    st.session_state.pop(k, None)
-                st.session_state["emp_new_wo_form_version"] = form_version + 1
-                st.session_state["emp_new_wo_success"] = (f"✅ Work Order No. {work_order_no.strip()} submitted to {manager} for review.")
-                st.rerun()
-    st.divider()
     
-    # ✅ v4.14 — Conditionally add the total tab for employees/team members
     user_info = st.session_state.get("user_info", {})
     can_access_wo_total = user_info.get("can_access_wo_total", False)
 
+    # ✅ v4.15 — Top-level tabs inside Work Order portal
     if can_access_wo_total:
-        tab_mine, tab_dept, tab_total = st.tabs([
-            "📋 My Work Orders",
-            f"🏢 Department Work Orders ({current_dept})",
-            "💷 Approved Work Order Total"
-        ])
+        main_tab, total_tab = st.tabs(["🛠️ Work Orders", "💷 Approved Work Order Total"])
     else:
+        main_tab = st.tabs(["🛠️ Work Orders"])[0]
+
+    with main_tab:
+        if editing_id:
+            rec = next((r for r in orders if str(r.get("id")) == str(editing_id)), None)
+            editable_statuses = ("pending_manager", "returned_to_employee", "rejected_director", "pending")
+            if rec and str(rec.get("status", "")).strip().lower() in editable_statuses:
+                st.warning(f"✏️ **Editing Work Order {get_work_order_number(rec)}** — save changes to resubmit.")
+                with st.form("work_order_emp_edit_form", clear_on_submit=False):
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        e_wo_no = st.text_input("🧾 Work Order No.", value=str(rec.get("manual_work_order_no", "") or rec.get("id", "")))
+                        e_emp = st.text_input("👤 Contractor / Employee Labour", value=str(rec.get("emp_name", "")))
+                        e_site = st.text_area("📍 Site Address", value=str(rec.get("site_address", "")), height=90)
+                        e_cjno = st.text_input("📘 Customer Job No.", value=str(rec.get("customer_job_no", "")))
+                    with ec2:
+                        try: _d = datetime.strptime(str(rec.get("work_date", ""))[:10], "%Y-%m-%d").date()
+                        except Exception: _d = date.today()
+                        e_date = st.date_input("📅 Date", value=_d)
+                        e_amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", value=max(float(rec.get("amount", 0.01) or 0.01), 0.01))
+                        e_desc = st.text_area("📝 Description", value=str(rec.get("desc", "")), height=150)
+                    if managers:
+                        current_mgr = str(rec.get("manager", "") or "")
+                        mgr_idx = managers.index(current_mgr) if current_mgr in managers else 0
+                        e_manager = st.selectbox("👔 Send to Manager", managers, index=mgr_idx)
+                    else:
+                        e_manager = st.text_input("👔 Manager Name", value=str(rec.get("manager", "")))
+                    e_files = st.file_uploader("📎 Add New Attachments (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"emp_edit_files_{editing_id}")
+                    existing_att = str(rec.get("attachment_name", "None") or "None")
+                    if existing_att and existing_att.lower() not in ("none", "nan", ""):
+                        st.caption(f"📎 Existing attachments: {existing_att}")
+                    csave, ccancel = st.columns(2)
+                    with csave: save_edit = st.form_submit_button("💾 Save Changes & Resubmit", type="primary", use_container_width=True)
+                    with ccancel: cancel_edit = st.form_submit_button("❌ Cancel", use_container_width=True)
+                    if save_edit:
+                        if not e_wo_no.strip() or not e_emp.strip() or not e_manager.strip() or not e_desc.strip():
+                            st.error("❌ Work Order No., Employee, Manager and Description are required.")
+                        else:
+                            existing_list = [n.strip() for n in existing_att.split(",") if n.strip() and n.strip().lower() not in ("none", "nan")]
+                            new_attachments = list(existing_list)
+                            if e_files:
+                                for i, f in enumerate(e_files, start=len(new_attachments) + 1):
+                                    safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
+                                    fn = f"{editing_id}_EDIT_F{i}_{safe_name}"
+                                    fp = os.path.join(UPLOAD_DIR, fn)
+                                    with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
+                                    _upload_to_drive_bg(fp, fn)
+                                    new_attachments.append(fn)
+                            old_data = {"manual_work_order_no": rec.get("manual_work_order_no"), "emp_name": rec.get("emp_name"), "site_address": rec.get("site_address"), "customer_job_no": rec.get("customer_job_no"), "work_date": rec.get("work_date"), "amount": rec.get("amount"), "desc": rec.get("desc"), "manager": rec.get("manager"), "status": rec.get("status")}
+                            for x in orders:
+                                if str(x.get("id")) == str(editing_id):
+                                    x["manual_work_order_no"] = e_wo_no.strip(); x["emp_name"] = e_emp.strip(); x["site_address"] = e_site.strip(); x["customer_job_no"] = e_cjno.strip(); x["work_date"] = str(e_date); x["amount"] = float(e_amount); x["desc"] = e_desc.strip(); x["manager"] = e_manager.strip(); x["attachment_name"] = ", ".join(new_attachments) or "None"; x["status"] = "pending_manager"; x["manager_comments"] = ""; x["manager_decision_date"] = ""; x["manager_decision_by"] = ""; x["director_comments"] = ""; x["director_decision_date"] = ""; x["director_decision_by"] = ""; x["pdf_path"] = ""; x["submitted_by"] = current_user; x["submitted_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    break
+                            save_all_work_orders(orders)
+                            new_data = {"manual_work_order_no": e_wo_no.strip(), "emp_name": e_emp.strip(), "site_address": e_site.strip(), "customer_job_no": e_cjno.strip(), "work_date": str(e_date), "amount": float(e_amount), "desc": e_desc.strip(), "manager": e_manager.strip(), "status": "pending_manager"}
+                            log_action("WORK_ORDER_EDITED", editing_id, old_data=old_data, new_data=new_data)
+                            st.session_state.editing_work_order_id_emp = None
+                            st.success("✅ Work Order updated and re-sent to Manager for review.")
+                            st.rerun()
+                    if cancel_edit:
+                        st.session_state.editing_work_order_id_emp = None; st.rerun()
+                st.divider()
+            else: st.session_state.editing_work_order_id_emp = None
+        st.markdown("### 📤 Submit New Work Order")
+        st.caption("Complete the work-order details below. No hours/time entry is required.")
+        wid = get_next_work_order_id(orders)
+        form_version = st.session_state.get("emp_new_wo_form_version", 0)
+        K_WO = f"emp_new_wo_no_v{form_version}"
+        K_EMP = f"emp_new_contractor_v{form_version}"
+        K_SITE = f"emp_new_site_v{form_version}"
+        K_CJNO = f"emp_new_cjno_v{form_version}"
+        K_DATE = f"emp_new_date_v{form_version}"
+        K_AMT = f"emp_new_amount_v{form_version}"
+        K_DESC = f"emp_new_desc_v{form_version}"
+        K_MGR = f"emp_new_manager_v{form_version}"
+        K_FILES = f"emp_new_files_v{form_version}"
+        with st.form(f"employee_new_work_order_form_v{form_version}", clear_on_submit=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                work_order_no = st.text_input("🧾 Work Order No.", key=K_WO, placeholder="Enter the Work Order No. from the work-order sheet")
+                contractor_employee = st.text_input("👤 Contractor / Employee Labour", key=K_EMP, value=current_user, placeholder="Enter contractor or employee name")
+                site_address = st.text_area("📍 Site Address", key=K_SITE, placeholder="Enter the full site address", height=90)
+                customer_job_no = st.text_input("📘 Customer Job No.", key=K_CJNO, placeholder="Enter Customer Job No.")
+            with c2:
+                work_date = st.date_input("📅 Date", key=K_DATE, value=date.today())
+                amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", key=K_AMT, value=0.01)
+                description = st.text_area("📝 Description", key=K_DESC, placeholder="Describe the work completed...", height=150)
+            if managers: manager = st.selectbox("👔 Send to Manager", managers, key=K_MGR)
+            else: manager = st.text_input("👔 Manager Name", key=K_MGR, placeholder="Enter manager name")
+            files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=K_FILES)
+            submitted = st.form_submit_button("📤 Submit Work Order to Manager", type="primary", use_container_width=True)
+            if submitted:
+                errors = []
+                if not work_order_no.strip(): errors.append("Work Order No.")
+                if not contractor_employee.strip(): errors.append("Contractor / Employee Labour")
+                if not site_address.strip(): errors.append("Site Address")
+                if not customer_job_no.strip(): errors.append("Customer Job No.")
+                if not description.strip(): errors.append("Description")
+                if not manager.strip(): errors.append("Manager")
+                duplicate = any(str(r.get("manual_work_order_no", "")).strip().lower() == work_order_no.strip().lower() for r in orders if str(r.get("manual_work_order_no", "")).strip())
+                if duplicate:
+                    st.error("❌ **Work Order No. already Exist.** Please change the Work Order No. and submit again — your form data has been kept.")
+                elif errors:
+                    st.error("Please correct: " + ", ".join(errors) + ".")
+                else:
+                    attachments = []
+                    for i, f in enumerate(files or [], 1):
+                        safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
+                        fn = f"{wid}_F{i}_{safe_name}"
+                        fp = os.path.join(UPLOAD_DIR, fn)
+                        with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
+                        _upload_to_drive_bg(fp, fn)
+                        attachments.append(fn)
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    rec = {"id": wid, "manual_work_order_no": work_order_no.strip(), "emp_name": contractor_employee.strip(), "dept": current_dept, "work_date": str(work_date), "hours": 0.0, "customer_job_no": customer_job_no.strip(), "site_address": site_address.strip(), "amount": float(amount), "manager": manager.strip(), "desc": description.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending_manager", "manager_comments": "", "manager_decision_date": "", "manager_decision_by": "", "director_comments": "", "director_decision_date": "", "director_decision_by": "", "submitted_by": current_user, "submitted_date": now, "payroll_status": "Pending", "payroll_date": "", "payroll_by": "", "pdf_path": ""}
+                    orders.append(rec)
+                    save_all_work_orders(orders)
+                    log_action("WORK_ORDER_CREATED", wid, decision_by=current_user)
+                    for k in (K_WO, K_EMP, K_SITE, K_CJNO, K_DATE, K_AMT, K_DESC, K_MGR, K_FILES):
+                        st.session_state.pop(k, None)
+                    st.session_state["emp_new_wo_form_version"] = form_version + 1
+                    st.session_state["emp_new_wo_success"] = (f"✅ Work Order No. {work_order_no.strip()} submitted to {manager} for review.")
+                    st.rerun()
+        st.divider()
+        
         tab_mine, tab_dept = st.tabs([
             "📋 My Work Orders",
             f"🏢 Department Work Orders ({current_dept})"
         ])
-
-    with tab_mine:
-        q = st.text_input("🔎 Search my work orders", placeholder="Search by ID, employee, manager, status, amount, date or description...", key="wo_employee_search")
-        mine = [r for r in orders if r.get("submitted_by") == current_user]
-        if q.strip():
-            ql = q.lower().strip()
-            mine = [r for r in mine if ql in " ".join(str(v) for v in r.values()).lower()]
-        if not mine: st.info("📋 You have not submitted any work orders yet.")
-        else:
-            for r in reversed(mine):
-                status_raw = str(r.get("status", "")).strip().lower()
-                display_status = {"pending_manager": "PENDING MANAGER", "pending_director": "PENDING DIRECTOR", "approved_payment": "APPROVED", "approved": "APPROVED", "rejected_director": "REJECTED BY DIRECTOR", "rejected": "REJECTED", "returned_to_employee": "RETURNED — NEEDS EDITS"}.get(status_raw, status_raw.replace("_", " ").upper())
-                icon = {"pending_manager": "🟡", "pending_director": "🟡", "approved_payment": "🟢", "approved": "🟢", "rejected_director": "🔴", "rejected": "🔴", "returned_to_employee": "🟠"}.get(status_raw, "⚪")
-                with st.expander(f"{icon} {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount', 0):.2f} | {display_status}"):
-                    st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}** | 👔 Manager: {r.get('manager')} | 🏢 {r.get('dept')} | 📅 {r.get('work_date')}")
-                    st.write(f"💷 £{r.get('amount', 0):.2f}")
-                    if r.get("site_address"): st.write(f"📍 Site Address: {r.get('site_address')}")
-                    if r.get("customer_job_no"): st.write(f"📘 Customer Job No.: {r.get('customer_job_no')}")
-                    st.info(f"📝 {r.get('desc')}")
-                    display_attachments(r)
-                    if r.get("manager_decision_by"): st.write(f"👔 Manager reviewed by: {r.get('manager_decision_by')} on {r.get('manager_decision_date')}")
-                    if r.get("manager_comments"):
-                        if status_raw == "returned_to_employee": st.error(f"❌ Manager Comments: {r.get('manager_comments')}")
-                        else: st.info(f"💬 Manager Comments: {r.get('manager_comments')}")
-                    if r.get("director_decision_by"): st.write(f"🎯 Approved By: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
-                    if r.get("director_comments"): st.warning(f"💬 Director Comments: {r.get('director_comments')}")
-                    if status_raw in ("pending_manager", "returned_to_employee", "rejected_director", "rejected", "pending"):
-                        st.divider()
-                        if st.button(f"✏️ Edit Work Order {get_work_order_number(r)}", key=f"wo_emp_edit_{r.get('id')}", type="secondary"):
-                            st.session_state.editing_work_order_id_emp = r.get("id"); st.rerun()
-    with tab_dept:
-        st.caption("Work orders already recorded for your department (including those submitted by managers). 👉 Check the Work Order No. here **before** submitting a new one to avoid duplicates.")
-        dept_orders = [r for r in orders if str(r.get("dept", "")).strip() == str(current_dept).strip()]
-        dq = st.text_input("🔎 Search department work orders", placeholder="Search by Work Order No., employee, manager, status, amount or date...", key="wo_emp_dept_search")
-        if dq.strip():
-            dql = dq.lower().strip()
-            dept_orders = [r for r in dept_orders if dql in " ".join(str(v) for v in r.values()).lower()]
-        if not dept_orders: st.info("📋 No work orders recorded for your department yet.")
-        else:
-            rows = []
-            for r in sorted(dept_orders, key=lambda x: str(x.get("work_date", "")), reverse=True):
-                rows.append({"Work Order No.": get_work_order_number(r), "Employee": r.get("emp_name", ""), "Manager": r.get("manager", ""), "Work Date": r.get("work_date", ""), "Amount (£)": float(r.get("amount", 0) or 0), "Status": str(r.get("status", "")).replace("_", " ").upper(), "Submitted By": r.get("submitted_by", "")})
-            df_view = pd.DataFrame(rows)
-            st.dataframe(df_view, use_container_width=True, hide_index=True)
-            st.caption(f"📊 {len(rows)} work order(s) in **{current_dept}**")
-            st.divider(); st.markdown("#### 📄 Full Details")
-            for r in reversed(dept_orders):
-                status_raw = str(r.get("status", "")).strip().lower()
-                display_status = {"pending_manager": "PENDING MANAGER", "pending_director": "PENDING DIRECTOR", "approved_payment": "APPROVED", "approved": "APPROVED", "rejected_director": "REJECTED", "rejected": "REJECTED", "returned_to_employee": "RETURNED"}.get(status_raw, status_raw.replace("_", " ").upper())
-                with st.expander(f"🧾 {get_work_order_number(r)} | {r.get('emp_name')} | £{float(r.get('amount', 0) or 0):.2f} | {display_status}"):
-                    st.write(f"👔 **Manager:** {r.get('manager', '-')} | 📅 **Date:** {r.get('work_date', '-')}")
-                    st.write(f"📝 **Submitted by:** {r.get('submitted_by', '-')}")
-                    if r.get("site_address"): st.write(f"📍 **Site Address:** {r.get('site_address')}")
-                    if r.get("customer_job_no"): st.write(f"📘 **Customer Job No.:** {r.get('customer_job_no')}")
-                    st.info(f"📝 {r.get('desc', '')}")
+        
+        with tab_mine:
+            q = st.text_input("🔎 Search my work orders", placeholder="Search by ID, employee, manager, status, amount, date or description...", key="wo_employee_search")
+            mine = [r for r in orders if r.get("submitted_by") == current_user]
+            if q.strip():
+                ql = q.lower().strip()
+                mine = [r for r in mine if ql in " ".join(str(v) for v in r.values()).lower()]
+            if not mine: st.info("📋 You have not submitted any work orders yet.")
+            else:
+                for r in reversed(mine):
+                    status_raw = str(r.get("status", "")).strip().lower()
+                    display_status = {"pending_manager": "PENDING MANAGER", "pending_director": "PENDING DIRECTOR", "approved_payment": "APPROVED", "approved": "APPROVED", "rejected_director": "REJECTED BY DIRECTOR", "rejected": "REJECTED", "returned_to_employee": "RETURNED — NEEDS EDITS"}.get(status_raw, status_raw.replace("_", " ").upper())
+                    icon = {"pending_manager": "🟡", "pending_director": "🟡", "approved_payment": "🟢", "approved": "🟢", "rejected_director": "🔴", "rejected": "🔴", "returned_to_employee": "🟠"}.get(status_raw, "⚪")
+                    with st.expander(f"{icon} {get_work_order_number(r)} | {r.get('emp_name')} | £{r.get('amount', 0):.2f} | {display_status}"):
+                        st.write(f"🧾 Work Order No.: **{get_work_order_number(r)}** | 👔 Manager: {r.get('manager')} | 🏢 {r.get('dept')} | 📅 {r.get('work_date')}")
+                        st.write(f"💷 £{r.get('amount', 0):.2f}")
+                        if r.get("site_address"): st.write(f"📍 Site Address: {r.get('site_address')}")
+                        if r.get("customer_job_no"): st.write(f"📘 Customer Job No.: {r.get('customer_job_no')}")
+                        st.info(f"📝 {r.get('desc')}")
+                        display_attachments(r)
+                        if r.get("manager_decision_by"): st.write(f"👔 Manager reviewed by: {r.get('manager_decision_by')} on {r.get('manager_decision_date')}")
+                        if r.get("manager_comments"):
+                            if status_raw == "returned_to_employee": st.error(f"❌ Manager Comments: {r.get('manager_comments')}")
+                            else: st.info(f"💬 Manager Comments: {r.get('manager_comments')}")
+                        if r.get("director_decision_by"): st.write(f"🎯 Approved By: {r.get('director_decision_by')} on {r.get('director_decision_date')}")
+                        if r.get("director_comments"): st.warning(f"💬 Director Comments: {r.get('director_comments')}")
+                        if status_raw in ("pending_manager", "returned_to_employee", "rejected_director", "rejected", "pending"):
+                            st.divider()
+                            if st.button(f"✏️ Edit Work Order {get_work_order_number(r)}", key=f"wo_emp_edit_{r.get('id')}", type="secondary"):
+                                st.session_state.editing_work_order_id_emp = r.get("id"); st.rerun()
+        with tab_dept:
+            st.caption("Work orders already recorded for your department (including those submitted by managers). 👉 Check the Work Order No. here **before** submitting a new one to avoid duplicates.")
+            dept_orders = [r for r in orders if str(r.get("dept", "")).strip() == str(current_dept).strip()]
+            dq = st.text_input("🔎 Search department work orders", placeholder="Search by Work Order No., employee, manager, status, amount or date...", key="wo_emp_dept_search")
+            if dq.strip():
+                dql = dq.lower().strip()
+                dept_orders = [r for r in dept_orders if dql in " ".join(str(v) for v in r.values()).lower()]
+            if not dept_orders: st.info("📋 No work orders recorded for your department yet.")
+            else:
+                rows = []
+                for r in sorted(dept_orders, key=lambda x: str(x.get("work_date", "")), reverse=True):
+                    rows.append({"Work Order No.": get_work_order_number(r), "Employee": r.get("emp_name", ""), "Manager": r.get("manager", ""), "Work Date": r.get("work_date", ""), "Amount (£)": float(r.get("amount", 0) or 0), "Status": str(r.get("status", "")).replace("_", " ").upper(), "Submitted By": r.get("submitted_by", "")})
+                df_view = pd.DataFrame(rows)
+                st.dataframe(df_view, use_container_width=True, hide_index=True)
+                st.caption(f"📊 {len(rows)} work order(s) in **{current_dept}**")
+                st.divider(); st.markdown("#### 📄 Full Details")
+                for r in reversed(dept_orders):
+                    status_raw = str(r.get("status", "")).strip().lower()
+                    display_status = {"pending_manager": "PENDING MANAGER", "pending_director": "PENDING DIRECTOR", "approved_payment": "APPROVED", "approved": "APPROVED", "rejected_director": "REJECTED", "rejected": "REJECTED", "returned_to_employee": "RETURNED"}.get(status_raw, status_raw.replace("_", " ").upper())
+                    with st.expander(f"🧾 {get_work_order_number(r)} | {r.get('emp_name')} | £{float(r.get('amount', 0) or 0):.2f} | {display_status}"):
+                        st.write(f"👔 **Manager:** {r.get('manager', '-')} | 📅 **Date:** {r.get('work_date', '-')}")
+                        st.write(f"📝 **Submitted by:** {r.get('submitted_by', '-')}")
+                        if r.get("site_address"): st.write(f"📍 **Site Address:** {r.get('site_address')}")
+                        if r.get("customer_job_no"): st.write(f"📘 **Customer Job No.:** {r.get('customer_job_no')}")
+                        st.info(f"📝 {r.get('desc', '')}")
 
     if can_access_wo_total:
-        with tab_total:
+        with total_tab:
             render_work_order_total(orders, scope_department=current_dept, key_prefix="wo_emp_total", prepared_by=current_user)
 
 def render_work_order_manager_portal(manager_name, manager_dept, show_total=True):
