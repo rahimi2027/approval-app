@@ -1,15 +1,14 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.13
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.14
 # ============================================================
+# ✅ v4.14 (WORK ORDER TOTAL FOR EMPLOYEES/TEAM MEMBERS):
+#    • Fixed: "Approved Work Order Total" tab now appears for
+#      Team Members / Staff / Work Order Employees if the
+#      can_access_wo_total permission is granted.
 # ✅ v4.13 (GRANULAR WORK ORDER TOTAL PERMISSION):
 #    • NEW per-user flag: can_access_wo_total.
-#    • Super Admin can toggle "💷 Approved Work Order Total" access.
-#    • The Work Order Total tab is hidden for users without this flag.
 # ✅ v4.12 (USER ACTIVE / INACTIVE + SUPER ADMIN FULL ACCESS):
 #    • NEW per-user flag: is_active (Active / Inactive).
-#    • Super Admin can toggle any user Active/Inactive in User Management.
-#    • Inactive users are blocked at login.
-#    • Super Admin ALWAYS gets every module + permission automatically.
 # ============================================================
 import streamlit as st
 import os
@@ -77,7 +76,6 @@ INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
 INSPECTOR_BONUS_PDF_DIR = os.path.join(APP_FOLDER, "inspector_bonus_pdfs")
 GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
 
-# ✅ v4.13 — added can_access_wo_total
 USER_DB_COLUMNS = [
     "full_name", "username", "password", "role", "dept",
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
@@ -728,7 +726,7 @@ def load_users(force=False):
                 "can_access_wo_total": _flag_or_default(r.get("can_access_wo_total", ""), user_role, "can_access_wo_total"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
-            # ✅ v4.13 — Super Admin ALWAYS gets full access, no matter what
+            # ✅ v4.14 — Super Admin ALWAYS gets full access, no matter what
             if user_role == "Super Admin":
                 users[username].update({
                     "can_view_all_dept": True,
@@ -1276,7 +1274,23 @@ def render_work_order_employee_portal(current_user, current_dept):
                 st.session_state["emp_new_wo_success"] = (f"✅ Work Order No. {work_order_no.strip()} submitted to {manager} for review.")
                 st.rerun()
     st.divider()
-    tab_mine, tab_dept = st.tabs(["📋 My Work Orders", f"🏢 Department Work Orders ({current_dept})"])
+    
+    # ✅ v4.14 — Conditionally add the total tab for employees/team members
+    user_info = st.session_state.get("user_info", {})
+    can_access_wo_total = user_info.get("can_access_wo_total", False)
+
+    if can_access_wo_total:
+        tab_mine, tab_dept, tab_total = st.tabs([
+            "📋 My Work Orders",
+            f"🏢 Department Work Orders ({current_dept})",
+            "💷 Approved Work Order Total"
+        ])
+    else:
+        tab_mine, tab_dept = st.tabs([
+            "📋 My Work Orders",
+            f"🏢 Department Work Orders ({current_dept})"
+        ])
+
     with tab_mine:
         q = st.text_input("🔎 Search my work orders", placeholder="Search by ID, employee, manager, status, amount, date or description...", key="wo_employee_search")
         mine = [r for r in orders if r.get("submitted_by") == current_user]
@@ -1332,6 +1346,10 @@ def render_work_order_employee_portal(current_user, current_dept):
                     if r.get("customer_job_no"): st.write(f"📘 **Customer Job No.:** {r.get('customer_job_no')}")
                     st.info(f"📝 {r.get('desc', '')}")
 
+    if can_access_wo_total:
+        with tab_total:
+            render_work_order_total(orders, scope_department=current_dept, key_prefix="wo_emp_total", prepared_by=current_user)
+
 def render_work_order_manager_portal(manager_name, manager_dept, show_total=True):
     st.subheader("🛠️ Work Orders")
     orders = load_work_orders()
@@ -1377,7 +1395,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
     approved = [r for r in manager_orders if r.get("status") in ("approved_payment", "approved")]
     rejected = [r for r in manager_orders if r.get("status") in ("rejected_director", "rejected", "returned_to_employee")]
     
-    # ✅ v4.13 — Conditionally show the total tab
     user_info = st.session_state.get("user_info", {})
     can_access_wo_total = user_info.get("can_access_wo_total", False)
     
@@ -2637,7 +2654,6 @@ if not st.session_state.logged_in:
         if st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True):
             USERS = load_users()
             if username in USERS and USERS[username]["password"] == password:
-                # ✅ v4.13 — Block inactive accounts at login
                 if not USERS[username].get("is_active", True):
                     st.error("❌ Your account has been deactivated. Please contact your Super Admin.")
                 else:
