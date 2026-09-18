@@ -1,16 +1,15 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.12
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.13
 # ============================================================
+# ✅ v4.13 (GRANULAR WORK ORDER TOTAL PERMISSION):
+#    • NEW per-user flag: can_access_wo_total.
+#    • Super Admin can toggle "💷 Approved Work Order Total" access.
+#    • The Work Order Total tab is hidden for users without this flag.
 # ✅ v4.12 (USER ACTIVE / INACTIVE + SUPER ADMIN FULL ACCESS):
 #    • NEW per-user flag: is_active (Active / Inactive).
 #    • Super Admin can toggle any user Active/Inactive in User Management.
 #    • Inactive users are blocked at login.
 #    • Super Admin ALWAYS gets every module + permission automatically.
-# ✅ v4.11.2 (DIRECTOR WORK ORDER TABS):
-#    • "💷 Approved Work Order Total" is its own tab in the Director's
-#      Work Order portal (4 tabs total: Pending | Approved | Rejected | Total).
-# ✅ v4.11.1 (DIRECTOR PORTAL HEADER FIX)
-# ✅ v4.11 (GRANULAR MODULE PERMISSIONS)
 # ============================================================
 import streamlit as st
 import os
@@ -78,12 +77,13 @@ INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
 INSPECTOR_BONUS_PDF_DIR = os.path.join(APP_FOLDER, "inspector_bonus_pdfs")
 GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
 
-# ✅ v4.12 — added is_active column
+# ✅ v4.13 — added can_access_wo_total
 USER_DB_COLUMNS = [
     "full_name", "username", "password", "role", "dept",
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
     "can_approve_requests", "can_access_inspector_bonus",
     "can_access_addition_deduction", "can_access_work_orders",
+    "can_access_wo_total",
     "is_active"
 ]
 
@@ -305,7 +305,7 @@ WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name",
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
 
 DEFAULT_USERS = [
-    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "is_active": True},
+    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "is_active": True},
     {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "is_active": True},
     {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "is_active": True},
     {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "is_active": True},
@@ -314,14 +314,14 @@ DEFAULT_USERS = [
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "is_active": True}
 ]
 PERMISSION_DEFAULTS = {
-    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True},
-    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True},
-    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False},
-    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False},
-    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False},
-    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True},
-    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True},
-    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True}
+    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False},
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True},
+    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False},
+    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False},
+    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False},
+    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True},
+    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True}
 }
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
@@ -330,7 +330,8 @@ PERMISSION_LABELS = {
     "can_approve_requests": "✅ Approve/Reject Requests",
     "can_access_inspector_bonus": "💰 National Grid Inspector Bonus",
     "can_access_addition_deduction": "➕ Addition & Deduction",
-    "can_access_work_orders": "🛠️ Work Orders"
+    "can_access_work_orders": "🛠️ Work Orders",
+    "can_access_wo_total": "💷 Approved Work Order Total"
 }
 
 try:
@@ -682,6 +683,7 @@ def save_users(users_dict):
             "can_access_inspector_bonus": u.get("can_access_inspector_bonus", False),
             "can_access_addition_deduction": u.get("can_access_addition_deduction", False),
             "can_access_work_orders": u.get("can_access_work_orders", False),
+            "can_access_wo_total": u.get("can_access_wo_total", False),
             "is_active": u.get("is_active", True)
         })
     pd.DataFrame(rows, columns=USER_DB_COLUMNS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
@@ -723,9 +725,10 @@ def load_users(force=False):
                 "can_access_inspector_bonus": _flag_or_default(r.get("can_access_inspector_bonus", ""), user_role, "can_access_inspector_bonus"),
                 "can_access_addition_deduction": _flag_or_default(r.get("can_access_addition_deduction", ""), user_role, "can_access_addition_deduction"),
                 "can_access_work_orders": _flag_or_default(r.get("can_access_work_orders", ""), user_role, "can_access_work_orders"),
+                "can_access_wo_total": _flag_or_default(r.get("can_access_wo_total", ""), user_role, "can_access_wo_total"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
-            # ✅ v4.12 — Super Admin ALWAYS gets full access, no matter what
+            # ✅ v4.13 — Super Admin ALWAYS gets full access, no matter what
             if user_role == "Super Admin":
                 users[username].update({
                     "can_view_all_dept": True,
@@ -735,6 +738,7 @@ def load_users(force=False):
                     "can_access_inspector_bonus": True,
                     "can_access_addition_deduction": True,
                     "can_access_work_orders": True,
+                    "can_access_wo_total": True,
                     "is_active": True
                 })
         _set_data_cache("_users_cache", users)
@@ -1372,7 +1376,16 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
     pending = [r for r in manager_orders if r.get("status") in ("pending_director", "pending_manager", "pending")]
     approved = [r for r in manager_orders if r.get("status") in ("approved_payment", "approved")]
     rejected = [r for r in manager_orders if r.get("status") in ("rejected_director", "rejected", "returned_to_employee")]
-    main_tab, total_tab = st.tabs(["🛠️ Work Orders", "💷 Approved Work Order Total"])
+    
+    # ✅ v4.13 — Conditionally show the total tab
+    user_info = st.session_state.get("user_info", {})
+    can_access_wo_total = user_info.get("can_access_wo_total", False)
+    
+    if can_access_wo_total:
+        main_tab, total_tab = st.tabs(["🛠️ Work Orders", "💷 Approved Work Order Total"])
+    else:
+        main_tab = st.tabs(["🛠️ Work Orders"])[0]
+
     with main_tab:
         st.markdown("### 📤 Submit New Work Order")
         st.caption("Complete the work-order details below. No hours/time entry is required.")
@@ -1506,12 +1519,12 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                     st.warning("Editable — you can update and resubmit.")
                     if st.button(f"✏️ Edit & Resubmit {wo}", key=f"wo_mgr_rejected_edit_{r.get('id')}"):
                         st.session_state.editing_work_order_id = r.get("id"); st.rerun()
-    with total_tab:
-        if show_total:
-            renderer = globals().get("render_work_order_total")
-            if renderer: renderer(load_work_orders(), scope_department=manager_dept, key_prefix="wo_mgr_total_tab", prepared_by=manager_name)
-            else: st.info("Approved Work Order Total is available in this tab.")
-        else: st.info("Approved Work Order Total is available from the Work Orders total tab.")
+    if can_access_wo_total:
+        with total_tab:
+            if show_total:
+                renderer = globals().get("render_work_order_total")
+                if renderer: renderer(load_work_orders(), scope_department=manager_dept, key_prefix="wo_mgr_total_tab", prepared_by=manager_name)
+                else: st.info("Approved Work Order Total is available in this tab.")
 
 def render_work_order_director_portal(director_name):
     st.subheader("🛠️ Work Orders — Director Final Approval")
@@ -1521,12 +1534,22 @@ def render_work_order_director_portal(director_name):
     approved = [r for r in orders if r.get("status") == "approved_payment"]
     rejected = [r for r in orders if r.get("status") == "rejected_director"]
 
-    t1, t2, t3, t4 = st.tabs([
-        f"⏳ Manager Approved / Awaiting Director ({len(pending)})",
-        f"✅ Approved for Payment ({len(approved)})",
-        f"❌ Rejected ({len(rejected)})",
-        "💷 Approved Work Order Total"
-    ])
+    user_info = st.session_state.get("user_info", {})
+    can_access_wo_total = user_info.get("can_access_wo_total", True)
+
+    if can_access_wo_total:
+        t1, t2, t3, t4 = st.tabs([
+            f"⏳ Manager Approved / Awaiting Director ({len(pending)})",
+            f"✅ Approved for Payment ({len(approved)})",
+            f"❌ Rejected ({len(rejected)})",
+            "💷 Approved Work Order Total"
+        ])
+    else:
+        t1, t2, t3 = st.tabs([
+            f"⏳ Manager Approved / Awaiting Director ({len(pending)})",
+            f"✅ Approved for Payment ({len(approved)})",
+            f"❌ Rejected ({len(rejected)})"
+        ])
 
     def search_list(items, key):
         q = st.text_input("🔎 Search Work Orders", placeholder="Search by Work Order No., employee, manager, submitter, amount, date, customer job no. or description...", key=key)
@@ -1664,8 +1687,9 @@ def render_work_order_director_portal(director_name):
                         apply_status_change(req_id, "approved_payment", new_comments, "rejected_director")
                         st.rerun()
 
-    with t4:
-        render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
+    if can_access_wo_total:
+        with t4:
+            render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
 
 def render_work_order_payroll_portal(payroll_name):
     st.subheader("🛠️ Work Orders — Payroll")
@@ -1692,7 +1716,9 @@ def render_work_order_payroll_portal(payroll_name):
     st.divider()
     render_work_order_bulk_download(load_work_orders(), key_prefix="wo_pay_bulk")
     st.divider()
-    render_work_order_total(approved, key_prefix="wo_pay_total", prepared_by=payroll_name)
+    user_info = st.session_state.get("user_info", {})
+    if user_info.get("can_access_wo_total", False):
+        render_work_order_total(approved, key_prefix="wo_pay_total", prepared_by=payroll_name)
 
 def initialise_inspector_bonus():
     safe_init_excel(INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS)
@@ -2517,6 +2543,7 @@ def user_management_panel():
             mcol1, mcol2 = st.columns(2)
             perm_ad = mcol1.checkbox(PERMISSION_LABELS["can_access_addition_deduction"], value=defaults.get("can_access_addition_deduction", True))
             perm_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=defaults.get("can_access_work_orders", False))
+            perm_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=defaults.get("can_access_wo_total", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
             new_active = st.checkbox("✅ Account Active", value=True, help="Uncheck to block this user from logging in.")
@@ -2524,9 +2551,9 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "is_active": new_active}
                     save_users(USERS)
-                    log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active, "permissions": {"can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo}})
+                    log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active, "permissions": {"can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total}})
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
     with tab2:
         st.markdown("### ✏️ Edit User")
@@ -2549,6 +2576,7 @@ def user_management_panel():
                 curr_perm_ib = bool(curr.get("can_access_inspector_bonus", False))
                 curr_perm_ad = bool(curr.get("can_access_addition_deduction", False))
                 curr_perm_wo = bool(curr.get("can_access_work_orders", False))
+                curr_perm_wo_total = bool(curr.get("can_access_wo_total", False))
                 ecol1, ecol2 = st.columns(2)
                 edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
                 edit_pdf = ecol1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=curr_perm_pdf)
@@ -2558,13 +2586,14 @@ def user_management_panel():
                 mcol1, mcol2 = st.columns(2)
                 edit_ad = mcol1.checkbox(PERMISSION_LABELS["can_access_addition_deduction"], value=curr_perm_ad)
                 edit_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=curr_perm_wo)
+                edit_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=curr_perm_wo_total)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
                 if st.form_submit_button("🔄 Update User", type="primary"):
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -2578,9 +2607,10 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_inspector_bonus"] = edit_ib
                         USERS[edit_user_sel]["can_access_addition_deduction"] = edit_ad
                         USERS[edit_user_sel]["can_access_work_orders"] = edit_wo
+                        USERS[edit_user_sel]["can_access_wo_total"] = edit_wo_total
                         USERS[edit_user_sel]["is_active"] = edit_active
                     save_users(USERS)
-                    log_action("USER_EDITED", old_data=curr, new_data={"full_name": upd_full_name.strip(), "username": upd_username_new, "role": upd_role, "department": upd_dept, "is_active": edit_active, "permissions": {"can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo}})
+                    log_action("USER_EDITED", old_data=curr, new_data={"full_name": upd_full_name.strip(), "username": upd_username_new, "role": upd_role, "department": upd_dept, "is_active": edit_active, "permissions": {"can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total}})
                     st.success(f"✅ User updated: **{upd_full_name}**"); st.rerun()
     with tab3:
         st.markdown("### ⚠️ Delete User Account")
@@ -2607,7 +2637,7 @@ if not st.session_state.logged_in:
         if st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True):
             USERS = load_users()
             if username in USERS and USERS[username]["password"] == password:
-                # ✅ v4.12 — Block inactive accounts at login
+                # ✅ v4.13 — Block inactive accounts at login
                 if not USERS[username].get("is_active", True):
                     st.error("❌ Your account has been deactivated. Please contact your Super Admin.")
                 else:
