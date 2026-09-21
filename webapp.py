@@ -112,37 +112,26 @@ _DRIVE_SYNC_LOCK = threading.RLock()
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD v4.18)
 # ============================================================
+# Google Drive is deliberately initialised without making network calls at import time.
+# Streamlit can rerun the script many times; doing Drive API calls during module
+# import made the app fragile and contributed to the native-process crash seen in
+# the Cloud logs.  The service-account credentials are still read from the same
+# [gdrive] key_b64 secret and Drive sync remains available.
 try:
     gdrive = st.secrets["gdrive"]
     b64_string = str(gdrive["key_b64"]).replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
-    
-    # Add padding if needed
     padding_needed = (4 - len(b64_string) % 4) % 4
     if padding_needed:
         b64_string += "=" * padding_needed
-    
-    # Decode the base64 string back into JSON
     decoded_json = base64.b64decode(b64_string).decode("utf-8")
     creds_dict = json.loads(decoded_json)
-    
-    # Authenticate using the Service Account
     credentials = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
     )
     drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
-    about = drive_service.about().get(fields="user").execute()
-    st.success("✅ Google Drive connected")
 except Exception as e:
     drive_service = None
-    st.error(f"❌ Google Drive connection failed: {e}")
-
-if drive_service:
-    try:
-        folder = drive_service.files().get(fileId=GOOGLE_DRIVE_FOLDER_ID, fields="id,name,mimeType").execute()
-        st.success("✅ Google Drive folder accessible")
-    except Exception as e:
-        drive_service = None
-        st.error(f"❌ Google Drive folder access failed: {e}")
+    print(f"Google Drive initialisation failed; local storage will be used: {e}")
 
 def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None or not os.path.exists(local_file_path): return None
@@ -758,7 +747,12 @@ def save_roles(roles_list):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
-initialise_drive_storage()
+# Initialise persistent files defensively. A Drive/API problem must never stop
+# the Streamlit application itself from starting.
+try:
+    initialise_drive_storage()
+except Exception as e:
+    print(f"Drive storage initialisation skipped: {e}")
 
 def init_user_db():
     safe_init_excel(USER_DB_PATH, USER_DB_COLUMNS)
