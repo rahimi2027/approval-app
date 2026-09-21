@@ -21,6 +21,7 @@ import json
 import base64
 import shutil
 import subprocess
+import re
 import pandas as pd
 import io
 import requests
@@ -139,7 +140,7 @@ def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None or not os.path.exists(local_file_path): return None
     cache_key = f"{GOOGLE_DRIVE_FOLDER_ID}::{display_filename}"
     def _do(file_id=None):
-        media = MediaFileUpload(local_file_path, resumable=False)
+        media = MediaFileUpload(local_file_path, resumable=True)
         if file_id:
             return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
         metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
@@ -177,7 +178,7 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
     filename = filename or os.path.basename(local_path)
     cache_key = f"{parent_id}::{filename}"
     def _do(file_id=None):
-        media = MediaFileUpload(local_path, resumable=False)
+        media = MediaFileUpload(local_path, resumable=True)
         if file_id:
             return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name", supportsAllDrives=True).execute()
         metadata = {"name": filename, "parents": [parent_id]}
@@ -196,7 +197,7 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
         return created.get("id")
     except Exception as e:
         print(f"Drive upload failed for {filename}: {e}")
-        return None
+        raise e  # Re-raise to show real error
 
 def _drive_download_file(file_id, local_path):
     if drive_service is None:
@@ -373,7 +374,11 @@ def save_uploaded_attachment(uploaded_file, filename):
     the Streamlit run. This prevents records from being saved with an attachment
     that was not backed up to Google Drive.
     """
-    safe_name = os.path.basename(str(filename)).replace("/", "_").replace("\\", "_")
+    # Sanitize filename to remove any problematic characters
+    safe_name = "".join(c for c in str(filename) if c.isalnum() or c in "._- ").strip()
+    if not safe_name:
+        safe_name = "attachment"
+    
     local_path = os.path.join(UPLOAD_DIR, safe_name)
     try:
         with open(local_path, "wb") as out_file:
@@ -778,11 +783,10 @@ def show_old_new_comparison(old_json, new_rec):
 
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
-        with st.spinner("Refreshing from Google Drive..."):
-            if drive_service is not None:
-                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH):
-                    remote = _drive_find_file(os.path.basename(path))
-                    if remote: _drive_download_file(remote["id"], path)
+        with st.spinner("Refreshing data..."):
+            # Just clear the cache. The local file is always the most up-to-date.
+            # The initialise_drive_storage() function already handles intelligent
+            # mtime comparison to sync with Google Drive when needed.
             _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
