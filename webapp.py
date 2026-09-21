@@ -105,6 +105,7 @@ os.makedirs(INSPECTOR_BONUS_PDF_DIR, exist_ok=True)
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 drive_service = None
+_LAST_DRIVE_UPLOAD_ERROR = ""
 
 _DRIVE_ID_CACHE = {}
 _DRIVE_SYNC_FINGERPRINTS = {}
@@ -140,9 +141,9 @@ def upload_to_google_drive(local_file_path, display_filename):
     def _do(file_id=None):
         media = MediaFileUpload(local_file_path, resumable=False)
         if file_id:
-            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents").execute()
+            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
         metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
-        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents").execute()
+        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
     try:
         cached_id = _DRIVE_ID_CACHE.get(cache_key)
         if cached_id:
@@ -164,7 +165,7 @@ def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
     try:
         safe_name = str(filename).replace("'", "\\'")
         q = (f"name = '{safe_name}' and '{parent_id}' in parents and trashed = false")
-        result = drive_service.files().list(q=q, spaces="drive", fields="files(id,name,modifiedTime)", orderBy="modifiedTime desc", pageSize=10).execute()
+        result = drive_service.files().list(q=q, spaces="drive", fields="files(id,name,modifiedTime,parents,mimeType)", orderBy="modifiedTime desc", pageSize=10, includeItemsFromAllDrives=True, supportsAllDrives=True).execute()
         files = result.get("files", [])
         return files[0] if files else None
     except Exception as e:
@@ -178,9 +179,9 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
     def _do(file_id=None):
         media = MediaFileUpload(local_path, resumable=False)
         if file_id:
-            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name").execute()
+            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name", supportsAllDrives=True).execute()
         metadata = {"name": filename, "parents": [parent_id]}
-        return drive_service.files().create(body=metadata, media_body=media, fields="id,name").execute()
+        return drive_service.files().create(body=metadata, media_body=media, fields="id,name", supportsAllDrives=True).execute()
     try:
         cached_id = _DRIVE_ID_CACHE.get(cache_key)
         if cached_id:
@@ -301,7 +302,7 @@ def _drive_get_or_create_folder(folder_name, parent_id=GOOGLE_DRIVE_FOLDER_ID):
             f"and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         )
         result = drive_service.files().list(
-            q=q, spaces="drive", fields="files(id,name)", pageSize=10
+            q=q, spaces="drive", fields="files(id,name,parents,mimeType)", pageSize=10, includeItemsFromAllDrives=True, supportsAllDrives=True
         ).execute()
         folders = result.get("files", [])
         if folders:
@@ -313,7 +314,7 @@ def _drive_get_or_create_folder(folder_name, parent_id=GOOGLE_DRIVE_FOLDER_ID):
                 "parents": [parent_id],
             }
             created = drive_service.files().create(
-                body=metadata, fields="id,name"
+                body=metadata, fields="id,name,parents", supportsAllDrives=True
             ).execute()
             folder_id = created.get("id")
         if folder_id:
@@ -324,41 +325,45 @@ def _drive_get_or_create_folder(folder_name, parent_id=GOOGLE_DRIVE_FOLDER_ID):
         return None
 
 def _upload_to_drive_bg(local_path, filename):
-    """Synchronous Drive upload with a safe fallback for attachments.
+    """Upload a local file to Google Drive and return True on success.
 
-    Attachments are preferably stored in the dedicated ``uploaded_attachments``
-    folder.  If that folder cannot be created/accessed (for example because the
-    service account only has access to the main app folder), the upload falls
-    back to the main ``Acoole_App_Uploads`` folder instead of rejecting the
-    whole request.  This keeps attachment uploads compatible with the existing
-    Drive permissions.
+    Attachments use the dedicated folder when possible, then the main app folder.
+    Both paths use the Drive API's shared-drive flags so the same code works for
+    a normal folder and a Shared Drive.  The last Drive API error is retained for
+    the caller so a real permission/quota problem is visible instead of appearing
+    as a generic upload failure.
     """
+    global _LAST_DRIVE_UPLOAD_ERROR
+    _LAST_DRIVE_UPLOAD_ERROR = ""
     if drive_service is None or not os.path.exists(local_path):
-        print(f"Drive upload unavailable for {filename}: Drive is not initialised or local file is missing")
+        _LAST_DRIVE_UPLOAD_ERROR = "Google Drive is not initialised or the local file does not exist."
         return False
     with _DRIVE_SYNC_LOCK:
+        errors = []
         try:
             is_attachment = os.path.abspath(local_path).startswith(os.path.abspath(UPLOAD_DIR) + os.sep)
+            candidate_parents = []
             if is_attachment:
-                # Preferred location: dedicated attachment folder.
                 attachment_parent = _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
                 if attachment_parent:
-                    uploaded_id = _drive_upload_path(local_path, filename, parent_id=attachment_parent)
+                    candidate_parents.append((attachment_parent, "uploaded_attachments"))
+            candidate_parents.append((GOOGLE_DRIVE_FOLDER_ID, "Acoole_App_Uploads"))
+
+            for parent_id, label in candidate_parents:
+                try:
+                    uploaded_id = _drive_upload_path(local_path, filename, parent_id=parent_id)
                     if uploaded_id:
                         return True
-                    print(f"Dedicated attachment folder upload failed for {filename}; trying main app folder")
-                else:
-                    print(f"Dedicated attachment folder unavailable for {filename}; trying main app folder")
+                    errors.append(f"{label}: Drive returned no file id")
+                except Exception as e:
+                    errors.append(f"{label}: {type(e).__name__}: {e}")
 
-                # Fallback: the main folder is known to be writable because the
-                # application workbooks are synchronised there.
-                uploaded_id = _drive_upload_path(local_path, filename, parent_id=GOOGLE_DRIVE_FOLDER_ID)
-                return bool(uploaded_id)
-
-            uploaded_id = _drive_upload_path(local_path, filename, parent_id=GOOGLE_DRIVE_FOLDER_ID)
-            return bool(uploaded_id)
+            _LAST_DRIVE_UPLOAD_ERROR = " | ".join(errors) or "No writable Drive destination was available."
+            print(f"Google Drive attachment upload failed for {filename}: {_LAST_DRIVE_UPLOAD_ERROR}")
+            return False
         except Exception as e:
-            print(f"Drive upload failed for {filename}: {type(e).__name__}: {e}")
+            _LAST_DRIVE_UPLOAD_ERROR = f"{type(e).__name__}: {e}"
+            print(f"Google Drive attachment upload failed for {filename}: {_LAST_DRIVE_UPLOAD_ERROR}")
             return False
 
 def save_uploaded_attachment(uploaded_file, filename):
@@ -382,10 +387,12 @@ def save_uploaded_attachment(uploaded_file, filename):
                 os.remove(local_path)
         except Exception:
             pass
+        detail = str(_LAST_DRIVE_UPLOAD_ERROR or "No additional Drive error was returned.")
         st.error(
             f"❌ Attachment '{safe_name}' could not be uploaded to Google Drive. "
-            "The record was NOT submitted. Please check the Google Drive connection and try again."
+            "The record was NOT submitted."
         )
+        st.caption(f"Google Drive upload detail: {detail}")
         st.stop()
     return safe_name
 
