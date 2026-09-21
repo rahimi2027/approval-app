@@ -2395,7 +2395,7 @@ def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
 
         # Title
         pdf.set_font(family, "B", 16)
-        pdf.cell(0, 10, safe("HR LEAVE SETTLEMENT APPROVAL FORM"), ln=True, align="C")
+        pdf.cell(0, 10, safe("HR LEAVE SETTLEMENT - APPROVAL FORM"), ln=True, align="C")
         pdf.ln(2)
         line_y = pdf.get_y()
         pdf.line(10, line_y, 200, line_y); pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
