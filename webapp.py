@@ -80,7 +80,10 @@ WORK_ORDERS_PATH = os.path.join(APP_FOLDER, "work_orders.xlsx")
 WORK_ORDER_PDF_DIR = os.path.join(APP_FOLDER, "work_order_pdfs")
 INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
 INSPECTOR_BONUS_PDF_DIR = os.path.join(APP_FOLDER, "inspector_bonus_pdfs")
-GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
+# ============================================================
+# ✅ UPDATED WITH YOUR SHARED DRIVE FOLDER ID
+# ============================================================
+GOOGLE_DRIVE_FOLDER_ID = "1U7gfbt38TsJArEfdANsYFKaJr3HrCcuw"
 GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME = "uploaded_attachments"
 
 USER_DB_COLUMNS = [
@@ -115,11 +118,6 @@ _DRIVE_SYNC_LOCK = threading.RLock()
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD v4.18)
 # ============================================================
-# Google Drive is deliberately initialised without making network calls at import time.
-# Streamlit can rerun the script many times; doing Drive API calls during module
-# import made the app fragile and contributed to the native-process crash seen in
-# the Cloud logs.  The service-account credentials are still read from the same
-# [gdrive] key_b64 secret and Drive sync remains available.
 try:
     gdrive = st.secrets["gdrive"]
     b64_string = str(gdrive["key_b64"]).replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
@@ -222,12 +220,7 @@ def _drive_download_file(file_id, local_path):
         return False
 
 def sync_persistent_file(local_path, columns=None):
-    """Synchronise one persistent workbook with Drive without background threads.
-
-    All Drive/XLSX operations are serialised. This is intentional: openpyxl and
-    the Google API client must not be allowed to modify the same workbook from
-    overlapping Streamlit reruns/background threads.
-    """
+    """Synchronise one persistent workbook with Drive without background threads."""
     if drive_service is None:
         if not os.path.exists(local_path) and columns is not None:
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
@@ -265,12 +258,7 @@ def sync_persistent_file(local_path, columns=None):
             _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
-    """Synchronously upload a changed workbook/file to Google Drive.
-
-    No daemon/background thread is used. This prevents Streamlit reruns from
-    racing with openpyxl/Google Drive operations and causing native allocator
-    crashes such as `free(): corrupted unsorted chunks`.
-    """
+    """Synchronously upload a changed workbook/file to Google Drive."""
     if drive_service is None or not os.path.exists(local_path):
         return
     try:
@@ -326,14 +314,7 @@ def _drive_get_or_create_folder(folder_name, parent_id=GOOGLE_DRIVE_FOLDER_ID):
         return None
 
 def _upload_to_drive_bg(local_path, filename):
-    """Upload a local file to Google Drive and return True on success.
-
-    Attachments use the dedicated folder when possible, then the main app folder.
-    Both paths use the Drive API's shared-drive flags so the same code works for
-    a normal folder and a Shared Drive.  The last Drive API error is retained for
-    the caller so a real permission/quota problem is visible instead of appearing
-    as a generic upload failure.
-    """
+    """Upload a local file to Google Drive and return True on success."""
     global _LAST_DRIVE_UPLOAD_ERROR
     _LAST_DRIVE_UPLOAD_ERROR = ""
     if drive_service is None or not os.path.exists(local_path):
@@ -368,12 +349,7 @@ def _upload_to_drive_bg(local_path, filename):
             return False
 
 def save_uploaded_attachment(uploaded_file, filename):
-    """Save an uploaded attachment locally and require successful Drive backup.
-
-    The caller must not continue with record submission when this function stops
-    the Streamlit run. This prevents records from being saved with an attachment
-    that was not backed up to Google Drive.
-    """
+    """Save an uploaded attachment locally and require successful Drive backup."""
     # Sanitize filename to remove any problematic characters
     safe_name = "".join(c for c in str(filename) if c.isalnum() or c in "._- ").strip()
     if not safe_name:
@@ -405,8 +381,6 @@ def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"): return
     os.makedirs(APP_FOLDER, exist_ok=True)
     with _DRIVE_SYNC_LOCK:
-        # Create the dedicated attachment folder up front so it is visible in
-        # Google Drive even before the first attachment is uploaded.
         _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
         targets = [
         (EXCEL_PATH, EXCEL_COLUMNS),
@@ -492,18 +466,10 @@ except ImportError:
 _EXCEL_INIT_LOCK = threading.Lock()
 
 def _write_empty_excel(path, columns):
-    """Create/replace an Excel file safely.
-
-    The temporary file MUST keep an .xlsx extension because pandas/openpyxl
-    validates the output extension before creating the workbook.  The previous
-    implementation used ``<file>.xlsx.tmp_<pid>``, which caused:
-    ``ValueError: Invalid extension for engine 'openpyxl': '.xlsx.tmp_...'``.
-    """
+    """Create/replace an Excel file safely."""
     parent = os.path.dirname(os.path.abspath(path))
     os.makedirs(parent, exist_ok=True)
     df = pd.DataFrame(columns=columns)
-
-    # Keep the .xlsx suffix so pandas selects the openpyxl writer correctly.
     stem = os.path.splitext(os.path.basename(path))[0]
     temp_path = os.path.join(parent, f".{stem}.clear_{os.getpid()}_{threading.get_ident()}.xlsx")
     try:
@@ -518,12 +484,7 @@ def _write_empty_excel(path, columns):
                 pass
 
 def safe_init_excel(path, columns):
-    """Create/repair an Excel workbook safely without deleting a live file.
-
-    The previous implementation called os.remove(path) on any read error. On
-    Streamlit Cloud, overlapping reruns could then race and raise FileNotFoundError.
-    We now build a replacement workbook and atomically replace the old file.
-    """
+    """Create/repair an Excel workbook safely without deleting a live file."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if not os.path.exists(path):
         tmp_path = f"{path}.init.tmp"
@@ -558,8 +519,6 @@ def safe_init_excel(path, columns):
         return True
     except Exception as e:
         print(f"Excel initialisation/recovery for {path} failed: {e}")
-        # Do not delete the original workbook. If it is unreadable, keep it for
-        # recovery and create a fresh workbook only when no usable file exists.
         if os.path.exists(path):
             return False
         tmp_path = f"{path}.init.tmp"
@@ -784,9 +743,6 @@ def show_old_new_comparison(old_json, new_rec):
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         with st.spinner("Refreshing data..."):
-            # Just clear the cache. The local file is always the most up-to-date.
-            # The initialise_drive_storage() function already handles intelligent
-            # mtime comparison to sync with Google Drive when needed.
             _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
@@ -867,8 +823,6 @@ def save_roles(roles_list):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
-# Initialise persistent files defensively. A Drive/API problem must never stop
-# the Streamlit application itself from starting.
 try:
     initialise_drive_storage()
 except Exception as e:
@@ -2546,9 +2500,6 @@ def ensure_attachment_local(filename):
     local_path = os.path.join(UPLOAD_DIR, filename)
     if os.path.exists(local_path): return local_path
     if drive_service is not None:
-        # New attachments are normally in the dedicated folder.  Also search
-        # the main app folder for backwards compatibility and for uploads made
-        # through the permission-safe fallback in _upload_to_drive_bg().
         attachment_parent = _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
         if attachment_parent:
             remote = _drive_find_file(filename, attachment_parent)
