@@ -3681,9 +3681,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
     if has_hr_leave: labels.append("👥 HR Leave Settlement")
+    if has_hr_leave: labels.append("📋 My Submitted HR Leave Requests")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
-    if not labels:
         st.subheader("🔐 Access Restricted")
         st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
     else:
@@ -3811,9 +3811,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
             with tabs[tab_idx]:
                 render_hr_leave_form(full_name)
             tab_idx += 1
-        if has_work_orders:
+        if has_hr_leave:
             with tabs[tab_idx]:
-                render_work_order_employee_portal(full_name, dept_name)
+                render_hr_leave_my_submissions(full_name)
             tab_idx += 1
         if has_inspector_bonus:
             with tabs[tab_idx]:
