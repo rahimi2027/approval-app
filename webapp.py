@@ -80,6 +80,7 @@ WORK_ORDER_PDF_DIR = os.path.join(APP_FOLDER, "work_order_pdfs")
 INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
 INSPECTOR_BONUS_PDF_DIR = os.path.join(APP_FOLDER, "inspector_bonus_pdfs")
 GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
+GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME = "uploaded_attachments"
 
 USER_DB_COLUMNS = [
     "full_name", "username", "password", "role", "dept",
@@ -285,20 +286,99 @@ def sync_saved_file_to_drive(local_path):
             print(f"Drive sync failed for {local_path}: {e}")
             _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
 
+def _drive_get_or_create_folder(folder_name, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    """Return a Drive folder id, creating it under parent_id when necessary."""
+    if drive_service is None:
+        return None
+    cache_key = f"folder::{parent_id}::{folder_name}"
+    cached = _DRIVE_ID_CACHE.get(cache_key)
+    if cached:
+        return cached
+    try:
+        safe_name = str(folder_name).replace("'", "\\'")
+        q = (
+            f"name = '{safe_name}' and '{parent_id}' in parents "
+            f"and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        )
+        result = drive_service.files().list(
+            q=q, spaces="drive", fields="files(id,name)", pageSize=10
+        ).execute()
+        folders = result.get("files", [])
+        if folders:
+            folder_id = folders[0]["id"]
+        else:
+            metadata = {
+                "name": folder_name,
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [parent_id],
+            }
+            created = drive_service.files().create(
+                body=metadata, fields="id,name"
+            ).execute()
+            folder_id = created.get("id")
+        if folder_id:
+            _DRIVE_ID_CACHE[cache_key] = folder_id
+        return folder_id
+    except Exception as e:
+        print(f"Google Drive folder setup failed for {folder_name}: {e}")
+        return None
+
 def _upload_to_drive_bg(local_path, filename):
-    """Compatibility wrapper: uploads synchronously; no background thread."""
+    """Compatibility wrapper: synchronous upload with explicit success/failure."""
     if drive_service is None or not os.path.exists(local_path):
-        return
+        return False
     with _DRIVE_SYNC_LOCK:
         try:
-            upload_to_google_drive(local_path, filename)
+            # Uploaded user attachments go into a dedicated Drive subfolder.
+            # PDFs and persistent Excel files continue to use the main app folder.
+            is_attachment = os.path.abspath(local_path).startswith(os.path.abspath(UPLOAD_DIR) + os.sep)
+            parent_id = GOOGLE_DRIVE_FOLDER_ID
+            if is_attachment:
+                parent_id = _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
+                if not parent_id:
+                    print(f"Drive attachment folder unavailable for {filename}")
+                    return False
+            uploaded_id = _drive_upload_path(local_path, filename, parent_id=parent_id)
+            return bool(uploaded_id)
         except Exception as e:
             print(f"Drive upload failed for {filename}: {e}")
+            return False
+
+def save_uploaded_attachment(uploaded_file, filename):
+    """Save an uploaded attachment locally and require successful Drive backup.
+
+    The caller must not continue with record submission when this function stops
+    the Streamlit run. This prevents records from being saved with an attachment
+    that was not backed up to Google Drive.
+    """
+    safe_name = os.path.basename(str(filename)).replace("/", "_").replace("\\", "_")
+    local_path = os.path.join(UPLOAD_DIR, safe_name)
+    try:
+        with open(local_path, "wb") as out_file:
+            out_file.write(uploaded_file.getbuffer())
+    except Exception as e:
+        st.error(f"❌ Could not save attachment '{safe_name}': {e}")
+        st.stop()
+    if not _upload_to_drive_bg(local_path, safe_name):
+        try:
+            if os.path.exists(local_path):
+                os.remove(local_path)
+        except Exception:
+            pass
+        st.error(
+            f"❌ Attachment '{safe_name}' could not be uploaded to Google Drive. "
+            "The record was NOT submitted. Please check the Google Drive connection and try again."
+        )
+        st.stop()
+    return safe_name
 
 def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"): return
     os.makedirs(APP_FOLDER, exist_ok=True)
     with _DRIVE_SYNC_LOCK:
+        # Create the dedicated attachment folder up front so it is visible in
+        # Google Drive even before the first attachment is uploaded.
+        _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
         targets = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, USER_DB_COLUMNS),
@@ -1305,10 +1385,8 @@ def render_work_order_employee_portal(current_user, current_dept):
                                 for i, f in enumerate(e_files, start=len(new_attachments) + 1):
                                     safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
                                     fn = f"{editing_id}_EDIT_F{i}_{safe_name}"
-                                    fp = os.path.join(UPLOAD_DIR, fn)
-                                    with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
-                                    _upload_to_drive_bg(fp, fn)
-                                    new_attachments.append(fn)
+                                    saved_fn = save_uploaded_attachment(f, fn)
+                                    new_attachments.append(saved_fn)
                             old_data = {"manual_work_order_no": rec.get("manual_work_order_no"), "emp_name": rec.get("emp_name"), "site_address": rec.get("site_address"), "customer_job_no": rec.get("customer_job_no"), "work_date": rec.get("work_date"), "amount": rec.get("amount"), "desc": rec.get("desc"), "manager": rec.get("manager"), "status": rec.get("status")}
                             for x in orders:
                                 if str(x.get("id")) == str(editing_id):
@@ -1370,10 +1448,8 @@ def render_work_order_employee_portal(current_user, current_dept):
                     for i, f in enumerate(files or [], 1):
                         safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
                         fn = f"{wid}_F{i}_{safe_name}"
-                        fp = os.path.join(UPLOAD_DIR, fn)
-                        with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
-                        _upload_to_drive_bg(fp, fn)
-                        attachments.append(fn)
+                        saved_fn = save_uploaded_attachment(f, fn)
+                        attachments.append(saved_fn)
                     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     rec = {"id": wid, "manual_work_order_no": work_order_no.strip(), "emp_name": contractor_employee.strip(), "dept": current_dept, "work_date": str(work_date), "hours": 0.0, "customer_job_no": customer_job_no.strip(), "site_address": site_address.strip(), "amount": float(amount), "manager": manager.strip(), "desc": description.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending_manager", "manager_comments": "", "manager_decision_date": "", "manager_decision_by": "", "director_comments": "", "director_decision_date": "", "director_decision_by": "", "submitted_by": current_user, "submitted_date": now, "payroll_status": "Pending", "payroll_date": "", "payroll_by": "", "pdf_path": ""}
                     orders.append(rec)
@@ -1533,10 +1609,8 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 for i, f in enumerate(files or [], 1):
                     safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
                     fn = f"{wid}_F{i}_{safe_name}"
-                    fp = os.path.join(UPLOAD_DIR, fn)
-                    with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
-                    _upload_to_drive_bg(fp, fn)
-                    attachments.append(fn)
+                    saved_fn = save_uploaded_attachment(f, fn)
+                    attachments.append(saved_fn)
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 rec = {"id": wid, "manual_work_order_no": work_order_no.strip(), "emp_name": contractor_employee.strip(), "dept": manager_dept, "work_date": str(work_date), "hours": 0.0, "customer_job_no": customer_job_no.strip(), "site_address": site_address.strip(), "amount": float(amount), "manager": manager_name, "desc": description.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending_director", "manager_comments": "", "manager_decision_date": "", "manager_decision_by": "", "director_comments": "", "director_decision_date": "", "director_decision_by": "", "submitted_by": manager_name, "submitted_date": now, "payroll_status": "Pending", "payroll_date": "", "payroll_by": "", "pdf_path": ""}
                 orders.append(rec)
@@ -2888,9 +2962,8 @@ elif role == "Work Order Manager":
                             for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
                                 fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
                                 edit_path = os.path.join(UPLOAD_DIR, fn)
-                                with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
-                                _upload_to_drive_bg(edit_path, fn)
-                                final_attachments.append(fn)
+                                saved_fn = save_uploaded_attachment(f, fn)
+                                final_attachments.append(saved_fn)
                         records = load_records_from_excel()
                         old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
                         new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
@@ -2927,9 +3000,8 @@ elif role == "Work Order Manager":
                             for i, f in enumerate(files, 1):
                                 fn = f"ID_{nid}_F{i}_{f.name}"
                                 file_path = os.path.join(UPLOAD_DIR, fn)
-                                with open(file_path, "wb") as out: out.write(f.getbuffer())
-                                att_list.append(fn)
-                                _upload_to_drive_bg(file_path, fn)
+                                saved_fn = save_uploaded_attachment(f, fn)
+                                att_list.append(saved_fn)
                         payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
@@ -3022,9 +3094,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
                                         fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
                                         edit_path = os.path.join(UPLOAD_DIR, fn)
-                                        with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
-                                        _upload_to_drive_bg(edit_path, fn)
-                                        final_attachments.append(fn)
+                                        saved_fn = save_uploaded_attachment(f, fn)
+                                        final_attachments.append(saved_fn)
                                 records = load_records_from_excel()
                                 old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
                                 new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
@@ -3061,9 +3132,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     for i, f in enumerate(files, 1):
                                         fn = f"ID_{nid}_F{i}_{f.name}"
                                         file_path = os.path.join(UPLOAD_DIR, fn)
-                                        with open(file_path, "wb") as out: out.write(f.getbuffer())
-                                        att_list.append(fn)
-                                        _upload_to_drive_bg(file_path, fn)
+                                        saved_fn = save_uploaded_attachment(f, fn)
+                                        att_list.append(saved_fn)
                                 payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                                 save_record_to_excel(payload)
                                 log_action("CREATED", nid)
