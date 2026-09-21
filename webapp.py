@@ -1,13 +1,15 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.18
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.19
 # ============================================================
-# ✅ v4.18 (ATTACHMENT PRESERVATION FIX):
-#    • Fixed: Attachments were being cleared before submission
-#      due to `clear_on_submit=True`. Now using versioned forms
-#      to preserve uploads and reset forms cleanly after submit.
-# ✅ v4.17 (BASE64 WHITESPACE & PADDING FIX):
-#    • Strips whitespace/newlines from base64 secrets before decoding.
-#    • Adds automatic padding to fix 'Incorrect padding' errors.
+# ✅ v4.19 (HR LEAVE SETTLEMENT MODULE):
+#    • Added HR Leave Settlement module (holiday payouts/deductions).
+#    • Super Admin manages HR categories + per-department daily rates.
+#    • Director approves/rejects with mandatory rejection reason.
+#    • Auto-calculates amount from days × daily rate (editable override).
+#    • Payroll read-only view of approved HR settlements.
+#    • New permission flag: can_access_hr_leave.
+# ✅ v4.18 (ATTACHMENT PRESERVATION FIX)
+# ✅ v4.17 (BASE64 WHITESPACE & PADDING FIX)
 # ✅ v4.16 (PERMANENT GOOGLE DRIVE FIX - BASE64 METHOD)
 # ✅ v4.15 (WORK ORDER TOTAL TAB RESTRUCTURE)
 # ✅ v4.14 (WORK ORDER TOTAL FOR EMPLOYEES/TEAM MEMBERS)
@@ -81,12 +83,35 @@ INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
 INSPECTOR_BONUS_PDF_DIR = os.path.join(APP_FOLDER, "inspector_bonus_pdfs")
 GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
 
+# ============================================================
+# 👥 HR LEAVE SETTLEMENT — PATHS & CONSTANTS
+# ============================================================
+HR_LEAVE_PATH = os.path.join(APP_FOLDER, "hr_leave_requests.xlsx")
+HR_DAILY_RATES_PATH = os.path.join(APP_FOLDER, "hr_daily_rates.xlsx")
+HR_LEAVE_PDF_DIR = os.path.join(APP_FOLDER, "hr_leave_pdfs")
+os.makedirs(HR_LEAVE_PDF_DIR, exist_ok=True)
+
+HR_LEAVE_COLUMNS = [
+    "ID", "Employee Name", "Employee Department", "Transaction Type",
+    "Category Reason", "Owe Owed", "Date", "Number of Days", "Amount (£)",
+    "Line Manager", "Description", "Attachment Name", "Status",
+    "Director Comments", "Rejection Reason", "Decision Date", "Decision By",
+    "Submitted By", "Submitted Date", "PDF File Path"
+]
+HR_DAILY_RATES_COLUMNS = ["Department", "Transaction Type", "Daily Rate (£)", "Active"]
+DEFAULT_HR_CATEGORIES = [
+    "Annual Leave Balance", "Unused Holiday Payout",
+    "Overused Holiday Deduction", "Leave Encashment",
+]
+DEFAULT_OWE_OWED = ["Company Owes Employee", "Employee Owes Company"]
+
 USER_DB_COLUMNS = [
     "full_name", "username", "password", "role", "dept",
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
     "can_approve_requests", "can_access_inspector_bonus",
     "can_access_addition_deduction", "can_access_work_orders",
     "can_access_wo_total",
+    "can_access_hr_leave",
     "is_active"
 ]
 
@@ -112,11 +137,6 @@ _DRIVE_SYNC_LOCK = threading.RLock()
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD v4.18)
 # ============================================================
-# Google Drive is deliberately initialised without making network calls at import time.
-# Streamlit can rerun the script many times; doing Drive API calls during module
-# import made the app fragile and contributed to the native-process crash seen in
-# the Cloud logs.  The service-account credentials are still read from the same
-# [gdrive] key_b64 secret and Drive sync remains available.
 try:
     gdrive = st.secrets["gdrive"]
     b64_string = str(gdrive["key_b64"]).replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
@@ -219,12 +239,6 @@ def _drive_download_file(file_id, local_path):
         return False
 
 def sync_persistent_file(local_path, columns=None):
-    """Synchronise one persistent workbook with Drive without background threads.
-
-    All Drive/XLSX operations are serialised. This is intentional: openpyxl and
-    the Google API client must not be allowed to modify the same workbook from
-    overlapping Streamlit reruns/background threads.
-    """
     if drive_service is None:
         if not os.path.exists(local_path) and columns is not None:
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
@@ -262,12 +276,6 @@ def sync_persistent_file(local_path, columns=None):
             _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
-    """Synchronously upload a changed workbook/file to Google Drive.
-
-    No daemon/background thread is used. This prevents Streamlit reruns from
-    racing with openpyxl/Google Drive operations and causing native allocator
-    crashes such as `free(): corrupted unsorted chunks`.
-    """
     if drive_service is None or not os.path.exists(local_path):
         return
     try:
@@ -286,7 +294,6 @@ def sync_saved_file_to_drive(local_path):
             _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
 
 def _upload_to_drive_bg(local_path, filename):
-    """Compatibility wrapper: uploads synchronously; no background thread."""
     if drive_service is None or not os.path.exists(local_path):
         return
     with _DRIVE_SYNC_LOCK:
@@ -300,12 +307,14 @@ def initialise_drive_storage():
     os.makedirs(APP_FOLDER, exist_ok=True)
     with _DRIVE_SYNC_LOCK:
         targets = [
-        (EXCEL_PATH, EXCEL_COLUMNS),
-        (USER_DB_PATH, USER_DB_COLUMNS),
-        (SETTINGS_PATH, ["setting", "value"]),
-        (AUDIT_LOG_PATH, AUDIT_COLUMNS),
+            (EXCEL_PATH, EXCEL_COLUMNS),
+            (USER_DB_PATH, USER_DB_COLUMNS),
+            (SETTINGS_PATH, ["setting", "value"]),
+            (AUDIT_LOG_PATH, AUDIT_COLUMNS),
             (WORK_ORDERS_PATH, WORK_ORDER_COLUMNS),
             (INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS),
+            (HR_LEAVE_PATH, HR_LEAVE_COLUMNS),
+            (HR_DAILY_RATES_PATH, HR_DAILY_RATES_COLUMNS),
         ]
         for path, columns in targets:
             sync_persistent_file(path, columns)
@@ -344,23 +353,23 @@ WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name",
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
 
 DEFAULT_USERS = [
-    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "is_active": True},
-    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "is_active": True},
-    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "is_active": True},
-    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "is_active": True},
+    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "is_active": True},
+    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "can_access_hr_leave": True, "is_active": True},
+    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "can_access_hr_leave": True, "is_active": True},
+    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "can_access_hr_leave": True, "is_active": True},
     {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd", "is_active": True},
     {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration", "is_active": True},
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "is_active": True}
 ]
 PERMISSION_DEFAULTS = {
-    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False},
-    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True},
-    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False},
-    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False},
-    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False},
-    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True},
-    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True},
-    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True}
+    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False},
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False},
+    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False},
+    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False},
+    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True},
+    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True},
+    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True}
 }
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
@@ -370,7 +379,8 @@ PERMISSION_LABELS = {
     "can_access_inspector_bonus": "💰 National Grid Inspector Bonus",
     "can_access_addition_deduction": "➕ Addition & Deduction",
     "can_access_work_orders": "🛠️ Work Orders",
-    "can_access_wo_total": "💷 Approved Work Order Total"
+    "can_access_wo_total": "💷 Approved Work Order Total",
+    "can_access_hr_leave": "👥 HR Leave Settlement"
 }
 
 try:
@@ -383,18 +393,9 @@ except ImportError:
 _EXCEL_INIT_LOCK = threading.Lock()
 
 def _write_empty_excel(path, columns):
-    """Create/replace an Excel file safely.
-
-    The temporary file MUST keep an .xlsx extension because pandas/openpyxl
-    validates the output extension before creating the workbook.  The previous
-    implementation used ``<file>.xlsx.tmp_<pid>``, which caused:
-    ``ValueError: Invalid extension for engine 'openpyxl': '.xlsx.tmp_...'``.
-    """
     parent = os.path.dirname(os.path.abspath(path))
     os.makedirs(parent, exist_ok=True)
     df = pd.DataFrame(columns=columns)
-
-    # Keep the .xlsx suffix so pandas selects the openpyxl writer correctly.
     stem = os.path.splitext(os.path.basename(path))[0]
     temp_path = os.path.join(parent, f".{stem}.clear_{os.getpid()}_{threading.get_ident()}.xlsx")
     try:
@@ -409,12 +410,6 @@ def _write_empty_excel(path, columns):
                 pass
 
 def safe_init_excel(path, columns):
-    """Create/repair an Excel workbook safely without deleting a live file.
-
-    The previous implementation called os.remove(path) on any read error. On
-    Streamlit Cloud, overlapping reruns could then race and raise FileNotFoundError.
-    We now build a replacement workbook and atomically replace the old file.
-    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if not os.path.exists(path):
         tmp_path = f"{path}.init.tmp"
@@ -449,8 +444,6 @@ def safe_init_excel(path, columns):
         return True
     except Exception as e:
         print(f"Excel initialisation/recovery for {path} failed: {e}")
-        # Do not delete the original workbook. If it is unreadable, keep it for
-        # recovery and create a fresh workbook only when no usable file exists.
         if os.path.exists(path):
             return False
         tmp_path = f"{path}.init.tmp"
@@ -532,6 +525,11 @@ def clear_all_inspector_bonus():
     _set_data_cache("_inspector_bonus_cache", [])
     sync_saved_file_to_drive(INSPECTOR_BONUS_PATH)
 
+def clear_all_hr_leave():
+    _write_empty_excel(HR_LEAVE_PATH, HR_LEAVE_COLUMNS)
+    _set_data_cache("_hr_leave_cache", [])
+    sync_saved_file_to_drive(HR_LEAVE_PATH)
+
 def clear_live_request_and_audit_data():
     clear_all_requests_file()
     clear_audit_log_file()
@@ -556,7 +554,18 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
     username = user_info.get("full_name", user_info.get("username", "Unknown"))
     role = user_info.get("role", "Unknown")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    SETTING_ACTIONS = ["CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED", "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED", "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED", "USER_CREATED", "USER_EDITED", "USER_DELETED", "PASSWORD_CHANGED", "PASSWORD_RESET", "INSPECTOR_BONUS_CREATED", "INSPECTOR_BONUS_APPROVED", "INSPECTOR_BONUS_REJECTED", "INSPECTOR_BONUS_EDITED", "INSPECTOR_BONUS_STATUS_CHANGED", "SUPER_ADMIN_CLEAR_INSPECTOR_BONUS"]
+    SETTING_ACTIONS = [
+        "CATEGORY_ADDED", "CATEGORY_EDITED", "CATEGORY_DELETED",
+        "DEPARTMENT_ADDED", "DEPARTMENT_EDITED", "DEPARTMENT_DELETED",
+        "ROLE_ADDED", "ROLE_EDITED", "ROLE_DELETED",
+        "USER_CREATED", "USER_EDITED", "USER_DELETED",
+        "PASSWORD_CHANGED", "PASSWORD_RESET",
+        "INSPECTOR_BONUS_CREATED", "INSPECTOR_BONUS_APPROVED",
+        "INSPECTOR_BONUS_REJECTED", "INSPECTOR_BONUS_EDITED",
+        "INSPECTOR_BONUS_STATUS_CHANGED", "SUPER_ADMIN_CLEAR_INSPECTOR_BONUS",
+        "HR_CATEGORY_ADDED", "HR_CATEGORY_DELETED",
+        "HR_RATE_ADDED", "HR_RATE_UPDATED", "HR_RATE_DELETED",
+    ]
     if action in SETTING_ACTIONS:
         action_labels = {
             "CATEGORY_ADDED": "🏷️ Category Added", "CATEGORY_EDITED": "🏷️ Category Edited", "CATEGORY_DELETED": "🏷️ Category Deleted",
@@ -568,11 +577,13 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "INSPECTOR_BONUS_REJECTED": "💰 Inspector Bonus Rejected", "INSPECTOR_BONUS_EDITED": "💰 Inspector Bonus Edited",
             "INSPECTOR_BONUS_STATUS_CHANGED": "💰 Inspector Bonus Status Changed",
             "SUPER_ADMIN_CLEAR_INSPECTOR_BONUS": "🧹 Super Admin — All Inspector Bonuses Cleared",
+            "HR_CATEGORY_ADDED": "🏷️ HR Category Added", "HR_CATEGORY_DELETED": "🏷️ HR Category Deleted",
+            "HR_RATE_ADDED": "💷 HR Daily Rate Added", "HR_RATE_UPDATED": "💷 HR Daily Rate Updated", "HR_RATE_DELETED": "💷 HR Daily Rate Deleted",
         }
         display_action = action_labels.get(action, action)
         old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
         new_val = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
-        save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": display_action, "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": decision_by or "-", "Decision_Date": decision_date or "-", "Field_Changed": "Inspector Bonus", "Old_Value": old_val, "New_Value": new_val, "IP_Address": "Auto-Logged"})
+        save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": display_action, "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": decision_by or "-", "Decision_Date": decision_date or "-", "Field_Changed": "Settings", "Old_Value": old_val, "New_Value": new_val, "IP_Address": "Auto-Logged"})
         return
     dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
     final_decision_by = decision_by or saved_decision_by
@@ -588,6 +599,17 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
         new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": wo_labels.get(action, action), "Request_ID": str(req_id), "Department": dept, "Amount": amount, "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "Work Order Status", "Old_Value": old_v if old_data else "-", "New_Value": new_v if new_data else action.replace("WORK_ORDER_", "").replace("_", " ").title(), "IP_Address": "Auto-Logged"})
+        return
+    if action.startswith("HR_LEAVE_"):
+        hr_labels = {
+            "HR_LEAVE_CREATED": "👥 HR Leave Settlement Created",
+            "HR_LEAVE_APPROVED": "👥 HR Leave Settlement Approved",
+            "HR_LEAVE_REJECTED": "👥 HR Leave Settlement Rejected",
+            "HR_LEAVE_STATUS_CHANGED": "👥 HR Leave Settlement Status Changed",
+        }
+        old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
+        new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
+        save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": hr_labels.get(action, action), "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "HR Leave Status", "Old_Value": old_v, "New_Value": new_v, "IP_Address": "Auto-Logged"})
         return
     if action in ["CREATED", "DELETED"]:
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": action, "Request_ID": str(req_id), "Department": dept, "Amount": amount, "Decision_By": "-", "Decision_Date": "-", "Field_Changed": "-", "Old_Value": "-", "New_Value": "New Request Created" if action == "CREATED" else "Request Permanently Deleted", "IP_Address": "Auto-Logged"})
@@ -624,12 +646,7 @@ def display_audit_log_panel():
         aid, ts, user, role, action, req_id = entry["AuditID"], entry["Timestamp"], entry["User_Name"], entry["User_Role"], entry["Action"], entry["Request_ID"]
         dept, amount, dec_by, dec_date = entry.get("Department", "-"), entry.get("Amount", "-"), entry.get("Decision_By", "-"), entry.get("Decision_Date", "-")
         field, old_val, new_val = entry["Field_Changed"], entry["Old_Value"], entry["New_Value"]
-        icon = {"CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌", "DELETED": "🗑️", "STATUS_CHANGED": "🔄",
-            "🏷️ Category Added": "🏷️", "🏷️ Category Edited": "🏷️", "🏷️ Category Deleted": "🏷️",
-            "🏢 Department Added": "🏢", "🏢 Department Edited": "🏢", "🏢 Department Deleted": "🏢",
-            "🎖️ Role Added": "🎖️", "🎖️ Role/Permissions Edited": "🎖️", "🎖️ Role Deleted": "🎖️",
-            "👤 User Account Created": "👤", "👤 User Account Edited": "✏️", "👤 User Account Deleted": "🗑️",
-            "🔑 Password Changed": "🔑", "🔑 Password Reset": "🔑"}.get(action, "ℹ️")
+        icon = {"CREATED": "➕", "EDITED": "✏️", "APPROVED": "✅", "REJECTED": "❌", "DELETED": "🗑️", "STATUS_CHANGED": "🔄"}.get(action, "ℹ️")
         title = f"{icon} {action}" + (f" — Request #{req_id}" if str(req_id) != "-" else "") + f" | {user} ({role}) | {ts}"
         with st.expander(title):
             st.write(f"**🕐 Time:** {ts}")
@@ -676,10 +693,10 @@ def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         with st.spinner("Refreshing from Google Drive..."):
             if drive_service is not None:
-                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH):
+                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH):
                     remote = _drive_find_file(os.path.basename(path))
                     if remote: _drive_download_file(remote["id"], path)
-            _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count")
+            _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count", "_hr_leave_cache", "_hr_daily_rates_cache")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 
@@ -692,7 +709,12 @@ def make_request_title(req):
 
 def init_settings():
     if not os.path.exists(SETTINGS_PATH):
-        pd.DataFrame([{"setting": "categories", "value": "|".join(DEFAULT_CATEGORIES)}, {"setting": "roles", "value": "|".join(DEFAULT_ROLES)}, {"setting": "departments", "value": "|".join(DEFAULT_DEPARTMENTS)}]).to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+        pd.DataFrame([
+            {"setting": "categories", "value": "|".join(DEFAULT_CATEGORIES)},
+            {"setting": "roles", "value": "|".join(DEFAULT_ROLES)},
+            {"setting": "departments", "value": "|".join(DEFAULT_DEPARTMENTS)},
+            {"setting": "hr_categories", "value": "|".join(DEFAULT_HR_CATEGORIES)},
+        ]).to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
 
 def _load_setting_value(setting_name, default_values):
     init_settings()
@@ -754,13 +776,26 @@ def save_roles(roles_list):
             df.at[idx, "value"] = "|".join(roles_list); found = True
     if not found:
         df = pd.concat([df, pd.DataFrame([{"setting": "roles", "value": "|".join(roles_list)}])], ignore_index=True)
-        df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
     df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
-# Initialise persistent files defensively. A Drive/API problem must never stop
-# the Streamlit application itself from starting.
+# HR Leave Settings
+def load_hr_categories(): return _load_setting_value("hr_categories", DEFAULT_HR_CATEGORIES)
+
+def save_hr_categories(cats):
+    init_settings()
+    df = _read_excel_records(SETTINGS_PATH)
+    found = False
+    for idx, r in df.iterrows():
+        if r["setting"] == "hr_categories":
+            df.at[idx, "value"] = "|".join(cats); found = True
+    if not found:
+        df = pd.concat([df, pd.DataFrame([{"setting": "hr_categories", "value": "|".join(cats)}])], ignore_index=True)
+    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    _invalidate_data_cache("_settings_cache")
+    sync_saved_file_to_drive(SETTINGS_PATH)
+
 try:
     initialise_drive_storage()
 except Exception as e:
@@ -792,6 +827,7 @@ def save_users(users_dict):
             "can_access_addition_deduction": u.get("can_access_addition_deduction", False),
             "can_access_work_orders": u.get("can_access_work_orders", False),
             "can_access_wo_total": u.get("can_access_wo_total", False),
+            "can_access_hr_leave": u.get("can_access_hr_leave", False),
             "is_active": u.get("is_active", True)
         })
     pd.DataFrame(rows, columns=USER_DB_COLUMNS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
@@ -834,6 +870,7 @@ def load_users(force=False):
                 "can_access_addition_deduction": _flag_or_default(r.get("can_access_addition_deduction", ""), user_role, "can_access_addition_deduction"),
                 "can_access_work_orders": _flag_or_default(r.get("can_access_work_orders", ""), user_role, "can_access_work_orders"),
                 "can_access_wo_total": _flag_or_default(r.get("can_access_wo_total", ""), user_role, "can_access_wo_total"),
+                "can_access_hr_leave": _flag_or_default(r.get("can_access_hr_leave", ""), user_role, "can_access_hr_leave"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
             if user_role == "Super Admin":
@@ -841,7 +878,7 @@ def load_users(force=False):
                     "can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True,
                     "can_approve_requests": True, "can_access_inspector_bonus": True,
                     "can_access_addition_deduction": True, "can_access_work_orders": True,
-                    "can_access_wo_total": True, "is_active": True
+                    "can_access_wo_total": True, "can_access_hr_leave": True, "is_active": True
                 })
         _set_data_cache("_users_cache", users)
         return dict(users)
@@ -2227,12 +2264,421 @@ def render_inspector_bonus_payroll_portal(payroll_name):
             st.divider()
             display_inspector_bonus_pdf_button(r, key_prefix="ib_payroll")
 
+# ============================================================
+# 👥 HR LEAVE SETTLEMENT — DATA LAYER
+# ============================================================
+def initialise_hr_leave():
+    safe_init_excel(HR_LEAVE_PATH, HR_LEAVE_COLUMNS)
+    safe_init_excel(HR_DAILY_RATES_PATH, HR_DAILY_RATES_COLUMNS)
+
+def load_hr_leave(force=False):
+    if not force and "_hr_leave_cache" in st.session_state:
+        return list(st.session_state["_hr_leave_cache"])
+    initialise_hr_leave()
+    try:
+        df = _read_excel_records(HR_LEAVE_PATH)
+        records = []
+        for r in df.to_dict(orient="records"):
+            try: rid = int(r.get("ID", 0))
+            except Exception: rid = 0
+            try: amount = float(r.get("Amount (£)", 0) or 0)
+            except Exception: amount = 0.0
+            try: days = float(r.get("Number of Days", 0) or 0)
+            except Exception: days = 0.0
+            records.append({
+                "id": rid,
+                "emp_name": str(r.get("Employee Name", "")).strip(),
+                "emp_dept": str(r.get("Employee Department", "")).strip(),
+                "type": str(r.get("Transaction Type", "")).strip(),
+                "category": str(r.get("Category Reason", "")).strip(),
+                "owe_owed": str(r.get("Owe Owed", "")).strip(),
+                "date": str(r.get("Date", "")).strip(),
+                "days": days, "amount": amount,
+                "manager": str(r.get("Line Manager", "")).strip(),
+                "desc": str(r.get("Description", "")).strip(),
+                "attachment_name": str(r.get("Attachment Name", "None")).strip(),
+                "status": str(r.get("Status", "pending")).strip().lower(),
+                "director_comments": str(r.get("Director Comments", "")).strip(),
+                "rejection_reason": str(r.get("Rejection Reason", "")).strip(),
+                "decision_date": str(r.get("Decision Date", "")).strip(),
+                "decision_by": str(r.get("Decision By", "")).strip(),
+                "submitted_by": str(r.get("Submitted By", "")).strip(),
+                "submitted_date": str(r.get("Submitted Date", "")).strip(),
+                "pdf_path": str(r.get("PDF File Path", "")).strip(),
+            })
+        _set_data_cache("_hr_leave_cache", records)
+        return list(records)
+    except Exception as e:
+        st.error(f"HR Leave Load Error: {e}")
+        return []
+
+def save_all_hr_leave(records, sync=True):
+    rows = [{
+        "ID": int(r.get("id", 0)),
+        "Employee Name": str(r.get("emp_name", "")),
+        "Employee Department": str(r.get("emp_dept", "")),
+        "Transaction Type": str(r.get("type", "")),
+        "Category Reason": str(r.get("category", "")),
+        "Owe Owed": str(r.get("owe_owed", "")),
+        "Date": str(r.get("date", "")),
+        "Number of Days": float(r.get("days", 0)),
+        "Amount (£)": float(r.get("amount", 0)),
+        "Line Manager": str(r.get("manager", "")),
+        "Description": str(r.get("desc", "")),
+        "Attachment Name": str(r.get("attachment_name", "None")),
+        "Status": str(r.get("status", "pending")).lower(),
+        "Director Comments": str(r.get("director_comments", "")),
+        "Rejection Reason": str(r.get("rejection_reason", "")),
+        "Decision Date": str(r.get("decision_date", "")),
+        "Decision By": str(r.get("decision_by", "")),
+        "Submitted By": str(r.get("submitted_by", "")),
+        "Submitted Date": str(r.get("submitted_date", "")),
+        "PDF File Path": str(r.get("pdf_path", "")),
+    } for r in records]
+    pd.DataFrame(rows, columns=HR_LEAVE_COLUMNS).to_excel(HR_LEAVE_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_hr_leave_cache", list(records))
+    if sync: sync_saved_file_to_drive(HR_LEAVE_PATH)
+
+def get_next_hr_leave_id(records):
+    if not records: return 1
+    return max(int(r.get("id", 0)) for r in records) + 1
+
+def load_hr_daily_rates(force=False):
+    if not force and "_hr_daily_rates_cache" in st.session_state:
+        return list(st.session_state["_hr_daily_rates_cache"])
+    initialise_hr_leave()
+    try:
+        df = _read_excel_records(HR_DAILY_RATES_PATH)
+        records = []
+        for r in df.to_dict(orient="records"):
+            try: rate = float(r.get("Daily Rate (£)", 0) or 0)
+            except Exception: rate = 0.0
+            active = str(r.get("Active", "True")).strip().lower() in ("true", "yes", "1")
+            records.append({
+                "dept": str(r.get("Department", "")).strip(),
+                "type": str(r.get("Transaction Type", "")).strip(),
+                "rate": rate, "active": active,
+            })
+        _set_data_cache("_hr_daily_rates_cache", records)
+        return list(records)
+    except Exception as e:
+        st.error(f"HR Daily Rates Load Error: {e}")
+        return []
+
+def save_hr_daily_rates(records):
+    rows = [{"Department": r["dept"], "Transaction Type": r["type"],
+             "Daily Rate (£)": float(r["rate"]), "Active": bool(r["active"])} for r in records]
+    pd.DataFrame(rows, columns=HR_DAILY_RATES_COLUMNS).to_excel(HR_DAILY_RATES_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_hr_daily_rates_cache", list(records))
+    sync_saved_file_to_drive(HR_DAILY_RATES_PATH)
+
+def get_hr_daily_rate(dept, transaction_type):
+    for r in load_hr_daily_rates():
+        if r["dept"] == dept and r["type"] == transaction_type and r["active"]:
+            return r["rate"]
+    return None
+
+# ============================================================
+# 👥 HR LEAVE SETTLEMENT — UI
+# ============================================================
+def render_hr_leave_form(user_name):
+    st.subheader("👥 New Request — HR Leave Settlement")
+    st.caption("Submit a holiday settlement (payout / deduction) for Director approval.")
+    hr_records = load_hr_leave()
+    hr_cats = load_hr_categories()
+    departments = load_departments()
+
+    form_version = st.session_state.get("hr_leave_form_version", 0)
+    with st.form(f"hr_leave_form_v{form_version}", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            emp_name = st.text_input("👤 Employee Name", key=f"hr_emp_v{form_version}")
+            owe_owed = st.selectbox("⚖️ Owe / Owed", DEFAULT_OWE_OWED, key=f"hr_owe_v{form_version}")
+            category = st.selectbox("🏷️ Category / Reason", hr_cats, key=f"hr_cat_v{form_version}")
+            transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
+            st.text_input("🔄 Transaction Type (auto-linked)", value=transaction_type, disabled=True, key=f"hr_type_v{form_version}")
+        with c2:
+            dt_val = st.date_input("📅 Date", value=date.today(), key=f"hr_date_v{form_version}")
+            emp_dept = st.selectbox("🏢 Employee Department", departments, key=f"hr_dept_v{form_version}")
+            manager = st.text_input("👔 Line Manager", key=f"hr_mgr_v{form_version}")
+            files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"],
+                                     accept_multiple_files=True, key=f"hr_files_v{form_version}")
+
+        c3, c4 = st.columns(2)
+        with c3:
+            num_days = st.number_input("🔢 Number of Days", min_value=0.0, step=0.5,
+                                       format="%.2f", key=f"hr_days_v{form_version}")
+        with c4:
+            rate = get_hr_daily_rate(emp_dept, transaction_type)
+            suggested = round((rate or 0) * float(num_days), 2)
+            amount = st.number_input("💷 Amount (£)", min_value=0.0, step=1.0, format="%.2f",
+                                     value=suggested, key=f"hr_amt_v{form_version}")
+            if rate:
+                st.caption(f"ℹ️ Auto-calc: {num_days} × £{rate:.2f} = £{suggested:.2f} (editable)")
+            else:
+                st.caption("⚠️ No daily rate configured by Super Admin — please enter manually.")
+        desc = st.text_area("📝 Description / Justification", key=f"hr_desc_v{form_version}")
+        submitted = st.form_submit_button("📤 Send to Director", type="primary", use_container_width=True)
+
+    if submitted:
+        if not emp_name.strip() or not manager.strip() or not desc.strip():
+            st.error("⚠️ Employee Name, Line Manager and Description are required.")
+        elif float(num_days) <= 0:
+            st.error("⚠️ Number of Days must be greater than 0.")
+        elif float(amount) <= 0:
+            st.error("⚠️ Amount must be greater than 0.")
+        else:
+            new_id = get_next_hr_leave_id(hr_records)
+            attachments = []
+            for i, f in enumerate(files or [], 1):
+                safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
+                fn = f"HRL_{new_id}_F{i}_{safe_name}"
+                fp = os.path.join(UPLOAD_DIR, fn)
+                with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
+                _upload_to_drive_bg(fp, fn)
+                attachments.append(fn)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            rec = {
+                "id": new_id, "emp_name": emp_name.strip(), "emp_dept": emp_dept,
+                "type": transaction_type, "category": category, "owe_owed": owe_owed,
+                "date": str(dt_val), "days": float(num_days), "amount": float(amount),
+                "manager": manager.strip(), "desc": desc.strip(),
+                "attachment_name": ", ".join(attachments) or "None",
+                "status": "pending", "director_comments": "", "rejection_reason": "",
+                "decision_date": "", "decision_by": "",
+                "submitted_by": user_name, "submitted_date": now, "pdf_path": "",
+            }
+            hr_records.append(rec)
+            save_all_hr_leave(hr_records)
+            log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
+            st.session_state["hr_leave_form_version"] = form_version + 1
+            st.success(f"✅ HR Leave Settlement #{new_id} sent to Director for approval.")
+            st.rerun()
+
+    st.divider()
+    st.subheader("📋 My Submitted HR Leave Requests")
+    mine = [r for r in hr_records if r.get("submitted_by") == user_name]
+    if not mine:
+        st.info("📋 You have not submitted any HR Leave requests yet.")
+    else:
+        for r in reversed(mine):
+            status = r["status"]
+            icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+            with st.expander(f"{icon} #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['amount']:.2f} | {status.upper()}"):
+                st.write(f"🔄 **{r['type']}** | ⚖️ {r['owe_owed']} | 🏷️ {r['category']}")
+                st.write(f"🔢 **{r['days']} day(s)** | 💷 **£{r['amount']:.2f}** | 📅 {r['date']}")
+                st.write(f"👔 **Line Manager:** {r['manager']}")
+                st.info(f"📝 {r['desc']}")
+                display_attachments(r)
+                if r.get("director_comments"): st.info(f"💬 Director: {r['director_comments']}")
+                if r.get("rejection_reason"): st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
+
+def render_hr_leave_director_portal(director_name):
+    st.subheader("👥 HR Leave Settlement — Director Approval")
+    st.info("Review HR leave settlement requests. Rejection requires a mandatory reason.")
+    st.divider()
+    records = load_hr_leave()
+    pending  = [r for r in records if r["status"] == "pending"]
+    approved = [r for r in records if r["status"] == "approved"]
+    rejected = [r for r in records if r["status"] == "rejected"]
+    t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
+
+    def show_details(r):
+        st.write(f"👤 **Employee:** {r['emp_name']} | 🏢 **Department:** {r['emp_dept']}")
+        st.write(f"🔄 **Transaction Type:** {r['type']} | ⚖️ **Owe / Owed:** {r['owe_owed']}")
+        st.write(f"🏷️ **Category / Reason:** {r['category']} | 📅 **Date:** {r['date']}")
+        st.write(f"🔢 **Days:** {r['days']} | 💷 **Amount:** £{r['amount']:.2f}")
+        st.write(f"👔 **Line Manager:** {r['manager']}")
+        st.write(f"📝 **Submitted by:** {r['submitted_by']} on {r['submitted_date']}")
+        st.info(f"📝 **Description:**\n{r['desc']}")
+        st.divider(); st.markdown("#### 📎 Attachments"); display_attachments(r)
+
+    with t1:
+        if not pending: st.success("✅ No pending HR Leave requests.")
+        for r in reversed(pending):
+            rid = r["id"]
+            with st.expander(f"🟡 #{rid} | {r['emp_name']} | {r['emp_dept']} | £{r['amount']:.2f} | {r['type']}"):
+                show_details(r)
+                st.markdown("### ✍️ Director Decision")
+                comments = st.text_area("Director Comments (optional)", key=f"hr_dir_comm_{rid}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ Approve", key=f"hr_dir_app_{rid}", type="primary", use_container_width=True):
+                        for x in records:
+                            if x["id"] == rid:
+                                x["status"] = "approved"; x["director_comments"] = comments.strip()
+                                x["decision_by"] = director_name
+                                x["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                break
+                        save_all_hr_leave(records)
+                        log_action("HR_LEAVE_APPROVED", rid, decision_by=director_name)
+                        st.success(f"✅ HR Leave #{rid} Approved."); st.rerun()
+                with c2:
+                    if st.button("❌ Reject", key=f"hr_dir_rej_{rid}", use_container_width=True):
+                        st.session_state[f"hr_reject_modal_{rid}"] = True
+                if st.session_state.get(f"hr_reject_modal_{rid}"):
+                    st.warning("⚠️ A rejection reason is required.")
+                    reason = st.text_area("Reason for Rejection (required)", key=f"hr_rej_reason_{rid}")
+                    rc1, rc2 = st.columns(2)
+                    with rc1:
+                        if st.button("Confirm Rejection", key=f"hr_rej_confirm_{rid}", type="primary", use_container_width=True):
+                            if not reason.strip():
+                                st.error("❌ Rejection reason cannot be empty.")
+                            else:
+                                for x in records:
+                                    if x["id"] == rid:
+                                        x["status"] = "rejected"; x["rejection_reason"] = reason.strip()
+                                        x["director_comments"] = comments.strip()
+                                        x["decision_by"] = director_name
+                                        x["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        break
+                                save_all_hr_leave(records)
+                                log_action("HR_LEAVE_REJECTED", rid, decision_by=director_name)
+                                st.session_state[f"hr_reject_modal_{rid}"] = False
+                                st.success(f"❌ HR Leave #{rid} Rejected."); st.rerun()
+                    with rc2:
+                        if st.button("Cancel", key=f"hr_rej_cancel_{rid}", use_container_width=True):
+                            st.session_state[f"hr_reject_modal_{rid}"] = False; st.rerun()
+
+    with t2:
+        if not approved: st.info("✅ No approved HR Leave requests.")
+        for r in reversed(approved):
+            with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['amount']:.2f} | ✅ {r['decision_by']}"):
+                show_details(r)
+                if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
+                st.write(f"📅 Decision Date: {r['decision_date']}")
+
+    with t3:
+        if not rejected: st.info("❌ No rejected HR Leave requests.")
+        for r in reversed(rejected):
+            with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['amount']:.2f} | ❌ {r['decision_by']}"):
+                show_details(r)
+                st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
+                if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
+
+def render_hr_leave_super_admin():
+    st.subheader("🛡️ HR Leave Settlement — Super Admin (View Only)")
+    st.info("✅ View all HR Leave requests. **Approval → Director only.**")
+    st.divider()
+    records = load_hr_leave()
+    search = st.text_input("🔎 Search HR Leave requests", placeholder="Search by ID, employee, department, category, amount, status...", key="hr_sa_search")
+    if search.strip():
+        q = search.lower().strip()
+        records = [r for r in records if q in " ".join(str(v) for v in r.values()).lower()]
+    pending  = [r for r in records if r["status"] == "pending"]
+    approved = [r for r in records if r["status"] == "approved"]
+    rejected = [r for r in records if r["status"] == "rejected"]
+    c1, c2, c3 = st.columns(3)
+    with c1: st.metric("🟡 Pending", len(pending))
+    with c2: st.metric("🟢 Approved", len(approved))
+    with c3: st.metric("🔴 Rejected", len(rejected))
+    st.divider()
+    t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
+    def show(r):
+        st.write(f"👤 **{r['emp_name']}** | 🏢 {r['emp_dept']} | 📅 {r['date']}")
+        st.write(f"🔄 {r['type']} | ⚖️ {r['owe_owed']} | 🏷️ {r['category']}")
+        st.write(f"🔢 {r['days']} day(s) | 💷 £{r['amount']:.2f} | 👔 {r['manager']}")
+        st.info(f"📝 {r['desc']}")
+        st.caption(f"Submitted by {r['submitted_by']} on {r['submitted_date']}")
+        display_attachments(r)
+    with t1:
+        if not pending: st.success("✅ No pending HR Leave requests.")
+        for r in reversed(pending):
+            with st.expander(f"🟡 #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['amount']:.2f}"):
+                show(r)
+    with t2:
+        if not approved: st.info("✅ No approved HR Leave requests.")
+        for r in reversed(approved):
+            with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['amount']:.2f} | ✅ {r['decision_by']}"):
+                show(r)
+                if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
+    with t3:
+        if not rejected: st.info("❌ No rejected HR Leave requests.")
+        for r in reversed(rejected):
+            with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['amount']:.2f}"):
+                show(r); st.error(f"❌ Reason: {r['rejection_reason']}")
+
+def render_hr_leave_payroll_portal():
+    st.subheader("👥 HR Leave Settlement — Payroll (View Only)")
+    st.info("View all approved HR Leave settlements for payroll processing.")
+    st.divider()
+    approved = [r for r in load_hr_leave() if r["status"] == "approved"]
+    st.metric("✅ Approved HR Leave Settlements", len(approved))
+    st.divider()
+    if not approved: st.info("No approved HR Leave settlements yet.")
+    for r in reversed(approved):
+        with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['amount']:.2f} | {r['type']}"):
+            st.write(f"🏷️ {r['category']} | ⚖️ {r['owe_owed']} | 🔢 {r['days']} day(s)")
+            st.write(f"💷 **£{r['amount']:.2f}** | 👔 {r['manager']} | 📅 {r['date']}")
+            st.write(f"✅ Approved by {r['decision_by']} on {r['decision_date']}")
+            if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
+            display_attachments(r)
+
+def render_hr_leave_settings():
+    """Super Admin settings: HR categories + Daily Holiday Rates."""
+    st.markdown("### 🏷️ HR Leave Categories")
+    st.caption("These appear in the HR Leave Settlement form dropdown.")
+    cats = load_hr_categories()
+    with st.form("hr_cat_add_form", clear_on_submit=True):
+        new_cat = st.text_input("➕ Add New Category", placeholder="e.g. Maternity Leave Settlement")
+        if st.form_submit_button("✅ Add Category"):
+            if new_cat.strip() and new_cat.strip() not in cats:
+                cats.append(new_cat.strip()); save_hr_categories(cats)
+                log_action("HR_CATEGORY_ADDED", new_data={"name": new_cat.strip()})
+                st.success(f"✅ Added: {new_cat}"); st.rerun()
+            elif new_cat.strip() in cats:
+                st.warning("⚠️ Category already exists.")
+    for i, cat in enumerate(cats):
+        c1, c2 = st.columns([5, 1])
+        c1.markdown(f"• **{cat}**")
+        with c2:
+            if len(cats) > 1 and st.button("🗑️", key=f"hr_cat_del_{i}"):
+                cats.pop(i); save_hr_categories(cats)
+                log_action("HR_CATEGORY_DELETED", old_data={"name": cat})
+                st.success(f"Deleted: {cat}"); st.rerun()
+
+    st.divider()
+    st.markdown("### 💷 Holiday Daily Rates (per Department + Type)")
+    st.caption("The HR form uses these rates to auto-calculate the amount when Number of Days is entered.")
+    rates = load_hr_daily_rates()
+    departments = load_departments()
+    with st.form("hr_rate_add_form", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        with c1: new_dept = st.selectbox("🏢 Department", departments, key="hr_rate_dept")
+        with c2: new_type = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key="hr_rate_type")
+        with c3: new_rate = st.number_input("💷 Daily Rate (£)", min_value=0.01, step=1.0, format="%.2f", value=100.00, key="hr_rate_amt")
+        if st.form_submit_button("➕ Add / Update Rate", type="primary"):
+            existing = next((r for r in rates if r["dept"] == new_dept and r["type"] == new_type), None)
+            if existing:
+                existing["rate"] = float(new_rate); existing["active"] = True
+                log_action("HR_RATE_UPDATED", new_data={"dept": new_dept, "type": new_type, "rate": float(new_rate)})
+            else:
+                rates.append({"dept": new_dept, "type": new_type, "rate": float(new_rate), "active": True})
+                log_action("HR_RATE_ADDED", new_data={"dept": new_dept, "type": new_type, "rate": float(new_rate)})
+            save_hr_daily_rates(rates)
+            st.success(f"✅ Saved rate for {new_dept} / {new_type}."); st.rerun()
+    st.divider()
+    if not rates:
+        st.info("📋 No daily rates configured yet.")
+    else:
+        for i, r in enumerate(rates):
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+            c1.markdown(f"🏢 **{r['dept']}**")
+            c2.markdown(f"🔄 {r['type']}")
+            c3.markdown(f"💷 **£{r['rate']:.2f}** {'✅' if r['active'] else '⛔'}")
+            with c4:
+                if st.button("🗑️", key=f"hr_rate_del_{i}"):
+                    rates.pop(i); save_hr_daily_rates(rates)
+                    log_action("HR_RATE_DELETED", old_data={"dept": r["dept"], "type": r["type"]})
+                    st.success("Deleted."); st.rerun()
+
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
 
 initialise_excel()
 initialise_work_orders()
 initialise_inspector_bonus()
+initialise_hr_leave()
 
 def load_records_from_excel(force=False):
     if not force and "_records_cache" in st.session_state:
@@ -2648,6 +3094,7 @@ def user_management_panel():
             perm_ad = mcol1.checkbox(PERMISSION_LABELS["can_access_addition_deduction"], value=defaults.get("can_access_addition_deduction", True))
             perm_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=defaults.get("can_access_work_orders", False))
             perm_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=defaults.get("can_access_wo_total", False))
+            perm_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=defaults.get("can_access_hr_leave", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
             new_active = st.checkbox("✅ Account Active", value=True, help="Uncheck to block this user from logging in.")
@@ -2655,9 +3102,9 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "is_active": new_active}
                     save_users(USERS)
-                    log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active, "permissions": {"can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total}})
+                    log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active})
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
     with tab2:
         st.markdown("### ✏️ Edit User")
@@ -2681,6 +3128,7 @@ def user_management_panel():
                 curr_perm_ad = bool(curr.get("can_access_addition_deduction", False))
                 curr_perm_wo = bool(curr.get("can_access_work_orders", False))
                 curr_perm_wo_total = bool(curr.get("can_access_wo_total", False))
+                curr_perm_hr = bool(curr.get("can_access_hr_leave", False))
                 ecol1, ecol2 = st.columns(2)
                 edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
                 edit_pdf = ecol1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=curr_perm_pdf)
@@ -2691,13 +3139,14 @@ def user_management_panel():
                 edit_ad = mcol1.checkbox(PERMISSION_LABELS["can_access_addition_deduction"], value=curr_perm_ad)
                 edit_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=curr_perm_wo)
                 edit_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=curr_perm_wo_total)
+                edit_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=curr_perm_hr)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
                 if st.form_submit_button("🔄 Update User", type="primary"):
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -2712,9 +3161,10 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_addition_deduction"] = edit_ad
                         USERS[edit_user_sel]["can_access_work_orders"] = edit_wo
                         USERS[edit_user_sel]["can_access_wo_total"] = edit_wo_total
+                        USERS[edit_user_sel]["can_access_hr_leave"] = edit_hr
                         USERS[edit_user_sel]["is_active"] = edit_active
                     save_users(USERS)
-                    log_action("USER_EDITED", old_data=curr, new_data={"full_name": upd_full_name.strip(), "username": upd_username_new, "role": upd_role, "department": upd_dept, "is_active": edit_active, "permissions": {"can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total}})
+                    log_action("USER_EDITED", old_data=curr, new_data={"full_name": upd_full_name.strip(), "username": upd_username_new, "role": upd_role, "department": upd_dept, "is_active": edit_active})
                     st.success(f"✅ User updated: **{upd_full_name}**"); st.rerun()
     with tab3:
         st.markdown("### ⚠️ Delete User Account")
@@ -2783,7 +3233,12 @@ elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    tab_add_ded, tab_work_orders, tab_inspector_bonus = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"])
+    tab_add_ded, tab_hr_leave, tab_work_orders, tab_inspector_bonus = st.tabs([
+        "➕ Addition & Deduction",
+        "👥 HR Leave Settlement",
+        "🛠️ Work Orders",
+        "💰 National Grid Inspector Bonus"
+    ])
     with tab_add_ded:
         tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
         with tab_pending:
@@ -2830,6 +3285,7 @@ elif role == "Payroll":
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
+    with tab_hr_leave: render_hr_leave_payroll_portal()
     with tab_work_orders: render_work_order_payroll_portal(full_name)
     with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
 
@@ -2961,8 +3417,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_inspector_bonus = user_info.get("can_access_inspector_bonus", False)
     has_addition_deduction = user_info.get("can_access_addition_deduction", True)
     has_work_orders = user_info.get("can_access_work_orders", False)
+    has_hr_leave = user_info.get("can_access_hr_leave", False)
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
+    if has_hr_leave: labels.append("👥 HR Leave Settlement")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
     if not labels:
@@ -3089,6 +3547,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                                         st.session_state.editing_request_id = req.get("id"); st.rerun()
             tab_idx += 1
+        if has_hr_leave:
+            with tabs[tab_idx]:
+                render_hr_leave_form(full_name)
+            tab_idx += 1
         if has_work_orders:
             with tabs[tab_idx]:
                 render_work_order_employee_portal(full_name, dept_name)
@@ -3099,7 +3561,12 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
 
 elif role == "Director":
-    director_addition_tab, director_work_order_tab, director_inspector_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"])
+    director_addition_tab, director_hr_tab, director_work_order_tab, director_inspector_tab = st.tabs([
+        "➕ Addition & Deduction",
+        "👥 HR Leave Settlement",
+        "🛠️ Work Orders",
+        "💰 National Grid Inspector Bonus"
+    ])
     with director_addition_tab:
         st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -3213,12 +3680,15 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
+    with director_hr_tab:
+        render_hr_leave_director_portal(full_name)
     with director_work_order_tab: render_work_order_director_portal(full_name)
     with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
+    super_add_ded_tab, super_hr_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
         "➕ Addition & Deduction",
+        "👥 HR Leave Settlement",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus",
         "🔧 System Management"
@@ -3274,6 +3744,8 @@ elif role == "Super Admin":
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
+    with super_hr_tab:
+        render_hr_leave_super_admin()
     with super_work_orders_tab:
         render_work_orders_super_admin()
     with super_inspector_bonus_tab:
@@ -3282,8 +3754,14 @@ elif role == "Super Admin":
         st.subheader("🔧 System Management — Super Admin")
         st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
         st.divider()
-        tab_settings, tab_users, tab_audit = st.tabs(["⚙️ System Settings", "👤 User Management", "📖 Audit History"])
+        tab_settings, tab_hr_settings, tab_users, tab_audit = st.tabs([
+            "⚙️ System Settings",
+            "👥 HR Leave Settings",
+            "👤 User Management",
+            "📖 Audit History"
+        ])
         with tab_settings: settings_management_panel()
+        with tab_hr_settings: render_hr_leave_settings()
         with tab_users: user_management_panel()
         with tab_audit:
             if "display_audit_log_panel" in globals(): display_audit_log_panel()
@@ -3307,7 +3785,7 @@ elif role == "Super Admin":
                         if st.button("↩️ Cancel", key="cancel_clear_all_requests_btn"):
                             st.session_state["confirm_clear_requests"] = False; st.rerun()
             with danger_col2:
-                reset_col1, reset_col2, reset_col3 = st.columns(3)
+                reset_col1, reset_col2, reset_col3, reset_col4 = st.columns(4)
                 with reset_col1:
                     if not st.session_state.get("confirm_clear_inspector_bonus", False):
                         if st.button("💰 Clear Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", use_container_width=True):
@@ -3328,6 +3806,15 @@ elif role == "Super Admin":
                             st.session_state["confirm_clear_all_work_orders"] = False
                             st.success("✅ Cleared."); st.rerun()
                 with reset_col3:
+                    if not st.session_state.get("confirm_clear_hr_leave", False):
+                        if st.button("👥 Clear HR Leave", key="super_admin_clear_all_hr_leave", type="secondary", use_container_width=True):
+                            st.session_state["confirm_clear_hr_leave"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_hr_leave", use_container_width=True):
+                            clear_all_hr_leave()
+                            st.session_state["confirm_clear_hr_leave"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col4:
                     if not st.session_state.get("confirm_clear_audit", False):
                         if st.button("🗑️ Clear Audit", type="secondary", key="clear_audit_history_btn"):
                             st.session_state["confirm_clear_audit"] = True; st.rerun()
@@ -3345,6 +3832,8 @@ elif role == "Super Admin":
             ("📥 Settings", SETTINGS_PATH, "settings", "backup_settings"),
             ("📥 Inspector Bonuses", INSPECTOR_BONUS_PATH, "inspector_bonus", "backup_inspector_bonus"),
             ("📥 Work Orders", WORK_ORDERS_PATH, "work_orders", "backup_work_orders"),
+            ("📥 HR Leave Requests", HR_LEAVE_PATH, "hr_leave_requests", "backup_hr_leave"),
+            ("📥 HR Daily Rates", HR_DAILY_RATES_PATH, "hr_daily_rates", "backup_hr_rates"),
             ("📥 Audit Log", AUDIT_LOG_PATH, "audit_log", "backup_audit_log"),
         ]
         backup_cols = st.columns(3)
@@ -3371,24 +3860,26 @@ elif role == "Super Admin":
         st.warning(
             "Use this only after downloading the backups above. "
             "It permanently clears all operational/test data: requests, work orders, "
-            "inspector bonuses and audit history. User accounts and system settings are NOT deleted."
+            "inspector bonuses, HR leave requests and audit history. User accounts and system settings are NOT deleted."
         )
 
         def _clear_live_launch_data():
             clear_all_requests_file()
             clear_all_inspector_bonus()
             _write_empty_excel(WORK_ORDERS_PATH, WORK_ORDER_COLUMNS)
+            _write_empty_excel(HR_LEAVE_PATH, HR_LEAVE_COLUMNS)
             _invalidate_data_cache(
                 "_work_orders_cache",
                 "_work_order_cache",
                 "_inspector_bonus_cache",
                 "_records_cache",
+                "_hr_leave_cache",
             )
             sync_saved_file_to_drive(WORK_ORDERS_PATH)
+            sync_saved_file_to_drive(HR_LEAVE_PATH)
             clear_audit_log_file()
 
-            # Remove generated operational PDFs/attachments, but keep directories.
-            for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, UPLOAD_DIR):
+            for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, UPLOAD_DIR):
                 if os.path.isdir(folder):
                     for root, dirs, files in os.walk(folder, topdown=False):
                         for filename in files:
@@ -3415,7 +3906,7 @@ elif role == "Super Admin":
         else:
             st.error(
                 "⚠️ FINAL CONFIRMATION: this will permanently remove all requests, "
-                "work orders, inspector bonuses, audit history, generated PDFs and uploaded attachments. "
+                "work orders, inspector bonuses, HR leave requests, audit history, generated PDFs and uploaded attachments. "
                 "Users and system settings will remain."
             )
             live_c1, live_c2 = st.columns(2)
