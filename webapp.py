@@ -106,20 +106,38 @@ _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.Lock()
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION — BASE64 METHOD (v4.17)
+# GOOGLE DRIVE CONNECTION — BASE64 METHOD WITH DIAGNOSTICS
 # ============================================================
 try:
     gdrive = st.secrets["gdrive"]
     
-    # Get the base64 string and clean it of any whitespace/newlines
+    # --- DIAGNOSTICS ---
+    if "key_b64" not in gdrive:
+        st.error("❌ Secret 'key_b64' not found. Available keys: " + str(list(gdrive.keys())))
+        raise KeyError("key_b64 missing from [gdrive] section")
+    
     b64_string = str(gdrive["key_b64"])
+    st.write(f"🔍 DEBUG: Secret length = {len(b64_string)} characters")
+    st.write(f"🔍 DEBUG: First 60 chars = `{b64_string[:60]}`")
+    
+    # Clean whitespace
     b64_string = b64_string.replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
+    st.write(f"🔍 DEBUG: Cleaned length = {len(b64_string)} characters")
     
-    # Decode the base64 string back into JSON
+    if len(b64_string) < 100:
+        st.error("❌ The base64 string is too short. You probably pasted the placeholder or only part of the string.")
+        raise ValueError("base64 string too short")
+    
+    # Decode
     decoded_json = base64.b64decode(b64_string).decode("utf-8")
-    creds_dict = json.loads(decoded_json)
+    st.write(f"🔍 DEBUG: Decoded JSON length = {len(decoded_json)} characters")
+    st.write(f"🔍 DEBUG: JSON starts with = `{decoded_json[:80]}`")
     
-    # Authenticate using the Service Account
+    # Parse
+    creds_dict = json.loads(decoded_json)
+    st.write(f"🔍 DEBUG: Parsed keys = {list(creds_dict.keys())}")
+    
+    # Authenticate
     credentials = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
     )
