@@ -2569,13 +2569,16 @@ def render_hr_leave_form(user_name):
 
     with col_left:
         emp_name = st.text_input("👤 Employee Name", key=K_EMP)
-        # Placeholder for live Transaction Type display
-        type_slot = st.empty()
+        # Transaction Type display is hidden — logic still runs below
         owe_owed = st.selectbox("⚖️ Owe / Owed", DEFAULT_OWE_OWED, key=K_OWE)
 
     with col_right:
         dt_val = st.date_input("📅 Date", value=date.today(), key=K_DATE)
         emp_dept = st.selectbox("🏢 Employee Department", departments, key=K_DEPT)
+
+    # ============ AUTO-LINKED TRANSACTION TYPE (HIDDEN — logic still active) ============
+    transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
+    # ❌ No visible field — transaction_type is silently computed and used below
 
     # ============ AUTO-LINKED TRANSACTION TYPE (rendered into the placeholder above) ============
     transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
