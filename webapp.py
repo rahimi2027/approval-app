@@ -25,7 +25,7 @@ import pandas as pd
 import io
 import requests
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
@@ -107,7 +107,7 @@ drive_service = None
 
 _DRIVE_ID_CACHE = {}
 _DRIVE_SYNC_FINGERPRINTS = {}
-_DRIVE_SYNC_LOCK = threading.Lock()
+_DRIVE_SYNC_LOCK = threading.RLock()
 
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD v4.18)
@@ -208,18 +208,27 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
         return None
 
 def _drive_download_file(file_id, local_path):
+    """Download a Drive file atomically so readers never see a half-written XLSX."""
     if drive_service is None: return False
-    try:
-        request = drive_service.files().get_media(fileId=file_id)
-        with open(local_path, "wb") as fh:
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
-        return True
-    except Exception as e:
-        print(f"Drive download failed for {local_path}: {e}")
-        return False
+    with _DRIVE_SYNC_LOCK:
+        tmp_path = f"{local_path}.download_{os.getpid()}"
+        try:
+            parent = os.path.dirname(os.path.abspath(local_path))
+            os.makedirs(parent, exist_ok=True)
+            request = drive_service.files().get_media(fileId=file_id)
+            with open(tmp_path, "wb") as fh:
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+            os.replace(tmp_path, local_path)
+            return True
+        except Exception as e:
+            print(f"Drive download failed for {local_path}: {e}")
+            try:
+                if os.path.exists(tmp_path): os.remove(tmp_path)
+            except OSError: pass
+            return False
 
 def sync_persistent_file(local_path, columns=None):
     if drive_service is None: return
@@ -232,7 +241,7 @@ def sync_persistent_file(local_path, columns=None):
             if os.path.exists(local_path) and rmt:
                 if "." in rmt: remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S.%f")
                 else: remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S")
-                local_dt = datetime.utcfromtimestamp(os.path.getmtime(local_path))
+                local_dt = datetime.fromtimestamp(os.path.getmtime(local_path), timezone.utc).replace(tzinfo=None)
                 if local_dt > remote_dt: local_newer = True
             if not local_newer:
                 if not _drive_download_file(remote["id"], local_path):
@@ -247,43 +256,53 @@ def sync_persistent_file(local_path, columns=None):
         _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
+    """Synchronise a changed persistent file to Drive safely.
+
+    This intentionally runs synchronously. The previous daemon-thread implementation
+    allowed Streamlit reruns and Google Drive/openpyxl operations to overlap on the
+    same XLSX file, which could leave a file half-written and, on Streamlit Cloud,
+    cause the process to abort with `free(): corrupted unsorted chunks`.
+    """
     if drive_service is None or not os.path.exists(local_path): return
-    try:
-        st_info = os.stat(local_path)
-        fingerprint = f"{st_info.st_size}:{int(st_info.st_mtime)}"
-    except Exception: return
-    if _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint: return
-    _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
-    def _worker(path):
-        with _DRIVE_SYNC_LOCK:
-            try:
-                if _drive_upload_path(path) is None:
-                    _DRIVE_SYNC_FINGERPRINTS.pop(path, None)
-            except Exception as e:
-                print(f"Background drive sync failed for {path}: {e}")
-                _DRIVE_SYNC_FINGERPRINTS.pop(path, None)
-    threading.Thread(target=_worker, args=(local_path,), daemon=True).start()
+    with _DRIVE_SYNC_LOCK:
+        try:
+            st_info = os.stat(local_path)
+            fingerprint = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
+            if _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint:
+                return
+            result = _drive_upload_path(local_path)
+            if result is not None:
+                _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
+            else:
+                _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
+        except Exception as e:
+            print(f"Drive sync failed for {local_path}: {e}")
+            _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
+
 
 def _upload_to_drive_bg(local_path, filename):
+    """Compatibility wrapper: upload synchronously to avoid unsafe background I/O."""
     if drive_service is None or not os.path.exists(local_path): return
-    def _worker(path, name):
-        try: upload_to_google_drive(path, name)
-        except Exception as e: print(f"Background upload failed for {name}: {e}")
-    threading.Thread(target=_worker, args=(local_path, filename), daemon=True).start()
+    try:
+        upload_to_google_drive(local_path, filename)
+    except Exception as e:
+        print(f"Drive upload failed for {filename}: {e}")
 
 def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"): return
-    targets = [
+    os.makedirs(APP_FOLDER, exist_ok=True)
+    with _DRIVE_SYNC_LOCK:
+        targets = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, USER_DB_COLUMNS),
         (SETTINGS_PATH, ["setting", "value"]),
         (AUDIT_LOG_PATH, AUDIT_COLUMNS),
-        (WORK_ORDERS_PATH, WORK_ORDER_COLUMNS),
-        (INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS),
-    ]
-    for path, columns in targets:
-        sync_persistent_file(path, columns)
-    st.session_state["drive_storage_initialised"] = True
+            (WORK_ORDERS_PATH, WORK_ORDER_COLUMNS),
+            (INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS),
+        ]
+        for path, columns in targets:
+            sync_persistent_file(path, columns)
+        st.session_state["drive_storage_initialised"] = True
 
 def get_onedrive_token():
     if not ONEDRIVE_CLIENT_ID or not ONEDRIVE_CLIENT_SECRET: return None
@@ -464,22 +483,19 @@ def save_audit_entry(entry):
         print(f"⚠️ Failed to save audit entry: {e}")
 
 def clear_audit_log_file():
-    if os.path.exists(AUDIT_LOG_FILE): os.remove(AUDIT_LOG_FILE)
-    pd.DataFrame(columns=AUDIT_COLUMNS).to_excel(AUDIT_LOG_FILE, index=False, engine="openpyxl")
+    _write_empty_excel(AUDIT_LOG_FILE, AUDIT_COLUMNS)
     _invalidate_data_cache("_audit_log_cache")
     st.session_state["_audit_log_count"] = 0
     sync_saved_file_to_drive(AUDIT_LOG_FILE)
 
 def clear_all_requests_file():
-    if os.path.exists(EXCEL_PATH): os.remove(EXCEL_PATH)
-    pd.DataFrame(columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
+    _write_empty_excel(EXCEL_PATH, EXCEL_COLUMNS)
     _set_data_cache("_records_cache", [])
     sync_saved_file_to_drive(EXCEL_PATH)
     st.session_state["_live_data_reset"] = datetime.now().isoformat()
 
 def clear_all_inspector_bonus():
-    if os.path.exists(INSPECTOR_BONUS_PATH): os.remove(INSPECTOR_BONUS_PATH)
-    pd.DataFrame(columns=INSPECTOR_BONUS_COLUMNS).to_excel(INSPECTOR_BONUS_PATH, index=False, engine="openpyxl")
+    _write_empty_excel(INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS)
     _set_data_cache("_inspector_bonus_cache", [])
     sync_saved_file_to_drive(INSPECTOR_BONUS_PATH)
 
