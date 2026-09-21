@@ -21,11 +21,11 @@ import json
 import base64
 import shutil
 import subprocess
-import re
 import pandas as pd
 import io
 import requests
 import threading
+import re
 from datetime import datetime, date
 
 from googleapiclient.discovery import build
@@ -1592,7 +1592,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
 def render_work_order_director_portal(director_name):
     st.subheader("🛠️ Work Orders — Director Final Approval")
     st.info("✅ Review all work orders, Approve, Reject, OR Change Status at any time. All changes are logged.")
-    orders = load_work_orders()
+    orders = load_work_orders(force=True)
     pending = [r for r in orders if r.get("status") == "pending_director"]
     approved = [r for r in orders if r.get("status") == "approved_payment"]
     rejected = [r for r in orders if r.get("status") == "rejected_director"]
@@ -2718,7 +2718,7 @@ st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 
 change_my_password_form()
 
-all_live_requests = load_records_from_excel()
+all_live_requests = load_records_from_excel(force=True)
 CATEGORIES = load_categories()
 
 st.divider()
