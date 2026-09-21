@@ -1900,7 +1900,7 @@ def inspector_bonus_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.cell(0, 10, safe("National Grid Inspector Bonus Approval Sheet"), ln=True, align="C")
         pdf.ln(4)
         pdf.set_font(family, "", 10)
-        pdf.multi_cell(0, 6, safe("This sheet needs to be completed and passed to Andy to be signed off and given to Accounts Team by the 3rd of the month."), align="C")
+        pdf.multi_cell(0, 6, safe("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month."), align="C")
         pdf.ln(8)
         def field(label, value, label_w=60, value_h=10):
             pdf.set_font(family, "B", 11); pdf.cell(label_w, value_h, safe(label), border=1)
@@ -3337,19 +3337,107 @@ elif role == "Super Admin":
                             st.success("✅ Cleared."); st.rerun()
         st.divider()
         st.subheader("📥 Download Data Backups")
-        bcol1, bcol2, bcol3 = st.columns(3)
-        with bcol1:
-            if os.path.exists(EXCEL_PATH):
-                with open(EXCEL_PATH, "rb") as f:
-                    st.download_button("📥 Requests", f.read(), file_name=f"BACKUP_requests_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_requests")
-        with bcol2:
-            if os.path.exists(USER_DB_PATH):
-                with open(USER_DB_PATH, "rb") as f:
-                    st.download_button("📥 Users", f.read(), file_name=f"BACKUP_users_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_users")
-        with bcol3:
-            if os.path.exists(SETTINGS_PATH):
-                with open(SETTINGS_PATH, "rb") as f:
-                    st.download_button("📥 Settings", f.read(), file_name=f"BACKUP_settings_{datetime.now().strftime('%Y-%m-%d')}.xlsx", type="primary", key="backup_settings")
+        st.caption("Download a copy before using the live-launch reset. User accounts and system settings are kept separately.")
+
+        backup_files = [
+            ("📥 Requests", EXCEL_PATH, "requests", "backup_requests"),
+            ("📥 Users", USER_DB_PATH, "users", "backup_users"),
+            ("📥 Settings", SETTINGS_PATH, "settings", "backup_settings"),
+            ("📥 Inspector Bonuses", INSPECTOR_BONUS_PATH, "inspector_bonus", "backup_inspector_bonus"),
+            ("📥 Work Orders", WORK_ORDERS_PATH, "work_orders", "backup_work_orders"),
+            ("📥 Audit Log", AUDIT_LOG_PATH, "audit_log", "backup_audit_log"),
+        ]
+        backup_cols = st.columns(3)
+        for i, (label, path, stem, key) in enumerate(backup_files):
+            with backup_cols[i % 3]:
+                if os.path.exists(path):
+                    try:
+                        with open(path, "rb") as f:
+                            st.download_button(
+                                label,
+                                f.read(),
+                                file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                                type="primary",
+                                key=key,
+                                width="stretch",
+                            )
+                    except Exception as e:
+                        st.warning(f"Unable to prepare {label}: {e}")
+                else:
+                    st.button(f"{label} (not available)", disabled=True, key=f"{key}_missing")
+
+        st.divider()
+        st.subheader("🚀 Make Software Live")
+        st.warning(
+            "Use this only after downloading the backups above. "
+            "It permanently clears all operational/test data: requests, work orders, "
+            "inspector bonuses and audit history. User accounts and system settings are NOT deleted."
+        )
+
+        def _clear_live_launch_data():
+            clear_all_requests_file()
+            clear_all_inspector_bonus()
+            _write_empty_excel(WORK_ORDERS_PATH, WORK_ORDER_COLUMNS)
+            _invalidate_data_cache(
+                "_work_orders_cache",
+                "_work_order_cache",
+                "_inspector_bonus_cache",
+                "_records_cache",
+            )
+            sync_saved_file_to_drive(WORK_ORDERS_PATH)
+            clear_audit_log_file()
+
+            # Remove generated operational PDFs/attachments, but keep directories.
+            for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, UPLOAD_DIR):
+                if os.path.isdir(folder):
+                    for root, dirs, files in os.walk(folder, topdown=False):
+                        for filename in files:
+                            try:
+                                os.remove(os.path.join(root, filename))
+                            except OSError:
+                                pass
+                        for dirname in dirs:
+                            try:
+                                os.rmdir(os.path.join(root, dirname))
+                            except OSError:
+                                pass
+            st.session_state["_live_data_reset"] = datetime.now().isoformat()
+
+        if not st.session_state.get("confirm_live_launch", False):
+            if st.button(
+                "🚀 Make Software Live — Clear All Operational Data",
+                type="primary",
+                key="make_software_live_btn",
+                width="stretch",
+            ):
+                st.session_state["confirm_live_launch"] = True
+                st.rerun()
+        else:
+            st.error(
+                "⚠️ FINAL CONFIRMATION: this will permanently remove all requests, "
+                "work orders, inspector bonuses, audit history, generated PDFs and uploaded attachments. "
+                "Users and system settings will remain."
+            )
+            live_c1, live_c2 = st.columns(2)
+            with live_c1:
+                if st.button(
+                    "🚀 YES — Make Software Live",
+                    type="primary",
+                    key="confirm_make_software_live_btn",
+                    width="stretch",
+                ):
+                    try:
+                        _clear_live_launch_data()
+                        st.session_state["confirm_live_launch"] = False
+                        st.success("✅ Software is ready for live use. All operational/test data has been cleared.")
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state["confirm_live_launch"] = False
+                        st.error(f"❌ Live launch reset failed: {e}")
+            with live_c2:
+                if st.button("↩️ Cancel", key="cancel_make_software_live_btn", width="stretch"):
+                    st.session_state["confirm_live_launch"] = False
+                    st.rerun()
 
 else:
     st.subheader("🔐 Access Restricted")
