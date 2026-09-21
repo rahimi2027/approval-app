@@ -113,6 +113,10 @@ try:
     # Convert the Streamlit secrets object to a regular dictionary
     creds_dict = dict(gdrive)
     
+    # ✅ THIS LINE FIXES THE 'Invalid JWT Signature' ERROR
+    # It converts the literal '\n' characters into actual line breaks.
+    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    
     # Authenticate using the Service Account
     credentials = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
