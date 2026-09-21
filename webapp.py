@@ -27,7 +27,7 @@ from datetime import datetime, date
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
-from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account  # ✅ CHANGED: Use service_account instead of Credentials
 
 st.markdown("""
     <style>
@@ -107,19 +107,19 @@ _DRIVE_ID_CACHE = {}
 _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.Lock()
 
+# ✅ CHANGED: Replaced OAuth with Service Account connection
 try:
     gdrive = st.secrets["gdrive"]
-    credentials = Credentials(
-        token=None,
-        refresh_token=gdrive["refresh_token"],
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=gdrive["client_id"],
-        client_secret=gdrive["client_secret"],
-        scopes=SCOPES
+    # Convert the Streamlit secrets object to a regular dictionary
+    creds_dict = dict(gdrive)
+    
+    # Authenticate using the Service Account
+    credentials = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=SCOPES
     )
     drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
     about = drive_service.about().get(fields="user").execute()
-    st.success("✅ Google Drive connected")
+    st.success("✅ Google Drive connected (Service Account)")
 except Exception as e:
     drive_service = None
     st.error(f"❌ Google Drive connection failed: {e}")
