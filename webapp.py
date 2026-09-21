@@ -1,22 +1,19 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.15
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.16
 # ============================================================
-# ✅ v4.15 (WORK ORDER TOTAL TAB RESTRUCTURE):
-#    • Moved "Approved Work Order Total" to be a TOP-LEVEL tab
-#      inside the Work Orders portal for Employees / Team Members.
-#      It is no longer a sibling to "My Work Orders" / "Department".
-# ✅ v4.14 (WORK ORDER TOTAL FOR EMPLOYEES/TEAM MEMBERS):
-#    • Fixed: "Approved Work Order Total" tab now appears for
-#      Team Members / Staff / Work Order Employees if granted.
-# ✅ v4.13 (GRANULAR WORK ORDER TOTAL PERMISSION):
-#    • NEW per-user flag: can_access_wo_total.
-# ✅ v4.12 (USER ACTIVE / INACTIVE + SUPER ADMIN FULL ACCESS):
-#    • NEW per-user flag: is_active (Active / Inactive).
+# ✅ v4.16 (PERMANENT GOOGLE DRIVE FIX):
+#    • Uses base64-encoded Service Account JSON in secrets.
+#    • Eliminates all private_key formatting issues permanently.
+# ✅ v4.15 (WORK ORDER TOTAL TAB RESTRUCTURE)
+# ✅ v4.14 (WORK ORDER TOTAL FOR EMPLOYEES/TEAM MEMBERS)
+# ✅ v4.13 (GRANULAR WORK ORDER TOTAL PERMISSION)
+# ✅ v4.12 (USER ACTIVE / INACTIVE + SUPER ADMIN FULL ACCESS)
 # ============================================================
 import streamlit as st
 import os
 import sys
 import json
+import base64
 import shutil
 import subprocess
 import pandas as pd
@@ -27,7 +24,7 @@ from datetime import datetime, date
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
-from google.oauth2 import service_account  # ✅ CHANGED: Use service_account instead of Credentials
+from google.oauth2 import service_account
 
 st.markdown("""
     <style>
@@ -107,15 +104,14 @@ _DRIVE_ID_CACHE = {}
 _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.Lock()
 
-# ✅ CHANGED: Replaced OAuth with Service Account connection
+# ============================================================
+# GOOGLE DRIVE CONNECTION — BASE64 METHOD (v4.16)
+# ============================================================
 try:
     gdrive = st.secrets["gdrive"]
-    # Convert the Streamlit secrets object to a regular dictionary
-    creds_dict = dict(gdrive)
-    
-    # ✅ THIS LINE FIXES THE 'Invalid JWT Signature' ERROR
-    # It converts the literal '\n' characters into actual line breaks.
-    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    # Decode the base64-encoded Service Account JSON from Streamlit Secrets
+    decoded_json = base64.b64decode(gdrive["key_b64"]).decode("utf-8")
+    creds_dict = json.loads(decoded_json)
     
     # Authenticate using the Service Account
     credentials = service_account.Credentials.from_service_account_info(
@@ -705,7 +701,7 @@ def _active_or_default(raw_value):
     s = str(raw_value).strip().lower()
     if s in ("true", "false"):
         return s == "true"
-    return True  # default = active
+    return True
 
 def load_users(force=False):
     init_user_db()
@@ -733,18 +729,12 @@ def load_users(force=False):
                 "can_access_wo_total": _flag_or_default(r.get("can_access_wo_total", ""), user_role, "can_access_wo_total"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
-            # ✅ v4.15 — Super Admin ALWAYS gets full access, no matter what
             if user_role == "Super Admin":
                 users[username].update({
-                    "can_view_all_dept": True,
-                    "can_generate_pdf": True,
-                    "can_download_data": True,
-                    "can_approve_requests": True,
-                    "can_access_inspector_bonus": True,
-                    "can_access_addition_deduction": True,
-                    "can_access_work_orders": True,
-                    "can_access_wo_total": True,
-                    "is_active": True
+                    "can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True,
+                    "can_approve_requests": True, "can_access_inspector_bonus": True,
+                    "can_access_addition_deduction": True, "can_access_work_orders": True,
+                    "can_access_wo_total": True, "is_active": True
                 })
         _set_data_cache("_users_cache", users)
         return dict(users)
@@ -1160,16 +1150,12 @@ def render_work_order_employee_portal(current_user, current_dept):
     _success_msg = st.session_state.pop("emp_new_wo_success", None)
     if _success_msg: st.success(_success_msg)
     editing_id = st.session_state.get("editing_work_order_id_emp")
-    
     user_info = st.session_state.get("user_info", {})
     can_access_wo_total = user_info.get("can_access_wo_total", False)
-
-    # ✅ v4.15 — Top-level tabs inside Work Order portal
     if can_access_wo_total:
         main_tab, total_tab = st.tabs(["🛠️ Work Orders", "💷 Approved Work Order Total"])
     else:
         main_tab = st.tabs(["🛠️ Work Orders"])[0]
-
     with main_tab:
         if editing_id:
             rec = next((r for r in orders if str(r.get("id")) == str(editing_id)), None)
@@ -1292,12 +1278,10 @@ def render_work_order_employee_portal(current_user, current_dept):
                     st.session_state["emp_new_wo_success"] = (f"✅ Work Order No. {work_order_no.strip()} submitted to {manager} for review.")
                     st.rerun()
         st.divider()
-        
         tab_mine, tab_dept = st.tabs([
             "📋 My Work Orders",
             f"🏢 Department Work Orders ({current_dept})"
         ])
-        
         with tab_mine:
             q = st.text_input("🔎 Search my work orders", placeholder="Search by ID, employee, manager, status, amount, date or description...", key="wo_employee_search")
             mine = [r for r in orders if r.get("submitted_by") == current_user]
@@ -1352,7 +1336,6 @@ def render_work_order_employee_portal(current_user, current_dept):
                         if r.get("site_address"): st.write(f"📍 **Site Address:** {r.get('site_address')}")
                         if r.get("customer_job_no"): st.write(f"📘 **Customer Job No.:** {r.get('customer_job_no')}")
                         st.info(f"📝 {r.get('desc', '')}")
-
     if can_access_wo_total:
         with total_tab:
             render_work_order_total(orders, scope_department=current_dept, key_prefix="wo_emp_total", prepared_by=current_user)
@@ -1401,15 +1384,12 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
     pending = [r for r in manager_orders if r.get("status") in ("pending_director", "pending_manager", "pending")]
     approved = [r for r in manager_orders if r.get("status") in ("approved_payment", "approved")]
     rejected = [r for r in manager_orders if r.get("status") in ("rejected_director", "rejected", "returned_to_employee")]
-    
     user_info = st.session_state.get("user_info", {})
     can_access_wo_total = user_info.get("can_access_wo_total", False)
-    
     if can_access_wo_total:
         main_tab, total_tab = st.tabs(["🛠️ Work Orders", "💷 Approved Work Order Total"])
     else:
         main_tab = st.tabs(["🛠️ Work Orders"])[0]
-
     with main_tab:
         st.markdown("### 📤 Submit New Work Order")
         st.caption("Complete the work-order details below. No hours/time entry is required.")
@@ -1557,10 +1537,8 @@ def render_work_order_director_portal(director_name):
     pending = [r for r in orders if r.get("status") == "pending_director"]
     approved = [r for r in orders if r.get("status") == "approved_payment"]
     rejected = [r for r in orders if r.get("status") == "rejected_director"]
-
     user_info = st.session_state.get("user_info", {})
     can_access_wo_total = user_info.get("can_access_wo_total", True)
-
     if can_access_wo_total:
         t1, t2, t3, t4 = st.tabs([
             f"⏳ Manager Approved / Awaiting Director ({len(pending)})",
@@ -1574,14 +1552,12 @@ def render_work_order_director_portal(director_name):
             f"✅ Approved for Payment ({len(approved)})",
             f"❌ Rejected ({len(rejected)})"
         ])
-
     def search_list(items, key):
         q = st.text_input("🔎 Search Work Orders", placeholder="Search by Work Order No., employee, manager, submitter, amount, date, customer job no. or description...", key=key)
         if q.strip():
             q = q.lower().strip()
             items = [r for r in items if q in " ".join(str(v) for v in r.values()).lower()]
         return items
-
     def show_full_details(r):
         st.write(f"🧾 **Work Order No.:** {get_work_order_number(r)}")
         st.write(f"👤 **Contractor / Employee Labour:** {r.get('emp_name','-')}")
@@ -1600,7 +1576,6 @@ def render_work_order_director_portal(director_name):
         st.divider()
         st.markdown("#### 📎 Attachments")
         display_attachments(r)
-
     def apply_status_change(req_id, new_status, comments, old_status):
         for x in orders:
             if str(x.get("id")) == str(req_id):
@@ -1626,7 +1601,6 @@ def render_work_order_director_portal(director_name):
                    old_data={"status": old_status}, new_data={"status": new_status},
                    decision_by=director_name)
         st.success(f"✅ Work Order #{req_id} status changed to **{new_status.replace('_',' ').title()}**.")
-
     with t1:
         items = search_list(pending, "wo_dir_pending_search")
         if not items:
@@ -1650,7 +1624,6 @@ def render_work_order_director_portal(director_name):
                     if st.button("❌ Reject", key=f"wo_dir_rej_{req_id}"):
                         apply_status_change(req_id, "rejected_director", comments, "pending_director")
                         st.rerun()
-
     with t2:
         items = search_list(approved, "wo_dir_approved_search")
         if not items:
@@ -1683,7 +1656,6 @@ def render_work_order_director_portal(director_name):
         if items:
             st.divider()
             render_work_order_bulk_download(load_work_orders(), key_prefix="wo_dir_bulk")
-
     with t3:
         items = search_list(rejected, "wo_dir_rejected_search")
         if not items:
@@ -1710,7 +1682,6 @@ def render_work_order_director_portal(director_name):
                     if st.button("✅ Change to Approved", key=f"wo_dir_rej_to_app_{req_id}", type="primary"):
                         apply_status_change(req_id, "approved_payment", new_comments, "rejected_director")
                         st.rerun()
-
     if can_access_wo_total:
         with t4:
             render_work_order_total(orders, key_prefix="wo_dir_total", prepared_by=director_name)
@@ -2879,12 +2850,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_inspector_bonus = user_info.get("can_access_inspector_bonus", False)
     has_addition_deduction = user_info.get("can_access_addition_deduction", True)
     has_work_orders = user_info.get("can_access_work_orders", False)
-
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
-
     if not labels:
         st.subheader("🔐 Access Restricted")
         st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
