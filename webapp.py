@@ -106,23 +106,25 @@ _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.Lock()
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION — BASE64 METHOD WITH DIAGNOSTICS
+# GOOGLE DRIVE CONNECTION — BASE64 METHOD (with auto-padding fix)
 # ============================================================
 try:
     gdrive = st.secrets["gdrive"]
     
-    # --- DIAGNOSTICS ---
     if "key_b64" not in gdrive:
         st.error("❌ Secret 'key_b64' not found. Available keys: " + str(list(gdrive.keys())))
         raise KeyError("key_b64 missing from [gdrive] section")
     
     b64_string = str(gdrive["key_b64"])
-    st.write(f"🔍 DEBUG: Secret length = {len(b64_string)} characters")
-    st.write(f"🔍 DEBUG: First 60 chars = `{b64_string[:60]}`")
     
     # Clean whitespace
     b64_string = b64_string.replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
-    st.write(f"🔍 DEBUG: Cleaned length = {len(b64_string)} characters")
+    
+    # ✅ FIX: Add '=' padding so the length is a multiple of 4
+    padding_needed = (4 - len(b64_string) % 4) % 4
+    if padding_needed:
+        b64_string += "=" * padding_needed
+        st.write(f"🔍 DEBUG: Added {padding_needed} padding character(s)")
     
     if len(b64_string) < 100:
         st.error("❌ The base64 string is too short. You probably pasted the placeholder or only part of the string.")
@@ -135,7 +137,6 @@ try:
     
     # Parse
     creds_dict = json.loads(decoded_json)
-    st.write(f"🔍 DEBUG: Parsed keys = {list(creds_dict.keys())}")
     
     # Authenticate
     credentials = service_account.Credentials.from_service_account_info(
@@ -144,6 +145,9 @@ try:
     drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
     about = drive_service.about().get(fields="user").execute()
     st.success("✅ Google Drive connected (Service Account)")
+    
+    # Clean up the debug messages after success
+    st.session_state["drive_debug_done"] = True
 except Exception as e:
     drive_service = None
     st.error(f"❌ Google Drive connection failed: {e}")
