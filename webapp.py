@@ -21,11 +21,11 @@ import json
 import base64
 import shutil
 import subprocess
+import re
 import pandas as pd
 import io
 import requests
 import threading
-import re
 from datetime import datetime, date
 
 from googleapiclient.discovery import build
@@ -585,11 +585,10 @@ def show_old_new_comparison(old_json, new_rec):
 
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
-        with st.spinner("Refreshing from Google Drive..."):
-            if drive_service is not None:
-                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH):
-                    remote = _drive_find_file(os.path.basename(path))
-                    if remote: _drive_download_file(remote["id"], path)
+        with st.spinner("Refreshing data..."):
+            # Just clear the cache. The local file is always the most up-to-date.
+            # The initialise_drive_storage() function already handles intelligent
+            # mtime comparison to sync with Google Drive when needed.
             _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
@@ -1592,7 +1591,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
 def render_work_order_director_portal(director_name):
     st.subheader("🛠️ Work Orders — Director Final Approval")
     st.info("✅ Review all work orders, Approve, Reject, OR Change Status at any time. All changes are logged.")
-    orders = load_work_orders(force=True)
+    orders = load_work_orders()
     pending = [r for r in orders if r.get("status") == "pending_director"]
     approved = [r for r in orders if r.get("status") == "approved_payment"]
     rejected = [r for r in orders if r.get("status") == "rejected_director"]
@@ -2718,7 +2717,7 @@ st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 
 change_my_password_form()
 
-all_live_requests = load_records_from_excel(force=True)
+all_live_requests = load_records_from_excel()
 CATEGORIES = load_categories()
 
 st.divider()
