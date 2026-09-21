@@ -2562,31 +2562,23 @@ def render_hr_leave_form(user_name):
     K_MGR   = f"hr_mgr_v{form_version}"
     K_FILES = f"hr_files_v{form_version}"
     K_DESC  = f"hr_desc_v{form_version}"
-    K_TYPE  = f"hr_type_v{form_version}"
 
-    # ============ TOP ROW: Employee Name | [Transaction Type slot] | Owe/Owed ============
+    # ============ TOP ROW ============
     col_left, col_right = st.columns(2)
 
     with col_left:
         emp_name = st.text_input("👤 Employee Name", key=K_EMP)
-        # Transaction Type display is hidden — logic still runs below
         owe_owed = st.selectbox("⚖️ Owe / Owed", DEFAULT_OWE_OWED, key=K_OWE)
 
     with col_right:
         dt_val = st.date_input("📅 Date", value=date.today(), key=K_DATE)
         emp_dept = st.selectbox("🏢 Employee Department", departments, key=K_DEPT)
 
-    # ============ AUTO-LINKED TRANSACTION TYPE (HIDDEN — logic still active) ============
+    # ============ AUTO-LINKED TRANSACTION TYPE (HIDDEN) ============
     transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
-    # ❌ No visible field — transaction_type is silently computed and used below
+    # No visible field — value is used below in the record and PDF
 
-    # ============ AUTO-LINKED TRANSACTION TYPE (rendered into the placeholder above) ============
-    transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
-    with type_slot.container():
-        st.text_input("🔄 Transaction Type (auto-linked)", value=transaction_type,
-                      disabled=True, key=K_TYPE)
-
-    # ============ SECOND ROW: Category | Days | Manager | Amount ============
+    # ============ SECOND ROW ============
     rate = get_hr_daily_rate(emp_dept, transaction_type)
 
     col_left2, col_right2 = st.columns(2)
@@ -2598,7 +2590,6 @@ def render_hr_leave_form(user_name):
 
     with col_right2:
         manager = st.text_input("👔 Line Manager", key=K_MGR)
-        # Auto-recalc amount whenever days / dept / owe_owed changes
         recalc_signature = f"{emp_dept}|{transaction_type}|{float(num_days)}"
         if st.session_state.get("_hr_amt_sig") != recalc_signature:
             if rate:
@@ -2613,7 +2604,7 @@ def render_hr_leave_form(user_name):
         else:
             st.caption("⚠️ No daily rate configured for this department/type — enter manually.")
 
-    # ============ FORM: Files, Description, Submit ============
+    # ============ FORM ============
     with st.form(f"hr_leave_form_v{form_version}", clear_on_submit=False):
         files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"],
                                  accept_multiple_files=True, key=K_FILES)
@@ -2651,7 +2642,7 @@ def render_hr_leave_form(user_name):
             hr_records.append(rec)
             save_all_hr_leave(hr_records)
             log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
-            for k in [K_EMP, K_OWE, K_CAT, K_DAYS, K_AMT, K_DATE, K_DEPT, K_MGR, K_FILES, K_DESC, K_TYPE, "_hr_amt_sig"]:
+            for k in [K_EMP, K_OWE, K_CAT, K_DAYS, K_AMT, K_DATE, K_DEPT, K_MGR, K_FILES, K_DESC, "_hr_amt_sig"]:
                 st.session_state.pop(k, None)
             st.session_state["hr_leave_form_version"] = form_version + 1
             st.success(f"✅ HR Leave Settlement #{new_id} sent to Director for approval.")
