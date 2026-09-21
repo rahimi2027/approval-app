@@ -21,7 +21,6 @@ import json
 import base64
 import shutil
 import subprocess
-import re
 import pandas as pd
 import io
 import requests
@@ -355,23 +354,64 @@ except ImportError:
     FPDF = None
     PDF_AVAILABLE = False
 
-def safe_init_excel(path, columns):
-    if not os.path.exists(path):
-        pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
-        return True
+_EXCEL_INIT_LOCK = threading.Lock()
+
+def _write_empty_excel(path, columns):
+    """Create/replace an Excel file safely, even when Streamlit reruns overlap."""
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    df = pd.DataFrame(columns=columns)
+    temp_path = f"{path}.tmp_{os.getpid()}"
     try:
-        df = pd.read_excel(path, engine="openpyxl").fillna("")
-        changed = False
-        for col in columns:
-            if col not in df.columns:
-                df[col] = ""
-                changed = True
-        if changed: df.to_excel(path, index=False, engine="openpyxl")
-        return True
-    except Exception:
-        os.remove(path)
-        pd.DataFrame(columns=columns).to_excel(path, index=False, engine="openpyxl")
-        return True
+        df.to_excel(temp_path, index=False, engine="openpyxl")
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try: os.remove(temp_path)
+            except OSError: pass
+
+def safe_init_excel(path, columns):
+    """Ensure an Excel file exists and has all required columns.
+
+    A previous version deleted the file inside the exception handler. On Streamlit
+    Cloud, overlapping reruns can make that delete race with another rerun and
+    raise FileNotFoundError, which can crash the whole app at startup. We now use
+    a lock plus an atomic replacement and never assume the file still exists when
+    repairing it.
+    """
+    with _EXCEL_INIT_LOCK:
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
+        if not os.path.exists(path):
+            _write_empty_excel(path, columns)
+            return True
+        try:
+            df = pd.read_excel(path, engine="openpyxl").fillna("")
+            changed = False
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = ""
+                    changed = True
+            if changed:
+                temp_path = f"{path}.tmp_{os.getpid()}"
+                try:
+                    df.to_excel(temp_path, index=False, engine="openpyxl")
+                    os.replace(temp_path, path)
+                finally:
+                    if os.path.exists(temp_path):
+                        try: os.remove(temp_path)
+                        except OSError: pass
+            return True
+        except Exception as exc:
+            # Do not call os.remove(path): another Streamlit rerun may already
+            # have replaced/removed it. Atomic replacement is sufficient.
+            try:
+                _write_empty_excel(path, columns)
+                print(f"Recreated invalid Excel file {path}: {exc}")
+                return True
+            except Exception as repair_exc:
+                print(f"Excel initialisation failed for {path}: {repair_exc}")
+                return False
 
 def _invalidate_data_cache(*names):
     for name in names: st.session_state.pop(name, None)
@@ -585,10 +625,11 @@ def show_old_new_comparison(old_json, new_rec):
 
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
-        with st.spinner("Refreshing data..."):
-            # Just clear the cache. The local file is always the most up-to-date.
-            # The initialise_drive_storage() function already handles intelligent
-            # mtime comparison to sync with Google Drive when needed.
+        with st.spinner("Refreshing from Google Drive..."):
+            if drive_service is not None:
+                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH):
+                    remote = _drive_find_file(os.path.basename(path))
+                    if remote: _drive_download_file(remote["id"], path)
             _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
@@ -1405,68 +1446,23 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
     with main_tab:
         st.markdown("### 📤 Submit New Work Order")
         st.caption("Complete the work-order details below. No hours/time entry is required.")
-
-        # Every widget in this form gets a dedicated namespace.  This is important
-        # because Work Order Managers also have the Addition & Deduction tab, and
-        # Streamlit requires widget keys to be unique across the whole page.
-        manager_key = re.sub(r"[^a-zA-Z0-9_]+", "_", str(manager_name or "manager")).strip("_").lower() or "manager"
-        dept_key = re.sub(r"[^a-zA-Z0-9_]+", "_", str(manager_dept or "department")).strip("_").lower() or "department"
-        wo_key_prefix = f"work_order_manager_{manager_key}_{dept_key}"
-
-        with st.form(f"{wo_key_prefix}_form", clear_on_submit=True):
+        form_version = st.session_state.get("wo_mgr_new_wo_form_version", 0)
+        with st.form(f"wo_mgr_new_work_order_form_v{form_version}", clear_on_submit=False):
             c1, c2 = st.columns(2)
             with c1:
-                work_order_no = st.text_input(
-                    "🧾 Work Order No.",
-                    key=f"{wo_key_prefix}_work_order_no",
-                    placeholder="Enter the Work Order No. from the work-order sheet"
-                )
-                contractor_employee = st.text_input(
-                    "👤 Contractor / Employee Labour",
-                    key=f"{wo_key_prefix}_employee",
-                    placeholder="Enter contractor or employee name"
-                )
-                site_address = st.text_area(
-                    "📍 Site Address",
-                    key=f"{wo_key_prefix}_site_address",
-                    placeholder="Enter the full site address",
-                    height=90
-                )
-                customer_job_no = st.text_input(
-                    "📘 Customer Job No.",
-                    key=f"{wo_key_prefix}_customer_job_no",
-                    placeholder="Enter Customer Job No."
-                )
+                work_order_no = st.text_input("🧾 Work Order No.", key=f"wo_mgr_wo_v{form_version}", placeholder="Enter the Work Order No. from the work-order sheet")
+                contractor_employee = st.text_input("👤 Contractor / Employee Labour", key=f"wo_mgr_emp_v{form_version}", placeholder="Enter contractor or employee name")
+                site_address = st.text_area("📍 Site Address", key=f"wo_mgr_site_v{form_version}", placeholder="Enter the full site address", height=90)
+                customer_job_no = st.text_input("📘 Customer Job No.", key=f"wo_mgr_cj_v{form_version}", placeholder="Enter Customer Job No.")
             with c2:
-                work_date = st.date_input(
-                    "📅 Date",
-                    key=f"{wo_key_prefix}_date",
-                    value=date.today()
-                )
-                amount = st.number_input(
-                    "💷 Amount (£)",
-                    min_value=0.01,
-                    step=1.0,
-                    format="%.2f",
-                    key=f"{wo_key_prefix}_amount"
-                )
-                description = st.text_area(
-                    "📝 Description",
-                    key=f"{wo_key_prefix}_description",
-                    placeholder="Describe the work completed...",
-                    height=150
-                )
-            files = st.file_uploader(
-                "📎 Supporting Work Order Document (optional)",
-                type=["pdf", "png", "jpg", "jpeg"],
-                accept_multiple_files=True,
-                key=f"{wo_key_prefix}_files"
-            )
-            submitted = st.form_submit_button(
-                "📤 Submit Work Order",
-                type="primary",
-                use_container_width=True
-            )
+                work_date = st.date_input("📅 Date", key=f"wo_mgr_date_v{form_version}", value=date.today())
+                amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", key=f"wo_mgr_amt_v{form_version}")
+                description = st.text_area("📝 Description", key=f"wo_mgr_desc_v{form_version}", placeholder="Describe the work completed...", height=150)
+            _all_users = load_users()
+            director_names = sorted({str(u.get("full_name", "")).strip() for u in _all_users.values() if str(u.get("role", "")).strip().lower() == "director" and str(u.get("full_name", "")).strip()})
+            director = director_names[0] if director_names else "Director"
+            files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_files_v{form_version}")
+            submitted = st.form_submit_button("📤 Submit Work Order", type="primary", use_container_width=True)
         if submitted:
             errors = []
             if not work_order_no.strip(): errors.append("Work Order No.")
@@ -1492,7 +1488,8 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 orders.append(rec)
                 save_all_work_orders(orders)
                 log_action("WORK_ORDER_MANAGER_CREATED", wid, decision_by=manager_name)
-                st.success(f"✅ Work Order {work_order_no.strip()} submitted to the Directors for final approval.")
+                st.session_state["wo_mgr_new_wo_form_version"] = form_version + 1
+                st.success(f"✅ Work Order {work_order_no.strip()} submitted to {director} for final approval.")
                 st.rerun()
         st.divider()
         wo_pending, wo_approved, wo_rejected = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Returned / Rejected ({len(rejected)})"])
@@ -2413,14 +2410,14 @@ def display_attachments(req):
             if not path: continue
             found_any = True
             is_image = name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
-            if is_image:
+            if is_director and is_image:
                 st.markdown(f"### 🖼️ {name}")
                 st.image(path, caption=name, use_container_width=True)
                 with open(path, "rb") as f:
-                    st.download_button(label=f"⬇️ Download {name}", data=f.read(), file_name=name, mime="image/*", key=f"attachment_image_preview_{req.get('id', idx)}_{idx}")
+                    st.download_button(label=f"⬇️ Download {name}", data=f.read(), file_name=name, mime="image/*", key=f"director_att_{req.get('id', idx)}_{idx}")
             else:
                 with open(path, "rb") as f: file_data = f.read()
-                st.download_button(label=f"⬇️ Download {name}", data=file_data, file_name=name, key=f"attachment_download_{req.get('id', idx)}_{idx}")
+                st.download_button(label=f"⬇️ Download {name}", data=file_data, file_name=name, key=f"attachment_{req.get('id', idx)}_{idx}")
         if not found_any: st.info("📎 Attachments referenced but files are not available.")
     except Exception as e:
         st.error(f"❌ Could not display attachments: {e}")
@@ -2855,22 +2852,20 @@ elif role == "Work Order Manager":
         else:
             st.subheader(f"➕ New Request — {dept_name}")
             nid = get_next_id(all_live_requests)
-            manager_form_key = re.sub(r"[^a-zA-Z0-9_]+", "_", str(full_name or "manager")).strip("_").lower() or "manager"
-            dept_form_key = re.sub(r"[^a-zA-Z0-9_]+", "_", str(dept_name or "department")).strip("_").lower() or "department"
-            request_key_prefix = f"mgr_request_{manager_form_key}_{dept_form_key}"
-            with st.form(f"{request_key_prefix}_form", clear_on_submit=True):
+            form_version = st.session_state.get("wo_mgr_new_req_form_version", 0)
+            with st.form(f"wo_mgr_new_req_v{form_version}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 with c1:
-                    en = st.text_input("👤 Employee Name", key=f"{request_key_prefix}_employee")
-                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"{request_key_prefix}_type")
-                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"{request_key_prefix}_category")
-                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"{request_key_prefix}_amount")
+                    en = st.text_input("👤 Employee Name", key=f"wo_mgr_en_v{form_version}")
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"wo_mgr_rt_v{form_version}")
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"wo_mgr_ct_v{form_version}")
+                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"wo_mgr_amt_v{form_version}")
                 with c2:
                     from datetime import datetime as dt
-                    dt_val = st.date_input("📅 Date", value=dt.today(), key=f"{request_key_prefix}_date")
-                    mgr = st.text_input("👔 Line Manager", key=f"{request_key_prefix}_manager")
-                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"{request_key_prefix}_files")
-                    desc = st.text_area("📝 Description / Justification", key=f"{request_key_prefix}_description")
+                    dt_val = st.date_input("📅 Date", value=dt.today(), key=f"wo_mgr_dt_v{form_version}")
+                    mgr = st.text_input("👔 Line Manager", key=f"wo_mgr_mgr_v{form_version}")
+                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_files_v{form_version}")
+                    desc = st.text_area("📝 Description / Justification", key=f"wo_mgr_desc_v{form_version}")
                 if st.form_submit_button("📤 Send to Director", type="primary"):
                     if en.strip() and mgr.strip() and desc.strip():
                         att_list = []
@@ -2884,6 +2879,7 @@ elif role == "Work Order Manager":
                         payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
+                        st.session_state["wo_mgr_new_req_form_version"] = form_version + 1
                         st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
                     else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
             st.divider()
