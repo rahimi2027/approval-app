@@ -2943,23 +2943,22 @@ elif role in ["Manager", "Staff", "Team Member"]:
                         if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
                             st.session_state.editing_request_id = None; st.rerun()
                 else:
-                    st.subheader(f"➕ New Request — {dept_name}")
-                    nid = get_next_id(all_live_requests)
-                    form_version = st.session_state.get("new_req_form_version", 0)
-                    with st.form(f"new_req_v{form_version}", clear_on_submit=False):
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
-                            rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
-                            ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
-                            amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
-                        with c2:
-                            from datetime import datetime as dt
-                            dt_val = st.date_input("📅 Date", value=dt.today(), key=f"dt_v{form_version}")
-                            mgr = st.text_input("👔 Line Manager", key=f"mgr_v{form_version}")
-                            files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"files_v{form_version}")
-                            desc = st.text_area("📝 Description / Justification", key=f"desc_v{form_version}")
-                        if st.form_submit_button("📤 Send to Director", type="primary"):
+            st.subheader(f"➕ New Request — {dept_name}")
+            nid = get_next_id(all_live_requests)
+            form_version = st.session_state.get("wo_mgr_new_req_form_version", 0)
+            with st.form(f"wo_mgr_new_req_v{form_version}", clear_on_submit=False):
+                c1, c2 = st.columns(2)
+                with c1:
+                    en = st.text_input("👤 Employee Name", key=f"wo_mgr_req_en_v{form_version}")
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"wo_mgr_req_rt_v{form_version}")
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"wo_mgr_req_ct_v{form_version}")
+                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"wo_mgr_req_amt_v{form_version}")
+                with c2:
+                    from datetime import datetime as dt
+                    dt_val = st.date_input("📅 Date", value=dt.today(), key=f"wo_mgr_req_dt_v{form_version}")
+                    mgr = st.text_input("👔 Line Manager", key=f"wo_mgr_req_mgr_v{form_version}")
+                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_req_files_v{form_version}")
+                    desc = st.text_area("📝 Description / Justification", key=f"wo_mgr_req_desc_v{form_version}")
                             if en.strip() and mgr.strip() and desc.strip():
                                 att_list = []
                                 if files:
