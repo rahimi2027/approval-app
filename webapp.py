@@ -2,9 +2,10 @@
 # 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.20
 # ============================================================
 # ✅ v4.20 (HR LEAVE: LIVE AUTO-LINK + PROFESSIONAL PDF):
-#    • Transaction Type moved above Owe/Owed with LIVE auto-linking
+#    • Transaction Type hidden (auto-linked in background)
 #    • Amount auto-recalculates live (Days × Super Admin Daily Rate)
 #    • Professional HR Leave PDF: company logo top + approval stamp bottom
+#    • NEW: "My Submitted HR Leave Requests" tab with search filters
 # ✅ v4.19 (HR LEAVE SETTLEMENT MODULE)
 # ✅ v4.18 (ATTACHMENT PRESERVATION FIX)
 # ✅ v4.17 (BASE64 WHITESPACE & PADDING FIX)
@@ -2576,7 +2577,6 @@ def render_hr_leave_form(user_name):
 
     # ============ AUTO-LINKED TRANSACTION TYPE (HIDDEN) ============
     transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
-    # No visible field — value is used below in the record and PDF
 
     # ============ SECOND ROW ============
     rate = get_hr_daily_rate(emp_dept, transaction_type)
@@ -3684,6 +3684,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
     if has_hr_leave: labels.append("📋 My Submitted HR Leave Requests")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
+    if not labels:
         st.subheader("🔐 Access Restricted")
         st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
     else:
@@ -3814,6 +3815,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if has_hr_leave:
             with tabs[tab_idx]:
                 render_hr_leave_my_submissions(full_name)
+            tab_idx += 1
+        if has_work_orders:
+            with tabs[tab_idx]:
+                render_work_order_employee_portal(full_name, dept_name)
             tab_idx += 1
         if has_inspector_bonus:
             with tabs[tab_idx]:
