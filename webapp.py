@@ -324,24 +324,41 @@ def _drive_get_or_create_folder(folder_name, parent_id=GOOGLE_DRIVE_FOLDER_ID):
         return None
 
 def _upload_to_drive_bg(local_path, filename):
-    """Compatibility wrapper: synchronous upload with explicit success/failure."""
+    """Synchronous Drive upload with a safe fallback for attachments.
+
+    Attachments are preferably stored in the dedicated ``uploaded_attachments``
+    folder.  If that folder cannot be created/accessed (for example because the
+    service account only has access to the main app folder), the upload falls
+    back to the main ``Acoole_App_Uploads`` folder instead of rejecting the
+    whole request.  This keeps attachment uploads compatible with the existing
+    Drive permissions.
+    """
     if drive_service is None or not os.path.exists(local_path):
+        print(f"Drive upload unavailable for {filename}: Drive is not initialised or local file is missing")
         return False
     with _DRIVE_SYNC_LOCK:
         try:
-            # Uploaded user attachments go into a dedicated Drive subfolder.
-            # PDFs and persistent Excel files continue to use the main app folder.
             is_attachment = os.path.abspath(local_path).startswith(os.path.abspath(UPLOAD_DIR) + os.sep)
-            parent_id = GOOGLE_DRIVE_FOLDER_ID
             if is_attachment:
-                parent_id = _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
-                if not parent_id:
-                    print(f"Drive attachment folder unavailable for {filename}")
-                    return False
-            uploaded_id = _drive_upload_path(local_path, filename, parent_id=parent_id)
+                # Preferred location: dedicated attachment folder.
+                attachment_parent = _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
+                if attachment_parent:
+                    uploaded_id = _drive_upload_path(local_path, filename, parent_id=attachment_parent)
+                    if uploaded_id:
+                        return True
+                    print(f"Dedicated attachment folder upload failed for {filename}; trying main app folder")
+                else:
+                    print(f"Dedicated attachment folder unavailable for {filename}; trying main app folder")
+
+                # Fallback: the main folder is known to be writable because the
+                # application workbooks are synchronised there.
+                uploaded_id = _drive_upload_path(local_path, filename, parent_id=GOOGLE_DRIVE_FOLDER_ID)
+                return bool(uploaded_id)
+
+            uploaded_id = _drive_upload_path(local_path, filename, parent_id=GOOGLE_DRIVE_FOLDER_ID)
             return bool(uploaded_id)
         except Exception as e:
-            print(f"Drive upload failed for {filename}: {e}")
+            print(f"Drive upload failed for {filename}: {type(e).__name__}: {e}")
             return False
 
 def save_uploaded_attachment(uploaded_file, filename):
@@ -2518,8 +2535,17 @@ def ensure_attachment_local(filename):
     local_path = os.path.join(UPLOAD_DIR, filename)
     if os.path.exists(local_path): return local_path
     if drive_service is not None:
-        remote = _drive_find_file(filename)
-        if remote and _drive_download_file(remote["id"], local_path): return local_path
+        # New attachments are normally in the dedicated folder.  Also search
+        # the main app folder for backwards compatibility and for uploads made
+        # through the permission-safe fallback in _upload_to_drive_bg().
+        attachment_parent = _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
+        if attachment_parent:
+            remote = _drive_find_file(filename, attachment_parent)
+            if remote and _drive_download_file(remote["id"], local_path):
+                return local_path
+        remote = _drive_find_file(filename, GOOGLE_DRIVE_FOLDER_ID)
+        if remote and _drive_download_file(remote["id"], local_path):
+            return local_path
     return None
 
 def display_attachments(req):
