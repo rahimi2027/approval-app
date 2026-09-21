@@ -1511,11 +1511,11 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             with c2:
                 work_date = st.date_input("📅 Date", key=f"wo_mgr_date_v{form_version}", value=date.today())
                 amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", key=f"wo_mgr_wo_amt_v{form_version}")
-                description = st.text_area("📝 Description", key=f"wo_mgr_desc_v{form_version}", placeholder="Describe the work completed...", height=150)
+                description = st.text_area("📝 Description", key=f"wo_mgr_wo_desc_v{form_version}", placeholder="Describe the work completed...", height=150)
             _all_users = load_users()
             director_names = sorted({str(u.get("full_name", "")).strip() for u in _all_users.values() if str(u.get("role", "")).strip().lower() == "director" and str(u.get("full_name", "")).strip()})
             director = director_names[0] if director_names else "Director"
-            files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_files_v{form_version}")
+            files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_wo_files_v{form_version}")
             submitted = st.form_submit_button("📤 Submit Work Order", type="primary", use_container_width=True)
         if submitted:
             errors = []
