@@ -2648,26 +2648,78 @@ def render_hr_leave_form(user_name):
             st.success(f"✅ HR Leave Settlement #{new_id} sent to Director for approval.")
             st.rerun()
 
-    st.divider()
+
+def render_hr_leave_my_submissions(user_name):
+    """Show only the current user's submitted HR Leave requests with search filters."""
     st.subheader("📋 My Submitted HR Leave Requests")
+    st.caption("All HR Leave Settlement requests you have submitted — filter by name, department or date.")
+    st.divider()
+
+    hr_records = load_hr_leave()
     mine = [r for r in hr_records if r.get("submitted_by") == user_name]
-    if not mine:
-        st.info("📋 You have not submitted any HR Leave requests yet.")
-    else:
-        for r in reversed(mine):
-            status = r["status"]
-            icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-            with st.expander(f"{icon} #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['amount']:.2f} | {status.upper()}"):
-                st.write(f"🔄 **{r['type']}** | ⚖️ {r['owe_owed']} | 🏷️ {r['category']}")
-                st.write(f"🔢 **{r['days']} day(s)** | 💷 **£{r['amount']:.2f}** | 📅 {r['date']}")
-                st.write(f"👔 **Line Manager:** {r['manager']}")
-                st.info(f"📝 {r['desc']}")
-                display_attachments(r)
-                if r.get("director_comments"): st.info(f"💬 Director: {r['director_comments']}")
-                if r.get("rejection_reason"): st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
-                if status in ("approved", "rejected"):
-                    st.divider()
-                    display_hr_leave_pdf_button(r, key_prefix=f"hr_form_{user_name.replace(' ','_')}")
+
+    # ---------- SEARCH FILTERS ----------
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        search_name = st.text_input(
+            "🔎 Search by Employee Name",
+            key="hr_sub_search_name",
+            placeholder="Type employee name...",
+        )
+    with c2:
+        dept_options = sorted({
+            str(r.get("emp_dept", "")).strip()
+            for r in mine if str(r.get("emp_dept", "")).strip()
+        })
+        search_dept = st.selectbox(
+            "🏢 Filter by Department",
+            ["All Departments"] + dept_options,
+            key="hr_sub_search_dept",
+        )
+    with c3:
+        use_date = st.checkbox("📅 Filter by specific date", key="hr_sub_use_date")
+        search_date = None
+        if use_date:
+            search_date = st.date_input("Pick a date", value=date.today(),
+                                        key="hr_sub_search_date")
+
+    # ---------- APPLY FILTERS ----------
+    filtered = list(mine)
+    if search_name.strip():
+        q = search_name.lower().strip()
+        filtered = [r for r in filtered if q in str(r.get("emp_name", "")).lower()]
+    if search_dept and search_dept != "All Departments":
+        filtered = [r for r in filtered if str(r.get("emp_dept", "")) == search_dept]
+    if search_date is not None:
+        filtered = [r for r in filtered if str(r.get("date", "")) == str(search_date)]
+
+    # ---------- SUMMARY METRICS ----------
+    m1, m2, m3, m4 = st.columns(4)
+    with m1: st.metric("📋 Total Found", len(filtered))
+    with m2: st.metric("🟡 Pending", len([r for r in filtered if r["status"] == "pending"]))
+    with m3: st.metric("🟢 Approved", len([r for r in filtered if r["status"] == "approved"]))
+    with m4: st.metric("🔴 Rejected", len([r for r in filtered if r["status"] == "rejected"]))
+    st.divider()
+
+    if not filtered:
+        st.info("📋 No HR Leave requests match your search.")
+        return
+
+    for r in reversed(filtered):
+        status = r["status"]
+        icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+        with st.expander(f"{icon} #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['amount']:.2f} | {status.upper()}"):
+            st.write(f"🔄 **{r['type']}** | ⚖️ {r['owe_owed']} | 🏷️ {r['category']}")
+            st.write(f"🔢 **{r['days']} day(s)** | 💷 **£{r['amount']:.2f}** | 📅 {r['date']}")
+            st.write(f"👔 **Line Manager:** {r['manager']}")
+            st.info(f"📝 {r['desc']}")
+            display_attachments(r)
+            if r.get("director_comments"): st.info(f"💬 Director: {r['director_comments']}")
+            if r.get("rejection_reason"): st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
+            if status in ("approved", "rejected"):
+                st.divider()
+                display_hr_leave_pdf_button(r, key_prefix=f"hr_sub_{user_name.replace(' ','_')}")
+
 
 def render_hr_leave_director_portal(director_name):
     st.subheader("👥 HR Leave Settlement — Director Approval")
