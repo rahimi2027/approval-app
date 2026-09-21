@@ -383,18 +383,30 @@ except ImportError:
 _EXCEL_INIT_LOCK = threading.Lock()
 
 def _write_empty_excel(path, columns):
-    """Create/replace an Excel file safely, even when Streamlit reruns overlap."""
+    """Create/replace an Excel file safely.
+
+    The temporary file MUST keep an .xlsx extension because pandas/openpyxl
+    validates the output extension before creating the workbook.  The previous
+    implementation used ``<file>.xlsx.tmp_<pid>``, which caused:
+    ``ValueError: Invalid extension for engine 'openpyxl': '.xlsx.tmp_...'``.
+    """
     parent = os.path.dirname(os.path.abspath(path))
     os.makedirs(parent, exist_ok=True)
     df = pd.DataFrame(columns=columns)
-    temp_path = f"{path}.tmp_{os.getpid()}"
+
+    # Keep the .xlsx suffix so pandas selects the openpyxl writer correctly.
+    stem = os.path.splitext(os.path.basename(path))[0]
+    temp_path = os.path.join(parent, f".{stem}.clear_{os.getpid()}_{threading.get_ident()}.xlsx")
     try:
-        df.to_excel(temp_path, index=False, engine="openpyxl")
-        os.replace(temp_path, path)
+        with _EXCEL_INIT_LOCK:
+            df.to_excel(temp_path, index=False, engine="openpyxl")
+            os.replace(temp_path, path)
     finally:
         if os.path.exists(temp_path):
-            try: os.remove(temp_path)
-            except OSError: pass
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 def safe_init_excel(path, columns):
     """Create/repair an Excel workbook safely without deleting a live file.
