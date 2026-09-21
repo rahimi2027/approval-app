@@ -1,9 +1,10 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.16
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.17
 # ============================================================
-# ✅ v4.16 (PERMANENT GOOGLE DRIVE FIX):
-#    • Uses base64-encoded Service Account JSON in secrets.
-#    • Eliminates all private_key formatting issues permanently.
+# ✅ v4.17 (BASE64 WHITESPACE FIX):
+#    • Strips whitespace/newlines from base64 secrets before decoding.
+#    • Fixes 'Expecting value: line 1 column 1 (char 0)' error.
+# ✅ v4.16 (PERMANENT GOOGLE DRIVE FIX - BASE64 METHOD)
 # ✅ v4.15 (WORK ORDER TOTAL TAB RESTRUCTURE)
 # ✅ v4.14 (WORK ORDER TOTAL FOR EMPLOYEES/TEAM MEMBERS)
 # ✅ v4.13 (GRANULAR WORK ORDER TOTAL PERMISSION)
@@ -105,12 +106,17 @@ _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.Lock()
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION — BASE64 METHOD (v4.16)
+# GOOGLE DRIVE CONNECTION — BASE64 METHOD (v4.17)
 # ============================================================
 try:
     gdrive = st.secrets["gdrive"]
-    # Decode the base64-encoded Service Account JSON from Streamlit Secrets
-    decoded_json = base64.b64decode(gdrive["key_b64"]).decode("utf-8")
+    
+    # Get the base64 string and clean it of any whitespace/newlines
+    b64_string = str(gdrive["key_b64"])
+    b64_string = b64_string.replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
+    
+    # Decode the base64 string back into JSON
+    decoded_json = base64.b64decode(b64_string).decode("utf-8")
     creds_dict = json.loads(decoded_json)
     
     # Authenticate using the Service Account
