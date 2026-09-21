@@ -1,20 +1,13 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.19
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.20
 # ============================================================
-# ✅ v4.19 (HR LEAVE SETTLEMENT MODULE):
-#    • Added HR Leave Settlement module (holiday payouts/deductions).
-#    • Super Admin manages HR categories + per-department daily rates.
-#    • Director approves/rejects with mandatory rejection reason.
-#    • Auto-calculates amount from days × daily rate (editable override).
-#    • Payroll read-only view of approved HR settlements.
-#    • New permission flag: can_access_hr_leave.
+# ✅ v4.20 (HR LEAVE: LIVE AUTO-LINK + PROFESSIONAL PDF):
+#    • Transaction Type moved above Owe/Owed with LIVE auto-linking
+#    • Amount auto-recalculates live (Days × Super Admin Daily Rate)
+#    • Professional HR Leave PDF: company logo top + approval stamp bottom
+# ✅ v4.19 (HR LEAVE SETTLEMENT MODULE)
 # ✅ v4.18 (ATTACHMENT PRESERVATION FIX)
 # ✅ v4.17 (BASE64 WHITESPACE & PADDING FIX)
-# ✅ v4.16 (PERMANENT GOOGLE DRIVE FIX - BASE64 METHOD)
-# ✅ v4.15 (WORK ORDER TOTAL TAB RESTRUCTURE)
-# ✅ v4.14 (WORK ORDER TOTAL FOR EMPLOYEES/TEAM MEMBERS)
-# ✅ v4.13 (GRANULAR WORK ORDER TOTAL PERMISSION)
-# ✅ v4.12 (USER ACTIVE / INACTIVE + SUPER ADMIN FULL ACCESS)
 # ============================================================
 import streamlit as st
 import os
@@ -135,7 +128,7 @@ _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.RLock()
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD v4.18)
+# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
 # ============================================================
 try:
     gdrive = st.secrets["gdrive"]
@@ -700,13 +693,6 @@ def refresh_data_button():
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 
-def make_request_title(req):
-    status, amount, dt, dec_by, decision_dt = req["status"].upper(), f"£{req['amount']:.2f}", format_date(req.get("date", "")), req.get("decision_by", ""), format_date(req.get("decision_date", ""))
-    if req["status"] == "pending": return f"🟡 ID #{req['id']} | {req['emp_name']} | PENDING | {amount} | 📅 {dt}"
-    elif req["status"] == "approved": return f"🟢 ID #{req['id']} | {req['emp_name']} | APPROVED | {amount} | ✅ Approved by {dec_by} on {decision_dt}"
-    elif req["status"] == "rejected": return f"🔴 ID #{req['id']} | {req['emp_name']} | REJECTED | {amount} | ❌ Rejected by {dec_by} on {decision_dt}"
-    else: return f"⚪ ID #{req['id']} | {req['emp_name']} | {status} | {amount} | 📅 {dt}"
-
 def init_settings():
     if not os.path.exists(SETTINGS_PATH):
         pd.DataFrame([
@@ -780,7 +766,6 @@ def save_roles(roles_list):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
-# HR Leave Settings
 def load_hr_categories(): return _load_setting_value("hr_categories", DEFAULT_HR_CATEGORIES)
 
 def save_hr_categories(cats):
@@ -2379,6 +2364,184 @@ def get_hr_daily_rate(dept, transaction_type):
     return None
 
 # ============================================================
+# 👥 HR LEAVE SETTLEMENT — PDF EXPORT
+# ============================================================
+def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
+    """Generate a professional HR Leave Settlement PDF with logo + approval stamp."""
+    if not PDF_AVAILABLE: return None
+    try:
+        cached_path = req.get("pdf_path", "")
+        if not force_regenerate and cached_path and os.path.exists(cached_path): return cached_path
+        pdf = FPDF()
+        pdf.add_page()
+        regular_font, bold_font = _pdf_font_paths()
+        if regular_font and bold_font:
+            pdf.add_font("DejaVu", "", regular_font)
+            pdf.add_font("DejaVu", "B", bold_font)
+            family = "DejaVu"
+        else:
+            family = "Helvetica"
+        def safe(v):
+            text = _pdf_text(v)
+            if family == "Helvetica": return text.encode("latin-1", "replace").decode("latin-1")
+            return text
+
+        # Company Logo
+        if os.path.exists(LOGO_PATH):
+            try:
+                pdf.image(LOGO_PATH, x=75, y=10, w=60); pdf.ln(28)
+            except Exception: pdf.ln(5)
+        else: pdf.ln(5)
+
+        # Title
+        pdf.set_font(family, "B", 16)
+        pdf.cell(0, 10, safe("HR LEAVE SETTLEMENT — APPROVAL FORM"), ln=True, align="C")
+        pdf.ln(2)
+        line_y = pdf.get_y()
+        pdf.line(10, line_y, 200, line_y); pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
+        pdf.ln(8)
+
+        # Request Details
+        pdf.set_font(family, "B", 11)
+        pdf.cell(0, 6, safe("REQUEST DETAILS"), ln=True); pdf.ln(2)
+        def field(label, value, label_w=60, value_h=7):
+            pdf.set_font(family, "B", 10)
+            pdf.cell(label_w, value_h, safe(label), border=0)
+            pdf.set_font(family, "", 10)
+            pdf.cell(0, value_h, safe(str(value)), border=0, ln=True)
+        field("Request ID:", f"HRL-{req.get('id', '')}")
+        field("Employee Name:", req.get("emp_name", ""))
+        field("Employee Department:", req.get("emp_dept", ""))
+        field("Transaction Type:", req.get("type", ""))
+        field("Category / Reason:", req.get("category", ""))
+        field("Owe / Owed:", req.get("owe_owed", ""))
+        field("Request Date:", req.get("date", ""))
+        field("Number of Days:", req.get("days", ""))
+        field("Amount:", f"£{float(req.get('amount', 0)):.2f}")
+        field("Line Manager:", req.get("manager", ""))
+        if req.get("submitted_by"): field("Submitted By:", req.get("submitted_by", ""))
+        if req.get("submitted_date"): field("Submitted Date:", req.get("submitted_date", ""))
+        pdf.ln(6)
+
+        # Description
+        pdf.set_font(family, "B", 11)
+        pdf.cell(0, 6, safe("DESCRIPTION / JUSTIFICATION"), ln=True); pdf.ln(2)
+        pdf.set_font(family, "", 10)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 6, safe(req.get("desc", "")))
+        pdf.ln(8)
+
+        # Director Approval
+        pdf.set_font(family, "B", 11)
+        pdf.cell(0, 6, safe("DIRECTOR APPROVAL"), ln=True); pdf.ln(2)
+        status = str(req.get("status", "")).strip().lower()
+        pdf.set_font(family, "", 10)
+        if status == "approved":
+            pdf.cell(60, 7, safe("Decision:"), 0, 0)
+            pdf.set_font(family, "B", 10); pdf.set_text_color(0, 128, 0)
+            pdf.cell(0, 7, safe("APPROVED"), ln=True)
+            pdf.set_text_color(0, 0, 0); pdf.set_font(family, "", 10)
+            pdf.cell(60, 7, safe("Approved By:"), 0, 0); pdf.cell(0, 7, safe(req.get("decision_by", "")), ln=True)
+            pdf.cell(60, 7, safe("Approval Date / Time:"), 0, 0); pdf.cell(0, 7, safe(req.get("decision_date", "")), ln=True)
+            if req.get("director_comments"):
+                pdf.cell(60, 7, safe("Director Comments:"), 0, 0)
+                pdf.multi_cell(0, 7, safe(req.get("director_comments", "")))
+        elif status == "rejected":
+            pdf.cell(60, 7, safe("Decision:"), 0, 0)
+            pdf.set_font(family, "B", 10); pdf.set_text_color(200, 0, 0)
+            pdf.cell(0, 7, safe("REJECTED"), ln=True)
+            pdf.set_text_color(0, 0, 0); pdf.set_font(family, "", 10)
+            pdf.cell(60, 7, safe("Rejected By:"), 0, 0); pdf.cell(0, 7, safe(req.get("decision_by", "")), ln=True)
+            pdf.cell(60, 7, safe("Rejection Date / Time:"), 0, 0); pdf.cell(0, 7, safe(req.get("decision_date", "")), ln=True)
+            pdf.cell(60, 7, safe("Reason for Rejection:"), 0, 0)
+            pdf.multi_cell(0, 7, safe(req.get("rejection_reason", "")))
+        else:
+            pdf.cell(60, 7, safe("Decision:"), 0, 0); pdf.cell(0, 7, safe("Pending"), ln=True)
+
+        # Approval Stamp at bottom
+        pdf.ln(14)
+        dash_y = pdf.get_y()
+        for x in range(10, 200, 4): pdf.line(x, dash_y, x + 2, dash_y)
+        if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
+            try: pdf.image(APPROVED_STAMP_PATH, x=70, y=dash_y - 8, w=65)
+            except Exception: pass
+        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
+            try: pdf.image(REJECTED_STAMP_PATH, x=70, y=dash_y - 8, w=65)
+            except Exception: pass
+        pdf.ln(18)
+        pdf.set_font(family, "", 8)
+        pdf.cell(0, 5, safe("Authorised Signature / Director"), ln=True)
+
+        # Attachments page
+        pdf.add_page()
+        pdf.set_font(family, "B", 12)
+        pdf.cell(0, 8, safe("ATTACHMENTS"), ln=True); pdf.ln(6)
+        pdf.set_font(family, "", 9)
+        att = str(req.get("attachment_name", "None")).strip()
+        display_files = []
+        if att and att.lower() not in ("none", "nan", ""):
+            for name in att.split(","):
+                n = name.strip()
+                if n and n.lower() not in ("none", ""): display_files.append(n)
+        if display_files:
+            for fname in display_files:
+                file_path = os.path.join(UPLOAD_DIR, fname)
+                if os.path.exists(file_path):
+                    if fname.lower().endswith((".png", ".jpg", ".jpeg")):
+                        pdf.ln(2)
+                        try: pdf.image(file_path, x=10, w=190); pdf.ln(70)
+                        except Exception: pdf.cell(0, 5, safe(f"     {fname} (preview unavailable)"), ln=True); pdf.ln(3)
+                    else: pdf.cell(0, 5, safe(f"     {fname} (non-image file)"), ln=True); pdf.ln(3)
+                else: pdf.cell(0, 5, safe(f"     {fname} (file not found)"), ln=True); pdf.ln(3)
+        else: pdf.cell(0, 6, safe("No attachments were included with this request."), ln=True)
+
+        os.makedirs(HR_LEAVE_PDF_DIR, exist_ok=True)
+        safe_id = "".join(str(req.get("id", "HRL")).split()) or "HRL"
+        safe_name = "_".join(str(req.get("emp_name", "Employee")).split()) or "Employee"
+        safe_cat = "_".join(str(req.get("category", "Leave")).split()) or "Leave"
+        safe_date = datetime.now().strftime("%Y-%m-%d")
+        filename = f"HR_Leave_Settlement_{safe_id}_{safe_name}_{safe_cat}_{safe_date}.pdf"
+        path = os.path.join(HR_LEAVE_PDF_DIR, filename)
+        pdf.output(path)
+        if upload_to_drive: _upload_to_drive_bg(path, os.path.basename(path))
+        return path
+    except Exception as e:
+        st.error(f"HR Leave PDF Error: {e}")
+        return None
+
+def display_hr_leave_pdf_button(req, key_prefix="hrl"):
+    """Render a Download / Generate PDF button for approved/rejected HR Leave requests."""
+    if not PDF_AVAILABLE:
+        st.warning("⚠️ PDF generation is unavailable. Please install fpdf2.")
+        return
+    status = str(req.get("status", "")).strip().lower()
+    if status not in ("approved", "rejected"):
+        st.info("📄 PDF download is available once the Director has decided on this request.")
+        return
+    req_id = str(req.get("id", "unknown"))
+    dl_key = f"{key_prefix}_hrl_dl_{req_id}"
+    gen_key = f"{key_prefix}_hrl_gen_{req_id}"
+    cached_path = req.get("pdf_path", "")
+    if cached_path and os.path.exists(cached_path):
+        with open(cached_path, "rb") as f:
+            st.download_button("⬇️ Download HR Leave Settlement PDF", data=f.read(),
+                              file_name=os.path.basename(cached_path), mime="application/pdf",
+                              type="primary", key=dl_key)
+        return
+    if st.button(f"📄 Generate HR Leave PDF for #{req_id}", key=gen_key, type="primary"):
+        with st.spinner("Generating PDF..."):
+            path = hr_leave_pdf(req, force_regenerate=True, upload_to_drive=True)
+        if path and os.path.exists(path):
+            records = load_hr_leave()
+            for r in records:
+                if str(r.get("id")) == req_id: r["pdf_path"] = path
+            save_all_hr_leave(records, sync=False)
+            st.success("✅ PDF generated. Click below to download.")
+            st.rerun()
+        else:
+            st.error("❌ Could not generate PDF.")
+
+# ============================================================
 # 👥 HR LEAVE SETTLEMENT — UI
 # ============================================================
 def render_hr_leave_form(user_name):
@@ -2389,35 +2552,69 @@ def render_hr_leave_form(user_name):
     departments = load_departments()
 
     form_version = st.session_state.get("hr_leave_form_version", 0)
-    with st.form(f"hr_leave_form_v{form_version}", clear_on_submit=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            emp_name = st.text_input("👤 Employee Name", key=f"hr_emp_v{form_version}")
-            owe_owed = st.selectbox("⚖️ Owe / Owed", DEFAULT_OWE_OWED, key=f"hr_owe_v{form_version}")
-            category = st.selectbox("🏷️ Category / Reason", hr_cats, key=f"hr_cat_v{form_version}")
-            transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
-            st.text_input("🔄 Transaction Type (auto-linked)", value=transaction_type, disabled=True, key=f"hr_type_v{form_version}")
-        with c2:
-            dt_val = st.date_input("📅 Date", value=date.today(), key=f"hr_date_v{form_version}")
-            emp_dept = st.selectbox("🏢 Employee Department", departments, key=f"hr_dept_v{form_version}")
-            manager = st.text_input("👔 Line Manager", key=f"hr_mgr_v{form_version}")
-            files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"],
-                                     accept_multiple_files=True, key=f"hr_files_v{form_version}")
+    K_EMP   = f"hr_emp_v{form_version}"
+    K_OWE   = f"hr_owe_v{form_version}"
+    K_CAT   = f"hr_cat_v{form_version}"
+    K_DAYS  = f"hr_days_v{form_version}"
+    K_AMT   = f"hr_amt_v{form_version}"
+    K_DATE  = f"hr_date_v{form_version}"
+    K_DEPT  = f"hr_dept_v{form_version}"
+    K_MGR   = f"hr_mgr_v{form_version}"
+    K_FILES = f"hr_files_v{form_version}"
+    K_DESC  = f"hr_desc_v{form_version}"
+    K_TYPE  = f"hr_type_v{form_version}"
 
-        c3, c4 = st.columns(2)
-        with c3:
-            num_days = st.number_input("🔢 Number of Days", min_value=0.0, step=0.5,
-                                       format="%.2f", key=f"hr_days_v{form_version}")
-        with c4:
-            rate = get_hr_daily_rate(emp_dept, transaction_type)
-            suggested = round((rate or 0) * float(num_days), 2)
-            amount = st.number_input("💷 Amount (£)", min_value=0.0, step=1.0, format="%.2f",
-                                     value=suggested, key=f"hr_amt_v{form_version}")
+    # ============ TOP ROW: Employee Name | [Transaction Type slot] | Owe/Owed ============
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        emp_name = st.text_input("👤 Employee Name", key=K_EMP)
+        # Placeholder for live Transaction Type display
+        type_slot = st.empty()
+        owe_owed = st.selectbox("⚖️ Owe / Owed", DEFAULT_OWE_OWED, key=K_OWE)
+
+    with col_right:
+        dt_val = st.date_input("📅 Date", value=date.today(), key=K_DATE)
+        emp_dept = st.selectbox("🏢 Employee Department", departments, key=K_DEPT)
+
+    # ============ AUTO-LINKED TRANSACTION TYPE (rendered into the placeholder above) ============
+    transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
+    with type_slot.container():
+        st.text_input("🔄 Transaction Type (auto-linked)", value=transaction_type,
+                      disabled=True, key=K_TYPE)
+
+    # ============ SECOND ROW: Category | Days | Manager | Amount ============
+    rate = get_hr_daily_rate(emp_dept, transaction_type)
+
+    col_left2, col_right2 = st.columns(2)
+
+    with col_left2:
+        category = st.selectbox("🏷️ Category / Reason", hr_cats, key=K_CAT)
+        num_days = st.number_input("🔢 Number of Days", min_value=0.0, step=0.5,
+                                   format="%.2f", key=K_DAYS)
+
+    with col_right2:
+        manager = st.text_input("👔 Line Manager", key=K_MGR)
+        # Auto-recalc amount whenever days / dept / owe_owed changes
+        recalc_signature = f"{emp_dept}|{transaction_type}|{float(num_days)}"
+        if st.session_state.get("_hr_amt_sig") != recalc_signature:
             if rate:
-                st.caption(f"ℹ️ Auto-calc: {num_days} × £{rate:.2f} = £{suggested:.2f} (editable)")
-            else:
-                st.caption("⚠️ No daily rate configured by Super Admin — please enter manually.")
-        desc = st.text_area("📝 Description / Justification", key=f"hr_desc_v{form_version}")
+                st.session_state[K_AMT] = round(rate * float(num_days), 2)
+            elif K_AMT not in st.session_state:
+                st.session_state[K_AMT] = 0.01
+            st.session_state["_hr_amt_sig"] = recalc_signature
+        amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0,
+                                 format="%.2f", key=K_AMT)
+        if rate:
+            st.caption(f"ℹ️ Auto-calc: {num_days} × £{rate:.2f} = £{round(rate * float(num_days), 2):.2f} (editable)")
+        else:
+            st.caption("⚠️ No daily rate configured for this department/type — enter manually.")
+
+    # ============ FORM: Files, Description, Submit ============
+    with st.form(f"hr_leave_form_v{form_version}", clear_on_submit=False):
+        files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"],
+                                 accept_multiple_files=True, key=K_FILES)
+        desc = st.text_area("📝 Description / Justification", key=K_DESC)
         submitted = st.form_submit_button("📤 Send to Director", type="primary", use_container_width=True)
 
     if submitted:
@@ -2451,6 +2648,8 @@ def render_hr_leave_form(user_name):
             hr_records.append(rec)
             save_all_hr_leave(hr_records)
             log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
+            for k in [K_EMP, K_OWE, K_CAT, K_DAYS, K_AMT, K_DATE, K_DEPT, K_MGR, K_FILES, K_DESC, K_TYPE, "_hr_amt_sig"]:
+                st.session_state.pop(k, None)
             st.session_state["hr_leave_form_version"] = form_version + 1
             st.success(f"✅ HR Leave Settlement #{new_id} sent to Director for approval.")
             st.rerun()
@@ -2472,6 +2671,9 @@ def render_hr_leave_form(user_name):
                 display_attachments(r)
                 if r.get("director_comments"): st.info(f"💬 Director: {r['director_comments']}")
                 if r.get("rejection_reason"): st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
+                if status in ("approved", "rejected"):
+                    st.divider()
+                    display_hr_leave_pdf_button(r, key_prefix=f"hr_form_{user_name.replace(' ','_')}")
 
 def render_hr_leave_director_portal(director_name):
     st.subheader("👥 HR Leave Settlement — Director Approval")
@@ -2547,6 +2749,9 @@ def render_hr_leave_director_portal(director_name):
                 show_details(r)
                 if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
                 st.write(f"📅 Decision Date: {r['decision_date']}")
+                st.divider()
+                st.markdown("#### 📄 HR Leave Settlement PDF")
+                display_hr_leave_pdf_button(r, key_prefix=f"hr_dir_app_{director_name.replace(' ','_')}")
 
     with t3:
         if not rejected: st.info("❌ No rejected HR Leave requests.")
@@ -2555,6 +2760,9 @@ def render_hr_leave_director_portal(director_name):
                 show_details(r)
                 st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
                 if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
+                st.divider()
+                st.markdown("#### 📄 HR Leave Settlement PDF")
+                display_hr_leave_pdf_button(r, key_prefix=f"hr_dir_rej_{director_name.replace(' ','_')}")
 
 def render_hr_leave_super_admin():
     st.subheader("🛡️ HR Leave Settlement — Super Admin (View Only)")
@@ -2592,11 +2800,15 @@ def render_hr_leave_super_admin():
             with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['amount']:.2f} | ✅ {r['decision_by']}"):
                 show(r)
                 if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
+                st.divider()
+                display_hr_leave_pdf_button(r, key_prefix="hr_sa_app")
     with t3:
         if not rejected: st.info("❌ No rejected HR Leave requests.")
         for r in reversed(rejected):
             with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['amount']:.2f}"):
                 show(r); st.error(f"❌ Reason: {r['rejection_reason']}")
+                st.divider()
+                display_hr_leave_pdf_button(r, key_prefix="hr_sa_rej")
 
 def render_hr_leave_payroll_portal():
     st.subheader("👥 HR Leave Settlement — Payroll (View Only)")
@@ -2613,6 +2825,8 @@ def render_hr_leave_payroll_portal():
             st.write(f"✅ Approved by {r['decision_by']} on {r['decision_date']}")
             if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
             display_attachments(r)
+            st.divider()
+            display_hr_leave_pdf_button(r, key_prefix="hr_payroll")
 
 def render_hr_leave_settings():
     """Super Admin settings: HR categories + Daily Holiday Rates."""
