@@ -21,7 +21,6 @@ import json
 import base64
 import shutil
 import subprocess
-import re
 import pandas as pd
 import io
 import requests
@@ -80,11 +79,7 @@ WORK_ORDERS_PATH = os.path.join(APP_FOLDER, "work_orders.xlsx")
 WORK_ORDER_PDF_DIR = os.path.join(APP_FOLDER, "work_order_pdfs")
 INSPECTOR_BONUS_PATH = os.path.join(APP_FOLDER, "inspector_bonus.xlsx")
 INSPECTOR_BONUS_PDF_DIR = os.path.join(APP_FOLDER, "inspector_bonus_pdfs")
-# ============================================================
-# ✅ YOUR PROVIDED FOLDER ID — MUST BE INSIDE A SHARED DRIVE
-# ============================================================
-GOOGLE_DRIVE_FOLDER_ID = "1U7gfbt38TsJArEfdANsYFKaJr3HrCcuw"
-GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME = "uploaded_attachments"
+GOOGLE_DRIVE_FOLDER_ID = "1g3DsqT_w_tU0QBnrXcZqYjp51SokH4hG"
 
 USER_DB_COLUMNS = [
     "full_name", "username", "password", "role", "dept",
@@ -109,7 +104,6 @@ os.makedirs(INSPECTOR_BONUS_PDF_DIR, exist_ok=True)
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 drive_service = None
-_LAST_DRIVE_UPLOAD_ERROR = ""
 
 _DRIVE_ID_CACHE = {}
 _DRIVE_SYNC_FINGERPRINTS = {}
@@ -118,6 +112,11 @@ _DRIVE_SYNC_LOCK = threading.RLock()
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD v4.18)
 # ============================================================
+# Google Drive is deliberately initialised without making network calls at import time.
+# Streamlit can rerun the script many times; doing Drive API calls during module
+# import made the app fragile and contributed to the native-process crash seen in
+# the Cloud logs.  The service-account credentials are still read from the same
+# [gdrive] key_b64 secret and Drive sync remains available.
 try:
     gdrive = st.secrets["gdrive"]
     b64_string = str(gdrive["key_b64"]).replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
@@ -138,11 +137,11 @@ def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None or not os.path.exists(local_file_path): return None
     cache_key = f"{GOOGLE_DRIVE_FOLDER_ID}::{display_filename}"
     def _do(file_id=None):
-        media = MediaFileUpload(local_file_path, resumable=True)
+        media = MediaFileUpload(local_file_path, resumable=False)
         if file_id:
-            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
+            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents").execute()
         metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
-        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
+        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents").execute()
     try:
         cached_id = _DRIVE_ID_CACHE.get(cache_key)
         if cached_id:
@@ -164,7 +163,7 @@ def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
     try:
         safe_name = str(filename).replace("'", "\\'")
         q = (f"name = '{safe_name}' and '{parent_id}' in parents and trashed = false")
-        result = drive_service.files().list(q=q, spaces="drive", fields="files(id,name,modifiedTime,parents,mimeType)", orderBy="modifiedTime desc", pageSize=10, includeItemsFromAllDrives=True, supportsAllDrives=True).execute()
+        result = drive_service.files().list(q=q, spaces="drive", fields="files(id,name,modifiedTime)", orderBy="modifiedTime desc", pageSize=10).execute()
         files = result.get("files", [])
         return files[0] if files else None
     except Exception as e:
@@ -176,11 +175,11 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
     filename = filename or os.path.basename(local_path)
     cache_key = f"{parent_id}::{filename}"
     def _do(file_id=None):
-        media = MediaFileUpload(local_path, resumable=True)
+        media = MediaFileUpload(local_path, resumable=False)
         if file_id:
-            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name", supportsAllDrives=True).execute()
+            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name").execute()
         metadata = {"name": filename, "parents": [parent_id]}
-        return drive_service.files().create(body=metadata, media_body=media, fields="id,name", supportsAllDrives=True).execute()
+        return drive_service.files().create(body=metadata, media_body=media, fields="id,name").execute()
     try:
         cached_id = _DRIVE_ID_CACHE.get(cache_key)
         if cached_id:
@@ -195,7 +194,7 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
         return created.get("id")
     except Exception as e:
         print(f"Drive upload failed for {filename}: {e}")
-        raise e  # Re-raise to show real error
+        return None
 
 def _drive_download_file(file_id, local_path):
     if drive_service is None:
@@ -220,7 +219,12 @@ def _drive_download_file(file_id, local_path):
         return False
 
 def sync_persistent_file(local_path, columns=None):
-    """Synchronise one persistent workbook with Drive without background threads."""
+    """Synchronise one persistent workbook with Drive without background threads.
+
+    All Drive/XLSX operations are serialised. This is intentional: openpyxl and
+    the Google API client must not be allowed to modify the same workbook from
+    overlapping Streamlit reruns/background threads.
+    """
     if drive_service is None:
         if not os.path.exists(local_path) and columns is not None:
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
@@ -258,7 +262,12 @@ def sync_persistent_file(local_path, columns=None):
             _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
-    """Synchronously upload a changed workbook/file to Google Drive."""
+    """Synchronously upload a changed workbook/file to Google Drive.
+
+    No daemon/background thread is used. This prevents Streamlit reruns from
+    racing with openpyxl/Google Drive operations and causing native allocator
+    crashes such as `free(): corrupted unsorted chunks`.
+    """
     if drive_service is None or not os.path.exists(local_path):
         return
     try:
@@ -276,112 +285,20 @@ def sync_saved_file_to_drive(local_path):
             print(f"Drive sync failed for {local_path}: {e}")
             _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
 
-def _drive_get_or_create_folder(folder_name, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Return a Drive folder id, creating it under parent_id when necessary."""
-    if drive_service is None:
-        return None
-    cache_key = f"folder::{parent_id}::{folder_name}"
-    cached = _DRIVE_ID_CACHE.get(cache_key)
-    if cached:
-        return cached
-    try:
-        safe_name = str(folder_name).replace("'", "\\'")
-        q = (
-            f"name = '{safe_name}' and '{parent_id}' in parents "
-            f"and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        )
-        result = drive_service.files().list(
-            q=q, spaces="drive", fields="files(id,name,parents,mimeType)", pageSize=10, includeItemsFromAllDrives=True, supportsAllDrives=True
-        ).execute()
-        folders = result.get("files", [])
-        if folders:
-            folder_id = folders[0]["id"]
-        else:
-            metadata = {
-                "name": folder_name,
-                "mimeType": "application/vnd.google-apps.folder",
-                "parents": [parent_id],
-            }
-            created = drive_service.files().create(
-                body=metadata, fields="id,name,parents", supportsAllDrives=True
-            ).execute()
-            folder_id = created.get("id")
-        if folder_id:
-            _DRIVE_ID_CACHE[cache_key] = folder_id
-        return folder_id
-    except Exception as e:
-        print(f"Google Drive folder setup failed for {folder_name}: {e}")
-        return None
-
 def _upload_to_drive_bg(local_path, filename):
-    """Upload a local file to Google Drive and return True on success."""
-    global _LAST_DRIVE_UPLOAD_ERROR
-    _LAST_DRIVE_UPLOAD_ERROR = ""
+    """Compatibility wrapper: uploads synchronously; no background thread."""
     if drive_service is None or not os.path.exists(local_path):
-        _LAST_DRIVE_UPLOAD_ERROR = "Google Drive is not initialised or the local file does not exist."
-        return False
+        return
     with _DRIVE_SYNC_LOCK:
-        errors = []
         try:
-            is_attachment = os.path.abspath(local_path).startswith(os.path.abspath(UPLOAD_DIR) + os.sep)
-            candidate_parents = []
-            if is_attachment:
-                attachment_parent = _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
-                if attachment_parent:
-                    candidate_parents.append((attachment_parent, "uploaded_attachments"))
-            candidate_parents.append((GOOGLE_DRIVE_FOLDER_ID, "Acoole_App_Uploads"))
-
-            for parent_id, label in candidate_parents:
-                try:
-                    uploaded_id = _drive_upload_path(local_path, filename, parent_id=parent_id)
-                    if uploaded_id:
-                        return True
-                    errors.append(f"{label}: Drive returned no file id")
-                except Exception as e:
-                    errors.append(f"{label}: {type(e).__name__}: {e}")
-
-            _LAST_DRIVE_UPLOAD_ERROR = " | ".join(errors) or "No writable Drive destination was available."
-            print(f"Google Drive attachment upload failed for {filename}: {_LAST_DRIVE_UPLOAD_ERROR}")
-            return False
+            upload_to_google_drive(local_path, filename)
         except Exception as e:
-            _LAST_DRIVE_UPLOAD_ERROR = f"{type(e).__name__}: {e}"
-            print(f"Google Drive attachment upload failed for {filename}: {_LAST_DRIVE_UPLOAD_ERROR}")
-            return False
-
-def save_uploaded_attachment(uploaded_file, filename):
-    """Save an uploaded attachment locally and require successful Drive backup."""
-    # Sanitize filename to remove any problematic characters
-    safe_name = "".join(c for c in str(filename) if c.isalnum() or c in "._- ").strip()
-    if not safe_name:
-        safe_name = "attachment"
-    
-    local_path = os.path.join(UPLOAD_DIR, safe_name)
-    try:
-        with open(local_path, "wb") as out_file:
-            out_file.write(uploaded_file.getbuffer())
-    except Exception as e:
-        st.error(f"❌ Could not save attachment '{safe_name}': {e}")
-        st.stop()
-    if not _upload_to_drive_bg(local_path, safe_name):
-        try:
-            if os.path.exists(local_path):
-                os.remove(local_path)
-        except Exception:
-            pass
-        detail = str(_LAST_DRIVE_UPLOAD_ERROR or "No additional Drive error was returned.")
-        st.error(
-            f"❌ Attachment '{safe_name}' could not be uploaded to Google Drive. "
-            "The record was NOT submitted."
-        )
-        st.caption(f"Google Drive upload detail: {detail}")
-        st.stop()
-    return safe_name
+            print(f"Drive upload failed for {filename}: {e}")
 
 def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"): return
     os.makedirs(APP_FOLDER, exist_ok=True)
     with _DRIVE_SYNC_LOCK:
-        _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
         targets = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, USER_DB_COLUMNS),
@@ -466,10 +383,18 @@ except ImportError:
 _EXCEL_INIT_LOCK = threading.Lock()
 
 def _write_empty_excel(path, columns):
-    """Create/replace an Excel file safely."""
+    """Create/replace an Excel file safely.
+
+    The temporary file MUST keep an .xlsx extension because pandas/openpyxl
+    validates the output extension before creating the workbook.  The previous
+    implementation used ``<file>.xlsx.tmp_<pid>``, which caused:
+    ``ValueError: Invalid extension for engine 'openpyxl': '.xlsx.tmp_...'``.
+    """
     parent = os.path.dirname(os.path.abspath(path))
     os.makedirs(parent, exist_ok=True)
     df = pd.DataFrame(columns=columns)
+
+    # Keep the .xlsx suffix so pandas selects the openpyxl writer correctly.
     stem = os.path.splitext(os.path.basename(path))[0]
     temp_path = os.path.join(parent, f".{stem}.clear_{os.getpid()}_{threading.get_ident()}.xlsx")
     try:
@@ -484,7 +409,12 @@ def _write_empty_excel(path, columns):
                 pass
 
 def safe_init_excel(path, columns):
-    """Create/repair an Excel workbook safely without deleting a live file."""
+    """Create/repair an Excel workbook safely without deleting a live file.
+
+    The previous implementation called os.remove(path) on any read error. On
+    Streamlit Cloud, overlapping reruns could then race and raise FileNotFoundError.
+    We now build a replacement workbook and atomically replace the old file.
+    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if not os.path.exists(path):
         tmp_path = f"{path}.init.tmp"
@@ -519,6 +449,8 @@ def safe_init_excel(path, columns):
         return True
     except Exception as e:
         print(f"Excel initialisation/recovery for {path} failed: {e}")
+        # Do not delete the original workbook. If it is unreadable, keep it for
+        # recovery and create a fresh workbook only when no usable file exists.
         if os.path.exists(path):
             return False
         tmp_path = f"{path}.init.tmp"
@@ -742,7 +674,11 @@ def show_old_new_comparison(old_json, new_rec):
 
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
-        with st.spinner("Refreshing data..."):
+        with st.spinner("Refreshing from Google Drive..."):
+            if drive_service is not None:
+                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH):
+                    remote = _drive_find_file(os.path.basename(path))
+                    if remote: _drive_download_file(remote["id"], path)
             _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
@@ -823,6 +759,8 @@ def save_roles(roles_list):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
+# Initialise persistent files defensively. A Drive/API problem must never stop
+# the Streamlit application itself from starting.
 try:
     initialise_drive_storage()
 except Exception as e:
@@ -1367,8 +1305,10 @@ def render_work_order_employee_portal(current_user, current_dept):
                                 for i, f in enumerate(e_files, start=len(new_attachments) + 1):
                                     safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
                                     fn = f"{editing_id}_EDIT_F{i}_{safe_name}"
-                                    saved_fn = save_uploaded_attachment(f, fn)
-                                    new_attachments.append(saved_fn)
+                                    fp = os.path.join(UPLOAD_DIR, fn)
+                                    with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
+                                    _upload_to_drive_bg(fp, fn)
+                                    new_attachments.append(fn)
                             old_data = {"manual_work_order_no": rec.get("manual_work_order_no"), "emp_name": rec.get("emp_name"), "site_address": rec.get("site_address"), "customer_job_no": rec.get("customer_job_no"), "work_date": rec.get("work_date"), "amount": rec.get("amount"), "desc": rec.get("desc"), "manager": rec.get("manager"), "status": rec.get("status")}
                             for x in orders:
                                 if str(x.get("id")) == str(editing_id):
@@ -1430,8 +1370,10 @@ def render_work_order_employee_portal(current_user, current_dept):
                     for i, f in enumerate(files or [], 1):
                         safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
                         fn = f"{wid}_F{i}_{safe_name}"
-                        saved_fn = save_uploaded_attachment(f, fn)
-                        attachments.append(saved_fn)
+                        fp = os.path.join(UPLOAD_DIR, fn)
+                        with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
+                        _upload_to_drive_bg(fp, fn)
+                        attachments.append(fn)
                     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     rec = {"id": wid, "manual_work_order_no": work_order_no.strip(), "emp_name": contractor_employee.strip(), "dept": current_dept, "work_date": str(work_date), "hours": 0.0, "customer_job_no": customer_job_no.strip(), "site_address": site_address.strip(), "amount": float(amount), "manager": manager.strip(), "desc": description.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending_manager", "manager_comments": "", "manager_decision_date": "", "manager_decision_by": "", "director_comments": "", "director_decision_date": "", "director_decision_by": "", "submitted_by": current_user, "submitted_date": now, "payroll_status": "Pending", "payroll_date": "", "payroll_by": "", "pdf_path": ""}
                     orders.append(rec)
@@ -1591,8 +1533,10 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 for i, f in enumerate(files or [], 1):
                     safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
                     fn = f"{wid}_F{i}_{safe_name}"
-                    saved_fn = save_uploaded_attachment(f, fn)
-                    attachments.append(saved_fn)
+                    fp = os.path.join(UPLOAD_DIR, fn)
+                    with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
+                    _upload_to_drive_bg(fp, fn)
+                    attachments.append(fn)
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 rec = {"id": wid, "manual_work_order_no": work_order_no.strip(), "emp_name": contractor_employee.strip(), "dept": manager_dept, "work_date": str(work_date), "hours": 0.0, "customer_job_no": customer_job_no.strip(), "site_address": site_address.strip(), "amount": float(amount), "manager": manager_name, "desc": description.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending_director", "manager_comments": "", "manager_decision_date": "", "manager_decision_by": "", "director_comments": "", "director_decision_date": "", "director_decision_by": "", "submitted_by": manager_name, "submitted_date": now, "payroll_status": "Pending", "payroll_date": "", "payroll_by": "", "pdf_path": ""}
                 orders.append(rec)
@@ -2500,14 +2444,8 @@ def ensure_attachment_local(filename):
     local_path = os.path.join(UPLOAD_DIR, filename)
     if os.path.exists(local_path): return local_path
     if drive_service is not None:
-        attachment_parent = _drive_get_or_create_folder(GOOGLE_DRIVE_ATTACHMENTS_FOLDER_NAME)
-        if attachment_parent:
-            remote = _drive_find_file(filename, attachment_parent)
-            if remote and _drive_download_file(remote["id"], local_path):
-                return local_path
-        remote = _drive_find_file(filename, GOOGLE_DRIVE_FOLDER_ID)
-        if remote and _drive_download_file(remote["id"], local_path):
-            return local_path
+        remote = _drive_find_file(filename)
+        if remote and _drive_download_file(remote["id"], local_path): return local_path
     return None
 
 def display_attachments(req):
@@ -2950,8 +2888,9 @@ elif role == "Work Order Manager":
                             for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
                                 fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
                                 edit_path = os.path.join(UPLOAD_DIR, fn)
-                                saved_fn = save_uploaded_attachment(f, fn)
-                                final_attachments.append(saved_fn)
+                                with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
+                                _upload_to_drive_bg(edit_path, fn)
+                                final_attachments.append(fn)
                         records = load_records_from_excel()
                         old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
                         new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
@@ -2988,8 +2927,9 @@ elif role == "Work Order Manager":
                             for i, f in enumerate(files, 1):
                                 fn = f"ID_{nid}_F{i}_{f.name}"
                                 file_path = os.path.join(UPLOAD_DIR, fn)
-                                saved_fn = save_uploaded_attachment(f, fn)
-                                att_list.append(saved_fn)
+                                with open(file_path, "wb") as out: out.write(f.getbuffer())
+                                att_list.append(fn)
+                                _upload_to_drive_bg(file_path, fn)
                         payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
@@ -3082,8 +3022,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
                                         fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
                                         edit_path = os.path.join(UPLOAD_DIR, fn)
-                                        saved_fn = save_uploaded_attachment(f, fn)
-                                        final_attachments.append(saved_fn)
+                                        with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
+                                        _upload_to_drive_bg(edit_path, fn)
+                                        final_attachments.append(fn)
                                 records = load_records_from_excel()
                                 old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
                                 new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
@@ -3120,8 +3061,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     for i, f in enumerate(files, 1):
                                         fn = f"ID_{nid}_F{i}_{f.name}"
                                         file_path = os.path.join(UPLOAD_DIR, fn)
-                                        saved_fn = save_uploaded_attachment(f, fn)
-                                        att_list.append(saved_fn)
+                                        with open(file_path, "wb") as out: out.write(f.getbuffer())
+                                        att_list.append(fn)
+                                        _upload_to_drive_bg(file_path, fn)
                                 payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                                 save_record_to_excel(payload)
                                 log_action("CREATED", nid)
