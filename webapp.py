@@ -1409,14 +1409,11 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
         # Every widget in this form gets a dedicated namespace.  This is important
         # because Work Order Managers also have the Addition & Deduction tab, and
         # Streamlit requires widget keys to be unique across the whole page.
-        try:
-            form_version = int(st.session_state.get("wo_mgr_new_wo_form_version", 0))
-        except Exception:
-            form_version = 0
         manager_key = re.sub(r"[^a-zA-Z0-9_]+", "_", str(manager_name or "manager")).strip("_").lower() or "manager"
-        wo_key_prefix = f"work_order_manager_{manager_key}_{form_version}"
+        dept_key = re.sub(r"[^a-zA-Z0-9_]+", "_", str(manager_dept or "department")).strip("_").lower() or "department"
+        wo_key_prefix = f"work_order_manager_{manager_key}_{dept_key}"
 
-        with st.form(f"{wo_key_prefix}_form", clear_on_submit=False):
+        with st.form(f"{wo_key_prefix}_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             with c1:
                 work_order_no = st.text_input(
@@ -1495,7 +1492,6 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 orders.append(rec)
                 save_all_work_orders(orders)
                 log_action("WORK_ORDER_MANAGER_CREATED", wid, decision_by=manager_name)
-                st.session_state["wo_mgr_new_wo_form_version"] = form_version + 1
                 st.success(f"✅ Work Order {work_order_no.strip()} submitted to the Directors for final approval.")
                 st.rerun()
         st.divider()
@@ -2859,20 +2855,22 @@ elif role == "Work Order Manager":
         else:
             st.subheader(f"➕ New Request — {dept_name}")
             nid = get_next_id(all_live_requests)
-            form_version = st.session_state.get("mgr_request_form_version", 0)
-            with st.form(f"mgr_request_form_v{form_version}", clear_on_submit=False):
+            manager_form_key = re.sub(r"[^a-zA-Z0-9_]+", "_", str(full_name or "manager")).strip("_").lower() or "manager"
+            dept_form_key = re.sub(r"[^a-zA-Z0-9_]+", "_", str(dept_name or "department")).strip("_").lower() or "department"
+            request_key_prefix = f"mgr_request_{manager_form_key}_{dept_form_key}"
+            with st.form(f"{request_key_prefix}_form", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 with c1:
-                    en = st.text_input("👤 Employee Name", key=f"mgr_request_en_v{form_version}")
-                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"mgr_request_rt_v{form_version}")
-                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"mgr_request_ct_v{form_version}")
-                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"mgr_request_amt_v{form_version}")
+                    en = st.text_input("👤 Employee Name", key=f"{request_key_prefix}_employee")
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"{request_key_prefix}_type")
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"{request_key_prefix}_category")
+                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"{request_key_prefix}_amount")
                 with c2:
                     from datetime import datetime as dt
-                    dt_val = st.date_input("📅 Date", value=dt.today(), key=f"mgr_request_dt_v{form_version}")
-                    mgr = st.text_input("👔 Line Manager", key=f"mgr_request_mgr_v{form_version}")
-                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"mgr_request_files_v{form_version}")
-                    desc = st.text_area("📝 Description / Justification", key=f"mgr_request_desc_v{form_version}")
+                    dt_val = st.date_input("📅 Date", value=dt.today(), key=f"{request_key_prefix}_date")
+                    mgr = st.text_input("👔 Line Manager", key=f"{request_key_prefix}_manager")
+                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"{request_key_prefix}_files")
+                    desc = st.text_area("📝 Description / Justification", key=f"{request_key_prefix}_description")
                 if st.form_submit_button("📤 Send to Director", type="primary"):
                     if en.strip() and mgr.strip() and desc.strip():
                         att_list = []
@@ -2886,7 +2884,6 @@ elif role == "Work Order Manager":
                         payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
-                        st.session_state["mgr_request_form_version"] = form_version + 1
                         st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
                     else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
             st.divider()
