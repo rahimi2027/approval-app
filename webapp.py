@@ -208,85 +208,103 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
         return None
 
 def _drive_download_file(file_id, local_path):
-    """Download a Drive file atomically so readers never see a half-written XLSX."""
-    if drive_service is None: return False
-    with _DRIVE_SYNC_LOCK:
-        tmp_path = f"{local_path}.download_{os.getpid()}"
+    if drive_service is None:
+        return False
+    tmp_path = f"{local_path}.tmp"
+    try:
+        request = drive_service.files().get_media(fileId=file_id)
+        with open(tmp_path, "wb") as fh:
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+        os.replace(tmp_path, local_path)
+        return True
+    except Exception as e:
         try:
-            parent = os.path.dirname(os.path.abspath(local_path))
-            os.makedirs(parent, exist_ok=True)
-            request = drive_service.files().get_media(fileId=file_id)
-            with open(tmp_path, "wb") as fh:
-                downloader = MediaIoBaseDownload(fh, request)
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-            os.replace(tmp_path, local_path)
-            return True
-        except Exception as e:
-            print(f"Drive download failed for {local_path}: {e}")
-            try:
-                if os.path.exists(tmp_path): os.remove(tmp_path)
-            except OSError: pass
-            return False
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        print(f"Drive download failed for {local_path}: {e}")
+        return False
 
 def sync_persistent_file(local_path, columns=None):
-    if drive_service is None: return
-    filename = os.path.basename(local_path)
-    remote = _drive_find_file(filename)
-    if remote:
-        try:
-            rmt = str(remote.get("modifiedTime", "")).rstrip("Z")
-            local_newer = False
-            if os.path.exists(local_path) and rmt:
-                if "." in rmt: remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S.%f")
-                else: remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S")
-                local_dt = datetime.fromtimestamp(os.path.getmtime(local_path), timezone.utc).replace(tzinfo=None)
-                if local_dt > remote_dt: local_newer = True
-            if not local_newer:
-                if not _drive_download_file(remote["id"], local_path):
-                    print(f"Using local copy of {filename} (Drive download failed)")
-        except Exception as e:
-            print(f"mtime compare failed for {filename} ({e}); downloading anyway")
-            _drive_download_file(remote["id"], local_path)
-    elif os.path.exists(local_path):
-        _drive_upload_path(local_path, filename)
-    elif columns is not None:
-        pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
-        _drive_upload_path(local_path, filename)
+    """Synchronise one persistent workbook with Drive without background threads.
+
+    All Drive/XLSX operations are serialised. This is intentional: openpyxl and
+    the Google API client must not be allowed to modify the same workbook from
+    overlapping Streamlit reruns/background threads.
+    """
+    if drive_service is None:
+        if not os.path.exists(local_path) and columns is not None:
+            pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
+        return
+
+    with _DRIVE_SYNC_LOCK:
+        filename = os.path.basename(local_path)
+        remote = _drive_find_file(filename)
+        if remote:
+            try:
+                rmt = str(remote.get("modifiedTime", "")).rstrip("Z")
+                local_newer = False
+                if os.path.exists(local_path) and rmt:
+                    try:
+                        from datetime import timezone
+                        if "." in rmt:
+                            remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc)
+                        else:
+                            remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+                        local_dt = datetime.fromtimestamp(os.path.getmtime(local_path), timezone.utc)
+                        local_newer = local_dt > remote_dt
+                    except Exception:
+                        local_newer = False
+                if not local_newer:
+                    if not _drive_download_file(remote["id"], local_path):
+                        print(f"Using local copy of {filename} (Drive download failed)")
+            except Exception as e:
+                print(f"Drive sync check failed for {filename}: {e}")
+                if not os.path.exists(local_path) and columns is not None:
+                    pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
+        elif os.path.exists(local_path):
+            _drive_upload_path(local_path, filename)
+        elif columns is not None:
+            pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
+            _drive_upload_path(local_path, filename)
 
 def sync_saved_file_to_drive(local_path):
-    """Synchronise a changed persistent file to Drive safely.
+    """Synchronously upload a changed workbook/file to Google Drive.
 
-    This intentionally runs synchronously. The previous daemon-thread implementation
-    allowed Streamlit reruns and Google Drive/openpyxl operations to overlap on the
-    same XLSX file, which could leave a file half-written and, on Streamlit Cloud,
-    cause the process to abort with `free(): corrupted unsorted chunks`.
+    No daemon/background thread is used. This prevents Streamlit reruns from
+    racing with openpyxl/Google Drive operations and causing native allocator
+    crashes such as `free(): corrupted unsorted chunks`.
     """
-    if drive_service is None or not os.path.exists(local_path): return
+    if drive_service is None or not os.path.exists(local_path):
+        return
+    try:
+        st_info = os.stat(local_path)
+        fingerprint = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
+    except Exception:
+        return
     with _DRIVE_SYNC_LOCK:
+        if _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint:
+            return
         try:
-            st_info = os.stat(local_path)
-            fingerprint = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
-            if _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint:
-                return
-            result = _drive_upload_path(local_path)
-            if result is not None:
+            if _drive_upload_path(local_path) is not None:
                 _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
-            else:
-                _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
         except Exception as e:
             print(f"Drive sync failed for {local_path}: {e}")
             _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
 
-
 def _upload_to_drive_bg(local_path, filename):
-    """Compatibility wrapper: upload synchronously to avoid unsafe background I/O."""
-    if drive_service is None or not os.path.exists(local_path): return
-    try:
-        upload_to_google_drive(local_path, filename)
-    except Exception as e:
-        print(f"Drive upload failed for {filename}: {e}")
+    """Compatibility wrapper: uploads synchronously; no background thread."""
+    if drive_service is None or not os.path.exists(local_path):
+        return
+    with _DRIVE_SYNC_LOCK:
+        try:
+            upload_to_google_drive(local_path, filename)
+        except Exception as e:
+            print(f"Drive upload failed for {filename}: {e}")
 
 def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"): return
@@ -390,47 +408,61 @@ def _write_empty_excel(path, columns):
             except OSError: pass
 
 def safe_init_excel(path, columns):
-    """Ensure an Excel file exists and has all required columns.
+    """Create/repair an Excel workbook safely without deleting a live file.
 
-    A previous version deleted the file inside the exception handler. On Streamlit
-    Cloud, overlapping reruns can make that delete race with another rerun and
-    raise FileNotFoundError, which can crash the whole app at startup. We now use
-    a lock plus an atomic replacement and never assume the file still exists when
-    repairing it.
+    The previous implementation called os.remove(path) on any read error. On
+    Streamlit Cloud, overlapping reruns could then race and raise FileNotFoundError.
+    We now build a replacement workbook and atomically replace the old file.
     """
-    with _EXCEL_INIT_LOCK:
-        parent = os.path.dirname(os.path.abspath(path))
-        os.makedirs(parent, exist_ok=True)
-        if not os.path.exists(path):
-            _write_empty_excel(path, columns)
-            return True
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if not os.path.exists(path):
+        tmp_path = f"{path}.init.tmp"
         try:
-            df = pd.read_excel(path, engine="openpyxl").fillna("")
-            changed = False
-            for col in columns:
-                if col not in df.columns:
-                    df[col] = ""
-                    changed = True
-            if changed:
-                temp_path = f"{path}.tmp_{os.getpid()}"
-                try:
-                    df.to_excel(temp_path, index=False, engine="openpyxl")
-                    os.replace(temp_path, path)
-                finally:
-                    if os.path.exists(temp_path):
-                        try: os.remove(temp_path)
-                        except OSError: pass
+            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
+            os.replace(tmp_path, path)
             return True
-        except Exception as exc:
-            # Do not call os.remove(path): another Streamlit rerun may already
-            # have replaced/removed it. Atomic replacement is sufficient.
+        finally:
             try:
-                _write_empty_excel(path, columns)
-                print(f"Recreated invalid Excel file {path}: {exc}")
-                return True
-            except Exception as repair_exc:
-                print(f"Excel initialisation failed for {path}: {repair_exc}")
-                return False
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+    try:
+        df = pd.read_excel(path, engine="openpyxl").fillna("")
+        changed = False
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+                changed = True
+        if changed:
+            tmp_path = f"{path}.repair.tmp"
+            try:
+                df.to_excel(tmp_path, index=False, engine="openpyxl")
+                os.replace(tmp_path, path)
+            finally:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+        return True
+    except Exception as e:
+        print(f"Excel initialisation/recovery for {path} failed: {e}")
+        # Do not delete the original workbook. If it is unreadable, keep it for
+        # recovery and create a fresh workbook only when no usable file exists.
+        if os.path.exists(path):
+            return False
+        tmp_path = f"{path}.init.tmp"
+        try:
+            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
+            os.replace(tmp_path, path)
+            return True
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
 
 def _invalidate_data_cache(*names):
     for name in names: st.session_state.pop(name, None)
