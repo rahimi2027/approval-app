@@ -1900,7 +1900,7 @@ def inspector_bonus_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.cell(0, 10, safe("National Grid Inspector Bonus Approval Sheet"), ln=True, align="C")
         pdf.ln(4)
         pdf.set_font(family, "", 10)
-        pdf.multi_cell(0, 6, safe("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month."), align="C")
+        pdf.multi_cell(0, 6, safe("This sheet needs to be completed and passed to Andy to be signed off and given to Accounts Team by the 3rd of the month."), align="C")
         pdf.ln(8)
         def field(label, value, label_w=60, value_h=10):
             pdf.set_font(family, "B", 11); pdf.cell(label_w, value_h, safe(label), border=1)
