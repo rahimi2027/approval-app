@@ -106,59 +106,31 @@ _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.Lock()
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION — BASE64 METHOD (with auto-padding fix)
+# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
 # ============================================================
 try:
     gdrive = st.secrets["gdrive"]
+    b64_string = str(gdrive["key_b64"]).replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
     
-    if "key_b64" not in gdrive:
-        st.error("❌ Secret 'key_b64' not found. Available keys: " + str(list(gdrive.keys())))
-        raise KeyError("key_b64 missing from [gdrive] section")
-    
-    b64_string = str(gdrive["key_b64"])
-    
-    # Clean whitespace
-    b64_string = b64_string.replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
-    
-    # ✅ FIX: Add '=' padding so the length is a multiple of 4
+    # Add padding if needed
     padding_needed = (4 - len(b64_string) % 4) % 4
     if padding_needed:
         b64_string += "=" * padding_needed
-        st.write(f"🔍 DEBUG: Added {padding_needed} padding character(s)")
     
-    if len(b64_string) < 100:
-        st.error("❌ The base64 string is too short. You probably pasted the placeholder or only part of the string.")
-        raise ValueError("base64 string too short")
-    
-    # Decode
+    # Decode the base64 string back into JSON
     decoded_json = base64.b64decode(b64_string).decode("utf-8")
-    st.write(f"🔍 DEBUG: Decoded JSON length = {len(decoded_json)} characters")
-    st.write(f"🔍 DEBUG: JSON starts with = `{decoded_json[:80]}`")
-    
-    # Parse
     creds_dict = json.loads(decoded_json)
     
-    # Authenticate
+    # Authenticate using the Service Account
     credentials = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
     )
     drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
     about = drive_service.about().get(fields="user").execute()
-    st.success("✅ Google Drive connected (Service Account)")
-    
-    # Clean up the debug messages after success
-    st.session_state["drive_debug_done"] = True
+    st.success("✅ Google Drive connected")
 except Exception as e:
     drive_service = None
     st.error(f"❌ Google Drive connection failed: {e}")
-
-if drive_service:
-    try:
-        folder = drive_service.files().get(fileId=GOOGLE_DRIVE_FOLDER_ID, fields="id,name,mimeType").execute()
-        st.success("✅ Google Drive folder accessible")
-    except Exception as e:
-        drive_service = None
-        st.error(f"❌ Google Drive folder access failed: {e}")
 
 def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None or not os.path.exists(local_file_path): return None
