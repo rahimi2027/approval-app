@@ -1,9 +1,13 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.17
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.18
 # ============================================================
-# ✅ v4.17 (BASE64 WHITESPACE FIX):
+# ✅ v4.18 (ATTACHMENT PRESERVATION FIX):
+#    • Fixed: Attachments were being cleared before submission
+#      due to `clear_on_submit=True`. Now using versioned forms
+#      to preserve uploads and reset forms cleanly after submit.
+# ✅ v4.17 (BASE64 WHITESPACE & PADDING FIX):
 #    • Strips whitespace/newlines from base64 secrets before decoding.
-#    • Fixes 'Expecting value: line 1 column 1 (char 0)' error.
+#    • Adds automatic padding to fix 'Incorrect padding' errors.
 # ✅ v4.16 (PERMANENT GOOGLE DRIVE FIX - BASE64 METHOD)
 # ✅ v4.15 (WORK ORDER TOTAL TAB RESTRUCTURE)
 # ✅ v4.14 (WORK ORDER TOTAL FOR EMPLOYEES/TEAM MEMBERS)
@@ -106,7 +110,7 @@ _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.Lock()
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
+# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD v4.18)
 # ============================================================
 try:
     gdrive = st.secrets["gdrive"]
@@ -131,6 +135,14 @@ try:
 except Exception as e:
     drive_service = None
     st.error(f"❌ Google Drive connection failed: {e}")
+
+if drive_service:
+    try:
+        folder = drive_service.files().get(fileId=GOOGLE_DRIVE_FOLDER_ID, fields="id,name,mimeType").execute()
+        st.success("✅ Google Drive folder accessible")
+    except Exception as e:
+        drive_service = None
+        st.error(f"❌ Google Drive folder access failed: {e}")
 
 def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None or not os.path.exists(local_file_path): return None
@@ -1393,21 +1405,22 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
     with main_tab:
         st.markdown("### 📤 Submit New Work Order")
         st.caption("Complete the work-order details below. No hours/time entry is required.")
-        with st.form("manager_new_work_order_form", clear_on_submit=True):
+        form_version = st.session_state.get("wo_mgr_new_wo_form_version", 0)
+        with st.form(f"wo_mgr_new_work_order_form_v{form_version}", clear_on_submit=False):
             c1, c2 = st.columns(2)
             with c1:
-                work_order_no = st.text_input("🧾 Work Order No.", placeholder="Enter the Work Order No. from the work-order sheet")
-                contractor_employee = st.text_input("👤 Contractor / Employee Labour", placeholder="Enter contractor or employee name")
-                site_address = st.text_area("📍 Site Address", placeholder="Enter the full site address", height=90)
-                customer_job_no = st.text_input("📘 Customer Job No.", placeholder="Enter Customer Job No.")
+                work_order_no = st.text_input("🧾 Work Order No.", key=f"wo_mgr_wo_v{form_version}", placeholder="Enter the Work Order No. from the work-order sheet")
+                contractor_employee = st.text_input("👤 Contractor / Employee Labour", key=f"wo_mgr_emp_v{form_version}", placeholder="Enter contractor or employee name")
+                site_address = st.text_area("📍 Site Address", key=f"wo_mgr_site_v{form_version}", placeholder="Enter the full site address", height=90)
+                customer_job_no = st.text_input("📘 Customer Job No.", key=f"wo_mgr_cj_v{form_version}", placeholder="Enter Customer Job No.")
             with c2:
-                work_date = st.date_input("📅 Date", value=date.today())
-                amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f")
-                description = st.text_area("📝 Description", placeholder="Describe the work completed...", height=150)
+                work_date = st.date_input("📅 Date", key=f"wo_mgr_date_v{form_version}", value=date.today())
+                amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", key=f"wo_mgr_amt_v{form_version}")
+                description = st.text_area("📝 Description", key=f"wo_mgr_desc_v{form_version}", placeholder="Describe the work completed...", height=150)
             _all_users = load_users()
             director_names = sorted({str(u.get("full_name", "")).strip() for u in _all_users.values() if str(u.get("role", "")).strip().lower() == "director" and str(u.get("full_name", "")).strip()})
             director = director_names[0] if director_names else "Director"
-            files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+            files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_files_v{form_version}")
             submitted = st.form_submit_button("📤 Submit Work Order", type="primary", use_container_width=True)
         if submitted:
             errors = []
@@ -1434,6 +1447,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                 orders.append(rec)
                 save_all_work_orders(orders)
                 log_action("WORK_ORDER_MANAGER_CREATED", wid, decision_by=manager_name)
+                st.session_state["wo_mgr_new_wo_form_version"] = form_version + 1
                 st.success(f"✅ Work Order {work_order_no.strip()} submitted to {director} for final approval.")
                 st.rerun()
         st.divider()
@@ -1791,7 +1805,7 @@ def inspector_bonus_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.cell(0, 10, safe("National Grid Inspector Bonus Approval Sheet"), ln=True, align="C")
         pdf.ln(4)
         pdf.set_font(family, "", 10)
-        pdf.multi_cell(0, 6, safe("This sheet needs to be completed and passed to Andy to be signed off and given to Rachel by the 3rd of the month."), align="C")
+        pdf.multi_cell(0, 6, safe("This sheet needs to be completed and passed to Andy to be signed off and given to Accounts Team by the 3rd of the month."), align="C")
         pdf.ln(8)
         def field(label, value, label_w=60, value_h=10):
             pdf.set_font(family, "B", 11); pdf.cell(label_w, value_h, safe(label), border=1)
@@ -2797,19 +2811,20 @@ elif role == "Work Order Manager":
         else:
             st.subheader(f"➕ New Request — {dept_name}")
             nid = get_next_id(all_live_requests)
-            with st.form("new_req", clear_on_submit=True):
+            form_version = st.session_state.get("wo_mgr_new_req_form_version", 0)
+            with st.form(f"wo_mgr_new_req_v{form_version}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 with c1:
-                    en = st.text_input("👤 Employee Name")
-                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
-                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
-                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
+                    en = st.text_input("👤 Employee Name", key=f"wo_mgr_en_v{form_version}")
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"wo_mgr_rt_v{form_version}")
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"wo_mgr_ct_v{form_version}")
+                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"wo_mgr_amt_v{form_version}")
                 with c2:
                     from datetime import datetime as dt
-                    dt_val = st.date_input("📅 Date", value=dt.today())
-                    mgr = st.text_input("👔 Line Manager")
-                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-                    desc = st.text_area("📝 Description / Justification")
+                    dt_val = st.date_input("📅 Date", value=dt.today(), key=f"wo_mgr_dt_v{form_version}")
+                    mgr = st.text_input("👔 Line Manager", key=f"wo_mgr_mgr_v{form_version}")
+                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_files_v{form_version}")
+                    desc = st.text_area("📝 Description / Justification", key=f"wo_mgr_desc_v{form_version}")
                 if st.form_submit_button("📤 Send to Director", type="primary"):
                     if en.strip() and mgr.strip() and desc.strip():
                         att_list = []
@@ -2823,6 +2838,7 @@ elif role == "Work Order Manager":
                         payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
+                        st.session_state["wo_mgr_new_req_form_version"] = form_version + 1
                         st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
                     else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
             st.divider()
@@ -2929,19 +2945,20 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 else:
                     st.subheader(f"➕ New Request — {dept_name}")
                     nid = get_next_id(all_live_requests)
-                    with st.form("new_req", clear_on_submit=True):
+                    form_version = st.session_state.get("new_req_form_version", 0)
+                    with st.form(f"new_req_v{form_version}", clear_on_submit=False):
                         c1, c2 = st.columns(2)
                         with c1:
-                            en = st.text_input("👤 Employee Name")
-                            rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"])
-                            ct = st.selectbox("🏷️ Category / Reason", CATEGORIES)
-                            amt = st.number_input("💷 Amount (£)", 0.01, step=10.0)
+                            en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
+                            rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
+                            ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
+                            amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
                         with c2:
                             from datetime import datetime as dt
-                            dt_val = st.date_input("📅 Date", value=dt.today())
-                            mgr = st.text_input("👔 Line Manager")
-                            files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-                            desc = st.text_area("📝 Description / Justification")
+                            dt_val = st.date_input("📅 Date", value=dt.today(), key=f"dt_v{form_version}")
+                            mgr = st.text_input("👔 Line Manager", key=f"mgr_v{form_version}")
+                            files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"files_v{form_version}")
+                            desc = st.text_area("📝 Description / Justification", key=f"desc_v{form_version}")
                         if st.form_submit_button("📤 Send to Director", type="primary"):
                             if en.strip() and mgr.strip() and desc.strip():
                                 att_list = []
@@ -2955,6 +2972,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                                 save_record_to_excel(payload)
                                 log_action("CREATED", nid)
+                                st.session_state["new_req_form_version"] = form_version + 1
                                 st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
                             else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
                     st.divider()
