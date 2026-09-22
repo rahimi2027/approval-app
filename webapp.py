@@ -1,22 +1,17 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.23
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.24
 # ============================================================
+# ✅ v4.24 (STORE RETURN / ADDITION + AUTO-FILL FIX):
+#    • Fixed auto-fill bug for Store Item prices
+#    • Added "Store Department Return (Addition)" module
+#    • Reverses previous deductions when items are returned
+#    • Added dedicated Store Returns tabs for Manager, Director, Payroll, Super Admin
+#    • Updated PDF to distinguish between Deduction and Addition
 # ✅ v4.23 (STORE DEDUCTION QUANTITY):
 #    • Added "Quantity" field to Store Department Deduction items
-#    • Auto-calculates total deduction (Quantity × Price)
-#    • Updated PDF, Director, Payroll, and Super Admin views to display Quantity
 # ✅ v4.22 (STORE ITEMS EDITABLE):
 #    • Super Admin Store Settings: Items can now be Edited (Name & Price)
-# ✅ v4.21 (STORE DEPARTMENT DEDUCTION MODULE):
-#    • New Store Department Deduction form with dynamic item selection
-#    • Auto-fill price from Super Admin configured items, editable manually
-#    • Calculates total employee deduction
-#    • Professional PDF with logo + approval stamp
-#    • "My Submitted Store Requests" tab with search filters
-# ✅ v4.20 (HR LEAVE: LIVE AUTO-LINK + PROFESSIONAL PDF)
-# ✅ v4.19 (HR LEAVE SETTLEMENT MODULE)
-# ✅ v4.18 (ATTACHMENT PRESERVATION FIX)
-# ✅ v4.17 (BASE64 WHITESPACE & PADDING FIX)
+# ✅ v4.21 (STORE DEPARTMENT DEDUCTION MODULE)
 # ============================================================
 import streamlit as st
 import os
@@ -117,7 +112,7 @@ os.makedirs(STORE_DEDUCTION_PDF_DIR, exist_ok=True)
 
 STORE_DEDUCTION_COLUMNS = [
     "ID", "Employee Name", "Date of Leaving", "Employee Department",
-    "Line Manager", "Date of Submit", "Items Deducted JSON", "Total Deduction (£)",
+    "Line Manager", "Date of Submit", "Type", "Items Deducted JSON", "Total Deduction (£)",
     "Description", "Attachment Name", "Status", "Director Comments",
     "Rejection Reason", "Decision Date", "Decision By", "Submitted By",
     "Submitted Date", "PDF File Path"
@@ -2456,6 +2451,7 @@ def load_store_deductions(force=False):
                 "emp_dept": str(r.get("Employee Department", "")).strip(),
                 "manager": str(r.get("Line Manager", "")).strip(),
                 "date_submit": str(r.get("Date of Submit", "")).strip(),
+                "type": str(r.get("Type", "Deduction")).strip(),
                 "items": items,
                 "total_deduction": total,
                 "desc": str(r.get("Description", "")).strip(),
@@ -2483,6 +2479,7 @@ def save_all_store_deductions(records, sync=True):
         "Employee Department": str(r.get("emp_dept", "")),
         "Line Manager": str(r.get("manager", "")),
         "Date of Submit": str(r.get("date_submit", "")),
+        "Type": str(r.get("type", "Deduction")),
         "Items Deducted JSON": json.dumps(r.get("items", []), ensure_ascii=False),
         "Total Deduction (£)": float(r.get("total_deduction", 0)),
         "Description": str(r.get("desc", "")),
@@ -2729,8 +2726,10 @@ def store_deduction_pdf(req, force_regenerate=False, upload_to_drive=True):
             except Exception: pdf.ln(5)
         else: pdf.ln(5)
 
+        is_addition = str(req.get("type", "Deduction")).strip() == "Addition"
         pdf.set_font(family, "B", 16)
-        pdf.cell(0, 10, safe("STORE DEPARTMENT DEDUCTION - APPROVAL FORM"), ln=True, align="C")
+        title_text = "STORE DEPARTMENT RETURN (ADDITION) - APPROVAL FORM" if is_addition else "STORE DEPARTMENT DEDUCTION - APPROVAL FORM"
+        pdf.cell(0, 10, safe(title_text), ln=True, align="C")
         pdf.ln(2)
         line_y = pdf.get_y()
         pdf.line(10, line_y, 200, line_y); pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
@@ -2753,7 +2752,8 @@ def store_deduction_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.ln(6)
 
         pdf.set_font(family, "B", 11)
-        pdf.cell(0, 6, safe("ITEMS TO DEDUCT"), ln=True); pdf.ln(2)
+        item_section_title = "ITEMS TO RETURN" if is_addition else "ITEMS TO DEDUCT"
+        pdf.cell(0, 6, safe(item_section_title), ln=True); pdf.ln(2)
         pdf.set_font(family, "B", 10)
         pdf.cell(90, 7, safe("Item Name"), border=1)
         pdf.cell(30, 7, safe("Qty"), border=1, align="C")
@@ -2766,7 +2766,8 @@ def store_deduction_pdf(req, force_regenerate=False, upload_to_drive=True):
             pdf.cell(40, 7, safe(f"£{float(item.get('price', 0)):.2f}"), border=1, align="R")
             pdf.cell(0, 7, safe(""), border=1, ln=True)
         pdf.set_font(family, "B", 11)
-        pdf.cell(120, 8, safe("TOTAL EMPLOYEE DEDUCTION"), border=1, align="R")
+        total_label = "TOTAL EMPLOYEE ADDITION" if is_addition else "TOTAL EMPLOYEE DEDUCTION"
+        pdf.cell(120, 8, safe(total_label), border=1, align="R")
         pdf.cell(40, 8, safe(f"£{float(req.get('total_deduction', 0)):.2f}"), border=1, align="R")
         pdf.cell(0, 8, safe(""), border=1, ln=True)
         pdf.ln(6)
@@ -2843,7 +2844,8 @@ def store_deduction_pdf(req, force_regenerate=False, upload_to_drive=True):
         safe_id = "".join(str(req.get("id", "STORE")).split()) or "STORE"
         safe_name = "_".join(str(req.get("emp_name", "Employee")).split()) or "Employee"
         safe_date = datetime.now().strftime("%Y-%m-%d")
-        filename = f"Store_Deduction_{safe_id}_{safe_name}_{safe_date}.pdf"
+        prefix = "Store_Return" if is_addition else "Store_Deduction"
+        filename = f"{prefix}_{safe_id}_{safe_name}_{safe_date}.pdf"
         path = os.path.join(STORE_DEDUCTION_PDF_DIR, filename)
         pdf.output(path)
         if upload_to_drive: _upload_to_drive_bg(path, os.path.basename(path))
@@ -2866,11 +2868,11 @@ def display_store_deduction_pdf_button(req, key_prefix="store"):
     cached_path = req.get("pdf_path", "")
     if cached_path and os.path.exists(cached_path):
         with open(cached_path, "rb") as f:
-            st.download_button("⬇️ Download Store Deduction PDF", data=f.read(),
+            st.download_button("⬇️ Download Store PDF", data=f.read(),
                               file_name=os.path.basename(cached_path), mime="application/pdf",
                               type="primary", key=dl_key)
         return
-    if st.button(f"📄 Generate Store Deduction PDF for #{req_id}", key=gen_key, type="primary"):
+    if st.button(f"📄 Generate Store PDF for #{req_id}", key=gen_key, type="primary"):
         with st.spinner("Generating PDF..."):
             path = store_deduction_pdf(req, force_regenerate=True, upload_to_drive=True)
         if path and os.path.exists(path):
@@ -3265,7 +3267,7 @@ def render_hr_leave_settings():
                     st.success("Deleted."); st.rerun()
 
 # ============================================================
-# 📦 STORE DEPARTMENT DEDUCTION — UI
+# 📦 STORE DEPARTMENT DEDUCTION & RETURN — UI
 # ============================================================
 def render_store_deduction_form(user_name, user_dept):
     st.subheader("📦 New Request — Store Department Deduction")
@@ -3300,6 +3302,9 @@ def render_store_deduction_form(user_name, user_dept):
                 match = next((it for it in store_items_master if it["name"] == selected_item), None)
                 if match:
                     item_row["price"] = match["price"]
+                    # Force the price widget to update
+                    if f"store_item_price_{i}" in st.session_state:
+                        st.session_state[f"store_item_price_{i}"] = match["price"]
                 st.rerun()
         with c2:
             item_row["quantity"] = st.number_input("Quantity", min_value=1, step=1, value=int(item_row.get("quantity", 1)), key=f"store_item_qty_{i}")
@@ -3345,6 +3350,7 @@ def render_store_deduction_form(user_name, user_dept):
             rec = {
                 "id": new_id, "emp_name": emp_name.strip(), "date_leaving": str(date_leaving),
                 "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit),
+                "type": "Deduction",
                 "items": valid_items, "total_deduction": total_deduction,
                 "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None",
                 "status": "pending", "director_comments": "", "rejection_reason": "",
@@ -3359,9 +3365,133 @@ def render_store_deduction_form(user_name, user_dept):
             st.success(f"✅ Store Department Deduction #{new_id} sent to Director for approval.")
             st.rerun()
 
-def render_store_deduction_my_submissions(user_name):
+def render_store_return_form(user_name, user_dept):
+    st.subheader("📦 New Request — Store Department Return (Addition)")
+    st.caption("Process returned items to reverse a previous deduction.")
+    
+    all_transactions = load_store_deductions()
+    approved_deds = [d for d in all_transactions if d["status"] == "approved" and d.get("type", "Deduction") == "Deduction"]
+    
+    if not approved_deds:
+        st.info("No approved store deductions found to return.")
+        return
+        
+    emp_options = sorted({d["emp_name"] for d in approved_deds})
+    selected_emp = st.selectbox("👤 Select Employee", emp_options, key="store_ret_emp")
+    
+    emp_deds = [d for d in approved_deds if d["emp_name"] == selected_emp]
+    
+    # Build a flat list of items
+    item_rows = []
+    for d in emp_deds:
+        for item in d.get("items", []):
+            item_rows.append({
+                "Request ID": d["id"],
+                "Item Name": item["item_name"],
+                "Original Qty": int(item["quantity"]),
+                "Price (£)": float(item["price"]),
+                "Return Qty": 0,
+                "Return Amount (£)": 0.0
+            })
+    
+    df_items = pd.DataFrame(item_rows)
+    
+    st.markdown("### 📦 Items Available for Return")
+    st.caption("Enter the quantity you are returning in the 'Return Qty' column. The Return Amount will calculate automatically.")
+    
+    edited_df = st.data_editor(
+        df_items,
+        column_config={
+            "Return Qty": st.column_config.NumberColumn(
+                "Return Qty",
+                min_value=0,
+                max_value=df_items["Original Qty"], # Can't do per-row max easily here, will validate later
+                step=1,
+                default=0
+            ),
+            "Return Amount (£)": st.column_config.NumberColumn(
+                "Return Amount (£)",
+                format="£%.2f",
+                disabled=True
+            )
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+    
+    # Filter where Return Qty > 0
+    valid_returns = edited_df[edited_df["Return Qty"] > 0].copy()
+    
+    if valid_returns.empty:
+        st.warning("Please select at least one item to return.")
+        total_addition = 0.0
+    else:
+        # Validate max quantity
+        valid_returns["Return Qty"] = valid_returns.apply(
+            lambda row: min(row["Return Qty"], row["Original Qty"]), axis=1
+        )
+        valid_returns["Return Amount (£)"] = valid_returns["Return Qty"] * valid_returns["Price (£)"]
+        total_addition = valid_returns["Return Amount (£)"].sum()
+        
+        st.markdown(f"<h4 style='text-align: right; color: #10b981;'>Total Employee Addition: £{total_addition:.2f}</h4>", unsafe_allow_html=True)
+    
+    with st.form("store_return_form", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            date_return = st.date_input("📅 Date of Return", value=date.today(), key="store_ret_date")
+            manager = st.text_input("👔 Line Manager", key="store_ret_manager")
+        with c2:
+            date_submit = st.date_input("📅 Date of Submit", value=date.today(), key="store_ret_submit")
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+        files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="store_ret_files")
+        desc = st.text_area("📝 Description / Justification", key="store_ret_desc")
+        
+        submitted = st.form_submit_button("📤 Send to Director for Approval", type="primary", use_container_width=True)
+        
+        if submitted:
+            if valid_returns.empty:
+                st.error("⚠️ Please select at least one item to return.")
+            elif not manager.strip() or not desc.strip():
+                st.error("⚠️ Line Manager and Description are required.")
+            else:
+                new_id = get_next_store_deduction_id(all_transactions)
+                attachments = []
+                for i, f in enumerate(files or [], 1):
+                    safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
+                    fn = f"STORE_RET_{new_id}_F{i}_{safe_name}"
+                    fp = os.path.join(UPLOAD_DIR, fn)
+                    with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
+                    _upload_to_drive_bg(fp, fn)
+                    attachments.append(fn)
+                    
+                items_list = []
+                for _, row in valid_returns.iterrows():
+                    items_list.append({
+                        "item_name": row["Item Name"],
+                        "quantity": int(row["Return Qty"]),
+                        "price": float(row["Price (£)"])
+                    })
+                    
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                rec = {
+                    "id": new_id, "emp_name": selected_emp, "date_leaving": str(date_return),
+                    "emp_dept": user_dept, "manager": manager.strip(), "date_submit": str(date_submit),
+                    "type": "Addition", "items": items_list, "total_deduction": total_addition,
+                    "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None",
+                    "status": "pending", "director_comments": "", "rejection_reason": "",
+                    "decision_date": "", "decision_by": "",
+                    "submitted_by": user_name, "submitted_date": now, "pdf_path": ""
+                }
+                all_transactions.append(rec)
+                save_all_store_deductions(all_transactions)
+                log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
+                st.success(f"✅ Store Return #{new_id} sent to Director for approval.")
+                st.rerun()
+
+def render_store_my_submissions(user_name):
     st.subheader("📋 My Submitted Store Requests")
-    st.caption("All Store Department Deduction requests you have submitted.")
+    st.caption("All Store Department transactions (Deductions and Returns) you have submitted.")
     st.divider()
 
     records = load_store_deductions()
@@ -3402,13 +3532,17 @@ def render_store_deduction_my_submissions(user_name):
     for r in reversed(filtered):
         status = r["status"]
         icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-        with st.expander(f"{icon} #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f} | {status.upper()}"):
+        type_label = "Deduction" if r.get("type", "Deduction") == "Deduction" else "Return (Addition)"
+        type_color = "#ef4444" if r.get("type", "Deduction") == "Deduction" else "#10b981"
+        
+        with st.expander(f"{icon} #{r['id']} | {r['emp_name']} | {type_label} | £{r['total_deduction']:.2f} | {status.upper()}"):
+            st.markdown(f"**Type:** <span style='color:{type_color}; font-weight:bold;'>{type_label}</span>", unsafe_allow_html=True)
             st.write(f"📅 **Leaving:** {r['date_leaving']} | **Submit:** {r['date_submit']}")
             st.write(f"👔 **Line Manager:** {r['manager']}")
-            st.markdown("**Items Deducted:**")
+            st.markdown("**Items:**")
             for item in r.get("items", []):
                 st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
-            st.write(f"**Total Deduction: £{r['total_deduction']:.2f}**")
+            st.write(f"**Total: £{r['total_deduction']:.2f}**")
             st.info(f"📝 {r['desc']}")
             display_attachments(r)
             if r.get("director_comments"): st.info(f"💬 Director: {r['director_comments']}")
@@ -3417,30 +3551,33 @@ def render_store_deduction_my_submissions(user_name):
                 st.divider()
                 display_store_deduction_pdf_button(r, key_prefix=f"store_sub_{user_name.replace(' ','_')}")
 
-def render_store_deduction_director_portal(director_name):
-    st.subheader("📦 Store Department Deduction — Director Approval")
-    st.info("Review unreturned item deductions for final settlement. Rejection requires a mandatory reason.")
+def render_store_director_portal(director_name, type_filter="Deduction"):
+    title = "📦 Store Department Deduction" if type_filter == "Deduction" else "📦 Store Department Return (Addition)"
+    st.subheader(f"{title} — Director Approval")
+    st.info(f"Review {type_filter.lower()} requests for final settlement. Rejection requires a mandatory reason.")
     st.divider()
     records = load_store_deductions()
-    pending  = [r for r in records if r["status"] == "pending"]
-    approved = [r for r in records if r["status"] == "approved"]
-    rejected = [r for r in records if r["status"] == "rejected"]
+    filtered_records = [r for r in records if r.get("type", "Deduction") == type_filter]
+    
+    pending  = [r for r in filtered_records if r["status"] == "pending"]
+    approved = [r for r in filtered_records if r["status"] == "approved"]
+    rejected = [r for r in filtered_records if r["status"] == "rejected"]
     t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
 
     def show_details(r):
         st.write(f"👤 **Employee:** {r['emp_name']} | 🏢 **Department:** {r['emp_dept']}")
         st.write(f"📅 **Date of Leaving:** {r['date_leaving']} | **Date of Submit:** {r['date_submit']}")
         st.write(f"👔 **Line Manager:** {r['manager']}")
-        st.markdown("**Items Deducted:**")
+        st.markdown("**Items:**")
         for item in r.get("items", []):
             st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
-        st.markdown(f"**Total Employee Deduction: £{r['total_deduction']:.2f}**")
+        st.markdown(f"**Total: £{r['total_deduction']:.2f}**")
         st.write(f"📝 **Submitted by:** {r['submitted_by']} on {r['submitted_date']}")
         st.info(f"📝 **Description:**\n{r['desc']}")
         st.divider(); st.markdown("#### 📎 Attachments"); display_attachments(r)
 
     with t1:
-        if not pending: st.success("✅ No pending Store Deduction requests.")
+        if not pending: st.success(f"✅ No pending {type_filter.lower()} requests.")
         for r in reversed(pending):
             rid = r["id"]
             with st.expander(f"🟡 #{rid} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f}"):
@@ -3458,7 +3595,7 @@ def render_store_deduction_director_portal(director_name):
                                 break
                         save_all_store_deductions(records)
                         log_action("STORE_DEDUCTION_APPROVED", rid, decision_by=director_name)
-                        st.success(f"✅ Store Deduction #{rid} Approved."); st.rerun()
+                        st.success(f"✅ Request #{rid} Approved."); st.rerun()
                 with c2:
                     if st.button("❌ Reject", key=f"store_dir_rej_{rid}", use_container_width=True):
                         st.session_state[f"store_reject_modal_{rid}"] = True
@@ -3481,45 +3618,49 @@ def render_store_deduction_director_portal(director_name):
                                 save_all_store_deductions(records)
                                 log_action("STORE_DEDUCTION_REJECTED", rid, decision_by=director_name)
                                 st.session_state[f"store_reject_modal_{rid}"] = False
-                                st.success(f"❌ Store Deduction #{rid} Rejected."); st.rerun()
+                                st.success(f"❌ Request #{rid} Rejected."); st.rerun()
                     with rc2:
                         if st.button("Cancel", key=f"store_rej_cancel_{rid}", use_container_width=True):
                             st.session_state[f"store_reject_modal_{rid}"] = False; st.rerun()
 
     with t2:
-        if not approved: st.info("✅ No approved Store Deduction requests.")
+        if not approved: st.info(f"✅ No approved {type_filter.lower()} requests.")
         for r in reversed(approved):
             with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f} | ✅ {r['decision_by']}"):
                 show_details(r)
                 if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
                 st.write(f"📅 Decision Date: {r['decision_date']}")
                 st.divider()
-                st.markdown("#### 📄 Store Deduction PDF")
+                st.markdown("#### 📄 PDF")
                 display_store_deduction_pdf_button(r, key_prefix=f"store_dir_app_{director_name.replace(' ','_')}")
 
     with t3:
-        if not rejected: st.info("❌ No rejected Store Deduction requests.")
+        if not rejected: st.info(f"❌ No rejected {type_filter.lower()} requests.")
         for r in reversed(rejected):
             with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f} | ❌ {r['decision_by']}"):
                 show_details(r)
                 st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
                 if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
                 st.divider()
-                st.markdown("#### 📄 Store Deduction PDF")
+                st.markdown("#### 📄 PDF")
                 display_store_deduction_pdf_button(r, key_prefix=f"store_dir_rej_{director_name.replace(' ','_')}")
 
-def render_store_deduction_super_admin():
-    st.subheader("🛡️ Store Department Deduction — Super Admin (View Only)")
-    st.info("✅ View all Store Deduction requests. **Approval → Director only.**")
+def render_store_super_admin(type_filter="Deduction"):
+    title = "Store Department Deduction" if type_filter == "Deduction" else "Store Department Return (Addition)"
+    st.subheader(f"🛡️ {title} — Super Admin (View Only)")
+    st.info(f"✅ View all {type_filter.lower()} requests. **Approval → Director only.**")
     st.divider()
     records = load_store_deductions()
-    search = st.text_input("🔎 Search Store Deduction requests", placeholder="Search by ID, employee, department, amount, status...", key="store_sa_search")
+    filtered_records = [r for r in records if r.get("type", "Deduction") == type_filter]
+    
+    search = st.text_input("🔎 Search requests", placeholder="Search by ID, employee, department, amount, status...", key="store_sa_search")
     if search.strip():
         q = search.lower().strip()
-        records = [r for r in records if q in " ".join(str(v) for v in r.values()).lower()]
-    pending  = [r for r in records if r["status"] == "pending"]
-    approved = [r for r in records if r["status"] == "approved"]
-    rejected = [r for r in records if r["status"] == "rejected"]
+        filtered_records = [r for r in filtered_records if q in " ".join(str(v) for v in r.values()).lower()]
+        
+    pending  = [r for r in filtered_records if r["status"] == "pending"]
+    approved = [r for r in filtered_records if r["status"] == "approved"]
+    rejected = [r for r in filtered_records if r["status"] == "rejected"]
     c1, c2, c3 = st.columns(3)
     with c1: st.metric("🟡 Pending", len(pending))
     with c2: st.metric("🟢 Approved", len(approved))
@@ -3529,20 +3670,20 @@ def render_store_deduction_super_admin():
     def show(r):
         st.write(f"👤 **{r['emp_name']}** | 🏢 {r['emp_dept']} | 📅 Leaving: {r['date_leaving']} | Submit: {r['date_submit']}")
         st.write(f"👔 **Manager:** {r['manager']}")
-        st.markdown("**Items Deducted:**")
+        st.markdown("**Items:**")
         for item in r.get("items", []):
             st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
-        st.markdown(f"**Total Deduction: £{r['total_deduction']:.2f}**")
+        st.markdown(f"**Total: £{r['total_deduction']:.2f}**")
         st.info(f"📝 {r['desc']}")
         st.caption(f"Submitted by {r['submitted_by']} on {r['submitted_date']}")
         display_attachments(r)
     with t1:
-        if not pending: st.success("✅ No pending Store Deduction requests.")
+        if not pending: st.success(f"✅ No pending {type_filter.lower()} requests.")
         for r in reversed(pending):
             with st.expander(f"🟡 #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f}"):
                 show(r)
     with t2:
-        if not approved: st.info("✅ No approved Store Deduction requests.")
+        if not approved: st.info(f"✅ No approved {type_filter.lower()} requests.")
         for r in reversed(approved):
             with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f} | ✅ {r['decision_by']}"):
                 show(r)
@@ -3550,28 +3691,32 @@ def render_store_deduction_super_admin():
                 st.divider()
                 display_store_deduction_pdf_button(r, key_prefix="store_sa_app")
     with t3:
-        if not rejected: st.info("❌ No rejected Store Deduction requests.")
+        if not rejected: st.info(f"❌ No rejected {type_filter.lower()} requests.")
         for r in reversed(rejected):
             with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f}"):
                 show(r); st.error(f"❌ Reason: {r['rejection_reason']}")
                 st.divider()
                 display_store_deduction_pdf_button(r, key_prefix="store_sa_rej")
 
-def render_store_deduction_payroll_portal():
-    st.subheader("📦 Store Department Deduction — Payroll (View Only)")
-    st.info("View all approved Store Deductions for payroll processing.")
+def render_store_payroll_portal(type_filter="Deduction"):
+    title = "Store Department Deduction" if type_filter == "Deduction" else "Store Department Return (Addition)"
+    st.subheader(f"📦 {title} — Payroll (View Only)")
+    st.info(f"View all approved {type_filter.lower()} requests for payroll processing.")
     st.divider()
-    approved = [r for r in load_store_deductions() if r["status"] == "approved"]
-    st.metric("✅ Approved Store Deductions", len(approved))
+    records = load_store_deductions()
+    filtered_records = [r for r in records if r.get("type", "Deduction") == type_filter]
+    approved = [r for r in filtered_records if r["status"] == "approved"]
+    
+    st.metric(f"✅ Approved {type_filter}s", len(approved))
     st.divider()
-    if not approved: st.info("No approved Store Deductions yet.")
+    if not approved: st.info(f"No approved {type_filter.lower()} requests yet.")
     for r in reversed(approved):
         with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f}"):
             st.write(f"📅 Leaving: {r['date_leaving']} | Submit: {r['date_submit']} | 👔 {r['manager']}")
-            st.markdown("**Items Deducted:**")
+            st.markdown("**Items:**")
             for item in r.get("items", []):
                 st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
-            st.markdown(f"**Total Deduction: £{r['total_deduction']:.2f}**")
+            st.markdown(f"**Total: £{r['total_deduction']:.2f}**")
             st.write(f"✅ Approved by {r['decision_by']} on {r['decision_date']}")
             if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
             display_attachments(r)
@@ -3606,7 +3751,6 @@ def render_store_items_settings():
     else:
         for i, item in enumerate(items):
             if st.session_state.editing_store_item_idx == i:
-                # Edit Mode
                 st.markdown(f"#### ✏️ Editing Item")
                 with st.form(f"edit_store_item_form_{i}", clear_on_submit=False):
                     ec1, ec2 = st.columns(2)
@@ -3637,7 +3781,6 @@ def render_store_items_settings():
                         st.session_state.editing_store_item_idx = None
                         st.rerun()
             else:
-                # View Mode
                 c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
                 c1.markdown(f"• **{item['name']}**")
                 c2.markdown(f"💷 **£{item['price']:.2f}**")
@@ -4219,10 +4362,11 @@ elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    tab_add_ded, tab_hr_leave, tab_store_ded, tab_work_orders, tab_inspector_bonus = st.tabs([
+    tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_work_orders, tab_inspector_bonus = st.tabs([
         "➕ Addition & Deduction",
         "👥 HR Leave Settlement",
-        "📦 Store Department Deduction",
+        "📦 Store Deductions",
+        "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus"
     ])
@@ -4273,7 +4417,8 @@ elif role == "Payroll":
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
     with tab_hr_leave: render_hr_leave_payroll_portal()
-    with tab_store_ded: render_store_deduction_payroll_portal()
+    with tab_store_ded: render_store_payroll_portal(type_filter="Deduction")
+    with tab_store_ret: render_store_payroll_portal(type_filter="Addition")
     with tab_work_orders: render_work_order_payroll_portal(full_name)
     with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
 
@@ -4411,7 +4556,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
     if has_hr_leave: labels.append("👥 HR Leave Settlement")
     if has_hr_leave: labels.append("📋 My Submitted HR Leave Requests")
-    if has_store_deduction: labels.append("📦 Store Department Deduction")
+    if has_store_deduction: labels.append("📦 Store Deduction")
+    if has_store_deduction: labels.append("📦 Store Return (Addition)")
     if has_store_deduction: labels.append("📋 My Submitted Store Requests")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
@@ -4553,7 +4699,11 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
         if has_store_deduction:
             with tabs[tab_idx]:
-                render_store_deduction_my_submissions(full_name)
+                render_store_return_form(full_name, dept_name)
+            tab_idx += 1
+        if has_store_deduction:
+            with tabs[tab_idx]:
+                render_store_my_submissions(full_name)
             tab_idx += 1
         if has_work_orders:
             with tabs[tab_idx]:
@@ -4565,10 +4715,11 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
 
 elif role == "Director":
-    director_addition_tab, director_hr_tab, director_store_tab, director_work_order_tab, director_inspector_tab = st.tabs([
+    director_addition_tab, director_hr_tab, director_store_ded_tab, director_store_ret_tab, director_work_order_tab, director_inspector_tab = st.tabs([
         "➕ Addition & Deduction",
         "👥 HR Leave Settlement",
-        "📦 Store Department Deduction",
+        "📦 Store Deductions",
+        "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus"
     ])
@@ -4687,16 +4838,19 @@ elif role == "Director":
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
     with director_hr_tab:
         render_hr_leave_director_portal(full_name)
-    with director_store_tab:
-        render_store_deduction_director_portal(full_name)
+    with director_store_ded_tab:
+        render_store_director_portal(full_name, type_filter="Deduction")
+    with director_store_ret_tab:
+        render_store_director_portal(full_name, type_filter="Addition")
     with director_work_order_tab: render_work_order_director_portal(full_name)
     with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_hr_tab, super_store_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
+    super_add_ded_tab, super_hr_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
         "➕ Addition & Deduction",
         "👥 HR Leave Settlement",
-        "📦 Store Department Deduction",
+        "📦 Store Deductions",
+        "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus",
         "🔧 System Management"
@@ -4754,8 +4908,10 @@ elif role == "Super Admin":
                         st.divider(); display_pdf_button(req, can_generate=True)
     with super_hr_tab:
         render_hr_leave_super_admin()
-    with super_store_tab:
-        render_store_deduction_super_admin()
+    with super_store_ded_tab:
+        render_store_super_admin(type_filter="Deduction")
+    with super_store_ret_tab:
+        render_store_super_admin(type_filter="Addition")
     with super_work_orders_tab:
         render_work_orders_super_admin()
     with super_inspector_bonus_tab:
@@ -4828,7 +4984,7 @@ elif role == "Super Admin":
                             st.success("✅ Cleared."); st.rerun()
                 with reset_col4:
                     if not st.session_state.get("confirm_clear_store_deduction", False):
-                        if st.button("📦 Clear Store Deductions", key="super_admin_clear_all_store_deduction", type="secondary", use_container_width=True):
+                        if st.button("📦 Clear Store Transactions", key="super_admin_clear_all_store_deduction", type="secondary", use_container_width=True):
                             st.session_state["confirm_clear_store_deduction"] = True
                     else:
                         if st.button("✅ Confirm", key="super_admin_confirm_clear_all_store_deduction", use_container_width=True):
@@ -4855,7 +5011,7 @@ elif role == "Super Admin":
             ("📥 Work Orders", WORK_ORDERS_PATH, "work_orders", "backup_work_orders"),
             ("📥 HR Leave Requests", HR_LEAVE_PATH, "hr_leave_requests", "backup_hr_leave"),
             ("📥 HR Daily Rates", HR_DAILY_RATES_PATH, "hr_daily_rates", "backup_hr_rates"),
-            ("📥 Store Deductions", STORE_DEDUCTION_PATH, "store_deductions", "backup_store_deductions"),
+            ("📥 Store Transactions", STORE_DEDUCTION_PATH, "store_transactions", "backup_store_transactions"),
             ("📥 Store Items", STORE_ITEMS_PATH, "store_items", "backup_store_items"),
             ("📥 Audit Log", AUDIT_LOG_PATH, "audit_log", "backup_audit_log"),
         ]
