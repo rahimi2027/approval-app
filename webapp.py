@@ -1266,291 +1266,74 @@ def _hrp_create_leave_id():
     return leave_id
 
 def render_hr_portal(current_user_info=None):
+    """HR Portal — HR Management, Employee Details, Leave and Leave History."""
     # Defensive initialization: Streamlit sessions may survive code/data changes.
+    _hr_portal_init()
     if "hrp_role" not in st.session_state:
         st.session_state.hrp_role = "hr"
     if "hrp_current_emp_id" not in st.session_state:
         st.session_state.hrp_current_emp_id = ""
-    """HR Portal — Employee, Holiday Allowance, Leave Records, and Settlement calculation."""
-    _hr_portal_init()
+    if "hrp_new_employee_form_version" not in st.session_state:
+        st.session_state.hrp_new_employee_form_version = 0
+
     st.subheader("🏢 HR Portal — Employee Management")
     st.caption("HR-managed employee, holiday and leave management system")
     st.divider()
 
     col_role1, col_role2 = st.columns([3, 1])
     with col_role2:
-        selected_role = st.selectbox("View As", ["hr", "emp"], index=0 if st.session_state.hrp_role == "hr" else 1,
-            format_func=lambda v: "🔐 HR — Full Access" if v == "hr" else "👤 Employee — View Only", key="hrp_role_selector")
+        selected_role = st.selectbox(
+            "View As",
+            ["hr", "emp"],
+            index=0 if st.session_state.hrp_role == "hr" else 1,
+            format_func=lambda v: "🔐 HR — Full Access" if v == "hr" else "👤 Employee — View Only",
+            key="hrp_role_selector",
+        )
         if selected_role != st.session_state.hrp_role:
             st.session_state.hrp_role = selected_role
             st.rerun()
 
     is_hr = st.session_state.hrp_role == "hr"
 
+    # Keep the currently selected employee valid. The selector itself is now
+    # inside Employee Details so the profile below it always belongs to the
+    # employee selected there.
+    active_employee_ids = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
+    all_employee_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
     if is_hr:
-        employee_options = {emp["emp_id"]: f"{emp['name']} — {emp['emp_id']}" for emp in st.session_state.hrp_employees if emp.get("status") == "Active"}
-        if employee_options:
-            selected_employee_id = st.selectbox("Current Employee", options=list(employee_options.keys()),
-                format_func=lambda x: employee_options[x],
-                index=list(employee_options.keys()).index(st.session_state.hrp_current_emp_id) if st.session_state.hrp_current_emp_id in employee_options else 0,
-                key="hrp_emp_selector")
-            st.session_state.hrp_current_emp_id = selected_employee_id
-        else:
-            selected_employee_id = ""
+        if st.session_state.hrp_current_emp_id not in all_employee_ids:
+            st.session_state.hrp_current_emp_id = active_employee_ids[0] if active_employee_ids else (all_employee_ids[0] if all_employee_ids else "")
     else:
-        selected_employee_id = st.session_state.hrp_current_emp_id
+        if not st.session_state.hrp_current_emp_id:
+            st.session_state.hrp_current_emp_id = all_employee_ids[0] if all_employee_ids else ""
 
-    emp = _hrp_get_employee(selected_employee_id)
-    if emp is None:
-        if is_hr:
-            st.info("👤 No employees are registered yet. Register the first employee below. Once created, you can book holiday and record sickness/family/emergency absences for them.")
-            st.markdown("### ➕ Register First Employee")
-            c1, c2 = st.columns(2)
-            with c1:
-                quick_id = st.text_input("Employee ID", placeholder="e.g. 001, EMP-001, A102", key="hrp_quick_id")
-                quick_name = st.text_input("Full Name", key="hrp_quick_name")
-                quick_start = st.date_input("Start Date", value=date.today(), key="hrp_quick_start")
-            with c2:
-                quick_position = st.text_input("Position / Job Title", key="hrp_quick_position")
-                hr_software_departments = load_departments()
-                quick_dept = st.selectbox("Department", options=hr_software_departments, key="hrp_quick_dept")
-                quick_agreement = st.selectbox("Agreement Type", options=HR_PORTAL_AGREEMENT_TYPES, key="hrp_quick_agreement")
-            if st.button("➕ Register Employee", type="primary", key="hrp_quick_register"):
-                valid, result = _hrp_validate_employee_id(quick_id)
-                if not valid:
-                    st.error(result)
-                elif not quick_name.strip() or not quick_position.strip():
-                    st.error("Full Name and Position / Job Title are required.")
-                else:
-                    new_employee = {"emp_id": result, "name": quick_name.strip(), "start_date": quick_start, "department": quick_dept, "job_title": quick_position.strip(), "agreement_type": quick_agreement, "status": "Active", "entitlement_override": None, "adjustment_note": ""}
-                    st.session_state.hrp_employees.append(new_employee)
-                    st.session_state.hrp_current_emp_id = result
-                    _hrp_save_employees()
-                    log_action("HR_EMPLOYEE_ADDED", result, new_data=new_employee)
-                    st.success(f"Employee {result} registered successfully.")
-                    st.rerun()
-            return
-        st.error("Employee record could not be found. Please contact HR.")
-        return
+    selected_employee_id = st.session_state.hrp_current_emp_id
+    emp = _hrp_get_employee(selected_employee_id) if selected_employee_id else None
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👤 Employee Details", "📅 Holiday Allowance", "✏️ Leave", "📋 Leave History", "🧑‍💼 HR Management" if is_hr else "📊 My Report"])
+    # HR gets the requested four-tab layout. Employees remain view-only and do
+    # not see HR Management.
+    if is_hr:
+        tab_hr, tab_details, tab_leave, tab_history = st.tabs([
+            "🧑‍💼 HR Management",
+            "👤 Employee Details",
+            "✏️ Leave",
+            "📋 Leave History",
+        ])
+    else:
+        tab_details, tab_leave, tab_history = st.tabs([
+            "👤 Employee Details",
+            "✏️ Leave",
+            "📋 Leave History",
+        ])
+        tab_hr = None
 
-    # ========== TAB 1: EMPLOYEE DETAILS ==========
-    with tab1:
-        st.subheader("Employee Profile")
-        st.info("HR can update employee information." if is_hr else "Your employee information is view-only. Contact HR if any details need to be changed.")
-        disabled = not is_hr
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            name = st.text_input("Full Name", value=emp["name"], disabled=disabled, key="hrp_emp_name")
-        with col2:
-            start_date = st.date_input("Start Date", value=emp["start_date"], disabled=disabled, key="hrp_emp_start")
-        with col3:
-            hr_software_departments = load_departments()
-            department = st.selectbox("Department", options=hr_software_departments,
-                index=hr_software_departments.index(emp["department"]) if emp["department"] in hr_software_departments else 0,
-                disabled=disabled, key="hrp_emp_dept")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.text_input("Employee ID", value=emp["emp_id"], disabled=True, key="hrp_emp_id_display")
-        with col2:
-            job_title = st.text_input("Position / Job Title", value=emp["job_title"], disabled=disabled, key="hrp_emp_job")
-        with col3:
-            agreement_type = st.selectbox("Agreement Type", options=HR_PORTAL_AGREEMENT_TYPES,
-                index=HR_PORTAL_AGREEMENT_TYPES.index(emp["agreement_type"]) if emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0,
-                disabled=disabled, key="hrp_emp_agreement")
-        st.write("")
-        st.text_input("Status", value=emp["status"], disabled=True, key="hrp_emp_status_display")
-        if is_hr:
-            if st.button("💾 Save Employee Details", type="primary", key="hrp_save_emp"):
-                old_data = {"name": emp["name"], "start_date": str(emp["start_date"]), "department": emp["department"], "job_title": emp["job_title"], "agreement_type": emp["agreement_type"]}
-                emp["name"] = name.strip()
-                emp["start_date"] = start_date
-                emp["department"] = department
-                emp["job_title"] = job_title.strip()
-                emp["agreement_type"] = agreement_type
-                new_data = {"name": emp["name"], "start_date": str(emp["start_date"]), "department": emp["department"], "job_title": emp["job_title"], "agreement_type": emp["agreement_type"]}
-                _hrp_save_employees()
-                log_action("HR_EMPLOYEE_EDITED", emp["emp_id"], old_data=old_data, new_data=new_data)
-                st.success(f"Employee {emp['emp_id']} updated successfully.")
-                st.rerun()
-
-    # ========== TAB 2: HOLIDAY ALLOWANCE ==========
-    with tab2:
-        st.subheader("Holiday Allowance")
-        entitlement, entitlement_note, service_years, calculated_base = _hrp_get_employee_entitlement(emp)
-        holiday_used = _hrp_get_approved_holiday_days(emp["emp_id"])
-        remaining = entitlement - holiday_used
-        holiday_position = _hrp_get_holiday_position(emp["emp_id"])
-        col1, col2, col3, col4 = st.columns(4)
-        with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
-        with col2: st.metric("Holiday Used", f"{holiday_used:.1f} days")
-        with col3: st.metric("Remaining", f"{remaining:.1f} days")
-        with col4: st.metric("Service", f"{service_years:.1f} years")
-        st.info(entitlement_note)
-
-        owed1, owed2 = st.columns(2)
-        with owed1:
-            st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
-        with owed2:
-            st.metric("👤 Employee Owes Company", f"{holiday_position['employee_owes_company']:.1f} days")
-
-        if is_hr:
-            st.divider()
-            st.subheader("⚙️ HR Entitlement Adjustment")
-            st.caption("Use this when the employee's contractual entitlement differs from the system calculation.")
-            col1, col2, col3 = st.columns(3)
-            with col1: st.metric("System Calculated", f"{calculated_base:.1f} days")
-            with col2:
-                adjusted_value = st.number_input("Final Entitlement", min_value=0.0, max_value=50.0, step=0.5, value=float(entitlement), key="hrp_adj_ent")
-            with col3:
-                adjustment_reason = st.text_input("Reason", value=st.session_state.hrp_adjustment_notes.get(emp["emp_id"], ""), placeholder="Reason for adjustment", key="hrp_adj_reason")
-            if st.button("✅ Save Entitlement", type="primary", key="hrp_save_ent"):
-                old_data = {"entitlement": entitlement}
-                st.session_state.hrp_entitlement_overrides[emp["emp_id"]] = adjusted_value
-                st.session_state.hrp_adjustment_notes[emp["emp_id"]] = adjustment_reason
-                emp["entitlement_override"] = adjusted_value
-                emp["adjustment_note"] = adjustment_reason
-                _hrp_save_employees()
-                log_action("HR_ENTITLEMENT_ADJUSTED", emp["emp_id"], old_data=old_data, new_data={"entitlement": adjusted_value, "reason": adjustment_reason})
-                st.success(f"Holiday entitlement for {emp['emp_id']} is now {adjusted_value:.1f} days.")
-                st.rerun()
-            if emp["emp_id"] in st.session_state.hrp_adjustment_notes:
-                note = st.session_state.hrp_adjustment_notes[emp["emp_id"]]
-                if note: st.caption(f"HR Adjustment Note: {note}")
-
-    # ========== TAB 3: LEAVE ==========
-    with tab3:
-        st.subheader("Leave Management")
-        if is_hr:
-            st.info("HR records leave on behalf of the employee. All leave submitted by HR is automatically marked Approved.")
-            form_version = st.session_state.get("hrp_leave_form_version", 0)
-            col1, col2 = st.columns(2)
-            with col1:
-                leave_type = st.selectbox("Leave Type", options=HR_PORTAL_LEAVE_TYPES, key=f"hrp_leave_type_{form_version}")
-                leave_start = st.date_input("Start Date", value=date.today(), key=f"hrp_leave_start_{form_version}")
-            with col2:
-                leave_end = st.date_input("End Date", value=date.today(), key=f"hrp_leave_end_{form_version}")
-                half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key=f"hrp_half_day_{form_version}")
-            request_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], key=f"hrp_request_source_{form_version}")
-            request_reference = st.text_input("Email / Call Reference", placeholder="Optional email subject, date, or reference", key=f"hrp_request_reference_{form_version}")
-            notes = st.text_area("Notes / Reason", placeholder="e.g. holiday requested by email; sickness reported by phone; family emergency", key=f"hrp_leave_notes_{form_version}")
-            if leave_end < leave_start:
-                st.error("End date cannot be before the start date.")
-            else:
-                calculated_days = _hrp_calculate_leave_days(leave_type, leave_start, leave_end, half_day)
-                st.metric("Calculated Leave Days", f"{calculated_days:.1f}")
-                st.caption("Weekends are excluded from the calculation.")
-                if st.button("📤 Record Leave — Automatically Approved", type="primary", key=f"hrp_record_leave_{form_version}"):
-                    if calculated_days <= 0:
-                        st.error("The selected dates do not contain any working days.")
-                    else:
-                        # Prevent accidental double-submission of the same leave request.
-                        duplicate = next((r for r in st.session_state.hrp_leave_records
-                                          if r.get("employee_id") == emp["emp_id"]
-                                          and r.get("date_from") == leave_start
-                                          and r.get("date_to") == leave_end
-                                          and r.get("type") == leave_type
-                                          and float(r.get("days", 0)) == float(calculated_days)
-                                          and str(r.get("request_reference", "")).strip() == request_reference.strip()
-                                          and str(r.get("notes", "")).strip() == notes.strip()), None)
-                        if duplicate:
-                            st.warning(f"This leave has already been recorded as {duplicate['leave_id']}. The duplicate was not added.")
-                        else:
-                            new_record = {"leave_id": _hrp_create_leave_id(), "employee_id": emp["emp_id"], "date_from": leave_start, "date_to": leave_end, "type": leave_type, "days": calculated_days, "status": "Approved", "request_source": request_source, "request_reference": request_reference.strip(), "notes": notes.strip(), "recorded_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR", "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-                            st.session_state.hrp_leave_records.append(new_record)
-                            _hrp_save_leave_records()
-                            log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
-                            st.session_state.hrp_leave_form_version = form_version + 1
-                            st.success(f"Leave recorded successfully for {emp['name']}. {calculated_days:.1f} day(s) — Approved. The form has been cleared for the next entry.")
-                            st.rerun()
-        else:
-            st.info("You are viewing your leave information. Leave is managed by HR.")
-            employee_leave = _hrp_get_employee_leave(emp["emp_id"])
-            if employee_leave:
-                display_records = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Leave Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
-                st.dataframe(pd.DataFrame(display_records), use_container_width=True, hide_index=True)
-            else:
-                st.write("No leave records found.")
-
-    # ========== TAB 4: LEAVE HISTORY ==========
-    with tab4:
-        st.subheader("Leave History")
-        employee_leave = _hrp_get_employee_leave(emp["emp_id"])
-        if employee_leave:
-            history_data = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
-            df_history = pd.DataFrame(history_data)
-            st.dataframe(df_history, use_container_width=True, hide_index=True)
-            if is_hr:
-                st.divider()
-                st.subheader("✏️ Edit / 🗑️ Delete Leave Record")
-                st.caption("HR can correct a wrongly entered leave record or remove an accidental duplicate. Deleted records are removed from the HR leave ledger.")
-                leave_choices = [r["leave_id"] for r in employee_leave]
-                selected_leave_id = st.selectbox("Select Leave Record", leave_choices, key=f"hrp_leave_action_selector_{emp['emp_id']}")
-                selected_leave = next((r for r in employee_leave if r["leave_id"] == selected_leave_id), None)
-                if selected_leave:
-                    with st.form(f"hrp_edit_leave_form_{emp['emp_id']}_{selected_leave_id}"):
-                        ec1, ec2 = st.columns(2)
-                        with ec1:
-                            edit_leave_type = st.selectbox("Leave Type", HR_PORTAL_LEAVE_TYPES, index=HR_PORTAL_LEAVE_TYPES.index(selected_leave["type"]) if selected_leave["type"] in HR_PORTAL_LEAVE_TYPES else 0)
-                            edit_leave_start = st.date_input("Start Date", value=selected_leave["date_from"])
-                            edit_leave_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], index=["Email", "Phone Call", "In Person", "Other"].index(selected_leave.get("request_source", "Email")) if selected_leave.get("request_source", "Email") in ["Email", "Phone Call", "In Person", "Other"] else 0)
-                        with ec2:
-                            edit_leave_end = st.date_input("End Date", value=selected_leave["date_to"])
-                            edit_leave_reference = st.text_input("Email / Call Reference", value=selected_leave.get("request_reference", ""))
-                            edit_leave_notes = st.text_area("Notes / Reason", value=selected_leave.get("notes", ""))
-                        edit_half_day = edit_leave_type == "Half Day Holiday"
-                        edit_days = _hrp_calculate_leave_days(edit_leave_type, edit_leave_start, edit_leave_end, edit_half_day)
-                        st.caption(f"Calculated days: {edit_days:.1f}. HR edits remain Approved automatically.")
-                        if st.form_submit_button("💾 Save Leave Changes", type="primary"):
-                            if edit_leave_end < edit_leave_start or edit_days <= 0:
-                                st.error("Please select a valid working-day date range.")
-                            else:
-                                old_leave = dict(selected_leave)
-                                selected_leave.update({"date_from": edit_leave_start, "date_to": edit_leave_end, "type": edit_leave_type, "days": edit_days, "status": "Approved", "request_source": edit_leave_source, "request_reference": edit_leave_reference.strip(), "notes": edit_leave_notes.strip()})
-                                _hrp_save_leave_records()
-                                log_action("HR_LEAVE_EDITED", selected_leave_id, old_data=old_leave, new_data=dict(selected_leave))
-                                st.success(f"Leave record {selected_leave_id} updated.")
-                                st.rerun()
-                    delete_confirm_key = f"hrp_confirm_leave_delete_{selected_leave_id}"
-                    if st.button("🗑️ Delete This Leave Record", key=f"hrp_delete_leave_{selected_leave_id}"):
-                        st.session_state[delete_confirm_key] = True
-                    if st.session_state.get(delete_confirm_key):
-                        st.warning(f"This will permanently delete leave record {selected_leave_id}. This is appropriate for an accidental duplicate or incorrect entry.")
-                        cdel1, cdel2 = st.columns(2)
-                        with cdel1:
-                            if st.button("⚠️ Confirm Delete", type="primary", key=f"hrp_confirm_leave_delete_yes_{selected_leave_id}"):
-                                old_leave = dict(selected_leave)
-                                st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r.get("leave_id") != selected_leave_id]
-                                _hrp_save_leave_records()
-                                log_action("HR_LEAVE_DELETED", selected_leave_id, old_data=old_leave)
-                                st.session_state.pop(delete_confirm_key, None)
-                                st.success(f"Leave record {selected_leave_id} deleted.")
-                                st.rerun()
-                        with cdel2:
-                            if st.button("Cancel", key=f"hrp_confirm_leave_delete_no_{selected_leave_id}"):
-                                st.session_state.pop(delete_confirm_key, None)
-                                st.rerun()
-            st.divider()
-            summary = _hrp_get_leave_summary(emp["emp_id"])
-            st.subheader("Leave Summary")
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1: st.metric("Holiday", f"{summary['holiday']:.1f}")
-            with col2: st.metric("Sick", f"{summary['sick']:.1f}")
-            with col3: st.metric("Unpaid", f"{summary['unpaid']:.1f}")
-            with col4: st.metric("Maternity", f"{summary['maternity']:.1f}")
-            with col5: st.metric("Paternity", f"{summary['paternity']:.1f}")
-            csv = df_history.to_csv(index=False)
-            st.download_button("📥 Export Leave History CSV", csv, file_name=f"{emp['emp_id']}_leave_history.csv", mime="text/csv", key="hrp_export_csv")
-        else:
-            st.info("No leave history is currently recorded.")
-
-    # ========== TAB 5: HR MANAGEMENT / MY REPORT ==========
-    with tab5:
-        if is_hr:
+    # ========== TAB 1: HR MANAGEMENT ==========
+    if is_hr and tab_hr is not None:
+        with tab_hr:
             st.subheader("🧑‍💼 HR Management")
-            st.caption("Employee directory management and HR-level leave settlement calculations")
-            hr_employee_tab, hr_settlement_tab = st.tabs(["👤 Employee Management", "💷 HR Settlement Calculator"])
+            st.caption("Employee Management and HR Leave Settlement")
+            hr_employee_tab, hr_settlement_tab = st.tabs(["👤 Employee Management", "💷 HR Leave Settlement"])
+
             with hr_employee_tab:
                 st.subheader("📊 Employee Overview — All Employees")
                 if st.session_state.hrp_employees:
@@ -1571,22 +1354,66 @@ def render_hr_portal(current_user_info=None):
                     st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
                 else:
                     st.info("No employee records yet. Register your first employee below.")
+
                 st.divider()
                 st.subheader("➕ Add New Employee")
                 st.info("HR enters the company Employee ID manually. Any unique letters/numbers format used by your company is accepted.")
-                col1, col2 = st.columns(2)
-                with col1:
-                    new_emp_id = st.text_input("Employee ID", placeholder="e.g. 001, EMP-001, A102 or your company batch number", key="hrp_new_emp_id")
-                    new_name = st.text_input("Full Name", placeholder="e.g. John Smith", key="hrp_new_name")
-                    new_start_date = st.date_input("Start Date", value=date.today(), key="hrp_new_start")
-                with col2:
-                    new_position = st.text_input("Position / Job Title", placeholder="e.g. Electrician", key="hrp_new_pos")
-                    hr_software_departments = load_departments()
-                    new_department = st.selectbox("Department", options=hr_software_departments, key="hrp_new_dept")
-                    new_agreement = st.selectbox("Agreement Type", options=HR_PORTAL_AGREEMENT_TYPES, key="hrp_new_agree")
-                    new_pattern = st.selectbox("Working Pattern", ["Regular hours", "Irregular / Part-Year"], key="hrp_new_pattern")
-                    new_days_per_week = st.number_input("Contracted Days Per Week", min_value=0.5, max_value=7.0, value=5.0, step=0.5, key="hrp_new_days")
-                if st.button("➕ Create Employee", type="primary", key="hrp_create_emp"):
+
+                # Versioned form keys guarantee that a successful submission
+                # renders a completely fresh form on the next rerun.
+                new_form_version = st.session_state.hrp_new_employee_form_version
+                with st.form(f"hrp_new_employee_form_{new_form_version}", clear_on_submit=False):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        new_emp_id = st.text_input(
+                            "Employee ID",
+                            placeholder="e.g. 001, EMP-001, A102 or your company batch number",
+                            key=f"hrp_new_emp_id_{new_form_version}",
+                        )
+                        new_name = st.text_input(
+                            "Full Name",
+                            placeholder="e.g. John Smith",
+                            key=f"hrp_new_name_{new_form_version}",
+                        )
+                        new_start_date = st.date_input(
+                            "Start Date",
+                            value=date.today(),
+                            key=f"hrp_new_start_{new_form_version}",
+                        )
+                        new_position = st.text_input(
+                            "Position / Job Title",
+                            placeholder="e.g. Electrician",
+                            key=f"hrp_new_pos_{new_form_version}",
+                        )
+                    with col2:
+                        hr_software_departments = load_departments()
+                        new_department = st.selectbox(
+                            "Department",
+                            options=hr_software_departments,
+                            key=f"hrp_new_dept_{new_form_version}",
+                        )
+                        new_agreement = st.selectbox(
+                            "Agreement Type",
+                            options=HR_PORTAL_AGREEMENT_TYPES,
+                            key=f"hrp_new_agree_{new_form_version}",
+                        )
+                        new_pattern = st.selectbox(
+                            "Working Pattern",
+                            ["Regular hours", "Irregular / Part-Year"],
+                            key=f"hrp_new_pattern_{new_form_version}",
+                        )
+                        new_days_per_week = st.number_input(
+                            "Contracted Days Per Week",
+                            min_value=0.5,
+                            max_value=7.0,
+                            value=5.0,
+                            step=0.5,
+                            key=f"hrp_new_days_{new_form_version}",
+                        )
+
+                    create_employee = st.form_submit_button("➕ Create Employee", type="primary", use_container_width=True)
+
+                if create_employee:
                     valid, result = _hrp_validate_employee_id(new_emp_id)
                     if not valid:
                         st.error(result)
@@ -1595,32 +1422,60 @@ def render_hr_portal(current_user_info=None):
                     elif not new_position.strip():
                         st.error("Please enter the position / job title.")
                     else:
-                        new_employee = {"emp_id": result, "name": new_name.strip(), "start_date": new_start_date, "department": new_department, "job_title": new_position.strip(), "agreement_type": new_agreement, "status": "Active", "working_pattern": new_pattern, "days_per_week": new_days_per_week}
+                        new_employee = {
+                            "emp_id": result,
+                            "name": new_name.strip(),
+                            "start_date": new_start_date,
+                            "department": new_department,
+                            "job_title": new_position.strip(),
+                            "agreement_type": new_agreement,
+                            "status": "Active",
+                            "working_pattern": new_pattern,
+                            "days_per_week": new_days_per_week,
+                            "entitlement_override": None,
+                            "adjustment_note": "",
+                        }
                         st.session_state.hrp_employees.append(new_employee)
                         _hrp_save_employees()
-                        if not st.session_state.get("hrp_current_emp_id"):
-                            st.session_state.hrp_current_emp_id = result
+                        st.session_state.hrp_current_emp_id = result
                         log_action("HR_EMPLOYEE_ADDED", result, new_data=new_employee)
-                        st.success(f"Employee {result} created successfully.")
+                        # Change every widget key used by the form. On rerun
+                        # Streamlit therefore creates a blank form for the next employee.
+                        st.session_state.hrp_new_employee_form_version = new_form_version + 1
+                        st.success(f"Employee {result} created successfully. The form is ready for the next employee.")
                         st.rerun()
+
                 st.divider()
                 st.subheader("Employee Directory")
                 st.caption("Edit active/inactive records or permanently delete an employee record. Deactivation is recommended when someone leaves the company so their history is retained.")
 
-                employee_table = [{"Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"], "Position": e["job_title"], "Department": e["department"], "Agreement": e["agreement_type"], "Status": e["status"]} for e in st.session_state.hrp_employees]
+                employee_table = [
+                    {
+                        "Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"],
+                        "Position": e["job_title"], "Department": e["department"],
+                        "Agreement": e["agreement_type"], "Status": e["status"],
+                    }
+                    for e in st.session_state.hrp_employees
+                ]
                 if employee_table:
                     st.dataframe(pd.DataFrame(employee_table), use_container_width=True, hide_index=True)
                 else:
                     st.info("No employee records yet.")
 
                 st.markdown("### ✏️ Edit / Deactivate Employee")
-                edit_emp_id = st.selectbox(
-                    "Select Employee",
-                    options=[e["emp_id"] for e in st.session_state.hrp_employees] or [""],
-                    format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid)['status']}",
-                    key="hrp_edit_emp_selector"
-                )
-                edit_emp = _hrp_get_employee(edit_emp_id)
+                edit_employee_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
+                if edit_employee_ids:
+                    edit_emp_id = st.selectbox(
+                        "Select Employee",
+                        options=edit_employee_ids,
+                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid)['status']}",
+                        key="hrp_edit_emp_selector",
+                    )
+                    edit_emp = _hrp_get_employee(edit_emp_id)
+                else:
+                    edit_emp_id = ""
+                    edit_emp = None
+
                 if edit_emp:
                     with st.form(f"hrp_edit_employee_form_{edit_emp_id}"):
                         ec1, ec2 = st.columns(2)
@@ -1630,11 +1485,29 @@ def render_hr_portal(current_user_info=None):
                             edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
                         with ec2:
                             hr_software_departments = load_departments()
-                            edit_dept = st.selectbox("Department", hr_software_departments, index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0)
-                            edit_agreement = st.selectbox("Agreement Type", HR_PORTAL_AGREEMENT_TYPES, index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0)
+                            edit_dept = st.selectbox(
+                                "Department",
+                                hr_software_departments,
+                                index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0,
+                            )
+                            edit_agreement = st.selectbox(
+                                "Agreement Type",
+                                HR_PORTAL_AGREEMENT_TYPES,
+                                index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0,
+                            )
                             edit_pattern_options = ["Regular hours", "Irregular / Part-Year"]
-                            edit_pattern = st.selectbox("Working Pattern", edit_pattern_options, index=edit_pattern_options.index(edit_emp.get("working_pattern", "Regular hours")) if edit_emp.get("working_pattern", "Regular hours") in edit_pattern_options else 0)
-                            edit_days = st.number_input("Contracted Days Per Week", min_value=0.5, max_value=7.0, value=float(edit_emp.get("days_per_week", 5) or 5), step=0.5)
+                            edit_pattern = st.selectbox(
+                                "Working Pattern",
+                                edit_pattern_options,
+                                index=edit_pattern_options.index(edit_emp.get("working_pattern", "Regular hours")) if edit_emp.get("working_pattern", "Regular hours") in edit_pattern_options else 0,
+                            )
+                            edit_days = st.number_input(
+                                "Contracted Days Per Week",
+                                min_value=0.5,
+                                max_value=7.0,
+                                value=float(edit_emp.get("days_per_week", 5) or 5),
+                                step=0.5,
+                            )
                             status_options = ["Active", "Inactive"]
                             edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")))
                             if edit_emp.get("status") == "Inactive":
@@ -1675,9 +1548,8 @@ def render_hr_portal(current_user_info=None):
                 with dc2:
                     if edit_emp:
                         if st.button("🗑️ Permanently Delete Employee", key=f"hrp_delete_{edit_emp_id}", use_container_width=True):
-                            # Keep this as a deliberate destructive action; leave history is removed with the employee.
                             st.session_state[f"hrp_confirm_delete_{edit_emp_id}"] = True
-                    if st.session_state.get(f"hrp_confirm_delete_{edit_emp_id}", False):
+                    if edit_emp and st.session_state.get(f"hrp_confirm_delete_{edit_emp_id}", False):
                         st.warning("This permanently removes the employee record and their HR portal leave records. Use Deactivate instead when an employee leaves the company.")
                         cc1, cc2 = st.columns(2)
                         with cc1:
@@ -1700,18 +1572,26 @@ def render_hr_portal(current_user_info=None):
                             if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", use_container_width=True):
                                 st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
                                 st.rerun()
+
             with hr_settlement_tab:
                 st.subheader("💷 HR Leave Settlement Calculator")
                 st.info("Compute an employee's leave settlement based on their entitlement and approved leave records.")
-                settlement_employee_id = st.selectbox("Settlement Employee",
-                    options=[e["emp_id"] for e in st.session_state.hrp_employees] or [""],
-                    format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}" if _hrp_get_employee(eid) else "No employees registered", key="hrp_settlement_emp")
-                settlement_employee = _hrp_get_employee(settlement_employee_id)
+                settlement_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
+                if settlement_ids:
+                    settlement_employee_id = st.selectbox(
+                        "Settlement Employee",
+                        options=settlement_ids,
+                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}" if _hrp_get_employee(eid) else "No employees registered",
+                        key="hrp_settlement_emp",
+                    )
+                    settlement_employee = _hrp_get_employee(settlement_employee_id)
+                else:
+                    settlement_employee = None
                 if settlement_employee:
                     entitlement, entitlement_note, _, _ = _hrp_get_employee_entitlement(settlement_employee)
-                    holiday_used = _hrp_get_approved_holiday_days(settlement_employee_id)
+                    holiday_used = _hrp_get_approved_holiday_days(settlement_employee["emp_id"])
                     remaining = entitlement - holiday_used
-                    holiday_position = _hrp_get_holiday_position(settlement_employee_id)
+                    holiday_position = _hrp_get_holiday_position(settlement_employee["emp_id"])
                     st.divider()
                     col1, col2, col3 = st.columns(3)
                     with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
@@ -1722,7 +1602,7 @@ def render_hr_portal(current_user_info=None):
                     with owed1: st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
                     with owed2: st.metric("👤 Employee Owes Company", f"{holiday_position['employee_owes_company']:.1f} days")
                     st.divider()
-                    summary = _hrp_get_leave_summary(settlement_employee_id)
+                    summary = _hrp_get_leave_summary(settlement_employee["emp_id"])
                     st.subheader("Leave Settlement Summary")
                     settlement_data = [
                         {"Leave Category": "Annual Holiday", "Approved Days": summary["holiday"], "Affects Holiday Balance": "Yes"},
@@ -1743,28 +1623,287 @@ def render_hr_portal(current_user_info=None):
                         st.warning(f"Employee is {abs(remaining):.1f} days over the current entitlement.")
                     else:
                         st.success(f"{remaining:.1f} days remaining.")
+                else:
+                    st.info("No employees are registered yet.")
+
+    # ========== TAB 2: EMPLOYEE DETAILS ==========
+    with tab_details:
+        st.subheader("Employee Details")
+
+        if is_hr:
+            if all_employee_ids:
+                selector_options = active_employee_ids or all_employee_ids
+                current_index = selector_options.index(st.session_state.hrp_current_emp_id) if st.session_state.hrp_current_emp_id in selector_options else 0
+                selected_from_dropdown = st.selectbox(
+                    "Current Employee",
+                    options=selector_options,
+                    index=current_index,
+                    format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}",
+                    key="hrp_current_employee_details_selector",
+                )
+                if selected_from_dropdown != st.session_state.hrp_current_emp_id:
+                    st.session_state.hrp_current_emp_id = selected_from_dropdown
+                    st.rerun()
+                emp = _hrp_get_employee(st.session_state.hrp_current_emp_id)
+            else:
+                emp = None
+                st.info("No employees are registered yet. Go to **HR Management → Employee Management** to create the first employee.")
         else:
-            st.subheader("📊 My Report")
-            entitlement, _, _, _ = _hrp_get_employee_entitlement(emp)
+            emp = _hrp_get_employee(st.session_state.hrp_current_emp_id) if st.session_state.hrp_current_emp_id else None
+
+        if emp:
+            st.info("HR can update employee information." if is_hr else "Your employee information is view-only. Contact HR if any details need to be changed.")
+            disabled = not is_hr
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                name = st.text_input("Full Name", value=emp["name"], disabled=disabled, key=f"hrp_emp_name_{emp['emp_id']}")
+            with col2:
+                start_date = st.date_input("Start Date", value=emp["start_date"], disabled=disabled, key=f"hrp_emp_start_{emp['emp_id']}")
+            with col3:
+                hr_software_departments = load_departments()
+                department = st.selectbox(
+                    "Department",
+                    options=hr_software_departments,
+                    index=hr_software_departments.index(emp["department"]) if emp["department"] in hr_software_departments else 0,
+                    disabled=disabled,
+                    key=f"hrp_emp_dept_{emp['emp_id']}",
+                )
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.text_input("Employee ID", value=emp["emp_id"], disabled=True, key=f"hrp_emp_id_display_{emp['emp_id']}")
+            with col2:
+                job_title = st.text_input("Position / Job Title", value=emp["job_title"], disabled=disabled, key=f"hrp_emp_job_{emp['emp_id']}")
+            with col3:
+                agreement_type = st.selectbox(
+                    "Agreement Type",
+                    options=HR_PORTAL_AGREEMENT_TYPES,
+                    index=HR_PORTAL_AGREEMENT_TYPES.index(emp["agreement_type"]) if emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0,
+                    disabled=disabled,
+                    key=f"hrp_emp_agreement_{emp['emp_id']}",
+                )
+            st.write("")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.text_input("Status", value=emp["status"], disabled=True, key=f"hrp_emp_status_display_{emp['emp_id']}")
+            with col2:
+                st.text_input("Working Pattern", value=emp.get("working_pattern", "Regular hours"), disabled=True, key=f"hrp_emp_pattern_display_{emp['emp_id']}")
+            with col3:
+                st.number_input("Contracted Days Per Week", min_value=0.5, max_value=7.0, value=float(emp.get("days_per_week", 5) or 5), step=0.5, disabled=True, key=f"hrp_emp_days_display_{emp['emp_id']}")
+
+            if is_hr:
+                if st.button("💾 Save Employee Details", type="primary", key=f"hrp_save_emp_{emp['emp_id']}"):
+                    old_data = {
+                        "name": emp["name"], "start_date": str(emp["start_date"]), "department": emp["department"],
+                        "job_title": emp["job_title"], "agreement_type": emp["agreement_type"],
+                    }
+                    emp["name"] = name.strip()
+                    emp["start_date"] = start_date
+                    emp["department"] = department
+                    emp["job_title"] = job_title.strip()
+                    emp["agreement_type"] = agreement_type
+                    new_data = {
+                        "name": emp["name"], "start_date": str(emp["start_date"]), "department": emp["department"],
+                        "job_title": emp["job_title"], "agreement_type": emp["agreement_type"],
+                    }
+                    _hrp_save_employees()
+                    log_action("HR_EMPLOYEE_EDITED", emp["emp_id"], old_data=old_data, new_data=new_data)
+                    st.success(f"Employee {emp['emp_id']} updated successfully.")
+                    st.rerun()
+
+            # Holiday allowance is now part of Employee Details rather than a
+            # separate top-level tab, keeping the requested four-tab layout.
+            st.divider()
+            st.subheader("📅 Holiday Allowance")
+            entitlement, entitlement_note, service_years, calculated_base = _hrp_get_employee_entitlement(emp)
             holiday_used = _hrp_get_approved_holiday_days(emp["emp_id"])
             remaining = entitlement - holiday_used
-            col1, col2, col3 = st.columns(3)
+            holiday_position = _hrp_get_holiday_position(emp["emp_id"])
+            col1, col2, col3, col4 = st.columns(4)
             with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
             with col2: st.metric("Holiday Used", f"{holiday_used:.1f} days")
             with col3: st.metric("Remaining", f"{remaining:.1f} days")
-            st.divider()
-            summary = _hrp_get_leave_summary(emp["emp_id"])
-            st.subheader("My Leave Summary")
-            col1, col2, col3 = st.columns(3)
-            with col1: st.metric("Annual Holiday", f"{summary['holiday']:.1f} days")
-            with col2: st.metric("Sick Leave", f"{summary['sick']:.1f} days")
-            with col3: st.metric("Other Leave", f"{(summary['unpaid'] + summary['maternity'] + summary['paternity']):.1f} days")
-            st.caption("Employee access is view-only.")
+            with col4: st.metric("Service", f"{service_years:.1f} years")
+            st.info(entitlement_note)
+            owed1, owed2 = st.columns(2)
+            with owed1:
+                st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
+            with owed2:
+                st.metric("👤 Employee Owes Company", f"{holiday_position['employee_owes_company']:.1f} days")
 
+            if is_hr:
+                st.divider()
+                st.subheader("⚙️ HR Entitlement Adjustment")
+                st.caption("Use this when the employee's contractual entitlement differs from the system calculation.")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("System Calculated", f"{calculated_base:.1f} days")
+                with col2:
+                    adjusted_value = st.number_input("Final Entitlement", min_value=0.0, max_value=50.0, step=0.5, value=float(entitlement), key=f"hrp_adj_ent_{emp['emp_id']}")
+                with col3:
+                    adjustment_reason = st.text_input("Reason", value=st.session_state.hrp_adjustment_notes.get(emp["emp_id"], ""), placeholder="Reason for adjustment", key=f"hrp_adj_reason_{emp['emp_id']}")
+                if st.button("✅ Save Entitlement", type="primary", key=f"hrp_save_ent_{emp['emp_id']}"):
+                    old_data = {"entitlement": entitlement}
+                    st.session_state.hrp_entitlement_overrides[emp["emp_id"]] = adjusted_value
+                    st.session_state.hrp_adjustment_notes[emp["emp_id"]] = adjustment_reason
+                    emp["entitlement_override"] = adjusted_value
+                    emp["adjustment_note"] = adjustment_reason
+                    _hrp_save_employees()
+                    log_action("HR_ENTITLEMENT_ADJUSTED", emp["emp_id"], old_data=old_data, new_data={"entitlement": adjusted_value, "reason": adjustment_reason})
+                    st.success(f"Holiday entitlement for {emp['emp_id']} is now {adjusted_value:.1f} days.")
+                    st.rerun()
+                if emp["emp_id"] in st.session_state.hrp_adjustment_notes:
+                    note = st.session_state.hrp_adjustment_notes[emp["emp_id"]]
+                    if note:
+                        st.caption(f"HR Adjustment Note: {note}")
+        elif not is_hr:
+            st.info("Your employee record could not be found. Please contact HR.")
 
-# ════════════════════════════════════════════════════════════
-# 🏢 HR DEPARTMENT WRAPPER (Combines HR Portal + HR Leave Settlement)
-# ════════════════════════════════════════════════════════════
+    # ========== TAB 3: LEAVE ==========
+    with tab_leave:
+        st.subheader("Leave Management")
+        if not emp:
+            st.info("Select an employee in **Employee Details** first." if is_hr else "No employee record is available.")
+        elif is_hr:
+            st.info("HR records leave on behalf of the employee. All leave submitted by HR is automatically marked Approved.")
+            form_version = st.session_state.get("hrp_leave_form_version", 0)
+            col1, col2 = st.columns(2)
+            with col1:
+                leave_type = st.selectbox("Leave Type", options=HR_PORTAL_LEAVE_TYPES, key=f"hrp_leave_type_{form_version}")
+                leave_start = st.date_input("Start Date", value=date.today(), key=f"hrp_leave_start_{form_version}")
+            with col2:
+                leave_end = st.date_input("End Date", value=date.today(), key=f"hrp_leave_end_{form_version}")
+                half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key=f"hrp_half_day_{form_version}")
+            request_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], key=f"hrp_request_source_{form_version}")
+            request_reference = st.text_input("Email / Call Reference", placeholder="Optional email subject, date, or reference", key=f"hrp_request_reference_{form_version}")
+            notes = st.text_area("Notes / Reason", placeholder="e.g. holiday requested by email; sickness reported by phone; family emergency", key=f"hrp_leave_notes_{form_version}")
+            if leave_end < leave_start:
+                st.error("End date cannot be before the start date.")
+            else:
+                calculated_days = _hrp_calculate_leave_days(leave_type, leave_start, leave_end, half_day)
+                st.metric("Calculated Leave Days", f"{calculated_days:.1f}")
+                st.caption("Weekends are excluded from the calculation.")
+                if st.button("📤 Record Leave — Automatically Approved", type="primary", key=f"hrp_record_leave_{form_version}"):
+                    if calculated_days <= 0:
+                        st.error("The selected dates do not contain any working days.")
+                    else:
+                        duplicate = next((r for r in st.session_state.hrp_leave_records
+                                          if r.get("employee_id") == emp["emp_id"]
+                                          and r.get("date_from") == leave_start
+                                          and r.get("date_to") == leave_end
+                                          and r.get("type") == leave_type
+                                          and float(r.get("days", 0)) == float(calculated_days)
+                                          and str(r.get("request_reference", "")).strip() == request_reference.strip()
+                                          and str(r.get("notes", "")).strip() == notes.strip()), None)
+                        if duplicate:
+                            st.warning(f"This leave has already been recorded as {duplicate['leave_id']}. The duplicate was not added.")
+                        else:
+                            new_record = {
+                                "leave_id": _hrp_create_leave_id(), "employee_id": emp["emp_id"],
+                                "date_from": leave_start, "date_to": leave_end, "type": leave_type,
+                                "days": calculated_days, "status": "Approved", "request_source": request_source,
+                                "request_reference": request_reference.strip(), "notes": notes.strip(),
+                                "recorded_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR",
+                                "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            }
+                            st.session_state.hrp_leave_records.append(new_record)
+                            _hrp_save_leave_records()
+                            log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
+                            st.session_state.hrp_leave_form_version = form_version + 1
+                            st.success(f"Leave recorded successfully for {emp['name']}. {calculated_days:.1f} day(s) — Approved. The form has been cleared for the next entry.")
+                            st.rerun()
+        else:
+            st.info("You are viewing your leave information. Leave is managed by HR.")
+            employee_leave = _hrp_get_employee_leave(emp["emp_id"])
+            if employee_leave:
+                display_records = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Leave Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
+                st.dataframe(pd.DataFrame(display_records), use_container_width=True, hide_index=True)
+            else:
+                st.write("No leave records found.")
+
+    # ========== TAB 4: LEAVE HISTORY ==========
+    with tab_history:
+        st.subheader("Leave History")
+        if not emp:
+            st.info("Select an employee in **Employee Details** first." if is_hr else "No employee record is available.")
+        else:
+            employee_leave = _hrp_get_employee_leave(emp["emp_id"])
+            if employee_leave:
+                history_data = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
+                df_history = pd.DataFrame(history_data)
+                st.dataframe(df_history, use_container_width=True, hide_index=True)
+                if is_hr:
+                    st.divider()
+                    st.subheader("✏️ Edit / 🗑️ Delete Leave Record")
+                    st.caption("HR can correct a wrongly entered leave record or remove an accidental duplicate. Deleted records are removed from the HR leave ledger.")
+                    leave_choices = [r["leave_id"] for r in employee_leave]
+                    selected_leave_id = st.selectbox("Select Leave Record", leave_choices, key=f"hrp_leave_action_selector_{emp['emp_id']}")
+                    selected_leave = next((r for r in employee_leave if r["leave_id"] == selected_leave_id), None)
+                    if selected_leave:
+                        with st.form(f"hrp_edit_leave_form_{emp['emp_id']}_{selected_leave_id}"):
+                            ec1, ec2 = st.columns(2)
+                            with ec1:
+                                edit_leave_type = st.selectbox("Leave Type", HR_PORTAL_LEAVE_TYPES, index=HR_PORTAL_LEAVE_TYPES.index(selected_leave["type"]) if selected_leave["type"] in HR_PORTAL_LEAVE_TYPES else 0)
+                                edit_leave_start = st.date_input("Start Date", value=selected_leave["date_from"])
+                                edit_leave_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], index=["Email", "Phone Call", "In Person", "Other"].index(selected_leave.get("request_source", "Email")) if selected_leave.get("request_source", "Email") in ["Email", "Phone Call", "In Person", "Other"] else 0)
+                            with ec2:
+                                edit_leave_end = st.date_input("End Date", value=selected_leave["date_to"])
+                                edit_leave_reference = st.text_input("Email / Call Reference", value=selected_leave.get("request_reference", ""))
+                                edit_leave_notes = st.text_area("Notes / Reason", value=selected_leave.get("notes", ""))
+                            edit_half_day = edit_leave_type == "Half Day Holiday"
+                            edit_days = _hrp_calculate_leave_days(edit_leave_type, edit_leave_start, edit_leave_end, edit_half_day)
+                            st.caption(f"Calculated days: {edit_days:.1f}. HR edits remain Approved automatically.")
+                            if st.form_submit_button("💾 Save Leave Changes", type="primary"):
+                                if edit_leave_end < edit_leave_start or edit_days <= 0:
+                                    st.error("Please select a valid working-day date range.")
+                                else:
+                                    old_leave = dict(selected_leave)
+                                    selected_leave.update({
+                                        "date_from": edit_leave_start, "date_to": edit_leave_end, "type": edit_leave_type,
+                                        "days": edit_days, "status": "Approved", "request_source": edit_leave_source,
+                                        "request_reference": edit_leave_reference.strip(), "notes": edit_leave_notes.strip(),
+                                    })
+                                    _hrp_save_leave_records()
+                                    log_action("HR_LEAVE_EDITED", selected_leave_id, old_data=old_leave, new_data=dict(selected_leave))
+                                    st.success(f"Leave record {selected_leave_id} updated.")
+                                    st.rerun()
+                        delete_confirm_key = f"hrp_confirm_leave_delete_{selected_leave_id}"
+                        if st.button("🗑️ Delete This Leave Record", key=f"hrp_delete_leave_{selected_leave_id}"):
+                            st.session_state[delete_confirm_key] = True
+                        if st.session_state.get(delete_confirm_key):
+                            st.warning(f"This will permanently delete leave record {selected_leave_id}. This is appropriate for an accidental duplicate or incorrect entry.")
+                            cdel1, cdel2 = st.columns(2)
+                            with cdel1:
+                                if st.button("⚠️ Confirm Delete", type="primary", key=f"hrp_confirm_leave_delete_yes_{selected_leave_id}"):
+                                    old_leave = dict(selected_leave)
+                                    st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r.get("leave_id") != selected_leave_id]
+                                    _hrp_save_leave_records()
+                                    log_action("HR_LEAVE_DELETED", selected_leave_id, old_data=old_leave)
+                                    st.session_state.pop(delete_confirm_key, None)
+                                    st.success(f"Leave record {selected_leave_id} deleted.")
+                                    st.rerun()
+                            with cdel2:
+                                if st.button("Cancel", key=f"hrp_confirm_leave_delete_no_{selected_leave_id}"):
+                                    st.session_state.pop(delete_confirm_key, None)
+                                    st.rerun()
+                st.divider()
+                summary = _hrp_get_leave_summary(emp["emp_id"])
+                st.subheader("Leave Summary")
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1: st.metric("Holiday", f"{summary['holiday']:.1f}")
+                with col2: st.metric("Sick", f"{summary['sick']:.1f}")
+                with col3: st.metric("Unpaid", f"{summary['unpaid']:.1f}")
+                with col4: st.metric("Maternity", f"{summary['maternity']:.1f}")
+                with col5: st.metric("Paternity", f"{summary['paternity']:.1f}")
+                csv = df_history.to_csv(index=False)
+                st.download_button("📥 Export Leave History CSV", csv, file_name=f"{emp['emp_id']}_leave_history.csv", mime="text/csv", key="hrp_export_csv")
+            else:
+                st.info("No leave history is currently recorded.")
+
+    # ========== EMPLOYEE-ONLY VIEW ==========
+    if not is_hr:
+        # The employee sees only the requested personal information/leave tabs.
+        pass
+
 def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
     """Unified HR Department area. Super Admin controls access; HR users get the portal and their HR settlement area."""
     sub_portal_tab, sub_settlement_tab = st.tabs([
