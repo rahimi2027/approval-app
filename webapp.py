@@ -2097,8 +2097,12 @@ def render_department_manager_leave_request(current_user_info=None):
         _hrp_init_storage()
         refreshed_employees = _hrp_load_employees()
         st.session_state.hrp_employees = refreshed_employees
+        # Department managers can have the Leave Request module without ever
+        # opening the HR portal, so their session may not contain leave records.
+        # Always load the persistent leave workbook here as well.
+        st.session_state.hrp_leave_records = _hrp_load_leave_records()
     except Exception as e:
-        st.error(f"Unable to load HR employee records: {e}")
+        st.error(f"Unable to load HR employee or leave records: {e}")
         return
 
     manager_department_key = re.sub(r"\s+", " ", manager_department).strip().casefold()
