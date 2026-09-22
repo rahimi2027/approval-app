@@ -1,6 +1,10 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.22
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.23
 # ============================================================
+# ✅ v4.23 (STORE DEDUCTION QUANTITY):
+#    • Added "Quantity" field to Store Department Deduction items
+#    • Auto-calculates total deduction (Quantity × Price)
+#    • Updated PDF, Director, Payroll, and Super Admin views to display Quantity
 # ✅ v4.22 (STORE ITEMS EDITABLE):
 #    • Super Admin Store Settings: Items can now be Edited (Name & Price)
 # ✅ v4.21 (STORE DEPARTMENT DEDUCTION MODULE):
@@ -370,7 +374,7 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
 
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
 DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Work Order Employee", "Work Order Manager", "Director", "Payroll", "Super Admin"]
-DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd"]
+DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd", "Store"]
 EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Category Reason", "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name", "Status", "Director Comments", "Decision Date", "Decision By", "Submitted By", "PDF File Path", "Edited From ID", "Old Data"]
 WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours", "Amount (£)", "Manager", "Description", "Attachment Name", "Status", "Site Address", "Customer Job No.", "Manager Comments", "Manager Decision Date", "Manager Decision By", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date", "Payroll By", "PDF File Path"]
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
@@ -2751,12 +2755,14 @@ def store_deduction_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.set_font(family, "B", 11)
         pdf.cell(0, 6, safe("ITEMS TO DEDUCT"), ln=True); pdf.ln(2)
         pdf.set_font(family, "B", 10)
-        pdf.cell(120, 7, safe("Item Name"), border=1)
+        pdf.cell(90, 7, safe("Item Name"), border=1)
+        pdf.cell(30, 7, safe("Qty"), border=1, align="C")
         pdf.cell(40, 7, safe("Price"), border=1, align="R")
         pdf.cell(0, 7, safe(""), border=1, ln=True)
         pdf.set_font(family, "", 10)
         for item in req.get("items", []):
-            pdf.cell(120, 7, safe(item.get("item_name", "")), border=1)
+            pdf.cell(90, 7, safe(item.get("item_name", "")), border=1)
+            pdf.cell(30, 7, safe(str(item.get("quantity", 1))), border=1, align="C")
             pdf.cell(40, 7, safe(f"£{float(item.get('price', 0)):.2f}"), border=1, align="R")
             pdf.cell(0, 7, safe(""), border=1, ln=True)
         pdf.set_font(family, "B", 11)
@@ -3280,13 +3286,13 @@ def render_store_deduction_form(user_name, user_dept):
         
     st.markdown("### 📦 Items to Deduct")
     if "store_form_items" not in st.session_state:
-        st.session_state.store_form_items = [{"item_name": "", "price": 0.0}]
+        st.session_state.store_form_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
         
     store_items_master = load_store_items()
     item_options = [""] + [it["name"] for it in store_items_master]
     
     for i, item_row in enumerate(st.session_state.store_form_items):
-        c1, c2, c3 = st.columns([3, 2, 1])
+        c1, c2, c3, c4 = st.columns([3, 1.5, 2, 0.5])
         with c1:
             selected_item = st.selectbox("Item Name", options=item_options, key=f"store_item_select_{i}", index=item_options.index(item_row.get("item_name", "")) if item_row.get("item_name") in item_options else 0)
             if selected_item != item_row.get("item_name", ""):
@@ -3296,18 +3302,20 @@ def render_store_deduction_form(user_name, user_dept):
                     item_row["price"] = match["price"]
                 st.rerun()
         with c2:
-            item_row["price"] = st.number_input("Price (£)", min_value=0.0, step=1.0, format="%.2f", value=float(item_row["price"]), key=f"store_item_price_{i}")
+            item_row["quantity"] = st.number_input("Quantity", min_value=1, step=1, value=int(item_row.get("quantity", 1)), key=f"store_item_qty_{i}")
         with c3:
+            item_row["price"] = st.number_input("Price (£)", min_value=0.0, step=1.0, format="%.2f", value=float(item_row["price"]), key=f"store_item_price_{i}")
+        with c4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️", key=f"store_item_remove_{i}"):
                 st.session_state.store_form_items.pop(i)
                 st.rerun()
                 
     if st.button("➕ Add Another Item", key="store_add_item_btn"):
-        st.session_state.store_form_items.append({"item_name": "", "price": 0.0})
+        st.session_state.store_form_items.append({"item_name": "", "quantity": 1, "price": 0.0})
         st.rerun()
         
-    total_deduction = sum(item.get("price", 0.0) for item in st.session_state.store_form_items)
+    total_deduction = sum(item.get("quantity", 1) * item.get("price", 0.0) for item in st.session_state.store_form_items)
     st.markdown(f"<h4 style='text-align: right; color: #ef4444;'>Total Employee Deduction: £{total_deduction:.2f}</h4>", unsafe_allow_html=True)
     st.divider()
     
@@ -3317,7 +3325,7 @@ def render_store_deduction_form(user_name, user_dept):
         submitted = st.form_submit_button("📤 Send to Director", type="primary", use_container_width=True)
         
     if submitted:
-        valid_items = [it for it in st.session_state.store_form_items if it.get("item_name") and it.get("price", 0) > 0]
+        valid_items = [it for it in st.session_state.store_form_items if it.get("item_name") and it.get("quantity", 0) > 0 and it.get("price", 0) > 0]
         if not emp_name.strip() or not manager.strip() or not desc.strip():
             st.error("⚠️ Employee Name, Line Manager and Description are required.")
         elif not valid_items:
@@ -3347,7 +3355,7 @@ def render_store_deduction_form(user_name, user_dept):
             save_all_store_deductions(all_deductions)
             log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
             
-            st.session_state.store_form_items = [{"item_name": "", "price": 0.0}]
+            st.session_state.store_form_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
             st.success(f"✅ Store Department Deduction #{new_id} sent to Director for approval.")
             st.rerun()
 
@@ -3399,7 +3407,7 @@ def render_store_deduction_my_submissions(user_name):
             st.write(f"👔 **Line Manager:** {r['manager']}")
             st.markdown("**Items Deducted:**")
             for item in r.get("items", []):
-                st.write(f"- {item.get('item_name')}: £{float(item.get('price', 0)):.2f}")
+                st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
             st.write(f"**Total Deduction: £{r['total_deduction']:.2f}**")
             st.info(f"📝 {r['desc']}")
             display_attachments(r)
@@ -3425,7 +3433,7 @@ def render_store_deduction_director_portal(director_name):
         st.write(f"👔 **Line Manager:** {r['manager']}")
         st.markdown("**Items Deducted:**")
         for item in r.get("items", []):
-            st.write(f"- {item.get('item_name')}: £{float(item.get('price', 0)):.2f}")
+            st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
         st.markdown(f"**Total Employee Deduction: £{r['total_deduction']:.2f}**")
         st.write(f"📝 **Submitted by:** {r['submitted_by']} on {r['submitted_date']}")
         st.info(f"📝 **Description:**\n{r['desc']}")
@@ -3523,7 +3531,7 @@ def render_store_deduction_super_admin():
         st.write(f"👔 **Manager:** {r['manager']}")
         st.markdown("**Items Deducted:**")
         for item in r.get("items", []):
-            st.write(f"- {item.get('item_name')}: £{float(item.get('price', 0)):.2f}")
+            st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
         st.markdown(f"**Total Deduction: £{r['total_deduction']:.2f}**")
         st.info(f"📝 {r['desc']}")
         st.caption(f"Submitted by {r['submitted_by']} on {r['submitted_date']}")
@@ -3562,7 +3570,7 @@ def render_store_deduction_payroll_portal():
             st.write(f"📅 Leaving: {r['date_leaving']} | Submit: {r['date_submit']} | 👔 {r['manager']}")
             st.markdown("**Items Deducted:**")
             for item in r.get("items", []):
-                st.write(f"- {item.get('item_name')}: £{float(item.get('price', 0)):.2f}")
+                st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
             st.markdown(f"**Total Deduction: £{r['total_deduction']:.2f}**")
             st.write(f"✅ Approved by {r['decision_by']} on {r['decision_date']}")
             if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
