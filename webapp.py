@@ -1,11 +1,14 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.20
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.21
 # ============================================================
-# ✅ v4.20 (HR LEAVE: LIVE AUTO-LINK + PROFESSIONAL PDF):
-#    • Transaction Type hidden (auto-linked in background)
-#    • Amount auto-recalculates live (Days × Super Admin Daily Rate)
-#    • Professional HR Leave PDF: company logo top + approval stamp bottom
-#    • NEW: "My Submitted HR Leave Requests" tab with search filters
+# ✅ v4.21 (STORE DEPARTMENT DEDUCTION MODULE):
+#    • New Store Department Deduction form with dynamic item selection
+#    • Auto-fill price from Super Admin configured items, editable manually
+#    • Calculates total employee deduction
+#    • Professional PDF with logo + approval stamp
+#    • "My Submitted Store Requests" tab with search filters
+#    • Super Admin Store Items Settings (Add/Edit/Delete items & prices)
+# ✅ v4.20 (HR LEAVE: LIVE AUTO-LINK + PROFESSIONAL PDF)
 # ✅ v4.19 (HR LEAVE SETTLEMENT MODULE)
 # ✅ v4.18 (ATTACHMENT PRESERVATION FIX)
 # ✅ v4.17 (BASE64 WHITESPACE & PADDING FIX)
@@ -99,13 +102,36 @@ DEFAULT_HR_CATEGORIES = [
 ]
 DEFAULT_OWE_OWED = ["Company Owes Employee", "Employee Owes Company"]
 
+# ============================================================
+# 📦 STORE DEPARTMENT DEDUCTION — PATHS & CONSTANTS
+# ============================================================
+STORE_DEDUCTION_PATH = os.path.join(APP_FOLDER, "store_deduction_requests.xlsx")
+STORE_ITEMS_PATH = os.path.join(APP_FOLDER, "store_items.xlsx")
+STORE_DEDUCTION_PDF_DIR = os.path.join(APP_FOLDER, "store_deduction_pdfs")
+os.makedirs(STORE_DEDUCTION_PDF_DIR, exist_ok=True)
+
+STORE_DEDUCTION_COLUMNS = [
+    "ID", "Employee Name", "Date of Leaving", "Employee Department",
+    "Line Manager", "Date of Submit", "Items Deducted JSON", "Total Deduction (£)",
+    "Description", "Attachment Name", "Status", "Director Comments",
+    "Rejection Reason", "Decision Date", "Decision By", "Submitted By",
+    "Submitted Date", "PDF File Path"
+]
+STORE_ITEMS_COLUMNS = ["Item Name", "Price (£)", "Active"]
+DEFAULT_STORE_ITEMS = [
+    {"Item Name": "Laptop - Dell Latitude", "Price (£)": 510.00, "Active": True},
+    {"Item Name": "Mobile Phone - iPhone 13", "Price (£)": 450.00, "Active": True},
+    {"Item Name": "ID Card / Access Badge", "Price (£)": 20.00, "Active": True},
+    {"Item Name": "Safety Boots", "Price (£)": 75.00, "Active": True},
+    {"Item Name": "Company Vehicle Keys", "Price (£)": 150.00, "Active": True},
+]
+
 USER_DB_COLUMNS = [
     "full_name", "username", "password", "role", "dept",
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
     "can_approve_requests", "can_access_inspector_bonus",
     "can_access_addition_deduction", "can_access_work_orders",
-    "can_access_wo_total",
-    "can_access_hr_leave",
+    "can_access_wo_total", "can_access_hr_leave", "can_access_store_deduction",
     "is_active"
 ]
 
@@ -309,6 +335,8 @@ def initialise_drive_storage():
             (INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS),
             (HR_LEAVE_PATH, HR_LEAVE_COLUMNS),
             (HR_DAILY_RATES_PATH, HR_DAILY_RATES_COLUMNS),
+            (STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS),
+            (STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS),
         ]
         for path, columns in targets:
             sync_persistent_file(path, columns)
@@ -347,23 +375,23 @@ WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name",
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
 
 DEFAULT_USERS = [
-    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "is_active": True},
-    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "can_access_hr_leave": True, "is_active": True},
-    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "can_access_hr_leave": True, "is_active": True},
-    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "can_access_hr_leave": True, "is_active": True},
-    {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd", "is_active": True},
-    {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration", "is_active": True},
-    {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "is_active": True}
+    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd", "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration", "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "can_access_store_deduction": True, "is_active": True}
 ]
 PERMISSION_DEFAULTS = {
-    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False},
-    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False},
-    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False},
-    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False},
-    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True},
-    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True},
-    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True},
-    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True}
+    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": False},
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": False},
+    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
+    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
+    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_store_deduction": True},
+    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_store_deduction": True},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_store_deduction": True},
+    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_store_deduction": True}
 }
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
@@ -374,7 +402,8 @@ PERMISSION_LABELS = {
     "can_access_addition_deduction": "➕ Addition & Deduction",
     "can_access_work_orders": "🛠️ Work Orders",
     "can_access_wo_total": "💷 Approved Work Order Total",
-    "can_access_hr_leave": "👥 HR Leave Settlement"
+    "can_access_hr_leave": "👥 HR Leave Settlement",
+    "can_access_store_deduction": "📦 Store Department Deduction"
 }
 
 try:
@@ -524,6 +553,11 @@ def clear_all_hr_leave():
     _set_data_cache("_hr_leave_cache", [])
     sync_saved_file_to_drive(HR_LEAVE_PATH)
 
+def clear_all_store_deductions():
+    _write_empty_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
+    _set_data_cache("_store_deduction_cache", [])
+    sync_saved_file_to_drive(STORE_DEDUCTION_PATH)
+
 def clear_live_request_and_audit_data():
     clear_all_requests_file()
     clear_audit_log_file()
@@ -559,6 +593,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         "INSPECTOR_BONUS_STATUS_CHANGED", "SUPER_ADMIN_CLEAR_INSPECTOR_BONUS",
         "HR_CATEGORY_ADDED", "HR_CATEGORY_DELETED",
         "HR_RATE_ADDED", "HR_RATE_UPDATED", "HR_RATE_DELETED",
+        "STORE_ITEM_ADDED", "STORE_ITEM_EDITED", "STORE_ITEM_DELETED",
     ]
     if action in SETTING_ACTIONS:
         action_labels = {
@@ -573,6 +608,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "SUPER_ADMIN_CLEAR_INSPECTOR_BONUS": "🧹 Super Admin — All Inspector Bonuses Cleared",
             "HR_CATEGORY_ADDED": "🏷️ HR Category Added", "HR_CATEGORY_DELETED": "🏷️ HR Category Deleted",
             "HR_RATE_ADDED": "💷 HR Daily Rate Added", "HR_RATE_UPDATED": "💷 HR Daily Rate Updated", "HR_RATE_DELETED": "💷 HR Daily Rate Deleted",
+            "STORE_ITEM_ADDED": "📦 Store Item Added", "STORE_ITEM_EDITED": "📦 Store Item Edited", "STORE_ITEM_DELETED": "📦 Store Item Deleted",
         }
         display_action = action_labels.get(action, action)
         old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
@@ -604,6 +640,17 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
         new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": hr_labels.get(action, action), "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "HR Leave Status", "Old_Value": old_v, "New_Value": new_v, "IP_Address": "Auto-Logged"})
+        return
+    if action.startswith("STORE_DEDUCTION_"):
+        store_labels = {
+            "STORE_DEDUCTION_CREATED": "📦 Store Deduction Created",
+            "STORE_DEDUCTION_APPROVED": "📦 Store Deduction Approved",
+            "STORE_DEDUCTION_REJECTED": "📦 Store Deduction Rejected",
+            "STORE_DEDUCTION_STATUS_CHANGED": "📦 Store Deduction Status Changed",
+        }
+        old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
+        new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
+        save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": store_labels.get(action, action), "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "Store Deduction Status", "Old_Value": old_v, "New_Value": new_v, "IP_Address": "Auto-Logged"})
         return
     if action in ["CREATED", "DELETED"]:
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": action, "Request_ID": str(req_id), "Department": dept, "Amount": amount, "Decision_By": "-", "Decision_Date": "-", "Field_Changed": "-", "Old_Value": "-", "New_Value": "New Request Created" if action == "CREATED" else "Request Permanently Deleted", "IP_Address": "Auto-Logged"})
@@ -687,10 +734,10 @@ def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         with st.spinner("Refreshing from Google Drive..."):
             if drive_service is not None:
-                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH):
+                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH):
                     remote = _drive_find_file(os.path.basename(path))
                     if remote: _drive_download_file(remote["id"], path)
-            _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count", "_hr_leave_cache", "_hr_daily_rates_cache")
+            _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count", "_hr_leave_cache", "_hr_daily_rates_cache", "_store_deduction_cache", "_store_items_cache")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 
@@ -814,6 +861,7 @@ def save_users(users_dict):
             "can_access_work_orders": u.get("can_access_work_orders", False),
             "can_access_wo_total": u.get("can_access_wo_total", False),
             "can_access_hr_leave": u.get("can_access_hr_leave", False),
+            "can_access_store_deduction": u.get("can_access_store_deduction", False),
             "is_active": u.get("is_active", True)
         })
     pd.DataFrame(rows, columns=USER_DB_COLUMNS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
@@ -857,6 +905,7 @@ def load_users(force=False):
                 "can_access_work_orders": _flag_or_default(r.get("can_access_work_orders", ""), user_role, "can_access_work_orders"),
                 "can_access_wo_total": _flag_or_default(r.get("can_access_wo_total", ""), user_role, "can_access_wo_total"),
                 "can_access_hr_leave": _flag_or_default(r.get("can_access_hr_leave", ""), user_role, "can_access_hr_leave"),
+                "can_access_store_deduction": _flag_or_default(r.get("can_access_store_deduction", ""), user_role, "can_access_store_deduction"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
             if user_role == "Super Admin":
@@ -864,7 +913,8 @@ def load_users(force=False):
                     "can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True,
                     "can_approve_requests": True, "can_access_inspector_bonus": True,
                     "can_access_addition_deduction": True, "can_access_work_orders": True,
-                    "can_access_wo_total": True, "can_access_hr_leave": True, "is_active": True
+                    "can_access_wo_total": True, "can_access_hr_leave": True,
+                    "can_access_store_deduction": True, "is_active": True
                 })
         _set_data_cache("_users_cache", users)
         return dict(users)
@@ -2365,10 +2415,123 @@ def get_hr_daily_rate(dept, transaction_type):
     return None
 
 # ============================================================
+# 📦 STORE DEPARTMENT DEDUCTION — DATA LAYER
+# ============================================================
+def initialise_store_deduction():
+    safe_init_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
+    safe_init_excel(STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS)
+    # Seed default items if empty
+    try:
+        df_items = _read_excel_records(STORE_ITEMS_PATH)
+        if df_items.empty:
+            pd.DataFrame(DEFAULT_STORE_ITEMS).to_excel(STORE_ITEMS_PATH, index=False, engine="openpyxl")
+            sync_saved_file_to_drive(STORE_ITEMS_PATH)
+    except Exception:
+        pass
+
+def load_store_deductions(force=False):
+    if not force and "_store_deduction_cache" in st.session_state:
+        return list(st.session_state["_store_deduction_cache"])
+    initialise_store_deduction()
+    try:
+        df = _read_excel_records(STORE_DEDUCTION_PATH)
+        records = []
+        for r in df.to_dict(orient="records"):
+            try: rid = int(r.get("ID", 0))
+            except Exception: rid = 0
+            try: total = float(r.get("Total Deduction (£)", 0) or 0)
+            except Exception: total = 0.0
+            try: items_json = r.get("Items Deducted JSON", "[]")
+            except Exception: items_json = "[]"
+            try: items = json.loads(items_json) if items_json else []
+            except Exception: items = []
+            records.append({
+                "id": rid,
+                "emp_name": str(r.get("Employee Name", "")).strip(),
+                "date_leaving": str(r.get("Date of Leaving", "")).strip(),
+                "emp_dept": str(r.get("Employee Department", "")).strip(),
+                "manager": str(r.get("Line Manager", "")).strip(),
+                "date_submit": str(r.get("Date of Submit", "")).strip(),
+                "items": items,
+                "total_deduction": total,
+                "desc": str(r.get("Description", "")).strip(),
+                "attachment_name": str(r.get("Attachment Name", "None")).strip(),
+                "status": str(r.get("Status", "pending")).strip().lower(),
+                "director_comments": str(r.get("Director Comments", "")).strip(),
+                "rejection_reason": str(r.get("Rejection Reason", "")).strip(),
+                "decision_date": str(r.get("Decision Date", "")).strip(),
+                "decision_by": str(r.get("Decision By", "")).strip(),
+                "submitted_by": str(r.get("Submitted By", "")).strip(),
+                "submitted_date": str(r.get("Submitted Date", "")).strip(),
+                "pdf_path": str(r.get("PDF File Path", "")).strip(),
+            })
+        _set_data_cache("_store_deduction_cache", records)
+        return list(records)
+    except Exception as e:
+        st.error(f"Store Deduction Load Error: {e}")
+        return []
+
+def save_all_store_deductions(records, sync=True):
+    rows = [{
+        "ID": int(r.get("id", 0)),
+        "Employee Name": str(r.get("emp_name", "")),
+        "Date of Leaving": str(r.get("date_leaving", "")),
+        "Employee Department": str(r.get("emp_dept", "")),
+        "Line Manager": str(r.get("manager", "")),
+        "Date of Submit": str(r.get("date_submit", "")),
+        "Items Deducted JSON": json.dumps(r.get("items", []), ensure_ascii=False),
+        "Total Deduction (£)": float(r.get("total_deduction", 0)),
+        "Description": str(r.get("desc", "")),
+        "Attachment Name": str(r.get("attachment_name", "None")),
+        "Status": str(r.get("status", "pending")).lower(),
+        "Director Comments": str(r.get("director_comments", "")),
+        "Rejection Reason": str(r.get("rejection_reason", "")),
+        "Decision Date": str(r.get("decision_date", "")),
+        "Decision By": str(r.get("decision_by", "")),
+        "Submitted By": str(r.get("submitted_by", "")),
+        "Submitted Date": str(r.get("submitted_date", "")),
+        "PDF File Path": str(r.get("pdf_path", "")),
+    } for r in records]
+    pd.DataFrame(rows, columns=STORE_DEDUCTION_COLUMNS).to_excel(STORE_DEDUCTION_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_store_deduction_cache", list(records))
+    if sync: sync_saved_file_to_drive(STORE_DEDUCTION_PATH)
+
+def get_next_store_deduction_id(records):
+    if not records: return 1
+    return max(int(r.get("id", 0)) for r in records) + 1
+
+def load_store_items(force=False):
+    if not force and "_store_items_cache" in st.session_state:
+        return list(st.session_state["_store_items_cache"])
+    initialise_store_deduction()
+    try:
+        df = _read_excel_records(STORE_ITEMS_PATH)
+        records = []
+        for r in df.to_dict(orient="records"):
+            try: price = float(r.get("Price (£)", 0) or 0)
+            except Exception: price = 0.0
+            active = str(r.get("Active", "True")).strip().lower() in ("true", "yes", "1")
+            records.append({
+                "name": str(r.get("Item Name", "")).strip(),
+                "price": price,
+                "active": active,
+            })
+        _set_data_cache("_store_items_cache", records)
+        return list(records)
+    except Exception as e:
+        st.error(f"Store Items Load Error: {e}")
+        return []
+
+def save_store_items(records):
+    rows = [{"Item Name": r["name"], "Price (£)": float(r["price"]), "Active": bool(r["active"])} for r in records]
+    pd.DataFrame(rows, columns=STORE_ITEMS_COLUMNS).to_excel(STORE_ITEMS_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_store_items_cache", list(records))
+    sync_saved_file_to_drive(STORE_ITEMS_PATH)
+
+# ============================================================
 # 👥 HR LEAVE SETTLEMENT — PDF EXPORT
 # ============================================================
 def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
-    """Generate a professional HR Leave Settlement PDF with logo + approval stamp."""
     if not PDF_AVAILABLE: return None
     try:
         cached_path = req.get("pdf_path", "")
@@ -2387,14 +2550,12 @@ def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
             if family == "Helvetica": return text.encode("latin-1", "replace").decode("latin-1")
             return text
 
-        # Company Logo
         if os.path.exists(LOGO_PATH):
             try:
                 pdf.image(LOGO_PATH, x=75, y=10, w=60); pdf.ln(28)
             except Exception: pdf.ln(5)
         else: pdf.ln(5)
 
-        # Title
         pdf.set_font(family, "B", 16)
         pdf.cell(0, 10, safe("HR LEAVE SETTLEMENT - APPROVAL FORM"), ln=True, align="C")
         pdf.ln(2)
@@ -2402,7 +2563,6 @@ def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.line(10, line_y, 200, line_y); pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
         pdf.ln(8)
 
-        # Request Details
         pdf.set_font(family, "B", 11)
         pdf.cell(0, 6, safe("REQUEST DETAILS"), ln=True); pdf.ln(2)
         def field(label, value, label_w=60, value_h=7):
@@ -2424,7 +2584,6 @@ def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
         if req.get("submitted_date"): field("Submitted Date:", req.get("submitted_date", ""))
         pdf.ln(6)
 
-        # Description
         pdf.set_font(family, "B", 11)
         pdf.cell(0, 6, safe("DESCRIPTION / JUSTIFICATION"), ln=True); pdf.ln(2)
         pdf.set_font(family, "", 10)
@@ -2432,7 +2591,6 @@ def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.multi_cell(0, 6, safe(req.get("desc", "")))
         pdf.ln(8)
 
-        # Director Approval
         pdf.set_font(family, "B", 11)
         pdf.cell(0, 6, safe("DIRECTOR APPROVAL"), ln=True); pdf.ln(2)
         status = str(req.get("status", "")).strip().lower()
@@ -2459,7 +2617,6 @@ def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
         else:
             pdf.cell(60, 7, safe("Decision:"), 0, 0); pdf.cell(0, 7, safe("Pending"), ln=True)
 
-        # Approval Stamp at bottom
         pdf.ln(14)
         dash_y = pdf.get_y()
         for x in range(10, 200, 4): pdf.line(x, dash_y, x + 2, dash_y)
@@ -2473,7 +2630,6 @@ def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.set_font(family, "", 8)
         pdf.cell(0, 5, safe("Authorised Signature / Director"), ln=True)
 
-        # Attachments page
         pdf.add_page()
         pdf.set_font(family, "B", 12)
         pdf.cell(0, 8, safe("ATTACHMENTS"), ln=True); pdf.ln(6)
@@ -2511,7 +2667,6 @@ def hr_leave_pdf(req, force_regenerate=False, upload_to_drive=True):
         return None
 
 def display_hr_leave_pdf_button(req, key_prefix="hrl"):
-    """Render a Download / Generate PDF button for approved/rejected HR Leave requests."""
     if not PDF_AVAILABLE:
         st.warning("⚠️ PDF generation is unavailable. Please install fpdf2.")
         return
@@ -2543,6 +2698,186 @@ def display_hr_leave_pdf_button(req, key_prefix="hrl"):
             st.error("❌ Could not generate PDF.")
 
 # ============================================================
+# 📦 STORE DEPARTMENT DEDUCTION — PDF EXPORT
+# ============================================================
+def store_deduction_pdf(req, force_regenerate=False, upload_to_drive=True):
+    if not PDF_AVAILABLE: return None
+    try:
+        cached_path = req.get("pdf_path", "")
+        if not force_regenerate and cached_path and os.path.exists(cached_path): return cached_path
+        pdf = FPDF()
+        pdf.add_page()
+        regular_font, bold_font = _pdf_font_paths()
+        if regular_font and bold_font:
+            pdf.add_font("DejaVu", "", regular_font)
+            pdf.add_font("DejaVu", "B", bold_font)
+            family = "DejaVu"
+        else:
+            family = "Helvetica"
+        def safe(v):
+            text = _pdf_text(v)
+            if family == "Helvetica": return text.encode("latin-1", "replace").decode("latin-1")
+            return text
+
+        if os.path.exists(LOGO_PATH):
+            try:
+                pdf.image(LOGO_PATH, x=75, y=10, w=60); pdf.ln(28)
+            except Exception: pdf.ln(5)
+        else: pdf.ln(5)
+
+        pdf.set_font(family, "B", 16)
+        pdf.cell(0, 10, safe("STORE DEPARTMENT DEDUCTION - APPROVAL FORM"), ln=True, align="C")
+        pdf.ln(2)
+        line_y = pdf.get_y()
+        pdf.line(10, line_y, 200, line_y); pdf.line(10, line_y + 1.5, 200, line_y + 1.5)
+        pdf.ln(8)
+
+        pdf.set_font(family, "B", 11)
+        pdf.cell(0, 6, safe("EMPLOYEE DETAILS"), ln=True); pdf.ln(2)
+        def field(label, value, label_w=60, value_h=7):
+            pdf.set_font(family, "B", 10)
+            pdf.cell(label_w, value_h, safe(label), border=0)
+            pdf.set_font(family, "", 10)
+            pdf.cell(0, value_h, safe(str(value)), border=0, ln=True)
+        field("Request ID:", f"STORE-{req.get('id', '')}")
+        field("Employee Name:", req.get("emp_name", ""))
+        field("Employee Department:", req.get("emp_dept", ""))
+        field("Date of Leaving:", req.get("date_leaving", ""))
+        field("Line Manager:", req.get("manager", ""))
+        field("Date of Submit:", req.get("date_submit", ""))
+        if req.get("submitted_by"): field("Submitted By:", req.get("submitted_by", ""))
+        pdf.ln(6)
+
+        pdf.set_font(family, "B", 11)
+        pdf.cell(0, 6, safe("ITEMS TO DEDUCT"), ln=True); pdf.ln(2)
+        pdf.set_font(family, "B", 10)
+        pdf.cell(120, 7, safe("Item Name"), border=1)
+        pdf.cell(40, 7, safe("Price"), border=1, align="R")
+        pdf.cell(0, 7, safe(""), border=1, ln=True)
+        pdf.set_font(family, "", 10)
+        for item in req.get("items", []):
+            pdf.cell(120, 7, safe(item.get("item_name", "")), border=1)
+            pdf.cell(40, 7, safe(f"£{float(item.get('price', 0)):.2f}"), border=1, align="R")
+            pdf.cell(0, 7, safe(""), border=1, ln=True)
+        pdf.set_font(family, "B", 11)
+        pdf.cell(120, 8, safe("TOTAL EMPLOYEE DEDUCTION"), border=1, align="R")
+        pdf.cell(40, 8, safe(f"£{float(req.get('total_deduction', 0)):.2f}"), border=1, align="R")
+        pdf.cell(0, 8, safe(""), border=1, ln=True)
+        pdf.ln(6)
+
+        pdf.set_font(family, "B", 11)
+        pdf.cell(0, 6, safe("DESCRIPTION / JUSTIFICATION"), ln=True); pdf.ln(2)
+        pdf.set_font(family, "", 10)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 6, safe(req.get("desc", "")))
+        pdf.ln(8)
+
+        pdf.set_font(family, "B", 11)
+        pdf.cell(0, 6, safe("DIRECTOR APPROVAL"), ln=True); pdf.ln(2)
+        status = str(req.get("status", "")).strip().lower()
+        pdf.set_font(family, "", 10)
+        if status == "approved":
+            pdf.cell(60, 7, safe("Decision:"), 0, 0)
+            pdf.set_font(family, "B", 10); pdf.set_text_color(0, 128, 0)
+            pdf.cell(0, 7, safe("APPROVED"), ln=True)
+            pdf.set_text_color(0, 0, 0); pdf.set_font(family, "", 10)
+            pdf.cell(60, 7, safe("Approved By:"), 0, 0); pdf.cell(0, 7, safe(req.get("decision_by", "")), ln=True)
+            pdf.cell(60, 7, safe("Approval Date / Time:"), 0, 0); pdf.cell(0, 7, safe(req.get("decision_date", "")), ln=True)
+            if req.get("director_comments"):
+                pdf.cell(60, 7, safe("Director Comments:"), 0, 0)
+                pdf.multi_cell(0, 7, safe(req.get("director_comments", "")))
+        elif status == "rejected":
+            pdf.cell(60, 7, safe("Decision:"), 0, 0)
+            pdf.set_font(family, "B", 10); pdf.set_text_color(200, 0, 0)
+            pdf.cell(0, 7, safe("REJECTED"), ln=True)
+            pdf.set_text_color(0, 0, 0); pdf.set_font(family, "", 10)
+            pdf.cell(60, 7, safe("Rejected By:"), 0, 0); pdf.cell(0, 7, safe(req.get("decision_by", "")), ln=True)
+            pdf.cell(60, 7, safe("Rejection Date / Time:"), 0, 0); pdf.cell(0, 7, safe(req.get("decision_date", "")), ln=True)
+            pdf.cell(60, 7, safe("Reason for Rejection:"), 0, 0)
+            pdf.multi_cell(0, 7, safe(req.get("rejection_reason", "")))
+        else:
+            pdf.cell(60, 7, safe("Decision:"), 0, 0); pdf.cell(0, 7, safe("Pending"), ln=True)
+
+        pdf.ln(14)
+        dash_y = pdf.get_y()
+        for x in range(10, 200, 4): pdf.line(x, dash_y, x + 2, dash_y)
+        if status == "approved" and os.path.exists(APPROVED_STAMP_PATH):
+            try: pdf.image(APPROVED_STAMP_PATH, x=70, y=dash_y - 8, w=65)
+            except Exception: pass
+        elif status == "rejected" and os.path.exists(REJECTED_STAMP_PATH):
+            try: pdf.image(REJECTED_STAMP_PATH, x=70, y=dash_y - 8, w=65)
+            except Exception: pass
+        pdf.ln(18)
+        pdf.set_font(family, "", 8)
+        pdf.cell(0, 5, safe("Authorised Signature / Director"), ln=True)
+
+        pdf.add_page()
+        pdf.set_font(family, "B", 12)
+        pdf.cell(0, 8, safe("ATTACHMENTS"), ln=True); pdf.ln(6)
+        pdf.set_font(family, "", 9)
+        att = str(req.get("attachment_name", "None")).strip()
+        display_files = []
+        if att and att.lower() not in ("none", "nan", ""):
+            for name in att.split(","):
+                n = name.strip()
+                if n and n.lower() not in ("none", ""): display_files.append(n)
+        if display_files:
+            for fname in display_files:
+                file_path = os.path.join(UPLOAD_DIR, fname)
+                if os.path.exists(file_path):
+                    if fname.lower().endswith((".png", ".jpg", ".jpeg")):
+                        pdf.ln(2)
+                        try: pdf.image(file_path, x=10, w=190); pdf.ln(70)
+                        except Exception: pdf.cell(0, 5, safe(f"     {fname} (preview unavailable)"), ln=True); pdf.ln(3)
+                    else: pdf.cell(0, 5, safe(f"     {fname} (non-image file)"), ln=True); pdf.ln(3)
+                else: pdf.cell(0, 5, safe(f"     {fname} (file not found)"), ln=True); pdf.ln(3)
+        else: pdf.cell(0, 6, safe("No attachments were included with this request."), ln=True)
+
+        os.makedirs(STORE_DEDUCTION_PDF_DIR, exist_ok=True)
+        safe_id = "".join(str(req.get("id", "STORE")).split()) or "STORE"
+        safe_name = "_".join(str(req.get("emp_name", "Employee")).split()) or "Employee"
+        safe_date = datetime.now().strftime("%Y-%m-%d")
+        filename = f"Store_Deduction_{safe_id}_{safe_name}_{safe_date}.pdf"
+        path = os.path.join(STORE_DEDUCTION_PDF_DIR, filename)
+        pdf.output(path)
+        if upload_to_drive: _upload_to_drive_bg(path, os.path.basename(path))
+        return path
+    except Exception as e:
+        st.error(f"Store Deduction PDF Error: {e}")
+        return None
+
+def display_store_deduction_pdf_button(req, key_prefix="store"):
+    if not PDF_AVAILABLE:
+        st.warning("⚠️ PDF generation is unavailable. Please install fpdf2.")
+        return
+    status = str(req.get("status", "")).strip().lower()
+    if status not in ("approved", "rejected"):
+        st.info("📄 PDF download is available once the Director has decided on this request.")
+        return
+    req_id = str(req.get("id", "unknown"))
+    dl_key = f"{key_prefix}_store_dl_{req_id}"
+    gen_key = f"{key_prefix}_store_gen_{req_id}"
+    cached_path = req.get("pdf_path", "")
+    if cached_path and os.path.exists(cached_path):
+        with open(cached_path, "rb") as f:
+            st.download_button("⬇️ Download Store Deduction PDF", data=f.read(),
+                              file_name=os.path.basename(cached_path), mime="application/pdf",
+                              type="primary", key=dl_key)
+        return
+    if st.button(f"📄 Generate Store Deduction PDF for #{req_id}", key=gen_key, type="primary"):
+        with st.spinner("Generating PDF..."):
+            path = store_deduction_pdf(req, force_regenerate=True, upload_to_drive=True)
+        if path and os.path.exists(path):
+            records = load_store_deductions()
+            for r in records:
+                if str(r.get("id")) == req_id: r["pdf_path"] = path
+            save_all_store_deductions(records, sync=False)
+            st.success("✅ PDF generated. Click below to download.")
+            st.rerun()
+        else:
+            st.error("❌ Could not generate PDF.")
+
+# ============================================================
 # 👥 HR LEAVE SETTLEMENT — UI
 # ============================================================
 def render_hr_leave_form(user_name):
@@ -2564,7 +2899,6 @@ def render_hr_leave_form(user_name):
     K_FILES = f"hr_files_v{form_version}"
     K_DESC  = f"hr_desc_v{form_version}"
 
-    # ============ TOP ROW ============
     col_left, col_right = st.columns(2)
 
     with col_left:
@@ -2575,10 +2909,8 @@ def render_hr_leave_form(user_name):
         dt_val = st.date_input("📅 Date", value=date.today(), key=K_DATE)
         emp_dept = st.selectbox("🏢 Employee Department", departments, key=K_DEPT)
 
-    # ============ AUTO-LINKED TRANSACTION TYPE (HIDDEN) ============
     transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
 
-    # ============ SECOND ROW ============
     rate = get_hr_daily_rate(emp_dept, transaction_type)
 
     col_left2, col_right2 = st.columns(2)
@@ -2604,7 +2936,6 @@ def render_hr_leave_form(user_name):
         else:
             st.caption("⚠️ No daily rate configured for this department/type — enter manually.")
 
-    # ============ FORM ============
     with st.form(f"hr_leave_form_v{form_version}", clear_on_submit=False):
         files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"],
                                  accept_multiple_files=True, key=K_FILES)
@@ -2650,7 +2981,6 @@ def render_hr_leave_form(user_name):
 
 
 def render_hr_leave_my_submissions(user_name):
-    """Show only the current user's submitted HR Leave requests with search filters."""
     st.subheader("📋 My Submitted HR Leave Requests")
     st.caption("All HR Leave Settlement requests you have submitted — filter by name, department or date.")
     st.divider()
@@ -2658,7 +2988,6 @@ def render_hr_leave_my_submissions(user_name):
     hr_records = load_hr_leave()
     mine = [r for r in hr_records if r.get("submitted_by") == user_name]
 
-    # ---------- SEARCH FILTERS ----------
     c1, c2, c3 = st.columns(3)
     with c1:
         search_name = st.text_input(
@@ -2683,7 +3012,6 @@ def render_hr_leave_my_submissions(user_name):
             search_date = st.date_input("Pick a date", value=date.today(),
                                         key="hr_sub_search_date")
 
-    # ---------- APPLY FILTERS ----------
     filtered = list(mine)
     if search_name.strip():
         q = search_name.lower().strip()
@@ -2693,7 +3021,6 @@ def render_hr_leave_my_submissions(user_name):
     if search_date is not None:
         filtered = [r for r in filtered if str(r.get("date", "")) == str(search_date)]
 
-    # ---------- SUMMARY METRICS ----------
     m1, m2, m3, m4 = st.columns(4)
     with m1: st.metric("📋 Total Found", len(filtered))
     with m2: st.metric("🟡 Pending", len([r for r in filtered if r["status"] == "pending"]))
@@ -2875,7 +3202,6 @@ def render_hr_leave_payroll_portal():
             display_hr_leave_pdf_button(r, key_prefix="hr_payroll")
 
 def render_hr_leave_settings():
-    """Super Admin settings: HR categories + Daily Holiday Rates."""
     st.markdown("### 🏷️ HR Leave Categories")
     st.caption("These appear in the HR Leave Settlement form dropdown.")
     cats = load_hr_categories()
@@ -2932,6 +3258,350 @@ def render_hr_leave_settings():
                     log_action("HR_RATE_DELETED", old_data={"dept": r["dept"], "type": r["type"]})
                     st.success("Deleted."); st.rerun()
 
+# ============================================================
+# 📦 STORE DEPARTMENT DEDUCTION — UI
+# ============================================================
+def render_store_deduction_form(user_name, user_dept):
+    st.subheader("📦 New Request — Store Department Deduction")
+    st.caption("Submit unreturned company items for Director approval and final settlement deduction.")
+    
+    departments = load_departments()
+    all_deductions = load_store_deductions()
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        emp_name = st.text_input("👤 Employee Name", key="store_emp_name")
+        emp_dept = st.selectbox("🏢 Employee Department", departments, key="store_emp_dept", index=departments.index(user_dept) if user_dept in departments else 0)
+        date_submit = st.date_input("📅 Date of Submit", value=date.today(), key="store_date_submit")
+    with col2:
+        date_leaving = st.date_input("📅 Date of Leaving", value=date.today(), key="store_date_leaving")
+        manager = st.text_input("👔 Line Manager", key="store_manager")
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+    st.markdown("### 📦 Items to Deduct")
+    if "store_form_items" not in st.session_state:
+        st.session_state.store_form_items = [{"item_name": "", "price": 0.0}]
+        
+    store_items_master = load_store_items()
+    item_options = [""] + [it["name"] for it in store_items_master]
+    
+    for i, item_row in enumerate(st.session_state.store_form_items):
+        c1, c2, c3 = st.columns([3, 2, 1])
+        with c1:
+            selected_item = st.selectbox("Item Name", options=item_options, key=f"store_item_select_{i}", index=item_options.index(item_row.get("item_name", "")) if item_row.get("item_name") in item_options else 0)
+            if selected_item != item_row.get("item_name", ""):
+                item_row["item_name"] = selected_item
+                match = next((it for it in store_items_master if it["name"] == selected_item), None)
+                if match:
+                    item_row["price"] = match["price"]
+                st.rerun()
+        with c2:
+            item_row["price"] = st.number_input("Price (£)", min_value=0.0, step=1.0, format="%.2f", value=float(item_row["price"]), key=f"store_item_price_{i}")
+        with c3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🗑️", key=f"store_item_remove_{i}"):
+                st.session_state.store_form_items.pop(i)
+                st.rerun()
+                
+    if st.button("➕ Add Another Item", key="store_add_item_btn"):
+        st.session_state.store_form_items.append({"item_name": "", "price": 0.0})
+        st.rerun()
+        
+    total_deduction = sum(item.get("price", 0.0) for item in st.session_state.store_form_items)
+    st.markdown(f"<h4 style='text-align: right; color: #ef4444;'>Total Employee Deduction: £{total_deduction:.2f}</h4>", unsafe_allow_html=True)
+    st.divider()
+    
+    with st.form("store_deduction_form", clear_on_submit=False):
+        files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="store_files")
+        desc = st.text_area("📝 Description / Justification", key="store_desc")
+        submitted = st.form_submit_button("📤 Send to Director", type="primary", use_container_width=True)
+        
+    if submitted:
+        valid_items = [it for it in st.session_state.store_form_items if it.get("item_name") and it.get("price", 0) > 0]
+        if not emp_name.strip() or not manager.strip() or not desc.strip():
+            st.error("⚠️ Employee Name, Line Manager and Description are required.")
+        elif not valid_items:
+            st.error("⚠️ Please select at least one item to deduct.")
+        else:
+            new_id = get_next_store_deduction_id(all_deductions)
+            attachments = []
+            for i, f in enumerate(files or [], 1):
+                safe_name = os.path.basename(f.name).replace("/", "_").replace("\\", "_")
+                fn = f"STORE_{new_id}_F{i}_{safe_name}"
+                fp = os.path.join(UPLOAD_DIR, fn)
+                with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
+                _upload_to_drive_bg(fp, fn)
+                attachments.append(fn)
+                
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            rec = {
+                "id": new_id, "emp_name": emp_name.strip(), "date_leaving": str(date_leaving),
+                "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit),
+                "items": valid_items, "total_deduction": total_deduction,
+                "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None",
+                "status": "pending", "director_comments": "", "rejection_reason": "",
+                "decision_date": "", "decision_by": "",
+                "submitted_by": user_name, "submitted_date": now, "pdf_path": ""
+            }
+            all_deductions.append(rec)
+            save_all_store_deductions(all_deductions)
+            log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
+            
+            st.session_state.store_form_items = [{"item_name": "", "price": 0.0}]
+            st.success(f"✅ Store Department Deduction #{new_id} sent to Director for approval.")
+            st.rerun()
+
+def render_store_deduction_my_submissions(user_name):
+    st.subheader("📋 My Submitted Store Requests")
+    st.caption("All Store Department Deduction requests you have submitted.")
+    st.divider()
+
+    records = load_store_deductions()
+    mine = [r for r in records if r.get("submitted_by") == user_name]
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        search_name = st.text_input("🔎 Search by Employee Name", key="store_sub_search_name", placeholder="Type employee name...")
+    with c2:
+        dept_options = sorted({str(r.get("emp_dept", "")).strip() for r in mine if str(r.get("emp_dept", "")).strip()})
+        search_dept = st.selectbox("🏢 Filter by Department", ["All Departments"] + dept_options, key="store_sub_search_dept")
+    with c3:
+        use_date = st.checkbox("📅 Filter by specific date", key="store_sub_use_date")
+        search_date = None
+        if use_date:
+            search_date = st.date_input("Pick a date", value=date.today(), key="store_sub_search_date")
+
+    filtered = list(mine)
+    if search_name.strip():
+        q = search_name.lower().strip()
+        filtered = [r for r in filtered if q in str(r.get("emp_name", "")).lower()]
+    if search_dept and search_dept != "All Departments":
+        filtered = [r for r in filtered if str(r.get("emp_dept", "")) == search_dept]
+    if search_date is not None:
+        filtered = [r for r in filtered if str(r.get("date_submit", "")) == str(search_date)]
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1: st.metric("📋 Total Found", len(filtered))
+    with m2: st.metric("🟡 Pending", len([r for r in filtered if r["status"] == "pending"]))
+    with m3: st.metric("🟢 Approved", len([r for r in filtered if r["status"] == "approved"]))
+    with m4: st.metric("🔴 Rejected", len([r for r in filtered if r["status"] == "rejected"]))
+    st.divider()
+
+    if not filtered:
+        st.info("📋 No Store requests match your search.")
+        return
+
+    for r in reversed(filtered):
+        status = r["status"]
+        icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+        with st.expander(f"{icon} #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f} | {status.upper()}"):
+            st.write(f"📅 **Leaving:** {r['date_leaving']} | **Submit:** {r['date_submit']}")
+            st.write(f"👔 **Line Manager:** {r['manager']}")
+            st.markdown("**Items Deducted:**")
+            for item in r.get("items", []):
+                st.write(f"- {item.get('item_name')}: £{float(item.get('price', 0)):.2f}")
+            st.write(f"**Total Deduction: £{r['total_deduction']:.2f}**")
+            st.info(f"📝 {r['desc']}")
+            display_attachments(r)
+            if r.get("director_comments"): st.info(f"💬 Director: {r['director_comments']}")
+            if r.get("rejection_reason"): st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
+            if status in ("approved", "rejected"):
+                st.divider()
+                display_store_deduction_pdf_button(r, key_prefix=f"store_sub_{user_name.replace(' ','_')}")
+
+def render_store_deduction_director_portal(director_name):
+    st.subheader("📦 Store Department Deduction — Director Approval")
+    st.info("Review unreturned item deductions for final settlement. Rejection requires a mandatory reason.")
+    st.divider()
+    records = load_store_deductions()
+    pending  = [r for r in records if r["status"] == "pending"]
+    approved = [r for r in records if r["status"] == "approved"]
+    rejected = [r for r in records if r["status"] == "rejected"]
+    t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
+
+    def show_details(r):
+        st.write(f"👤 **Employee:** {r['emp_name']} | 🏢 **Department:** {r['emp_dept']}")
+        st.write(f"📅 **Date of Leaving:** {r['date_leaving']} | **Date of Submit:** {r['date_submit']}")
+        st.write(f"👔 **Line Manager:** {r['manager']}")
+        st.markdown("**Items Deducted:**")
+        for item in r.get("items", []):
+            st.write(f"- {item.get('item_name')}: £{float(item.get('price', 0)):.2f}")
+        st.markdown(f"**Total Employee Deduction: £{r['total_deduction']:.2f}**")
+        st.write(f"📝 **Submitted by:** {r['submitted_by']} on {r['submitted_date']}")
+        st.info(f"📝 **Description:**\n{r['desc']}")
+        st.divider(); st.markdown("#### 📎 Attachments"); display_attachments(r)
+
+    with t1:
+        if not pending: st.success("✅ No pending Store Deduction requests.")
+        for r in reversed(pending):
+            rid = r["id"]
+            with st.expander(f"🟡 #{rid} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f}"):
+                show_details(r)
+                st.markdown("### ✍️ Director Decision")
+                comments = st.text_area("Director Comments (optional)", key=f"store_dir_comm_{rid}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ Approve", key=f"store_dir_app_{rid}", type="primary", use_container_width=True):
+                        for x in records:
+                            if x["id"] == rid:
+                                x["status"] = "approved"; x["director_comments"] = comments.strip()
+                                x["decision_by"] = director_name
+                                x["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                break
+                        save_all_store_deductions(records)
+                        log_action("STORE_DEDUCTION_APPROVED", rid, decision_by=director_name)
+                        st.success(f"✅ Store Deduction #{rid} Approved."); st.rerun()
+                with c2:
+                    if st.button("❌ Reject", key=f"store_dir_rej_{rid}", use_container_width=True):
+                        st.session_state[f"store_reject_modal_{rid}"] = True
+                if st.session_state.get(f"store_reject_modal_{rid}"):
+                    st.warning("⚠️ A rejection reason is required.")
+                    reason = st.text_area("Reason for Rejection (required)", key=f"store_rej_reason_{rid}")
+                    rc1, rc2 = st.columns(2)
+                    with rc1:
+                        if st.button("Confirm Rejection", key=f"store_rej_confirm_{rid}", type="primary", use_container_width=True):
+                            if not reason.strip():
+                                st.error("❌ Rejection reason cannot be empty.")
+                            else:
+                                for x in records:
+                                    if x["id"] == rid:
+                                        x["status"] = "rejected"; x["rejection_reason"] = reason.strip()
+                                        x["director_comments"] = comments.strip()
+                                        x["decision_by"] = director_name
+                                        x["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        break
+                                save_all_store_deductions(records)
+                                log_action("STORE_DEDUCTION_REJECTED", rid, decision_by=director_name)
+                                st.session_state[f"store_reject_modal_{rid}"] = False
+                                st.success(f"❌ Store Deduction #{rid} Rejected."); st.rerun()
+                    with rc2:
+                        if st.button("Cancel", key=f"store_rej_cancel_{rid}", use_container_width=True):
+                            st.session_state[f"store_reject_modal_{rid}"] = False; st.rerun()
+
+    with t2:
+        if not approved: st.info("✅ No approved Store Deduction requests.")
+        for r in reversed(approved):
+            with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f} | ✅ {r['decision_by']}"):
+                show_details(r)
+                if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
+                st.write(f"📅 Decision Date: {r['decision_date']}")
+                st.divider()
+                st.markdown("#### 📄 Store Deduction PDF")
+                display_store_deduction_pdf_button(r, key_prefix=f"store_dir_app_{director_name.replace(' ','_')}")
+
+    with t3:
+        if not rejected: st.info("❌ No rejected Store Deduction requests.")
+        for r in reversed(rejected):
+            with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f} | ❌ {r['decision_by']}"):
+                show_details(r)
+                st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
+                if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
+                st.divider()
+                st.markdown("#### 📄 Store Deduction PDF")
+                display_store_deduction_pdf_button(r, key_prefix=f"store_dir_rej_{director_name.replace(' ','_')}")
+
+def render_store_deduction_super_admin():
+    st.subheader("🛡️ Store Department Deduction — Super Admin (View Only)")
+    st.info("✅ View all Store Deduction requests. **Approval → Director only.**")
+    st.divider()
+    records = load_store_deductions()
+    search = st.text_input("🔎 Search Store Deduction requests", placeholder="Search by ID, employee, department, amount, status...", key="store_sa_search")
+    if search.strip():
+        q = search.lower().strip()
+        records = [r for r in records if q in " ".join(str(v) for v in r.values()).lower()]
+    pending  = [r for r in records if r["status"] == "pending"]
+    approved = [r for r in records if r["status"] == "approved"]
+    rejected = [r for r in records if r["status"] == "rejected"]
+    c1, c2, c3 = st.columns(3)
+    with c1: st.metric("🟡 Pending", len(pending))
+    with c2: st.metric("🟢 Approved", len(approved))
+    with c3: st.metric("🔴 Rejected", len(rejected))
+    st.divider()
+    t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
+    def show(r):
+        st.write(f"👤 **{r['emp_name']}** | 🏢 {r['emp_dept']} | 📅 Leaving: {r['date_leaving']} | Submit: {r['date_submit']}")
+        st.write(f"👔 **Manager:** {r['manager']}")
+        st.markdown("**Items Deducted:**")
+        for item in r.get("items", []):
+            st.write(f"- {item.get('item_name')}: £{float(item.get('price', 0)):.2f}")
+        st.markdown(f"**Total Deduction: £{r['total_deduction']:.2f}**")
+        st.info(f"📝 {r['desc']}")
+        st.caption(f"Submitted by {r['submitted_by']} on {r['submitted_date']}")
+        display_attachments(r)
+    with t1:
+        if not pending: st.success("✅ No pending Store Deduction requests.")
+        for r in reversed(pending):
+            with st.expander(f"🟡 #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f}"):
+                show(r)
+    with t2:
+        if not approved: st.info("✅ No approved Store Deduction requests.")
+        for r in reversed(approved):
+            with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f} | ✅ {r['decision_by']}"):
+                show(r)
+                if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
+                st.divider()
+                display_store_deduction_pdf_button(r, key_prefix="store_sa_app")
+    with t3:
+        if not rejected: st.info("❌ No rejected Store Deduction requests.")
+        for r in reversed(rejected):
+            with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f}"):
+                show(r); st.error(f"❌ Reason: {r['rejection_reason']}")
+                st.divider()
+                display_store_deduction_pdf_button(r, key_prefix="store_sa_rej")
+
+def render_store_deduction_payroll_portal():
+    st.subheader("📦 Store Department Deduction — Payroll (View Only)")
+    st.info("View all approved Store Deductions for payroll processing.")
+    st.divider()
+    approved = [r for r in load_store_deductions() if r["status"] == "approved"]
+    st.metric("✅ Approved Store Deductions", len(approved))
+    st.divider()
+    if not approved: st.info("No approved Store Deductions yet.")
+    for r in reversed(approved):
+        with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f}"):
+            st.write(f"📅 Leaving: {r['date_leaving']} | Submit: {r['date_submit']} | 👔 {r['manager']}")
+            st.markdown("**Items Deducted:**")
+            for item in r.get("items", []):
+                st.write(f"- {item.get('item_name')}: £{float(item.get('price', 0)):.2f}")
+            st.markdown(f"**Total Deduction: £{r['total_deduction']:.2f}**")
+            st.write(f"✅ Approved by {r['decision_by']} on {r['decision_date']}")
+            if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
+            display_attachments(r)
+            st.divider()
+            display_store_deduction_pdf_button(r, key_prefix="store_payroll")
+
+def render_store_items_settings():
+    st.markdown("### 📦 Store Items & Prices")
+    st.caption("These items and prices will be available in the Store Department Deduction form dropdown.")
+    items = load_store_items()
+    with st.form("add_store_item_form", clear_on_submit=True):
+        new_item = st.text_input("➕ Add New Item", placeholder="e.g. Safety Helmet")
+        new_price = st.number_input("💷 Price (£)", min_value=0.01, step=1.0, format="%.2f", value=50.00)
+        if st.form_submit_button("✅ Add Item"):
+            if new_item.strip() and not any(it["name"].lower() == new_item.strip().lower() for it in items):
+                items.append({"name": new_item.strip(), "price": float(new_price), "active": True})
+                save_store_items(items)
+                log_action("STORE_ITEM_ADDED", new_data={"name": new_item.strip(), "price": float(new_price)})
+                st.success(f"✅ Added: {new_item}")
+                st.rerun()
+            elif any(it["name"].lower() == new_item.strip().lower() for it in items):
+                st.warning("⚠️ Item already exists.")
+    st.divider()
+    if not items:
+        st.info("📋 No store items configured yet.")
+    else:
+        for i, item in enumerate(items):
+            c1, c2, c3 = st.columns([3, 2, 1])
+            c1.markdown(f"• **{item['name']}**")
+            c2.markdown(f"💷 **£{item['price']:.2f}**")
+            with c3:
+                if st.button("🗑️", key=f"del_store_item_{i}"):
+                    items.pop(i)
+                    save_store_items(items)
+                    log_action("STORE_ITEM_DELETED", old_data={"name": item['name']})
+                    st.success("Deleted.")
+                    st.rerun()
+
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
 
@@ -2939,6 +3609,7 @@ initialise_excel()
 initialise_work_orders()
 initialise_inspector_bonus()
 initialise_hr_leave()
+initialise_store_deduction()
 
 def load_records_from_excel(force=False):
     if not force and "_records_cache" in st.session_state:
@@ -3355,6 +4026,7 @@ def user_management_panel():
             perm_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=defaults.get("can_access_work_orders", False))
             perm_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=defaults.get("can_access_wo_total", False))
             perm_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=defaults.get("can_access_hr_leave", False))
+            perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
             new_active = st.checkbox("✅ Account Active", value=True, help="Uncheck to block this user from logging in.")
@@ -3362,7 +4034,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_store_deduction": perm_store, "is_active": new_active}
                     save_users(USERS)
                     log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active})
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
@@ -3389,6 +4061,7 @@ def user_management_panel():
                 curr_perm_wo = bool(curr.get("can_access_work_orders", False))
                 curr_perm_wo_total = bool(curr.get("can_access_wo_total", False))
                 curr_perm_hr = bool(curr.get("can_access_hr_leave", False))
+                curr_perm_store = bool(curr.get("can_access_store_deduction", False))
                 ecol1, ecol2 = st.columns(2)
                 edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
                 edit_pdf = ecol1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=curr_perm_pdf)
@@ -3400,13 +4073,14 @@ def user_management_panel():
                 edit_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=curr_perm_wo)
                 edit_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=curr_perm_wo_total)
                 edit_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=curr_perm_hr)
+                edit_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=curr_perm_store)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
                 if st.form_submit_button("🔄 Update User", type="primary"):
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_store_deduction": edit_store, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -3422,6 +4096,7 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_work_orders"] = edit_wo
                         USERS[edit_user_sel]["can_access_wo_total"] = edit_wo_total
                         USERS[edit_user_sel]["can_access_hr_leave"] = edit_hr
+                        USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["is_active"] = edit_active
                     save_users(USERS)
                     log_action("USER_EDITED", old_data=curr, new_data={"full_name": upd_full_name.strip(), "username": upd_username_new, "role": upd_role, "department": upd_dept, "is_active": edit_active})
@@ -3493,9 +4168,10 @@ elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    tab_add_ded, tab_hr_leave, tab_work_orders, tab_inspector_bonus = st.tabs([
+    tab_add_ded, tab_hr_leave, tab_store_ded, tab_work_orders, tab_inspector_bonus = st.tabs([
         "➕ Addition & Deduction",
         "👥 HR Leave Settlement",
+        "📦 Store Department Deduction",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus"
     ])
@@ -3546,6 +4222,7 @@ elif role == "Payroll":
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
     with tab_hr_leave: render_hr_leave_payroll_portal()
+    with tab_store_ded: render_store_deduction_payroll_portal()
     with tab_work_orders: render_work_order_payroll_portal(full_name)
     with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
 
@@ -3678,10 +4355,13 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_addition_deduction = user_info.get("can_access_addition_deduction", True)
     has_work_orders = user_info.get("can_access_work_orders", False)
     has_hr_leave = user_info.get("can_access_hr_leave", False)
+    has_store_deduction = user_info.get("can_access_store_deduction", False)
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
     if has_hr_leave: labels.append("👥 HR Leave Settlement")
     if has_hr_leave: labels.append("📋 My Submitted HR Leave Requests")
+    if has_store_deduction: labels.append("📦 Store Department Deduction")
+    if has_store_deduction: labels.append("📋 My Submitted Store Requests")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
     if not labels:
@@ -3816,6 +4496,14 @@ elif role in ["Manager", "Staff", "Team Member"]:
             with tabs[tab_idx]:
                 render_hr_leave_my_submissions(full_name)
             tab_idx += 1
+        if has_store_deduction:
+            with tabs[tab_idx]:
+                render_store_deduction_form(full_name, dept_name)
+            tab_idx += 1
+        if has_store_deduction:
+            with tabs[tab_idx]:
+                render_store_deduction_my_submissions(full_name)
+            tab_idx += 1
         if has_work_orders:
             with tabs[tab_idx]:
                 render_work_order_employee_portal(full_name, dept_name)
@@ -3826,9 +4514,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
 
 elif role == "Director":
-    director_addition_tab, director_hr_tab, director_work_order_tab, director_inspector_tab = st.tabs([
+    director_addition_tab, director_hr_tab, director_store_tab, director_work_order_tab, director_inspector_tab = st.tabs([
         "➕ Addition & Deduction",
         "👥 HR Leave Settlement",
+        "📦 Store Department Deduction",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus"
     ])
@@ -3947,13 +4636,16 @@ elif role == "Director":
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
     with director_hr_tab:
         render_hr_leave_director_portal(full_name)
+    with director_store_tab:
+        render_store_deduction_director_portal(full_name)
     with director_work_order_tab: render_work_order_director_portal(full_name)
     with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_hr_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
+    super_add_ded_tab, super_hr_tab, super_store_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
         "➕ Addition & Deduction",
         "👥 HR Leave Settlement",
+        "📦 Store Department Deduction",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus",
         "🔧 System Management"
@@ -4011,6 +4703,8 @@ elif role == "Super Admin":
                         st.divider(); display_pdf_button(req, can_generate=True)
     with super_hr_tab:
         render_hr_leave_super_admin()
+    with super_store_tab:
+        render_store_deduction_super_admin()
     with super_work_orders_tab:
         render_work_orders_super_admin()
     with super_inspector_bonus_tab:
@@ -4019,14 +4713,16 @@ elif role == "Super Admin":
         st.subheader("🔧 System Management — Super Admin")
         st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
         st.divider()
-        tab_settings, tab_hr_settings, tab_users, tab_audit = st.tabs([
+        tab_settings, tab_hr_settings, tab_store_settings, tab_users, tab_audit = st.tabs([
             "⚙️ System Settings",
             "👥 HR Leave Settings",
+            "📦 Store Settings",
             "👤 User Management",
             "📖 Audit History"
         ])
         with tab_settings: settings_management_panel()
         with tab_hr_settings: render_hr_leave_settings()
+        with tab_store_settings: render_store_items_settings()
         with tab_users: user_management_panel()
         with tab_audit:
             if "display_audit_log_panel" in globals(): display_audit_log_panel()
@@ -4080,6 +4776,15 @@ elif role == "Super Admin":
                             st.session_state["confirm_clear_hr_leave"] = False
                             st.success("✅ Cleared."); st.rerun()
                 with reset_col4:
+                    if not st.session_state.get("confirm_clear_store_deduction", False):
+                        if st.button("📦 Clear Store Deductions", key="super_admin_clear_all_store_deduction", type="secondary", use_container_width=True):
+                            st.session_state["confirm_clear_store_deduction"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_store_deduction", use_container_width=True):
+                            clear_all_store_deductions()
+                            st.session_state["confirm_clear_store_deduction"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col4:
                     if not st.session_state.get("confirm_clear_audit", False):
                         if st.button("🗑️ Clear Audit", type="secondary", key="clear_audit_history_btn"):
                             st.session_state["confirm_clear_audit"] = True; st.rerun()
@@ -4099,6 +4804,8 @@ elif role == "Super Admin":
             ("📥 Work Orders", WORK_ORDERS_PATH, "work_orders", "backup_work_orders"),
             ("📥 HR Leave Requests", HR_LEAVE_PATH, "hr_leave_requests", "backup_hr_leave"),
             ("📥 HR Daily Rates", HR_DAILY_RATES_PATH, "hr_daily_rates", "backup_hr_rates"),
+            ("📥 Store Deductions", STORE_DEDUCTION_PATH, "store_deductions", "backup_store_deductions"),
+            ("📥 Store Items", STORE_ITEMS_PATH, "store_items", "backup_store_items"),
             ("📥 Audit Log", AUDIT_LOG_PATH, "audit_log", "backup_audit_log"),
         ]
         backup_cols = st.columns(3)
@@ -4133,18 +4840,21 @@ elif role == "Super Admin":
             clear_all_inspector_bonus()
             _write_empty_excel(WORK_ORDERS_PATH, WORK_ORDER_COLUMNS)
             _write_empty_excel(HR_LEAVE_PATH, HR_LEAVE_COLUMNS)
+            _write_empty_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
             _invalidate_data_cache(
                 "_work_orders_cache",
                 "_work_order_cache",
                 "_inspector_bonus_cache",
                 "_records_cache",
                 "_hr_leave_cache",
+                "_store_deduction_cache",
             )
             sync_saved_file_to_drive(WORK_ORDERS_PATH)
             sync_saved_file_to_drive(HR_LEAVE_PATH)
+            sync_saved_file_to_drive(STORE_DEDUCTION_PATH)
             clear_audit_log_file()
 
-            for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, UPLOAD_DIR):
+            for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, STORE_DEDUCTION_PDF_DIR, UPLOAD_DIR):
                 if os.path.isdir(folder):
                     for root, dirs, files in os.walk(folder, topdown=False):
                         for filename in files:
@@ -4171,7 +4881,7 @@ elif role == "Super Admin":
         else:
             st.error(
                 "⚠️ FINAL CONFIRMATION: this will permanently remove all requests, "
-                "work orders, inspector bonuses, HR leave requests, audit history, generated PDFs and uploaded attachments. "
+                "work orders, inspector bonuses, HR leave requests, Store Deductions, audit history, generated PDFs and uploaded attachments. "
                 "Users and system settings will remain."
             )
             live_c1, live_c2 = st.columns(2)
