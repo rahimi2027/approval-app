@@ -144,7 +144,7 @@ USER_DB_COLUMNS = [
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
     "can_approve_requests", "can_access_inspector_bonus",
     "can_access_addition_deduction", "can_access_work_orders",
-    "can_access_wo_total", "can_access_hr_leave", "can_access_store_deduction",
+    "can_access_wo_total", "can_access_hr_leave", "can_access_leave_request", "can_access_store_deduction",
     "is_active"
 ]
 
@@ -390,22 +390,22 @@ WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name",
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
 
 DEFAULT_USERS = [
-    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_leave_request": True, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "can_access_hr_leave": True, "can_access_leave_request": True, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "can_access_hr_leave": True, "can_access_leave_request": True, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "can_access_hr_leave": True, "can_access_leave_request": True, "can_access_store_deduction": True, "is_active": True},
     {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd", "can_access_hr_leave": False, "can_access_store_deduction": True, "is_active": True},
     {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration", "can_access_hr_leave": False, "can_access_store_deduction": True, "is_active": True},
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "can_access_store_deduction": True, "is_active": True}
 ]
 PERMISSION_DEFAULTS = {
-    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": False},
-    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": False},
+    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False},
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False},
     "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
     "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
-    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_store_deduction": True},
+    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True},
     "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True},
-    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_store_deduction": True},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True},
     "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True}
 }
 PERMISSION_LABELS = {
@@ -418,6 +418,7 @@ PERMISSION_LABELS = {
     "can_access_work_orders": "🛠️ Work Orders",
     "can_access_wo_total": "💷 Approved Work Order Total",
     "can_access_hr_leave": "🏢 HR Department (Employee Management + Leave Settlement)",
+    "can_access_leave_request": "📝 Leave Request (Department Manager)",
     "can_access_store_deduction": "📦 Store Department Deduction"
 }
 
@@ -887,6 +888,7 @@ def save_users(users_dict):
             "can_access_work_orders": u.get("can_access_work_orders", False),
             "can_access_wo_total": u.get("can_access_wo_total", False),
             "can_access_hr_leave": u.get("can_access_hr_leave", False),
+            "can_access_leave_request": u.get("can_access_leave_request", False),
             "can_access_store_deduction": u.get("can_access_store_deduction", False),
             "is_active": u.get("is_active", True)
         })
@@ -912,6 +914,7 @@ def load_users(force=False):
         return dict(st.session_state["_users_cache"])
     try:
         df = _read_excel_records(USER_DB_PATH)
+        has_leave_request_column = "can_access_leave_request" in df.columns
         users = {}
         for _, r in df.iterrows():
             username = str(r.get("username", "")).strip()
@@ -931,6 +934,7 @@ def load_users(force=False):
                 "can_access_work_orders": _flag_or_default(r.get("can_access_work_orders", ""), user_role, "can_access_work_orders"),
                 "can_access_wo_total": _flag_or_default(r.get("can_access_wo_total", ""), user_role, "can_access_wo_total"),
                 "can_access_hr_leave": _flag_or_default(r.get("can_access_hr_leave", ""), user_role, "can_access_hr_leave"),
+                "can_access_leave_request": _flag_or_default(r.get("can_access_leave_request", ""), user_role, "can_access_leave_request"),
                 "can_access_store_deduction": _flag_or_default(r.get("can_access_store_deduction", ""), user_role, "can_access_store_deduction"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
@@ -939,19 +943,28 @@ def load_users(force=False):
                     "can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True,
                     "can_approve_requests": True, "can_access_inspector_bonus": True,
                     "can_access_addition_deduction": True, "can_access_work_orders": True,
-                    "can_access_wo_total": True, "can_access_hr_leave": False,
+                    "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False,
                     "can_access_store_deduction": True, "is_active": True
                 })
 
         # Existing installations may still have the old HR permission stored
         # for the built-in Director/Super Admin accounts. Migrate those records
         # so the HR Department is not shown to them automatically.
+        # Migrate existing manager accounts: historically can_access_hr_leave also
+        # exposed the department-manager Leave Request module. Preserve that access
+        # while making the new Leave Request permission independently configurable.
+        migrated_leave_request = False
+        for username, u in users.items():
+            if (not has_leave_request_column) and str(u.get("role", "")).strip().lower() == "manager" and str(u.get("dept", "")).strip().casefold() != "hr" and u.get("can_access_hr_leave"):
+                u["can_access_leave_request"] = True
+                migrated_leave_request = True
+
         migrated_builtin_hr = False
         for builtin_username in ("andy", "wais"):
             if builtin_username in users and users[builtin_username].get("can_access_hr_leave"):
                 users[builtin_username]["can_access_hr_leave"] = False
                 migrated_builtin_hr = True
-        if migrated_builtin_hr:
+        if migrated_builtin_hr or migrated_leave_request:
             save_users(users)
         _set_data_cache("_users_cache", users)
         return dict(users)
@@ -5432,6 +5445,7 @@ def user_management_panel():
             perm_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=defaults.get("can_access_work_orders", False))
             perm_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=defaults.get("can_access_wo_total", False))
             perm_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=defaults.get("can_access_hr_leave", False))
+            perm_leave_req = st.checkbox(PERMISSION_LABELS["can_access_leave_request"], value=defaults.get("can_access_leave_request", False))
             perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
@@ -5440,7 +5454,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_store_deduction": perm_store, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_store_deduction": perm_store, "is_active": new_active}
                     save_users(USERS)
                     log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active})
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
@@ -5467,6 +5481,7 @@ def user_management_panel():
                 curr_perm_wo = bool(curr.get("can_access_work_orders", False))
                 curr_perm_wo_total = bool(curr.get("can_access_wo_total", False))
                 curr_perm_hr = bool(curr.get("can_access_hr_leave", False))
+                curr_perm_leave_req = bool(curr.get("can_access_leave_request", False))
                 curr_perm_store = bool(curr.get("can_access_store_deduction", False))
                 ecol1, ecol2 = st.columns(2)
                 edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
@@ -5479,6 +5494,7 @@ def user_management_panel():
                 edit_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=curr_perm_wo)
                 edit_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=curr_perm_wo_total)
                 edit_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=curr_perm_hr)
+                edit_leave_req = st.checkbox(PERMISSION_LABELS["can_access_leave_request"], value=curr_perm_leave_req)
                 edit_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=curr_perm_store)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
@@ -5486,7 +5502,7 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_store_deduction": edit_store, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_store_deduction": edit_store, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -5502,6 +5518,7 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_work_orders"] = edit_wo
                         USERS[edit_user_sel]["can_access_wo_total"] = edit_wo_total
                         USERS[edit_user_sel]["can_access_hr_leave"] = edit_hr
+                        USERS[edit_user_sel]["can_access_leave_request"] = edit_leave_req
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["is_active"] = edit_active
                     save_users(USERS)
@@ -5763,12 +5780,15 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_addition_deduction = user_info.get("can_access_addition_deduction", True)
     has_work_orders = user_info.get("can_access_work_orders", False)
     has_hr_leave = user_info.get("can_access_hr_leave", False)
+    has_leave_request = user_info.get("can_access_leave_request", False)
     has_store_deduction = user_info.get("can_access_store_deduction", False)
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
-    if has_hr_leave:
-        is_hr_manager_account = (str(role).strip().lower() == "manager" and str(dept).strip().casefold() == "hr")
-        labels.append("🏢 HR Department" if is_hr_manager_account else "📝 Leave Request")
+    is_hr_manager_account = (str(role).strip().lower() == "manager" and str(dept).strip().casefold() == "hr")
+    if has_hr_leave and is_hr_manager_account:
+        labels.append("🏢 HR Department")
+    if has_leave_request:
+        labels.append("📝 Leave Request")
     if has_store_deduction: labels.append("📦 Store Deduction")
     if has_store_deduction: labels.append("📦 Store Return (Addition)")
     if has_store_deduction: labels.append("📋 My Submitted Store Requests")
@@ -5898,9 +5918,13 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                                         st.session_state.editing_request_id = req.get("id"); st.rerun()
             tab_idx += 1
-        if has_hr_leave:
+        if has_hr_leave and is_hr_manager_account:
             with tabs[tab_idx]:
                 render_hr_department(current_user_info=user_info, has_hr_access=True, director_name=full_name)
+            tab_idx += 1
+        if has_leave_request:
+            with tabs[tab_idx]:
+                render_department_manager_leave_request(current_user_info=user_info)
             tab_idx += 1
         if has_store_deduction:
             with tabs[tab_idx]:
