@@ -97,7 +97,8 @@ HR_EMPLOYEE_COLUMNS = [
 ]
 HR_PORTAL_LEAVE_COLUMNS = [
     "Leave ID", "Employee ID", "Date From", "Date To", "Leave Type", "Days",
-    "Status", "Request Source", "Request Reference", "Notes", "Recorded By", "Recorded At"
+    "Status", "Request Source", "Request Reference", "Notes", "Recorded By", "Recorded At",
+    "Entry Source", "Requested By", "Requested At", "Approved By", "Approved At", "Rejection Reason"
 ]
 
 HR_LEAVE_COLUMNS = [
@@ -615,7 +616,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         "HR_RATE_ADDED", "HR_RATE_UPDATED", "HR_RATE_DELETED",
         "STORE_ITEM_ADDED", "STORE_ITEM_EDITED", "STORE_ITEM_DELETED",
         "HR_EMPLOYEE_ADDED", "HR_EMPLOYEE_EDITED", "HR_LEAVE_RECORDED", "HR_LEAVE_EDITED", "HR_LEAVE_DELETED",
-        "HR_ENTITLEMENT_ADJUSTED",
+        "HR_ENTITLEMENT_ADJUSTED", "HR_PORTAL_LEAVE_REQUESTED", "HR_PORTAL_LEAVE_APPROVED", "HR_PORTAL_LEAVE_REJECTED",
     ]
     if action in SETTING_ACTIONS:
         action_labels = {
@@ -633,6 +634,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "STORE_ITEM_ADDED": "📦 Store Item Added", "STORE_ITEM_EDITED": "📦 Store Item Edited", "STORE_ITEM_DELETED": "📦 Store Item Deleted",
             "HR_EMPLOYEE_ADDED": "🧑💼 HR Employee Added", "HR_EMPLOYEE_EDITED": "🧑💼 HR Employee Edited",
             "HR_LEAVE_RECORDED": "📅 HR Leave Recorded", "HR_LEAVE_EDITED": "✏️ HR Leave Edited", "HR_LEAVE_DELETED": "🗑️ HR Leave Deleted", "HR_ENTITLEMENT_ADJUSTED": "📊 HR Entitlement Adjusted",
+            "HR_PORTAL_LEAVE_REQUESTED": "📝 Department Leave Requested", "HR_PORTAL_LEAVE_APPROVED": "✅ Department Leave Approved", "HR_PORTAL_LEAVE_REJECTED": "❌ Department Leave Rejected",
         }
         display_action = action_labels.get(action, action)
         old_val = _audit_json(old_data)
@@ -1065,6 +1067,12 @@ def _hrp_load_leave_records():
                 "notes": str(r.get("Notes", "")).strip(),
                 "recorded_by": str(r.get("Recorded By", "")).strip(),
                 "recorded_at": str(r.get("Recorded At", "")).strip(),
+                "entry_source": str(r.get("Entry Source", "HR Direct")).strip() or "HR Direct",
+                "requested_by": str(r.get("Requested By", "")).strip(),
+                "requested_at": str(r.get("Requested At", "")).strip(),
+                "approved_by": str(r.get("Approved By", "")).strip(),
+                "approved_at": str(r.get("Approved At", "")).strip(),
+                "rejection_reason": str(r.get("Rejection Reason", "")).strip(),
             })
         st.session_state.hrp_next_leave_number = max_no + 1
         return records
@@ -1083,6 +1091,9 @@ def _hrp_save_leave_records():
             "Status": r.get("status", "Approved"), "Request Source": r.get("request_source", "Email"),
             "Request Reference": r.get("request_reference", ""), "Notes": r.get("notes", ""),
             "Recorded By": r.get("recorded_by", ""), "Recorded At": r.get("recorded_at", ""),
+            "Entry Source": r.get("entry_source", "HR Direct"), "Requested By": r.get("requested_by", ""),
+            "Requested At": r.get("requested_at", ""), "Approved By": r.get("approved_by", ""),
+            "Approved At": r.get("approved_at", ""), "Rejection Reason": r.get("rejection_reason", ""),
         })
     pd.DataFrame(rows, columns=HR_PORTAL_LEAVE_COLUMNS).to_excel(HR_PORTAL_LEAVE_PATH, index=False, engine="openpyxl")
     sync_saved_file_to_drive(HR_PORTAL_LEAVE_PATH)
@@ -1296,6 +1307,9 @@ def render_hr_portal(current_user_info=None):
             st.rerun()
 
     is_hr = st.session_state.hrp_role == "hr"
+    current_role_name = str((current_user_info or {}).get("role", "")).strip().casefold() if isinstance(current_user_info, dict) else ""
+    current_dept_name = str((current_user_info or {}).get("dept", "")).strip().casefold() if isinstance(current_user_info, dict) else ""
+    is_hr_manager = current_dept_name == "hr" or current_role_name == "hr manager"
 
     # Keep the currently selected employee valid. The selector itself is now
     # inside Employee Details so the profile below it always belongs to the
@@ -1315,12 +1329,20 @@ def render_hr_portal(current_user_info=None):
     # HR gets the requested four-tab layout. Employees remain view-only and do
     # not see HR Management.
     if is_hr:
-        tab_hr, tab_details, tab_leave, tab_history = st.tabs([
-            "🧑‍💼 HR Management",
-            "👤 Employee Details",
-            "✏️ Leave",
-            "📋 Leave History",
-        ])
+        if is_hr_manager:
+            tab_hr, tab_details, tab_leave, tab_history = st.tabs([
+                "🧑‍💼 HR Management",
+                "👤 Employee Details",
+                "✏️ Leave",
+                "📋 Leave History",
+            ])
+        else:
+            tab_hr, tab_details, tab_leave, tab_history = st.tabs([
+                "🧑‍💼 HR Management",
+                "👤 Employee Details",
+                "✏️ Leave",
+                "📋 Leave History",
+            ])
     else:
         tab_details, tab_leave, tab_history = st.tabs([
             "👤 Employee Details",
@@ -1333,8 +1355,14 @@ def render_hr_portal(current_user_info=None):
     if is_hr and tab_hr is not None:
         with tab_hr:
             st.subheader("🧑‍💼 HR Management")
-            st.caption("Employee Management and HR Leave Settlement")
-            hr_employee_tab, hr_settlement_tab = st.tabs(["👤 Employee Management", "💷 HR Leave Settlement"])
+            if is_hr_manager:
+                st.caption("Employee Management, Leave Approvals and HR Leave Settlement")
+                hr_employee_tab, hr_approval_tab, hr_settlement_tab = st.tabs([
+                    "👤 Employee Management", "✅ Leave Approvals", "💷 HR Leave Settlement"
+                ])
+            else:
+                st.caption("Employee Management and HR Leave Settlement")
+                hr_employee_tab, hr_settlement_tab = st.tabs(["👤 Employee Management", "💷 HR Leave Settlement"])
 
             with hr_employee_tab:
                 st.subheader("📊 Employee Overview — All Employees")
@@ -1574,6 +1602,10 @@ def render_hr_portal(current_user_info=None):
                             if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", use_container_width=True):
                                 st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
                                 st.rerun()
+
+            if is_hr_manager:
+                with hr_approval_tab:
+                    render_hr_leave_approvals()
 
             with hr_settlement_tab:
                 st.subheader("💷 HR Leave Settlement Calculator")
@@ -1832,7 +1864,7 @@ def render_hr_portal(current_user_info=None):
                         st.error("The selected dates do not contain any working days.")
                     else:
                         duplicate = next((r for r in st.session_state.hrp_leave_records
-                                          if r.get("employee_id") == emp["emp_id"]
+                                          if r.get("employee_id") == leave_employee["emp_id"]
                                           and r.get("date_from") == leave_start
                                           and r.get("date_to") == leave_end
                                           and r.get("type") == leave_type
@@ -1849,6 +1881,11 @@ def render_hr_portal(current_user_info=None):
                                 "request_reference": request_reference.strip(), "notes": notes.strip(),
                                 "recorded_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR",
                                 "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "entry_source": "HR Direct",
+                                "requested_by": "", "requested_at": "",
+                                "approved_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR",
+                                "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "rejection_reason": "",
                             }
                             st.session_state.hrp_leave_records.append(new_record)
                             _hrp_save_leave_records()
@@ -1913,7 +1950,7 @@ def render_hr_portal(current_user_info=None):
                         f"{history_employee.get('job_title', '')}"
                     )
 
-                employee_leave = _hrp_get_employee_leave(selected_history_employee_id)
+                employee_leave = [r for r in _hrp_get_employee_leave(selected_history_employee_id) if r.get("status") == "Approved"]
                 if employee_leave:
                     history_data = [{
                         "Leave ID": r["leave_id"], "Date From": r["date_from"],
@@ -2007,7 +2044,7 @@ def render_hr_portal(current_user_info=None):
                 else:
                     st.info(f"No leave history is currently recorded for {history_employee['name'] if history_employee else selected_history_employee_id}.")
         elif emp:
-            employee_leave = _hrp_get_employee_leave(emp["emp_id"])
+            employee_leave = [r for r in _hrp_get_employee_leave(emp["emp_id"]) if r.get("status") == "Approved"]
             if employee_leave:
                 history_data = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
                 st.dataframe(pd.DataFrame(history_data), use_container_width=True, hide_index=True)
@@ -2021,8 +2058,120 @@ def render_hr_portal(current_user_info=None):
         # The employee sees only the requested personal information/leave tabs.
         pass
 
+def render_department_manager_leave_request(current_user_info=None):
+    """Department-manager leave request workflow. Requests remain pending until HR approves them."""
+    user = current_user_info or {}
+    manager_name = str(user.get("full_name", "Department Manager")).strip()
+    manager_department = str(user.get("dept", "")).strip()
+    st.subheader("📝 Leave Request")
+    st.caption("Submit leave on behalf of an employee in your department. HR must approve the request before it becomes official leave.")
+    if not manager_department:
+        st.error("Your account is not assigned to a department. Please contact the Super Admin.")
+        return
+    employees = [e for e in st.session_state.get("hrp_employees", []) if e.get("status", "Active") == "Active" and str(e.get("department", "")).strip() == manager_department]
+    if not employees:
+        st.info(f"No active employees have been added to the **{manager_department}** department by HR yet.")
+        return
+    employee_ids = [e["emp_id"] for e in employees]
+    key_suffix = re.sub(r"[^A-Za-z0-9_]+", "_", manager_department) or "dept"
+    selected_id = st.selectbox("👤 Employee — Request Leave For", employee_ids, format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}", key=f"dept_leave_employee_{key_suffix}")
+    selected_employee = _hrp_get_employee(selected_id)
+    if not selected_employee:
+        st.error("Selected employee could not be found.")
+        return
+    st.info(f"Requesting leave for **{selected_employee['name']}** ({selected_employee['emp_id']}) · {selected_employee.get('job_title', '')} · {manager_department}")
+    form_version = st.session_state.get(f"dept_leave_form_version_{key_suffix}", 0)
+    with st.form(f"dept_leave_request_form_{key_suffix}_{form_version}", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            leave_type = st.selectbox("Leave Type", HR_PORTAL_LEAVE_TYPES, key=f"dept_leave_type_{key_suffix}_{form_version}")
+            leave_start = st.date_input("Start Date", value=date.today(), key=f"dept_leave_start_{key_suffix}_{form_version}")
+        with c2:
+            leave_end = st.date_input("End Date", value=date.today(), key=f"dept_leave_end_{key_suffix}_{form_version}")
+            half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key=f"dept_leave_half_{key_suffix}_{form_version}")
+        request_reference = st.text_input("Request Reference", placeholder="Optional email, call, or internal reference", key=f"dept_leave_ref_{key_suffix}_{form_version}")
+        notes = st.text_area("Notes / Reason", placeholder="Reason or details supplied by the employee", key=f"dept_leave_notes_{key_suffix}_{form_version}")
+        submitted = st.form_submit_button("📤 Submit Leave Request to HR", type="primary", use_container_width=True)
+    if submitted:
+        if leave_end < leave_start:
+            st.error("End date cannot be before the start date.")
+            return
+        days = _hrp_calculate_leave_days(leave_type, leave_start, leave_end, half_day)
+        if days <= 0:
+            st.error("The selected dates do not contain any working days.")
+            return
+        duplicate = next((r for r in st.session_state.hrp_leave_records if r.get("employee_id") == selected_employee["emp_id"] and r.get("date_from") == leave_start and r.get("date_to") == leave_end and r.get("type") == leave_type and r.get("status") == "Pending HR Approval"), None)
+        if duplicate:
+            st.warning(f"A leave request for these dates is already waiting for HR approval ({duplicate['leave_id']}).")
+            return
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        record = {"leave_id": _hrp_create_leave_id(), "employee_id": selected_employee["emp_id"], "date_from": leave_start, "date_to": leave_end, "type": leave_type, "days": days, "status": "Pending HR Approval", "request_source": "Department Manager", "request_reference": request_reference.strip(), "notes": notes.strip(), "recorded_by": manager_name, "recorded_at": now, "entry_source": "Department Manager Request", "requested_by": manager_name, "requested_at": now, "approved_by": "", "approved_at": "", "rejection_reason": ""}
+        st.session_state.hrp_leave_records.append(record)
+        _hrp_save_leave_records()
+        log_action("HR_PORTAL_LEAVE_REQUESTED", record["leave_id"], new_data=record)
+        st.session_state[f"dept_leave_form_version_{key_suffix}"] = form_version + 1
+        st.success(f"Leave request {record['leave_id']} submitted to HR for approval.")
+        st.rerun()
+    pending = [r for r in st.session_state.hrp_leave_records if r.get("employee_id") in employee_ids and r.get("requested_by") == manager_name and r.get("status") in ("Pending HR Approval", "Rejected")]
+    if pending:
+        st.divider(); st.subheader("📋 My Leave Requests")
+        rows = []
+        for r in reversed(pending):
+            employee = _hrp_get_employee(r["employee_id"])
+            rows.append({"Leave ID": r["leave_id"], "Employee": employee["name"] if employee else r["employee_id"], "From": r["date_from"], "To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "HR Rejection Reason": r.get("rejection_reason", "")})
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def render_hr_leave_approvals():
+    """HR-only approval queue for department-manager leave requests."""
+    st.subheader("✅ Leave Approvals")
+    st.caption("Only department-manager requests appear here. Leave entered directly by HR is already Approved and does not require approval.")
+    pending = [r for r in st.session_state.hrp_leave_records if r.get("status") == "Pending HR Approval"]
+    if not pending:
+        st.success("There are no leave requests waiting for HR approval.")
+        return
+    for record in reversed(pending):
+        employee = _hrp_get_employee(record.get("employee_id"))
+        employee_name = employee.get("name", record.get("employee_id")) if employee else record.get("employee_id")
+        department = employee.get("department", "") if employee else ""
+        with st.expander(f"🟡 {record['leave_id']} — {employee_name} — {record['type']} — {record['days']:.1f} day(s)", expanded=True):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.write(f"**Employee:** {employee_name}"); st.write(f"**Employee ID:** {record.get('employee_id')}"); st.write(f"**Department:** {department}")
+            with c2:
+                st.write(f"**Dates:** {record['date_from']} → {record['date_to']}"); st.write(f"**Leave Type:** {record['type']}"); st.write(f"**Days:** {record['days']:.1f}")
+            with c3:
+                st.write(f"**Requested By:** {record.get('requested_by', '')}"); st.write(f"**Requested At:** {record.get('requested_at', '')}"); st.write(f"**Reference:** {record.get('request_reference', '') or '-'}")
+            if record.get("notes"): st.info(f"**Notes:** {record['notes']}")
+            rejection_reason = st.text_area("Rejection reason (required only if rejecting)", key=f"hr_reject_reason_{record['leave_id']}")
+            a1, a2 = st.columns(2)
+            with a1:
+                if st.button("✅ Approve Leave", type="primary", key=f"approve_leave_{record['leave_id']}"):
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    old = dict(record); approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
+                    record.update({"status": "Approved", "approved_by": approver, "approved_at": now, "recorded_by": approver, "recorded_at": now, "rejection_reason": ""})
+                    _hrp_save_leave_records()
+                    log_action("HR_PORTAL_LEAVE_APPROVED", record["leave_id"], old_data=old, new_data=dict(record), decision_by=approver, decision_date=now)
+                    st.success(f"{record['leave_id']} approved. It is now part of the employee's official leave history."); st.rerun()
+            with a2:
+                if st.button("❌ Reject Leave", key=f"reject_leave_{record['leave_id']}"):
+                    if not rejection_reason.strip():
+                        st.error("Please enter a rejection reason before rejecting the request.")
+                    else:
+                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        old = dict(record); approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
+                        record.update({"status": "Rejected", "rejection_reason": rejection_reason.strip(), "approved_by": approver, "approved_at": now})
+                        _hrp_save_leave_records()
+                        log_action("HR_PORTAL_LEAVE_REJECTED", record["leave_id"], old_data=old, new_data=dict(record), decision_by=approver, decision_date=now)
+                        st.success(f"{record['leave_id']} rejected."); st.rerun()
+
 def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
-    """Unified HR Department area. Super Admin controls access; HR users get the portal and their HR settlement area."""
+    """HR department area. Department managers get requests only; HR Manager keeps the full direct-entry portal."""
+    user_role = str((current_user_info or {}).get("role", "")).strip().lower()
+    user_dept = str((current_user_info or {}).get("dept", "")).strip().casefold()
+    if user_role == "manager" and user_dept != "hr" and not is_super_admin and not is_director:
+        render_department_manager_leave_request(current_user_info)
+        return
     sub_portal_tab, sub_settlement_tab = st.tabs([
         "🧑‍💼 HR Portal (Employee / Holiday / Leave)",
         "💷 HR Leave Settlement"
@@ -5617,7 +5766,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_store_deduction = user_info.get("can_access_store_deduction", False)
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
-    if has_hr_leave: labels.append("🏢 HR Department")
+    if has_hr_leave:
+        is_hr_manager_account = (str(role).strip().lower() == "manager" and str(dept).strip().casefold() == "hr")
+        labels.append("🏢 HR Department" if is_hr_manager_account else "📝 Leave Request")
     if has_store_deduction: labels.append("📦 Store Deduction")
     if has_store_deduction: labels.append("📦 Store Return (Addition)")
     if has_store_deduction: labels.append("📋 My Submitted Store Requests")
