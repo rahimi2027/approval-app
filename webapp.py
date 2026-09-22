@@ -2238,47 +2238,117 @@ def render_department_manager_leave_request(current_user_info=None):
 
 
 def render_hr_leave_approvals():
-    """HR-only approval queue for department-manager leave requests."""
-    st.subheader("✅ Leave Approvals")
-    st.caption("Only department-manager requests appear here. Leave entered directly by HR is already Approved and does not require approval.")
-    pending = [r for r in st.session_state.hrp_leave_records if r.get("status") == "Pending HR Approval"]
-    if not pending:
-        st.success("There are no leave requests waiting for HR approval.")
+    """HR approval inbox for department-manager leave requests.
+
+    Always reloads the persistent leave workbook so requests submitted by a
+    department manager in another Streamlit session appear immediately to HR.
+    Approved requests are removed from Pending and become part of official
+    Leave History. Rejected requests remain visible in the Rejected section.
+    """
+    try:
+        _hrp_init_storage()
+        st.session_state.hrp_employees = _hrp_load_employees()
+        st.session_state.hrp_leave_records = _hrp_load_leave_records()
+    except Exception as e:
+        st.error(f"Unable to refresh leave approval requests: {e}")
         return
-    for record in reversed(pending):
-        employee = _hrp_get_employee(record.get("employee_id"))
-        employee_name = employee.get("name", record.get("employee_id")) if employee else record.get("employee_id")
-        department = employee.get("department", "") if employee else ""
-        with st.expander(f"🟡 {record['leave_id']} — {employee_name} — {record['type']} — {record['days']:.1f} day(s)", expanded=True):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.write(f"**Employee:** {employee_name}"); st.write(f"**Employee ID:** {record.get('employee_id')}"); st.write(f"**Department:** {department}")
-            with c2:
-                st.write(f"**Dates:** {record['date_from']} → {record['date_to']}"); st.write(f"**Leave Type:** {record['type']}"); st.write(f"**Days:** {record['days']:.1f}")
-            with c3:
-                st.write(f"**Requested By:** {record.get('requested_by', '')}"); st.write(f"**Requested At:** {record.get('requested_at', '')}"); st.write(f"**Reference:** {record.get('request_reference', '') or '-'}")
-            if record.get("notes"): st.info(f"**Notes:** {record['notes']}")
-            rejection_reason = st.text_area("Rejection reason (required only if rejecting)", key=f"hr_reject_reason_{record['leave_id']}")
-            a1, a2 = st.columns(2)
-            with a1:
-                if st.button("✅ Approve Leave", type="primary", key=f"approve_leave_{record['leave_id']}"):
-                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    old = dict(record); approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
-                    record.update({"status": "Approved", "approved_by": approver, "approved_at": now, "recorded_by": approver, "recorded_at": now, "rejection_reason": ""})
-                    _hrp_save_leave_records()
-                    log_action("HR_PORTAL_LEAVE_APPROVED", record["leave_id"], old_data=old, new_data=dict(record), decision_by=approver, decision_date=now)
-                    st.success(f"{record['leave_id']} approved. It is now part of the employee's official leave history."); st.rerun()
-            with a2:
-                if st.button("❌ Reject Leave", key=f"reject_leave_{record['leave_id']}"):
-                    if not rejection_reason.strip():
-                        st.error("Please enter a rejection reason before rejecting the request.")
-                    else:
-                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        old = dict(record); approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
-                        record.update({"status": "Rejected", "rejection_reason": rejection_reason.strip(), "approved_by": approver, "approved_at": now})
-                        _hrp_save_leave_records()
-                        log_action("HR_PORTAL_LEAVE_REJECTED", record["leave_id"], old_data=old, new_data=dict(record), decision_by=approver, decision_date=now)
-                        st.success(f"{record['leave_id']} rejected."); st.rerun()
+
+    st.subheader("✅ Leave Approvals")
+    st.caption("Department-manager leave requests are shown here. HR direct-entry leave is already Approved and does not require approval.")
+
+    pending = [r for r in st.session_state.hrp_leave_records if r.get("status") == "Pending HR Approval"]
+    rejected = [r for r in st.session_state.hrp_leave_records if r.get("status") == "Rejected"]
+
+    pending_tab, rejected_tab = st.tabs([
+        f"⏳ Pending Approval ({len(pending)})",
+        f"❌ Rejected ({len(rejected)})",
+    ])
+
+    with pending_tab:
+        if not pending:
+            st.success("There are no leave requests waiting for HR approval.")
+        else:
+            for record in reversed(pending):
+                employee = _hrp_get_employee(record.get("employee_id"))
+                employee_name = employee.get("name", record.get("employee_id")) if employee else record.get("employee_id")
+                department = employee.get("department", "") if employee else ""
+                with st.expander(f"🟡 {record['leave_id']} — {employee_name} — {record['type']} — {record['days']:.1f} day(s)", expanded=True):
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.write(f"**Employee:** {employee_name}")
+                        st.write(f"**Employee ID:** {record.get('employee_id')}")
+                        st.write(f"**Department:** {department}")
+                    with c2:
+                        st.write(f"**Dates:** {record['date_from']} → {record['date_to']}")
+                        st.write(f"**Leave Type:** {record['type']}")
+                        st.write(f"**Days:** {record['days']:.1f}")
+                    with c3:
+                        st.write(f"**Requested By:** {record.get('requested_by', '')}")
+                        st.write(f"**Requested At:** {record.get('requested_at', '')}")
+                        st.write(f"**Reference:** {record.get('request_reference', '') or '-'}")
+                    if record.get("notes"):
+                        st.info(f"**Notes:** {record['notes']}")
+                    rejection_reason = st.text_area("Rejection reason (required only if rejecting)", key=f"hr_reject_reason_{record['leave_id']}")
+                    a1, a2 = st.columns(2)
+                    with a1:
+                        if st.button("✅ Approve Leave", type="primary", key=f"approve_leave_{record['leave_id']}"):
+                            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            old = dict(record)
+                            approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
+                            record.update({
+                                "status": "Approved",
+                                "approved_by": approver,
+                                "approved_at": now,
+                                "recorded_by": approver,
+                                "recorded_at": now,
+                                "rejection_reason": "",
+                            })
+                            _hrp_save_leave_records()
+                            log_action("HR_PORTAL_LEAVE_APPROVED", record["leave_id"], old_data=old, new_data=dict(record), decision_by=approver, decision_date=now)
+                            st.success(f"{record['leave_id']} approved. It is now part of the employee's official leave history.")
+                            st.rerun()
+                    with a2:
+                        if st.button("❌ Reject Leave", key=f"reject_leave_{record['leave_id']}"):
+                            if not rejection_reason.strip():
+                                st.error("Please enter a rejection reason before rejecting the request.")
+                            else:
+                                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                old = dict(record)
+                                approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
+                                record.update({
+                                    "status": "Rejected",
+                                    "rejection_reason": rejection_reason.strip(),
+                                    "approved_by": approver,
+                                    "approved_at": now,
+                                })
+                                _hrp_save_leave_records()
+                                log_action("HR_PORTAL_LEAVE_REJECTED", record["leave_id"], old_data=old, new_data=dict(record), decision_by=approver, decision_date=now)
+                                st.success(f"{record['leave_id']} rejected and moved to Rejected.")
+                                st.rerun()
+
+    with rejected_tab:
+        if not rejected:
+            st.info("There are no rejected department-manager leave requests.")
+        else:
+            for record in reversed(rejected):
+                employee = _hrp_get_employee(record.get("employee_id"))
+                employee_name = employee.get("name", record.get("employee_id")) if employee else record.get("employee_id")
+                department = employee.get("department", "") if employee else ""
+                with st.expander(f"🔴 {record['leave_id']} — {employee_name} — {record['type']} — {record['days']:.1f} day(s)"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.write(f"**Employee:** {employee_name}")
+                        st.write(f"**Employee ID:** {record.get('employee_id')}")
+                        st.write(f"**Department:** {department}")
+                        st.write(f"**Requested By:** {record.get('requested_by', '')}")
+                    with c2:
+                        st.write(f"**Dates:** {record['date_from']} → {record['date_to']}")
+                        st.write(f"**Leave Type:** {record['type']}")
+                        st.write(f"**Days:** {record['days']:.1f}")
+                        st.write(f"**Rejected By:** {record.get('approved_by', '')}")
+                        st.write(f"**Rejected At:** {record.get('approved_at', '')}")
+                    st.error(f"**Rejection reason:** {record.get('rejection_reason', '') or 'No reason recorded.'}")
+
 
 def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
     """HR department area. Department managers get requests only; HR Manager keeps the full direct-entry portal."""
@@ -6025,7 +6095,16 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
         if has_leave_request:
             with tabs[tab_idx]:
-                render_department_manager_leave_request(current_user_info=user_info)
+                # HR Managers use this module as the approval inbox for requests
+                # submitted by department managers. They do not submit their own
+                # leave through this workflow; HR direct-entry remains in the HR
+                # Department -> Employee Details / Leave tabs and is immediately Approved.
+                normalized_dept = re.sub(r"\s+", " ", str(dept_name or "")).strip().casefold()
+                is_hr_manager_account = normalized_dept in {"hr", "human resource", "human resources", "hr department", "human resource department"} and has_hr_leave
+                if is_hr_manager_account:
+                    render_hr_leave_approvals()
+                else:
+                    render_department_manager_leave_request(current_user_info=user_info)
             tab_idx += 1
         if has_store_deduction:
             with tabs[tab_idx]:
