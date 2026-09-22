@@ -370,7 +370,7 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
 
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
 DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Work Order Employee", "Work Order Manager", "Director", "Payroll", "Super Admin"]
-DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd", "Store"]
+DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd", "Store", "HR"]
 EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Category Reason", "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name", "Status", "Director Comments", "Decision Date", "Decision By", "Submitted By", "PDF File Path", "Edited From ID", "Old Data"]
 WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours", "Amount (£)", "Manager", "Description", "Attachment Name", "Status", "Site Address", "Customer Job No.", "Manager Comments", "Manager Decision Date", "Manager Decision By", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date", "Payroll By", "PDF File Path"]
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
@@ -403,7 +403,7 @@ PERMISSION_LABELS = {
     "can_access_addition_deduction": "➕ Addition & Deduction",
     "can_access_work_orders": "🛠️ Work Orders",
     "can_access_wo_total": "💷 Approved Work Order Total",
-    "can_access_hr_leave": "👥 HR Leave Settlement",
+    "can_access_hr_leave": "🏢 HR Department (Employee Management + Leave Settlement)",
     "can_access_store_deduction": "📦 Store Department Deduction"
 }
 
@@ -968,12 +968,15 @@ def _hrp_get_employee(employee_id):
     return None
 
 def _hrp_validate_employee_id(employee_id):
-    employee_id = employee_id.strip().upper()
-    if not employee_id: return False, "Employee ID is required."
-    if not employee_id.startswith("ACE-ID"): return False, "Employee ID must start with ACE-ID."
-    if not re.fullmatch(r"ACE-ID[A-Z0-9-]+", employee_id): return False, "Employee ID contains invalid characters."
+    """Validate an HR-entered employee ID. The company chooses the format; it only has to be unique."""
+    employee_id = str(employee_id).strip()
+    if not employee_id:
+        return False, "Employee ID is required."
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", employee_id):
+        return False, "Employee ID may contain only letters, numbers, hyphens and underscores."
     for emp in st.session_state.hrp_employees:
-        if emp["emp_id"].upper() == employee_id: return False, "This Employee ID already exists."
+        if str(emp["emp_id"]).strip().casefold() == employee_id.casefold():
+            return False, "This Employee ID already exists."
     return True, employee_id
 
 def _hrp_get_working_days(start_date, end_date):
@@ -1024,6 +1027,22 @@ def _hrp_get_employee_leave(employee_id):
 
 def _hrp_get_approved_holiday_days(employee_id):
     return sum(r["days"] for r in st.session_state.hrp_leave_records if r["employee_id"] == employee_id and r["status"] == "Approved" and r["type"] in HR_PORTAL_HOLIDAY_LEAVE_TYPES)
+
+def _hrp_get_holiday_position(employee_id):
+    """Return signed balance plus explicit company/employee owed amounts."""
+    employee = _hrp_get_employee(employee_id)
+    if not employee:
+        return {"entitlement": 0.0, "used": 0.0, "balance": 0.0, "employee_owes_company": 0.0, "company_owes_employee": 0.0}
+    entitlement, _, _, _ = _hrp_get_employee_entitlement(employee)
+    used = _hrp_get_approved_holiday_days(employee_id)
+    balance = round(entitlement - used, 1)
+    return {
+        "entitlement": entitlement,
+        "used": used,
+        "balance": balance,
+        "employee_owes_company": round(abs(balance), 1) if balance < 0 else 0.0,
+        "company_owes_employee": round(balance, 1) if balance > 0 else 0.0,
+    }
 
 def _hrp_get_leave_summary(employee_id):
     records = _hrp_get_employee_leave(employee_id)
@@ -1121,12 +1140,20 @@ def render_hr_portal(current_user_info=None):
         entitlement, entitlement_note, service_years, calculated_base = _hrp_get_employee_entitlement(emp)
         holiday_used = _hrp_get_approved_holiday_days(emp["emp_id"])
         remaining = entitlement - holiday_used
+        holiday_position = _hrp_get_holiday_position(emp["emp_id"])
         col1, col2, col3, col4 = st.columns(4)
         with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
         with col2: st.metric("Holiday Used", f"{holiday_used:.1f} days")
         with col3: st.metric("Remaining", f"{remaining:.1f} days")
         with col4: st.metric("Service", f"{service_years:.1f} years")
         st.info(entitlement_note)
+
+        owed1, owed2 = st.columns(2)
+        with owed1:
+            st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
+        with owed2:
+            st.metric("👤 Employee Owes Company", f"{holiday_position['employee_owes_company']:.1f} days")
+
         if is_hr:
             st.divider()
             st.subheader("⚙️ HR Entitlement Adjustment")
@@ -1215,10 +1242,10 @@ def render_hr_portal(current_user_info=None):
             hr_employee_tab, hr_settlement_tab = st.tabs(["👤 Employee Management", "💷 HR Settlement Calculator"])
             with hr_employee_tab:
                 st.subheader("➕ Add New Employee")
-                st.info("Employee ID is entered manually by HR and must start with ACE-ID.")
+                st.info("HR enters the company Employee ID manually. Any unique letters/numbers format used by your company is accepted.")
                 col1, col2 = st.columns(2)
                 with col1:
-                    new_emp_id = st.text_input("Employee ID", placeholder="e.g. ACE-ID006", key="hrp_new_emp_id")
+                    new_emp_id = st.text_input("Employee ID", placeholder="e.g. 001, EMP-001, A102 or your company batch number", key="hrp_new_emp_id")
                     new_name = st.text_input("Full Name", placeholder="e.g. John Smith", key="hrp_new_name")
                     new_start_date = st.date_input("Start Date", value=date.today(), key="hrp_new_start")
                 with col2:
@@ -1241,8 +1268,87 @@ def render_hr_portal(current_user_info=None):
                         st.rerun()
                 st.divider()
                 st.subheader("Employee Directory")
+                st.caption("Edit active/inactive records or permanently delete an employee record. Deactivation is recommended when someone leaves the company so their history is retained.")
+
                 employee_table = [{"Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"], "Position": e["job_title"], "Department": e["department"], "Agreement": e["agreement_type"], "Status": e["status"]} for e in st.session_state.hrp_employees]
                 st.dataframe(pd.DataFrame(employee_table), use_container_width=True, hide_index=True)
+
+                st.markdown("### ✏️ Edit / Deactivate Employee")
+                edit_emp_id = st.selectbox(
+                    "Select Employee",
+                    options=[e["emp_id"] for e in st.session_state.hrp_employees],
+                    format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid)['status']}",
+                    key="hrp_edit_emp_selector"
+                )
+                edit_emp = _hrp_get_employee(edit_emp_id)
+                if edit_emp:
+                    with st.form(f"hrp_edit_employee_form_{edit_emp_id}"):
+                        ec1, ec2 = st.columns(2)
+                        with ec1:
+                            edit_name = st.text_input("Full Name", value=edit_emp["name"])
+                            edit_start = st.date_input("Start Date", value=edit_emp["start_date"])
+                            edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
+                        with ec2:
+                            edit_dept = st.selectbox("Department", HR_PORTAL_DEPARTMENTS, index=HR_PORTAL_DEPARTMENTS.index(edit_emp["department"]) if edit_emp["department"] in HR_PORTAL_DEPARTMENTS else 0)
+                            edit_agreement = st.selectbox("Agreement Type", HR_PORTAL_AGREEMENT_TYPES, index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0)
+                            status_options = ["Active", "Inactive"]
+                            edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")))
+                            if edit_emp.get("status") == "Inactive":
+                                st.caption("This employee is inactive. Their leave history is retained.")
+                        if st.form_submit_button("💾 Save Employee Changes", type="primary"):
+                            old_data = dict(edit_emp)
+                            edit_emp["name"] = edit_name.strip()
+                            edit_emp["start_date"] = edit_start
+                            edit_emp["job_title"] = edit_position.strip()
+                            edit_emp["department"] = edit_dept
+                            edit_emp["agreement_type"] = edit_agreement
+                            edit_emp["status"] = edit_status
+                            log_action("HR_EMPLOYEE_EDITED", edit_emp_id, old_data=old_data, new_data=dict(edit_emp))
+                            st.success(f"Employee {edit_emp_id} updated successfully.")
+                            st.rerun()
+
+                st.markdown("### 🔴 Deactivate / Delete")
+                dc1, dc2 = st.columns(2)
+                with dc1:
+                    if edit_emp and edit_emp.get("status") == "Active":
+                        if st.button("🚪 Deactivate Employee", key=f"hrp_deactivate_{edit_emp_id}", use_container_width=True):
+                            old_status = edit_emp.get("status", "Active")
+                            edit_emp["status"] = "Inactive"
+                            log_action("HR_EMPLOYEE_DEACTIVATED", edit_emp_id, old_data={"status": old_status}, new_data={"status": "Inactive"})
+                            st.success(f"Employee {edit_emp_id} has been deactivated. Their records and leave history have been retained.")
+                            st.rerun()
+                    elif edit_emp:
+                        if st.button("🟢 Reactivate Employee", key=f"hrp_reactivate_{edit_emp_id}", use_container_width=True):
+                            edit_emp["status"] = "Active"
+                            log_action("HR_EMPLOYEE_REACTIVATED", edit_emp_id, old_data={"status": "Inactive"}, new_data={"status": "Active"})
+                            st.success(f"Employee {edit_emp_id} has been reactivated.")
+                            st.rerun()
+                with dc2:
+                    if edit_emp:
+                        if st.button("🗑️ Permanently Delete Employee", key=f"hrp_delete_{edit_emp_id}", use_container_width=True):
+                            # Keep this as a deliberate destructive action; leave history is removed with the employee.
+                            st.session_state[f"hrp_confirm_delete_{edit_emp_id}"] = True
+                    if st.session_state.get(f"hrp_confirm_delete_{edit_emp_id}", False):
+                        st.warning("This permanently removes the employee record and their HR portal leave records. Use Deactivate instead when an employee leaves the company.")
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            if st.button("⚠️ Confirm Permanent Delete", key=f"hrp_confirm_delete_yes_{edit_emp_id}", type="primary", use_container_width=True):
+                                deleted = _hrp_get_employee(edit_emp_id)
+                                st.session_state.hrp_employees = [e for e in st.session_state.hrp_employees if e["emp_id"] != edit_emp_id]
+                                st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r["employee_id"] != edit_emp_id]
+                                st.session_state.hrp_entitlement_overrides.pop(edit_emp_id, None)
+                                st.session_state.hrp_adjustment_notes.pop(edit_emp_id, None)
+                                log_action("HR_EMPLOYEE_DELETED", edit_emp_id, old_data=deleted)
+                                st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
+                                if st.session_state.get("hrp_current_emp_id") == edit_emp_id:
+                                    active_ids = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
+                                    st.session_state.hrp_current_emp_id = active_ids[0] if active_ids else ""
+                                st.success(f"Employee {edit_emp_id} permanently deleted.")
+                                st.rerun()
+                        with cc2:
+                            if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", use_container_width=True):
+                                st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
+                                st.rerun()
             with hr_settlement_tab:
                 st.subheader("💷 HR Leave Settlement Calculator")
                 st.info("Compute an employee's leave settlement based on their entitlement and approved leave records.")
@@ -1254,12 +1360,16 @@ def render_hr_portal(current_user_info=None):
                     entitlement, entitlement_note, _, _ = _hrp_get_employee_entitlement(settlement_employee)
                     holiday_used = _hrp_get_approved_holiday_days(settlement_employee_id)
                     remaining = entitlement - holiday_used
+                    holiday_position = _hrp_get_holiday_position(settlement_employee_id)
                     st.divider()
                     col1, col2, col3 = st.columns(3)
                     with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
                     with col2: st.metric("Approved Holiday Used", f"{holiday_used:.1f} days")
-                    with col3: st.metric("Remaining Holiday", f"{remaining:.1f} days")
+                    with col3: st.metric("Balance", f"{remaining:.1f} days")
                     st.caption(entitlement_note)
+                    owed1, owed2 = st.columns(2)
+                    with owed1: st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
+                    with owed2: st.metric("👤 Employee Owes Company", f"{holiday_position['employee_owes_company']:.1f} days")
                     st.divider()
                     summary = _hrp_get_leave_summary(settlement_employee_id)
                     st.subheader("Leave Settlement Summary")
@@ -1304,14 +1414,11 @@ def render_hr_portal(current_user_info=None):
 # ════════════════════════════════════════════════════════════
 # 🏢 HR DEPARTMENT WRAPPER (Combines HR Portal + HR Leave Settlement)
 # ════════════════════════════════════════════════════════════
-def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name=""):
-    """
-    Combines the new HR Portal and the existing HR Leave Settlement into one tab structure.
-    Both Super Admin and Director will use this wrapper.
-    """
+def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
+    """Unified HR Department area. Super Admin controls access; HR users get the portal and their HR settlement area."""
     sub_portal_tab, sub_settlement_tab = st.tabs([
         "🧑‍💼 HR Portal (Employee / Holiday / Leave)",
-        "💷 HR Leave Settlement (Director Approval)"
+        "💷 HR Leave Settlement"
     ])
 
     with sub_portal_tab:
@@ -1322,8 +1429,17 @@ def render_hr_department(current_user_info=None, is_super_admin=False, is_direct
             render_hr_leave_super_admin()
         elif is_director:
             render_hr_leave_director_portal(director_name)
+        elif has_hr_access:
+            settlement_submit_tab, settlement_history_tab = st.tabs([
+                "➕ New Settlement",
+                "📋 My Submitted Settlements"
+            ])
+            with settlement_submit_tab:
+                render_hr_leave_form(director_name)
+            with settlement_history_tab:
+                render_hr_leave_my_submissions(director_name)
         else:
-            render_hr_leave_super_admin()
+            st.error("You do not have access to the HR Department module.")
 
 
 def initialise_work_orders():
@@ -4894,8 +5010,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_store_deduction = user_info.get("can_access_store_deduction", False)
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
-    if has_hr_leave: labels.append("👥 HR Leave Settlement")
-    if has_hr_leave: labels.append("📋 My Submitted HR Leave Requests")
+    if has_hr_leave: labels.append("🏢 HR Department")
     if has_store_deduction: labels.append("📦 Store Deduction")
     if has_store_deduction: labels.append("📦 Store Return (Addition)")
     if has_store_deduction: labels.append("📋 My Submitted Store Requests")
@@ -5027,11 +5142,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
         if has_hr_leave:
             with tabs[tab_idx]:
-                render_hr_leave_form(full_name)
-            tab_idx += 1
-        if has_hr_leave:
-            with tabs[tab_idx]:
-                render_hr_leave_my_submissions(full_name)
+                render_hr_department(current_user_info=user_info, has_hr_access=True, director_name=full_name)
             tab_idx += 1
         if has_store_deduction:
             with tabs[tab_idx]:
