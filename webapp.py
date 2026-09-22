@@ -1,13 +1,14 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.21
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.22
 # ============================================================
+# ✅ v4.22 (STORE ITEMS EDITABLE):
+#    • Super Admin Store Settings: Items can now be Edited (Name & Price)
 # ✅ v4.21 (STORE DEPARTMENT DEDUCTION MODULE):
 #    • New Store Department Deduction form with dynamic item selection
 #    • Auto-fill price from Super Admin configured items, editable manually
 #    • Calculates total employee deduction
 #    • Professional PDF with logo + approval stamp
 #    • "My Submitted Store Requests" tab with search filters
-#    • Super Admin Store Items Settings (Add/Edit/Delete items & prices)
 # ✅ v4.20 (HR LEAVE: LIVE AUTO-LINK + PROFESSIONAL PDF)
 # ✅ v4.19 (HR LEAVE SETTLEMENT MODULE)
 # ✅ v4.18 (ATTACHMENT PRESERVATION FIX)
@@ -2420,7 +2421,6 @@ def get_hr_daily_rate(dept, transaction_type):
 def initialise_store_deduction():
     safe_init_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
     safe_init_excel(STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS)
-    # Seed default items if empty
     try:
         df_items = _read_excel_records(STORE_ITEMS_PATH)
         if df_items.empty:
@@ -3574,6 +3574,10 @@ def render_store_items_settings():
     st.markdown("### 📦 Store Items & Prices")
     st.caption("These items and prices will be available in the Store Department Deduction form dropdown.")
     items = load_store_items()
+
+    if "editing_store_item_idx" not in st.session_state:
+        st.session_state.editing_store_item_idx = None
+
     with st.form("add_store_item_form", clear_on_submit=True):
         new_item = st.text_input("➕ Add New Item", placeholder="e.g. Safety Helmet")
         new_price = st.number_input("💷 Price (£)", min_value=0.01, step=1.0, format="%.2f", value=50.00)
@@ -3586,21 +3590,60 @@ def render_store_items_settings():
                 st.rerun()
             elif any(it["name"].lower() == new_item.strip().lower() for it in items):
                 st.warning("⚠️ Item already exists.")
+
     st.divider()
+
     if not items:
         st.info("📋 No store items configured yet.")
     else:
         for i, item in enumerate(items):
-            c1, c2, c3 = st.columns([3, 2, 1])
-            c1.markdown(f"• **{item['name']}**")
-            c2.markdown(f"💷 **£{item['price']:.2f}**")
-            with c3:
-                if st.button("🗑️", key=f"del_store_item_{i}"):
-                    items.pop(i)
-                    save_store_items(items)
-                    log_action("STORE_ITEM_DELETED", old_data={"name": item['name']})
-                    st.success("Deleted.")
-                    st.rerun()
+            if st.session_state.editing_store_item_idx == i:
+                # Edit Mode
+                st.markdown(f"#### ✏️ Editing Item")
+                with st.form(f"edit_store_item_form_{i}", clear_on_submit=False):
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        edit_name = st.text_input("Item Name", value=item['name'], key=f"edit_store_name_{i}")
+                    with ec2:
+                        edit_price = st.number_input("Price (£)", min_value=0.01, step=1.0, format="%.2f", value=float(item['price']), key=f"edit_store_price_{i}")
+
+                    btn_col1, btn_col2, _ = st.columns([1, 1, 3])
+                    with btn_col1:
+                        save_btn = st.form_submit_button("💾 Save", type="primary", use_container_width=True)
+                    with btn_col2:
+                        cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+
+                    if save_btn:
+                        if edit_name.strip():
+                            old_data = {"name": item['name'], "price": item['price']}
+                            items[i]['name'] = edit_name.strip()
+                            items[i]['price'] = float(edit_price)
+                            save_store_items(items)
+                            log_action("STORE_ITEM_EDITED", old_data=old_data, new_data={"name": items[i]['name'], "price": items[i]['price']})
+                            st.session_state.editing_store_item_idx = None
+                            st.success(f"✅ Updated item: {edit_name}")
+                            st.rerun()
+                        else:
+                            st.error("Item name cannot be empty.")
+                    if cancel_btn:
+                        st.session_state.editing_store_item_idx = None
+                        st.rerun()
+            else:
+                # View Mode
+                c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
+                c1.markdown(f"• **{item['name']}**")
+                c2.markdown(f"💷 **£{item['price']:.2f}**")
+                with c3:
+                    if st.button("✏️", key=f"edit_store_item_{i}", help="Edit Item"):
+                        st.session_state.editing_store_item_idx = i
+                        st.rerun()
+                with c4:
+                    if st.button("🗑️", key=f"del_store_item_{i}", help="Delete Item"):
+                        items.pop(i)
+                        save_store_items(items)
+                        log_action("STORE_ITEM_DELETED", old_data={"name": item['name']})
+                        st.success("Deleted.")
+                        st.rerun()
 
 def initialise_excel():
     safe_init_excel(EXCEL_PATH, EXCEL_COLUMNS)
