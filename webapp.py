@@ -2753,7 +2753,7 @@ def store_deduction_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.ln(6)
 
         pdf.set_font(family, "B", 11)
-        item_section_title = "ITEMS TO RETURN" if is_addition else "ITEMS TO DEDUCT"
+        item_section_title = "ITEMS TO RETURN Claim" if is_addition else "ITEMS TO DEDUCT"
         pdf.cell(0, 6, safe(item_section_title), ln=True); pdf.ln(2)
         pdf.set_font(family, "B", 10)
         pdf.cell(90, 7, safe("Item Name"), border=1)
@@ -3383,7 +3383,7 @@ def render_store_return_form(user_name, user_dept):
         if selected_emp == "-- Manual Entry --":
             selected_emp = st.text_input("👤 Employee Name (Manual Entry)", key="store_ret_manual_emp_2")
 
-    st.markdown("### 📦 Items to Return")
+    st.markdown("### 📦 Items to Return Claim")
     st.caption("If the item was deducted in this software, click the button below to load them. You can then adjust the quantities for partial returns or add new items manually.")
     
     if "store_return_items" not in st.session_state:
