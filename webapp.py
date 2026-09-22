@@ -1,16 +1,16 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.24
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.25
 # ============================================================
+# ✅ v4.25 (STORE RETURN REDESIGN & KEYERROR FIX):
+#    • Fixed KeyError: 'quantity' in Store Return form
+#    • Redesigned Store Return form to match Store Deduction form
+#    • Added "Fetch Previous Deductions" button to auto-populate return items
+#    • Supports partial returns and manual item addition
+#    • Updated PDF and views to safely handle missing quantities
 # ✅ v4.24 (STORE RETURN / ADDITION + AUTO-FILL FIX):
-#    • Fixed auto-fill bug for Store Item prices
 #    • Added "Store Department Return (Addition)" module
-#    • Reverses previous deductions when items are returned
-#    • Added dedicated Store Returns tabs for Manager, Director, Payroll, Super Admin
-#    • Updated PDF to distinguish between Deduction and Addition
-# ✅ v4.23 (STORE DEDUCTION QUANTITY):
-#    • Added "Quantity" field to Store Department Deduction items
-# ✅ v4.22 (STORE ITEMS EDITABLE):
-#    • Super Admin Store Settings: Items can now be Edited (Name & Price)
+# ✅ v4.23 (STORE DEDUCTION QUANTITY)
+# ✅ v4.22 (STORE ITEMS EDITABLE)
 # ✅ v4.21 (STORE DEPARTMENT DEDUCTION MODULE)
 # ============================================================
 import streamlit as st
@@ -3367,73 +3367,81 @@ def render_store_deduction_form(user_name, user_dept):
 
 def render_store_return_form(user_name, user_dept):
     st.subheader("📦 New Request — Store Department Return (Addition)")
-    st.caption("Process returned items to reverse a previous deduction.")
+    st.caption("Process returned items to reverse a previous deduction, or add items not previously deducted.")
     
     all_transactions = load_store_deductions()
     approved_deds = [d for d in all_transactions if d["status"] == "approved" and d.get("type", "Deduction") == "Deduction"]
     
-    if not approved_deds:
-        st.info("No approved store deductions found to return.")
-        return
-        
+    # Employee selection
     emp_options = sorted({d["emp_name"] for d in approved_deds})
-    selected_emp = st.selectbox("👤 Select Employee", emp_options, key="store_ret_emp")
-    
-    emp_deds = [d for d in approved_deds if d["emp_name"] == selected_emp]
-    
-    # Build a flat list of items
-    item_rows = []
-    for d in emp_deds:
-        for item in d.get("items", []):
-            item_rows.append({
-                "Request ID": d["id"],
-                "Item Name": item["item_name"],
-                "Original Qty": int(item["quantity"]),
-                "Price (£)": float(item["price"]),
-                "Return Qty": 0,
-                "Return Amount (£)": 0.0
-            })
-    
-    df_items = pd.DataFrame(item_rows)
-    
-    st.markdown("### 📦 Items Available for Return")
-    st.caption("Enter the quantity you are returning in the 'Return Qty' column. The Return Amount will calculate automatically.")
-    
-    edited_df = st.data_editor(
-        df_items,
-        column_config={
-            "Return Qty": st.column_config.NumberColumn(
-                "Return Qty",
-                min_value=0,
-                max_value=df_items["Original Qty"], # Can't do per-row max easily here, will validate later
-                step=1,
-                default=0
-            ),
-            "Return Amount (£)": st.column_config.NumberColumn(
-                "Return Amount (£)",
-                format="£%.2f",
-                disabled=True
-            )
-        },
-        hide_index=True,
-        use_container_width=True
-    )
-    
-    # Filter where Return Qty > 0
-    valid_returns = edited_df[edited_df["Return Qty"] > 0].copy()
-    
-    if valid_returns.empty:
-        st.warning("Please select at least one item to return.")
-        total_addition = 0.0
+    if not emp_options:
+        st.info("No approved store deductions found in the system to return against.")
+        st.markdown("### 📦 Manual Return (Items not previously deducted in this software)")
+        selected_emp = st.text_input("👤 Employee Name", key="store_ret_manual_emp")
     else:
-        # Validate max quantity
-        valid_returns["Return Qty"] = valid_returns.apply(
-            lambda row: min(row["Return Qty"], row["Original Qty"]), axis=1
-        )
-        valid_returns["Return Amount (£)"] = valid_returns["Return Qty"] * valid_returns["Price (£)"]
-        total_addition = valid_returns["Return Amount (£)"].sum()
+        selected_emp = st.selectbox("👤 Select Employee (from previous deductions)", ["-- Manual Entry --"] + emp_options, key="store_ret_emp")
+        if selected_emp == "-- Manual Entry --":
+            selected_emp = st.text_input("👤 Employee Name (Manual Entry)", key="store_ret_manual_emp_2")
+
+    st.markdown("### 📦 Items to Return")
+    st.caption("If the item was deducted in this software, click the button below to load them. You can then adjust the quantities for partial returns or add new items manually.")
+    
+    if "store_return_items" not in st.session_state:
+        st.session_state.store_return_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
         
-        st.markdown(f"<h4 style='text-align: right; color: #10b981;'>Total Employee Addition: £{total_addition:.2f}</h4>", unsafe_allow_html=True)
+    store_items_master = load_store_items()
+    item_options = [""] + [it["name"] for it in store_items_master]
+    
+    # Button to fetch previous deductions
+    if selected_emp and selected_emp != "-- Manual Entry --":
+        if st.button("🔄 Fetch Approved Deductions for this Employee", key="store_fetch_deds_btn"):
+            emp_deds = [d for d in approved_deds if d["emp_name"] == selected_emp]
+            agg_items = {}
+            for d in emp_deds:
+                for item in d.get("items", []):
+                    name = item.get("item_name")
+                    qty = int(item.get("quantity", 1))
+                    price = float(item.get("price", 0))
+                    if name in agg_items:
+                        agg_items[name]["quantity"] += qty
+                    else:
+                        agg_items[name] = {"item_name": name, "quantity": qty, "price": price}
+            if agg_items:
+                st.session_state.store_return_items = list(agg_items.values())
+                st.success(f"Loaded {len(agg_items)} item(s) from previous deductions.")
+                st.rerun()
+            else:
+                st.warning("No items found in previous deductions for this employee.")
+
+    for i, item_row in enumerate(st.session_state.store_return_items):
+        c1, c2, c3, c4 = st.columns([3, 1.5, 2, 0.5])
+        with c1:
+            selected_item = st.selectbox("Item Name", options=item_options, key=f"store_ret_select_{i}", index=item_options.index(item_row.get("item_name", "")) if item_row.get("item_name") in item_options else 0)
+            if selected_item != item_row.get("item_name", ""):
+                item_row["item_name"] = selected_item
+                match = next((it for it in store_items_master if it["name"] == selected_item), None)
+                if match:
+                    item_row["price"] = match["price"]
+                    if f"store_ret_price_{i}" in st.session_state:
+                        st.session_state[f"store_ret_price_{i}"] = match["price"]
+                st.rerun()
+        with c2:
+            item_row["quantity"] = st.number_input("Quantity", min_value=1, step=1, value=int(item_row.get("quantity", 1)), key=f"store_ret_qty_{i}")
+        with c3:
+            item_row["price"] = st.number_input("Price (£)", min_value=0.0, step=1.0, format="%.2f", value=float(item_row["price"]), key=f"store_ret_price_{i}")
+        with c4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🗑️", key=f"store_ret_remove_{i}"):
+                st.session_state.store_return_items.pop(i)
+                st.rerun()
+                
+    if st.button("➕ Add Another Item", key="store_add_ret_item_btn"):
+        st.session_state.store_return_items.append({"item_name": "", "quantity": 1, "price": 0.0})
+        st.rerun()
+        
+    total_addition = sum(item.get("quantity", 1) * item.get("price", 0.0) for item in st.session_state.store_return_items)
+    st.markdown(f"<h4 style='text-align: right; color: #10b981;'>Total Employee Addition: £{total_addition:.2f}</h4>", unsafe_allow_html=True)
+    st.divider()
     
     with st.form("store_return_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
@@ -3450,10 +3458,11 @@ def render_store_return_form(user_name, user_dept):
         submitted = st.form_submit_button("📤 Send to Director for Approval", type="primary", use_container_width=True)
         
         if submitted:
-            if valid_returns.empty:
+            valid_items = [it for it in st.session_state.store_return_items if it.get("item_name") and it.get("quantity", 0) > 0 and it.get("price", 0) > 0]
+            if not selected_emp or selected_emp == "-- Manual Entry --" or not manager.strip() or not desc.strip():
+                st.error("⚠️ Employee Name, Line Manager and Description are required.")
+            elif not valid_items:
                 st.error("⚠️ Please select at least one item to return.")
-            elif not manager.strip() or not desc.strip():
-                st.error("⚠️ Line Manager and Description are required.")
             else:
                 new_id = get_next_store_deduction_id(all_transactions)
                 attachments = []
@@ -3465,19 +3474,11 @@ def render_store_return_form(user_name, user_dept):
                     _upload_to_drive_bg(fp, fn)
                     attachments.append(fn)
                     
-                items_list = []
-                for _, row in valid_returns.iterrows():
-                    items_list.append({
-                        "item_name": row["Item Name"],
-                        "quantity": int(row["Return Qty"]),
-                        "price": float(row["Price (£)"])
-                    })
-                    
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 rec = {
                     "id": new_id, "emp_name": selected_emp, "date_leaving": str(date_return),
                     "emp_dept": user_dept, "manager": manager.strip(), "date_submit": str(date_submit),
-                    "type": "Addition", "items": items_list, "total_deduction": total_addition,
+                    "type": "Addition", "items": valid_items, "total_deduction": total_addition,
                     "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None",
                     "status": "pending", "director_comments": "", "rejection_reason": "",
                     "decision_date": "", "decision_by": "",
@@ -3486,6 +3487,8 @@ def render_store_return_form(user_name, user_dept):
                 all_transactions.append(rec)
                 save_all_store_deductions(all_transactions)
                 log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
+                
+                st.session_state.store_return_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
                 st.success(f"✅ Store Return #{new_id} sent to Director for approval.")
                 st.rerun()
 
