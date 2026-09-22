@@ -1346,20 +1346,20 @@ def render_hr_portal(current_user_info=None):
             tab_hr, tab_details, tab_leave, tab_history = st.tabs([
                 "🧑‍💼 HR Management",
                 "👤 Employee Details",
-                "✏️ Leave",
+                "✏️ Submit Leave",
                 "📋 Leave History",
             ])
         else:
             tab_hr, tab_details, tab_leave, tab_history = st.tabs([
                 "🧑‍💼 HR Management",
                 "👤 Employee Details",
-                "✏️ Leave",
+                "✏️ Submit Leave",
                 "📋 Leave History",
             ])
     else:
         tab_details, tab_leave, tab_history = st.tabs([
             "👤 Employee Details",
-            "✏️ Leave",
+            "✏️ Submit Leave",
             "📋 Leave History",
         ])
         tab_hr = None
