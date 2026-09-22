@@ -629,8 +629,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "HR_LEAVE_RECORDED": "📅 HR Leave Recorded", "HR_ENTITLEMENT_ADJUSTED": "📊 HR Entitlement Adjusted",
         }
         display_action = action_labels.get(action, action)
-        old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
-        new_val = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
+        old_val = json.dumps(old_data, ensure_ascii=False, default=str)[:300] if old_data else "-"
+        new_val = json.dumps(new_data, ensure_ascii=False, default=str)[:300] if new_data else "-"
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": display_action, "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": decision_by or "-", "Decision_Date": decision_date or "-", "Field_Changed": "Settings", "Old_Value": old_val, "New_Value": new_val, "IP_Address": "Auto-Logged"})
         return
     dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
@@ -644,8 +644,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "WORK_ORDER_DIRECTOR_REJECTED": "🛠️ Work Order Rejected by Director", "WORK_ORDER_STATUS_CHANGED": "🛠️ Work Order Status Changed",
             "WORK_ORDER_EDITED": "🛠️ Work Order Edited", "WORK_ORDER_PAID": "🛠️ Work Order Paid",
         }
-        old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
-        new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
+        old_v = json.dumps(old_data, ensure_ascii=False, default=str)[:300] if old_data else "-"
+        new_v = json.dumps(new_data, ensure_ascii=False, default=str)[:300] if new_data else "-"
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": wo_labels.get(action, action), "Request_ID": str(req_id), "Department": dept, "Amount": amount, "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "Work Order Status", "Old_Value": old_v if old_data else "-", "New_Value": new_v if new_data else action.replace("WORK_ORDER_", "").replace("_", " ").title(), "IP_Address": "Auto-Logged"})
         return
     if action.startswith("HR_LEAVE_"):
@@ -655,8 +655,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "HR_LEAVE_REJECTED": "👥 HR Leave Settlement Rejected",
             "HR_LEAVE_STATUS_CHANGED": "👥 HR Leave Settlement Status Changed",
         }
-        old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
-        new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
+        old_v = json.dumps(old_data, ensure_ascii=False, default=str)[:300] if old_data else "-"
+        new_v = json.dumps(new_data, ensure_ascii=False, default=str)[:300] if new_data else "-"
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": hr_labels.get(action, action), "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "HR Leave Status", "Old_Value": old_v, "New_Value": new_v, "IP_Address": "Auto-Logged"})
         return
     if action.startswith("STORE_DEDUCTION_"):
@@ -666,8 +666,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "STORE_DEDUCTION_REJECTED": "📦 Store Deduction Rejected",
             "STORE_DEDUCTION_STATUS_CHANGED": "📦 Store Deduction Status Changed",
         }
-        old_v = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
-        new_v = json.dumps(new_data, ensure_ascii=False)[:300] if new_data else "-"
+        old_v = json.dumps(old_data, ensure_ascii=False, default=str)[:300] if old_data else "-"
+        new_v = json.dumps(new_data, ensure_ascii=False, default=str)[:300] if new_data else "-"
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": store_labels.get(action, action), "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "Store Deduction Status", "Old_Value": old_v, "New_Value": new_v, "IP_Address": "Auto-Logged"})
         return
     if action in ["CREATED", "DELETED"]:
@@ -1212,6 +1212,11 @@ def _hrp_create_leave_id():
     return leave_id
 
 def render_hr_portal(current_user_info=None):
+    # Defensive initialization: Streamlit sessions may survive code/data changes.
+    if "hrp_role" not in st.session_state:
+        st.session_state.hrp_role = "hr"
+    if "hrp_current_emp_id" not in st.session_state:
+        st.session_state.hrp_current_emp_id = ""
     """HR Portal — Employee, Holiday Allowance, Leave Records, and Settlement calculation."""
     _hr_portal_init()
     st.subheader("🏢 HR Portal — Employee Management")
@@ -1253,7 +1258,8 @@ def render_hr_portal(current_user_info=None):
                 quick_start = st.date_input("Start Date", value=date.today(), key="hrp_quick_start")
             with c2:
                 quick_position = st.text_input("Position / Job Title", key="hrp_quick_position")
-                quick_dept = st.selectbox("Department", options=HR_PORTAL_DEPARTMENTS, key="hrp_quick_dept")
+                hr_software_departments = load_departments()
+                quick_dept = st.selectbox("Department", options=hr_software_departments, key="hrp_quick_dept")
                 quick_agreement = st.selectbox("Agreement Type", options=HR_PORTAL_AGREEMENT_TYPES, key="hrp_quick_agreement")
             if st.button("➕ Register Employee", type="primary", key="hrp_quick_register"):
                 valid, result = _hrp_validate_employee_id(quick_id)
@@ -1286,8 +1292,9 @@ def render_hr_portal(current_user_info=None):
         with col2:
             start_date = st.date_input("Start Date", value=emp["start_date"], disabled=disabled, key="hrp_emp_start")
         with col3:
-            department = st.selectbox("Department", options=HR_PORTAL_DEPARTMENTS,
-                index=HR_PORTAL_DEPARTMENTS.index(emp["department"]) if emp["department"] in HR_PORTAL_DEPARTMENTS else 0,
+            hr_software_departments = load_departments()
+            department = st.selectbox("Department", options=hr_software_departments,
+                index=hr_software_departments.index(emp["department"]) if emp["department"] in hr_software_departments else 0,
                 disabled=disabled, key="hrp_emp_dept")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1455,7 +1462,8 @@ def render_hr_portal(current_user_info=None):
                     new_start_date = st.date_input("Start Date", value=date.today(), key="hrp_new_start")
                 with col2:
                     new_position = st.text_input("Position / Job Title", placeholder="e.g. Electrician", key="hrp_new_pos")
-                    new_department = st.selectbox("Department", options=HR_PORTAL_DEPARTMENTS, key="hrp_new_dept")
+                    hr_software_departments = load_departments()
+                    new_department = st.selectbox("Department", options=hr_software_departments, key="hrp_new_dept")
                     new_agreement = st.selectbox("Agreement Type", options=HR_PORTAL_AGREEMENT_TYPES, key="hrp_new_agree")
                 if st.button("➕ Create Employee", type="primary", key="hrp_create_emp"):
                     valid, result = _hrp_validate_employee_id(new_emp_id)
@@ -1500,7 +1508,8 @@ def render_hr_portal(current_user_info=None):
                             edit_start = st.date_input("Start Date", value=edit_emp["start_date"])
                             edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
                         with ec2:
-                            edit_dept = st.selectbox("Department", HR_PORTAL_DEPARTMENTS, index=HR_PORTAL_DEPARTMENTS.index(edit_emp["department"]) if edit_emp["department"] in HR_PORTAL_DEPARTMENTS else 0)
+                            hr_software_departments = load_departments()
+                            edit_dept = st.selectbox("Department", hr_software_departments, index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0)
                             edit_agreement = st.selectbox("Agreement Type", HR_PORTAL_AGREEMENT_TYPES, index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0)
                             status_options = ["Active", "Inactive"]
                             edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")))
@@ -5157,7 +5166,7 @@ elif role == "Work Order Manager":
                         new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
                         for r in records:
                             if int(r.get("id", 0)) == int(eid):
-                                r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict)
+                                r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
                                 break
                         log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
                         save_all_records(records)
@@ -5297,7 +5306,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
                                 for r in records:
                                     if int(r.get("id", 0)) == int(eid):
-                                        r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict)
+                                        r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
                                         break
                                 log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
                                 save_all_records(records)
