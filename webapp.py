@@ -1,14 +1,15 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.25
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.26
 # ============================================================
+# ✅ v4.26 (DUPLICATE KEY FIX):
+#    • Fixed StreamlitDuplicateElementKey error in Store tabs
+#    • Made all widget keys unique for Deductions vs Returns
+#    • Updated Super Admin, Director, and Payroll portals
 # ✅ v4.25 (STORE RETURN REDESIGN & KEYERROR FIX):
 #    • Fixed KeyError: 'quantity' in Store Return form
 #    • Redesigned Store Return form to match Store Deduction form
 #    • Added "Fetch Previous Deductions" button to auto-populate return items
-#    • Supports partial returns and manual item addition
-#    • Updated PDF and views to safely handle missing quantities
-# ✅ v4.24 (STORE RETURN / ADDITION + AUTO-FILL FIX):
-#    • Added "Store Department Return (Addition)" module
+# ✅ v4.24 (STORE RETURN / ADDITION + AUTO-FILL FIX)
 # ✅ v4.23 (STORE DEDUCTION QUANTITY)
 # ✅ v4.22 (STORE ITEMS EDITABLE)
 # ✅ v4.21 (STORE DEPARTMENT DEDUCTION MODULE)
@@ -3302,7 +3303,6 @@ def render_store_deduction_form(user_name, user_dept):
                 match = next((it for it in store_items_master if it["name"] == selected_item), None)
                 if match:
                     item_row["price"] = match["price"]
-                    # Force the price widget to update
                     if f"store_item_price_{i}" in st.session_state:
                         st.session_state[f"store_item_price_{i}"] = match["price"]
                 st.rerun()
@@ -3586,10 +3586,10 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
             with st.expander(f"🟡 #{rid} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f}"):
                 show_details(r)
                 st.markdown("### ✍️ Director Decision")
-                comments = st.text_area("Director Comments (optional)", key=f"store_dir_comm_{rid}")
+                comments = st.text_area("Director Comments (optional)", key=f"store_dir_comm_{type_filter}_{rid}")
                 c1, c2 = st.columns(2)
                 with c1:
-                    if st.button("✅ Approve", key=f"store_dir_app_{rid}", type="primary", use_container_width=True):
+                    if st.button("✅ Approve", key=f"store_dir_app_{type_filter}_{rid}", type="primary", use_container_width=True):
                         for x in records:
                             if x["id"] == rid:
                                 x["status"] = "approved"; x["director_comments"] = comments.strip()
@@ -3600,14 +3600,14 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
                         log_action("STORE_DEDUCTION_APPROVED", rid, decision_by=director_name)
                         st.success(f"✅ Request #{rid} Approved."); st.rerun()
                 with c2:
-                    if st.button("❌ Reject", key=f"store_dir_rej_{rid}", use_container_width=True):
-                        st.session_state[f"store_reject_modal_{rid}"] = True
-                if st.session_state.get(f"store_reject_modal_{rid}"):
+                    if st.button("❌ Reject", key=f"store_dir_rej_{type_filter}_{rid}", use_container_width=True):
+                        st.session_state[f"store_reject_modal_{type_filter}_{rid}"] = True
+                if st.session_state.get(f"store_reject_modal_{type_filter}_{rid}"):
                     st.warning("⚠️ A rejection reason is required.")
-                    reason = st.text_area("Reason for Rejection (required)", key=f"store_rej_reason_{rid}")
+                    reason = st.text_area("Reason for Rejection (required)", key=f"store_rej_reason_{type_filter}_{rid}")
                     rc1, rc2 = st.columns(2)
                     with rc1:
-                        if st.button("Confirm Rejection", key=f"store_rej_confirm_{rid}", type="primary", use_container_width=True):
+                        if st.button("Confirm Rejection", key=f"store_rej_confirm_{type_filter}_{rid}", type="primary", use_container_width=True):
                             if not reason.strip():
                                 st.error("❌ Rejection reason cannot be empty.")
                             else:
@@ -3620,11 +3620,11 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
                                         break
                                 save_all_store_deductions(records)
                                 log_action("STORE_DEDUCTION_REJECTED", rid, decision_by=director_name)
-                                st.session_state[f"store_reject_modal_{rid}"] = False
+                                st.session_state[f"store_reject_modal_{type_filter}_{rid}"] = False
                                 st.success(f"❌ Request #{rid} Rejected."); st.rerun()
                     with rc2:
-                        if st.button("Cancel", key=f"store_rej_cancel_{rid}", use_container_width=True):
-                            st.session_state[f"store_reject_modal_{rid}"] = False; st.rerun()
+                        if st.button("Cancel", key=f"store_rej_cancel_{type_filter}_{rid}", use_container_width=True):
+                            st.session_state[f"store_reject_modal_{type_filter}_{rid}"] = False; st.rerun()
 
     with t2:
         if not approved: st.info(f"✅ No approved {type_filter.lower()} requests.")
@@ -3635,7 +3635,7 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
                 st.write(f"📅 Decision Date: {r['decision_date']}")
                 st.divider()
                 st.markdown("#### 📄 PDF")
-                display_store_deduction_pdf_button(r, key_prefix=f"store_dir_app_{director_name.replace(' ','_')}")
+                display_store_deduction_pdf_button(r, key_prefix=f"store_dir_app_{type_filter}_{director_name.replace(' ','_')}")
 
     with t3:
         if not rejected: st.info(f"❌ No rejected {type_filter.lower()} requests.")
@@ -3646,7 +3646,7 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
                 if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
                 st.divider()
                 st.markdown("#### 📄 PDF")
-                display_store_deduction_pdf_button(r, key_prefix=f"store_dir_rej_{director_name.replace(' ','_')}")
+                display_store_deduction_pdf_button(r, key_prefix=f"store_dir_rej_{type_filter}_{director_name.replace(' ','_')}")
 
 def render_store_super_admin(type_filter="Deduction"):
     title = "Store Department Deduction" if type_filter == "Deduction" else "Store Department Return (Addition)"
@@ -3656,7 +3656,7 @@ def render_store_super_admin(type_filter="Deduction"):
     records = load_store_deductions()
     filtered_records = [r for r in records if r.get("type", "Deduction") == type_filter]
     
-    search = st.text_input("🔎 Search requests", placeholder="Search by ID, employee, department, amount, status...", key="store_sa_search")
+    search = st.text_input("🔎 Search requests", placeholder="Search by ID, employee, department, amount, status...", key=f"store_sa_search_{type_filter}")
     if search.strip():
         q = search.lower().strip()
         filtered_records = [r for r in filtered_records if q in " ".join(str(v) for v in r.values()).lower()]
@@ -3692,14 +3692,14 @@ def render_store_super_admin(type_filter="Deduction"):
                 show(r)
                 if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
                 st.divider()
-                display_store_deduction_pdf_button(r, key_prefix="store_sa_app")
+                display_store_deduction_pdf_button(r, key_prefix=f"store_sa_app_{type_filter}")
     with t3:
         if not rejected: st.info(f"❌ No rejected {type_filter.lower()} requests.")
         for r in reversed(rejected):
             with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f}"):
                 show(r); st.error(f"❌ Reason: {r['rejection_reason']}")
                 st.divider()
-                display_store_deduction_pdf_button(r, key_prefix="store_sa_rej")
+                display_store_deduction_pdf_button(r, key_prefix=f"store_sa_rej_{type_filter}")
 
 def render_store_payroll_portal(type_filter="Deduction"):
     title = "Store Department Deduction" if type_filter == "Deduction" else "Store Department Return (Addition)"
@@ -3724,7 +3724,7 @@ def render_store_payroll_portal(type_filter="Deduction"):
             if r.get("director_comments"): st.info(f"💬 {r['director_comments']}")
             display_attachments(r)
             st.divider()
-            display_store_deduction_pdf_button(r, key_prefix="store_payroll")
+            display_store_deduction_pdf_button(r, key_prefix=f"store_payroll_{type_filter}")
 
 def render_store_items_settings():
     st.markdown("### 📦 Store Items & Prices")
