@@ -393,8 +393,8 @@ DEFAULT_USERS = [
     {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
     {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
     {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "can_access_hr_leave": True, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd", "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration", "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd", "can_access_hr_leave": False, "can_access_store_deduction": True, "is_active": True},
+    {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration", "can_access_hr_leave": False, "can_access_store_deduction": True, "is_active": True},
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "can_access_store_deduction": True, "is_active": True}
 ]
 PERMISSION_DEFAULTS = {
@@ -403,9 +403,9 @@ PERMISSION_DEFAULTS = {
     "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
     "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
     "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_store_deduction": True},
-    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_store_deduction": True},
+    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True},
     "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_store_deduction": True},
-    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_store_deduction": True}
+    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True}
 }
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
@@ -931,9 +931,20 @@ def load_users(force=False):
                     "can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True,
                     "can_approve_requests": True, "can_access_inspector_bonus": True,
                     "can_access_addition_deduction": True, "can_access_work_orders": True,
-                    "can_access_wo_total": True, "can_access_hr_leave": True,
+                    "can_access_wo_total": True, "can_access_hr_leave": False,
                     "can_access_store_deduction": True, "is_active": True
                 })
+
+        # Existing installations may still have the old HR permission stored
+        # for the built-in Director/Super Admin accounts. Migrate those records
+        # so the HR Department is not shown to them automatically.
+        migrated_builtin_hr = False
+        for builtin_username in ("andy", "wais"):
+            if builtin_username in users and users[builtin_username].get("can_access_hr_leave"):
+                users[builtin_username]["can_access_hr_leave"] = False
+                migrated_builtin_hr = True
+        if migrated_builtin_hr:
+            save_users(users)
         _set_data_cache("_users_cache", users)
         return dict(users)
     except Exception as e:
@@ -1069,6 +1080,10 @@ def _hrp_save_leave_records():
 
 def _hr_portal_init():
     _hrp_init_storage()
+    # Always initialise the HR portal view state. Older sessions may not have
+    # this key, which previously caused a KeyError in the View As selector.
+    if "hrp_role" not in st.session_state:
+        st.session_state.hrp_role = "hr"
     if st.session_state.get("hrp_storage_version") != 2:
         # Load the persistent HR workbooks instead of keeping the old demo/sample employees
         # that existed in earlier versions of this portal.
@@ -1079,8 +1094,12 @@ def _hr_portal_init():
         st.session_state.hrp_employees = _hrp_load_employees()
     elif "hrp_leave_records" not in st.session_state:
         st.session_state.hrp_leave_records = _hrp_load_leave_records()
-    if "hrp_current_emp_id" not in st.session_state:
-        active = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
+    active = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
+    # If the previously selected employee was deleted/deactivated, clear the
+    # stale ID and select the first active employee (or none if the database is empty).
+    current_emp_id = str(st.session_state.get("hrp_current_emp_id", "") or "").strip()
+    active_lookup = {str(x).casefold() for x in active}
+    if current_emp_id.casefold() not in active_lookup:
         st.session_state.hrp_current_emp_id = active[0] if active else ""
     if "hrp_entitlement_overrides" not in st.session_state:
         st.session_state.hrp_entitlement_overrides = {e["emp_id"]: e["entitlement_override"] for e in st.session_state.hrp_employees if e.get("entitlement_override") is not None}
@@ -5363,9 +5382,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
 
 elif role == "Director":
-    director_addition_tab, director_hr_dept_tab, director_store_ded_tab, director_store_ret_tab, director_work_order_tab, director_inspector_tab = st.tabs([
+    director_addition_tab, director_store_ded_tab, director_store_ret_tab, director_work_order_tab, director_inspector_tab = st.tabs([
         "➕ Addition & Deduction",
-        "🏢 HR Department",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
@@ -5484,8 +5502,6 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
-    with director_hr_dept_tab:
-        render_hr_department(current_user_info=user_info, is_director=True, director_name=full_name)
     with director_store_ded_tab:
         render_store_director_portal(full_name, type_filter="Deduction")
     with director_store_ret_tab:
@@ -5494,9 +5510,8 @@ elif role == "Director":
     with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_hr_dept_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
+    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
         "➕ Addition & Deduction",
-        "🏢 HR Department",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
@@ -5554,8 +5569,6 @@ elif role == "Super Admin":
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
-    with super_hr_dept_tab:
-        render_hr_department(current_user_info=user_info, is_super_admin=True)
     with super_store_ded_tab:
         render_store_super_admin(type_filter="Deduction")
     with super_store_ret_tab:
