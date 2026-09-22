@@ -1,14 +1,13 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.26
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.27
 # ============================================================
-# ✅ v4.26 (DUPLICATE KEY FIX):
-#    • Fixed StreamlitDuplicateElementKey error in Store tabs
-#    • Made all widget keys unique for Deductions vs Returns
-#    • Updated Super Admin, Director, and Payroll portals
-# ✅ v4.25 (STORE RETURN REDESIGN & KEYERROR FIX):
-#    • Fixed KeyError: 'quantity' in Store Return form
-#    • Redesigned Store Return form to match Store Deduction form
-#    • Added "Fetch Previous Deductions" button to auto-populate return items
+# ✅ v4.27 (HR DEPARTMENT TAB):
+#    • New "🏢 HR Department" tab containing 2 sub-tabs:
+#        1. 🧑💼 HR Portal (Employee mgmt, Holiday allowance, Leave records, HR Settlement calc)
+#        2. 💷 HR Leave Settlement (existing Director approval module)
+#    • Added to Super Admin and Director portals
+# ✅ v4.26 (DUPLICATE KEY FIX)
+# ✅ v4.25 (STORE RETURN REDESIGN & KEYERROR FIX)
 # ✅ v4.24 (STORE RETURN / ADDITION + AUTO-FILL FIX)
 # ✅ v4.23 (STORE DEDUCTION QUANTITY)
 # ✅ v4.22 (STORE ITEMS EDITABLE)
@@ -23,9 +22,10 @@ import shutil
 import subprocess
 import pandas as pd
 import io
+import re
 import requests
 import threading
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
@@ -595,6 +595,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         "HR_CATEGORY_ADDED", "HR_CATEGORY_DELETED",
         "HR_RATE_ADDED", "HR_RATE_UPDATED", "HR_RATE_DELETED",
         "STORE_ITEM_ADDED", "STORE_ITEM_EDITED", "STORE_ITEM_DELETED",
+        "HR_EMPLOYEE_ADDED", "HR_EMPLOYEE_EDITED", "HR_LEAVE_RECORDED",
+        "HR_ENTITLEMENT_ADJUSTED",
     ]
     if action in SETTING_ACTIONS:
         action_labels = {
@@ -610,6 +612,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "HR_CATEGORY_ADDED": "🏷️ HR Category Added", "HR_CATEGORY_DELETED": "🏷️ HR Category Deleted",
             "HR_RATE_ADDED": "💷 HR Daily Rate Added", "HR_RATE_UPDATED": "💷 HR Daily Rate Updated", "HR_RATE_DELETED": "💷 HR Daily Rate Deleted",
             "STORE_ITEM_ADDED": "📦 Store Item Added", "STORE_ITEM_EDITED": "📦 Store Item Edited", "STORE_ITEM_DELETED": "📦 Store Item Deleted",
+            "HR_EMPLOYEE_ADDED": "🧑💼 HR Employee Added", "HR_EMPLOYEE_EDITED": "🧑💼 HR Employee Edited",
+            "HR_LEAVE_RECORDED": "📅 HR Leave Recorded", "HR_ENTITLEMENT_ADJUSTED": "📊 HR Entitlement Adjusted",
         }
         display_action = action_labels.get(action, action)
         old_val = json.dumps(old_data, ensure_ascii=False)[:300] if old_data else "-"
@@ -922,6 +926,405 @@ def load_users(force=False):
     except Exception as e:
         st.error(f"User DB Load Error: {e}")
         return {}
+
+# ════════════════════════════════════════════════════════════
+# 🏢 HR PORTAL MODULE (NEW) — Employee / Holiday / Leave Management
+# ════════════════════════════════════════════════════════════
+HR_PORTAL_DEPARTMENTS = ["HR", "Operations", "Sales", "Admin", "Finance"]
+HR_PORTAL_AGREEMENT_TYPES = ["Permanent", "Fixed Term", "Part-Time", "Temporary", "Apprentice", "Contractor"]
+HR_PORTAL_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday", "Sick Leave", "Unpaid Holiday", "Unpaid Absence", "Maternity Leave", "Paternity Leave"]
+HR_PORTAL_HOLIDAY_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday"]
+
+def _hr_portal_init():
+    if "hrp_role" not in st.session_state:
+        st.session_state.hrp_role = "hr"
+    if "hrp_current_emp_id" not in st.session_state:
+        st.session_state.hrp_current_emp_id = "ACE-ID001"
+    if "hrp_employees" not in st.session_state:
+        st.session_state.hrp_employees = [
+            {"emp_id": "ACE-ID001", "name": "John Smith", "start_date": date(2024, 3, 15), "department": "HR", "job_title": "HR Administrator", "agreement_type": "Permanent", "status": "Active"},
+            {"emp_id": "ACE-ID002", "name": "Alice Jones", "start_date": date(2023, 6, 1), "department": "Operations", "job_title": "Operations Manager", "agreement_type": "Permanent", "status": "Active"},
+            {"emp_id": "ACE-ID003", "name": "Bob Williams", "start_date": date(2025, 9, 1), "department": "Sales", "job_title": "Sales Executive", "agreement_type": "Fixed Term", "status": "Active"},
+            {"emp_id": "ACE-ID004", "name": "Sarah Brown", "start_date": date(2022, 1, 10), "department": "Admin", "job_title": "Administrator", "agreement_type": "Permanent", "status": "Active"},
+            {"emp_id": "ACE-ID005", "name": "Mike Davis", "start_date": date(2026, 6, 1), "department": "Finance", "job_title": "Finance Assistant", "agreement_type": "Permanent", "status": "Active"},
+        ]
+    if "hrp_leave_records" not in st.session_state:
+        st.session_state.hrp_leave_records = [
+            {"leave_id": "LV-001", "employee_id": "ACE-ID001", "date_from": date(2026, 1, 5), "date_to": date(2026, 1, 5), "type": "Full Day Holiday", "days": 1.0, "status": "Approved", "notes": ""},
+            {"leave_id": "LV-002", "employee_id": "ACE-ID001", "date_from": date(2026, 3, 15), "date_to": date(2026, 3, 15), "type": "Half Day Holiday", "days": 0.5, "status": "Approved", "notes": ""},
+            {"leave_id": "LV-003", "employee_id": "ACE-ID001", "date_from": date(2026, 6, 20), "date_to": date(2026, 6, 20), "type": "Sick Leave", "days": 1.0, "status": "Approved", "notes": ""},
+        ]
+    if "hrp_entitlement_overrides" not in st.session_state:
+        st.session_state.hrp_entitlement_overrides = {}
+    if "hrp_adjustment_notes" not in st.session_state:
+        st.session_state.hrp_adjustment_notes = {}
+    if "hrp_next_leave_number" not in st.session_state:
+        st.session_state.hrp_next_leave_number = 4
+
+def _hrp_get_employee(employee_id):
+    for emp in st.session_state.hrp_employees:
+        if emp["emp_id"] == employee_id:
+            return emp
+    return None
+
+def _hrp_validate_employee_id(employee_id):
+    employee_id = employee_id.strip().upper()
+    if not employee_id: return False, "Employee ID is required."
+    if not employee_id.startswith("ACE-ID"): return False, "Employee ID must start with ACE-ID."
+    if not re.fullmatch(r"ACE-ID[A-Z0-9-]+", employee_id): return False, "Employee ID contains invalid characters."
+    for emp in st.session_state.hrp_employees:
+        if emp["emp_id"].upper() == employee_id: return False, "This Employee ID already exists."
+    return True, employee_id
+
+def _hrp_get_working_days(start_date, end_date):
+    if end_date < start_date: return 0
+    total = 0
+    current = start_date
+    while current <= end_date:
+        if current.weekday() < 5: total += 1
+        current += timedelta(days=1)
+    return total
+
+def _hrp_calculate_leave_days(leave_type, start_date, end_date, half_day=False):
+    if end_date < start_date: return 0.0
+    if leave_type == "Half Day Holiday" or half_day: return 0.5
+    return float(_hrp_get_working_days(start_date, end_date))
+
+def _hrp_calculate_service_years(start_date):
+    days = (date.today() - start_date).days
+    if days < 0: return 0.0
+    return days / 365.25
+
+def _hrp_calculate_holiday_entitlement(employee):
+    start_date = employee["start_date"]
+    today = date.today()
+    if today.month >= 4:
+        holiday_year_start = date(today.year, 4, 1)
+    else:
+        holiday_year_start = date(today.year - 1, 4, 1)
+    service_years = _hrp_calculate_service_years(start_date)
+    if start_date < holiday_year_start and service_years >= 1:
+        return 28.0, "Standard entitlement: 28 days for the current holiday year.", service_years
+    period_start = max(start_date, holiday_year_start)
+    days_in_period = (date(today.year + 1, 3, 31) - period_start).days + 1
+    days_in_year = 365
+    proportion = min(max(days_in_period / days_in_year, 0), 1)
+    entitlement = round(28 * proportion, 1)
+    return entitlement, f"Pro-rated entitlement based on start date {start_date.strftime('%d/%m/%Y')}.", service_years
+
+def _hrp_get_employee_entitlement(employee):
+    employee_id = employee["emp_id"]
+    calculated, note, service_years = _hrp_calculate_holiday_entitlement(employee)
+    if employee_id in st.session_state.hrp_entitlement_overrides:
+        return st.session_state.hrp_entitlement_overrides[employee_id], "HR-adjusted entitlement", service_years, calculated
+    return calculated, note, service_years, calculated
+
+def _hrp_get_employee_leave(employee_id):
+    return [r for r in st.session_state.hrp_leave_records if r["employee_id"] == employee_id]
+
+def _hrp_get_approved_holiday_days(employee_id):
+    return sum(r["days"] for r in st.session_state.hrp_leave_records if r["employee_id"] == employee_id and r["status"] == "Approved" and r["type"] in HR_PORTAL_HOLIDAY_LEAVE_TYPES)
+
+def _hrp_get_leave_summary(employee_id):
+    records = _hrp_get_employee_leave(employee_id)
+    return {
+        "holiday": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] in HR_PORTAL_HOLIDAY_LEAVE_TYPES),
+        "sick": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] == "Sick Leave"),
+        "unpaid": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] in ["Unpaid Holiday", "Unpaid Absence"]),
+        "maternity": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] == "Maternity Leave"),
+        "paternity": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] == "Paternity Leave"),
+    }
+
+def _hrp_create_leave_id():
+    leave_id = f"LV-{st.session_state.hrp_next_leave_number:03d}"
+    st.session_state.hrp_next_leave_number += 1
+    return leave_id
+
+def render_hr_portal(current_user_info=None):
+    """HR Portal — Employee, Holiday Allowance, Leave Records, and Settlement calculation."""
+    _hr_portal_init()
+    st.subheader("🏢 HR Portal — Employee Management")
+    st.caption("HR-managed employee, holiday and leave management system")
+    st.divider()
+
+    col_role1, col_role2 = st.columns([3, 1])
+    with col_role2:
+        selected_role = st.selectbox("View As", ["hr", "emp"], index=0 if st.session_state.hrp_role == "hr" else 1,
+            format_func=lambda v: "🔐 HR — Full Access" if v == "hr" else "👤 Employee — View Only", key="hrp_role_selector")
+        if selected_role != st.session_state.hrp_role:
+            st.session_state.hrp_role = selected_role
+            st.rerun()
+
+    is_hr = st.session_state.hrp_role == "hr"
+
+    if is_hr:
+        employee_options = {emp["emp_id"]: f"{emp['name']} — {emp['emp_id']}" for emp in st.session_state.hrp_employees if emp["status"] == "Active"}
+        if employee_options:
+            selected_employee_id = st.selectbox("Current Employee", options=list(employee_options.keys()),
+                format_func=lambda x: employee_options[x],
+                index=list(employee_options.keys()).index(st.session_state.hrp_current_emp_id) if st.session_state.hrp_current_emp_id in employee_options else 0,
+                key="hrp_emp_selector")
+            st.session_state.hrp_current_emp_id = selected_employee_id
+        else:
+            selected_employee_id = st.session_state.hrp_current_emp_id
+    else:
+        selected_employee_id = st.session_state.hrp_current_emp_id
+
+    emp = _hrp_get_employee(selected_employee_id)
+    if emp is None:
+        st.error("Employee record could not be found.")
+        return
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👤 Employee Details", "📅 Holiday Allowance", "✏️ Leave", "📋 Leave History", "🧑‍💼 HR Management" if is_hr else "📊 My Report"])
+
+    # ========== TAB 1: EMPLOYEE DETAILS ==========
+    with tab1:
+        st.subheader("Employee Profile")
+        st.info("HR can update employee information." if is_hr else "Your employee information is view-only. Contact HR if any details need to be changed.")
+        disabled = not is_hr
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            name = st.text_input("Full Name", value=emp["name"], disabled=disabled, key="hrp_emp_name")
+        with col2:
+            start_date = st.date_input("Start Date", value=emp["start_date"], disabled=disabled, key="hrp_emp_start")
+        with col3:
+            department = st.selectbox("Department", options=HR_PORTAL_DEPARTMENTS,
+                index=HR_PORTAL_DEPARTMENTS.index(emp["department"]) if emp["department"] in HR_PORTAL_DEPARTMENTS else 0,
+                disabled=disabled, key="hrp_emp_dept")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.text_input("Employee ID", value=emp["emp_id"], disabled=True, key="hrp_emp_id_display")
+        with col2:
+            job_title = st.text_input("Position / Job Title", value=emp["job_title"], disabled=disabled, key="hrp_emp_job")
+        with col3:
+            agreement_type = st.selectbox("Agreement Type", options=HR_PORTAL_AGREEMENT_TYPES,
+                index=HR_PORTAL_AGREEMENT_TYPES.index(emp["agreement_type"]) if emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0,
+                disabled=disabled, key="hrp_emp_agreement")
+        st.write("")
+        st.text_input("Status", value=emp["status"], disabled=True, key="hrp_emp_status_display")
+        if is_hr:
+            if st.button("💾 Save Employee Details", type="primary", key="hrp_save_emp"):
+                old_data = {"name": emp["name"], "start_date": str(emp["start_date"]), "department": emp["department"], "job_title": emp["job_title"], "agreement_type": emp["agreement_type"]}
+                emp["name"] = name.strip()
+                emp["start_date"] = start_date
+                emp["department"] = department
+                emp["job_title"] = job_title.strip()
+                emp["agreement_type"] = agreement_type
+                new_data = {"name": emp["name"], "start_date": str(emp["start_date"]), "department": emp["department"], "job_title": emp["job_title"], "agreement_type": emp["agreement_type"]}
+                log_action("HR_EMPLOYEE_EDITED", emp["emp_id"], old_data=old_data, new_data=new_data)
+                st.success(f"Employee {emp['emp_id']} updated successfully.")
+                st.rerun()
+
+    # ========== TAB 2: HOLIDAY ALLOWANCE ==========
+    with tab2:
+        st.subheader("Holiday Allowance")
+        entitlement, entitlement_note, service_years, calculated_base = _hrp_get_employee_entitlement(emp)
+        holiday_used = _hrp_get_approved_holiday_days(emp["emp_id"])
+        remaining = entitlement - holiday_used
+        col1, col2, col3, col4 = st.columns(4)
+        with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
+        with col2: st.metric("Holiday Used", f"{holiday_used:.1f} days")
+        with col3: st.metric("Remaining", f"{remaining:.1f} days")
+        with col4: st.metric("Service", f"{service_years:.1f} years")
+        st.info(entitlement_note)
+        if is_hr:
+            st.divider()
+            st.subheader("⚙️ HR Entitlement Adjustment")
+            st.caption("Use this when the employee's contractual entitlement differs from the system calculation.")
+            col1, col2, col3 = st.columns(3)
+            with col1: st.metric("System Calculated", f"{calculated_base:.1f} days")
+            with col2:
+                adjusted_value = st.number_input("Final Entitlement", min_value=0.0, max_value=50.0, step=0.5, value=float(entitlement), key="hrp_adj_ent")
+            with col3:
+                adjustment_reason = st.text_input("Reason", value=st.session_state.hrp_adjustment_notes.get(emp["emp_id"], ""), placeholder="Reason for adjustment", key="hrp_adj_reason")
+            if st.button("✅ Save Entitlement", type="primary", key="hrp_save_ent"):
+                old_data = {"entitlement": entitlement}
+                st.session_state.hrp_entitlement_overrides[emp["emp_id"]] = adjusted_value
+                st.session_state.hrp_adjustment_notes[emp["emp_id"]] = adjustment_reason
+                log_action("HR_ENTITLEMENT_ADJUSTED", emp["emp_id"], old_data=old_data, new_data={"entitlement": adjusted_value, "reason": adjustment_reason})
+                st.success(f"Holiday entitlement for {emp['emp_id']} is now {adjusted_value:.1f} days.")
+                st.rerun()
+            if emp["emp_id"] in st.session_state.hrp_adjustment_notes:
+                note = st.session_state.hrp_adjustment_notes[emp["emp_id"]]
+                if note: st.caption(f"HR Adjustment Note: {note}")
+
+    # ========== TAB 3: LEAVE ==========
+    with tab3:
+        st.subheader("Leave Management")
+        if is_hr:
+            st.info("HR records leave on behalf of the employee. All leave submitted by HR is automatically marked Approved.")
+            col1, col2 = st.columns(2)
+            with col1:
+                leave_type = st.selectbox("Leave Type", options=HR_PORTAL_LEAVE_TYPES, key="hrp_leave_type")
+                leave_start = st.date_input("Start Date", value=date.today(), key="hrp_leave_start")
+            with col2:
+                leave_end = st.date_input("End Date", value=date.today(), key="hrp_leave_end")
+                half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key="hrp_half_day")
+            notes = st.text_area("Notes / Reference", placeholder="Optional HR notes or reference", key="hrp_leave_notes")
+            if leave_end < leave_start:
+                st.error("End date cannot be before the start date.")
+            else:
+                calculated_days = _hrp_calculate_leave_days(leave_type, leave_start, leave_end, half_day)
+                st.metric("Calculated Leave Days", f"{calculated_days:.1f}")
+                st.caption("Weekends are excluded from the calculation.")
+                if st.button("📤 Record Leave — Automatically Approved", type="primary", key="hrp_record_leave"):
+                    if calculated_days <= 0:
+                        st.error("The selected dates do not contain any working days.")
+                    else:
+                        new_record = {"leave_id": _hrp_create_leave_id(), "employee_id": emp["emp_id"], "date_from": leave_start, "date_to": leave_end, "type": leave_type, "days": calculated_days, "status": "Approved", "notes": notes.strip()}
+                        st.session_state.hrp_leave_records.append(new_record)
+                        log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
+                        st.success(f"Leave recorded successfully for {emp['name']}. {calculated_days:.1f} day(s) — Approved.")
+                        st.rerun()
+        else:
+            st.info("You are viewing your leave information. Leave is managed by HR.")
+            employee_leave = _hrp_get_employee_leave(emp["emp_id"])
+            if employee_leave:
+                display_records = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Leave Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
+                st.dataframe(pd.DataFrame(display_records), use_container_width=True, hide_index=True)
+            else:
+                st.write("No leave records found.")
+
+    # ========== TAB 4: LEAVE HISTORY ==========
+    with tab4:
+        st.subheader("Leave History")
+        employee_leave = _hrp_get_employee_leave(emp["emp_id"])
+        if employee_leave:
+            history_data = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
+            df_history = pd.DataFrame(history_data)
+            st.dataframe(df_history, use_container_width=True, hide_index=True)
+            st.divider()
+            summary = _hrp_get_leave_summary(emp["emp_id"])
+            st.subheader("Leave Summary")
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1: st.metric("Holiday", f"{summary['holiday']:.1f}")
+            with col2: st.metric("Sick", f"{summary['sick']:.1f}")
+            with col3: st.metric("Unpaid", f"{summary['unpaid']:.1f}")
+            with col4: st.metric("Maternity", f"{summary['maternity']:.1f}")
+            with col5: st.metric("Paternity", f"{summary['paternity']:.1f}")
+            csv = df_history.to_csv(index=False)
+            st.download_button("📥 Export Leave History CSV", csv, file_name=f"{emp['emp_id']}_leave_history.csv", mime="text/csv", key="hrp_export_csv")
+        else:
+            st.info("No leave history is currently recorded.")
+
+    # ========== TAB 5: HR MANAGEMENT / MY REPORT ==========
+    with tab5:
+        if is_hr:
+            st.subheader("🧑‍💼 HR Management")
+            st.caption("Employee directory management and HR-level leave settlement calculations")
+            hr_employee_tab, hr_settlement_tab = st.tabs(["👤 Employee Management", "💷 HR Settlement Calculator"])
+            with hr_employee_tab:
+                st.subheader("➕ Add New Employee")
+                st.info("Employee ID is entered manually by HR and must start with ACE-ID.")
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_emp_id = st.text_input("Employee ID", placeholder="e.g. ACE-ID006", key="hrp_new_emp_id")
+                    new_name = st.text_input("Full Name", placeholder="e.g. John Smith", key="hrp_new_name")
+                    new_start_date = st.date_input("Start Date", value=date.today(), key="hrp_new_start")
+                with col2:
+                    new_position = st.text_input("Position / Job Title", placeholder="e.g. Electrician", key="hrp_new_pos")
+                    new_department = st.selectbox("Department", options=HR_PORTAL_DEPARTMENTS, key="hrp_new_dept")
+                    new_agreement = st.selectbox("Agreement Type", options=HR_PORTAL_AGREEMENT_TYPES, key="hrp_new_agree")
+                if st.button("➕ Create Employee", type="primary", key="hrp_create_emp"):
+                    valid, result = _hrp_validate_employee_id(new_emp_id)
+                    if not valid:
+                        st.error(result)
+                    elif not new_name.strip():
+                        st.error("Please enter the employee's full name.")
+                    elif not new_position.strip():
+                        st.error("Please enter the position / job title.")
+                    else:
+                        new_employee = {"emp_id": result, "name": new_name.strip(), "start_date": new_start_date, "department": new_department, "job_title": new_position.strip(), "agreement_type": new_agreement, "status": "Active"}
+                        st.session_state.hrp_employees.append(new_employee)
+                        log_action("HR_EMPLOYEE_ADDED", result, new_data=new_employee)
+                        st.success(f"Employee {result} created successfully.")
+                        st.rerun()
+                st.divider()
+                st.subheader("Employee Directory")
+                employee_table = [{"Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"], "Position": e["job_title"], "Department": e["department"], "Agreement": e["agreement_type"], "Status": e["status"]} for e in st.session_state.hrp_employees]
+                st.dataframe(pd.DataFrame(employee_table), use_container_width=True, hide_index=True)
+            with hr_settlement_tab:
+                st.subheader("💷 HR Leave Settlement Calculator")
+                st.info("Compute an employee's leave settlement based on their entitlement and approved leave records.")
+                settlement_employee_id = st.selectbox("Settlement Employee",
+                    options=[e["emp_id"] for e in st.session_state.hrp_employees],
+                    format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}", key="hrp_settlement_emp")
+                settlement_employee = _hrp_get_employee(settlement_employee_id)
+                if settlement_employee:
+                    entitlement, entitlement_note, _, _ = _hrp_get_employee_entitlement(settlement_employee)
+                    holiday_used = _hrp_get_approved_holiday_days(settlement_employee_id)
+                    remaining = entitlement - holiday_used
+                    st.divider()
+                    col1, col2, col3 = st.columns(3)
+                    with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
+                    with col2: st.metric("Approved Holiday Used", f"{holiday_used:.1f} days")
+                    with col3: st.metric("Remaining Holiday", f"{remaining:.1f} days")
+                    st.caption(entitlement_note)
+                    st.divider()
+                    summary = _hrp_get_leave_summary(settlement_employee_id)
+                    st.subheader("Leave Settlement Summary")
+                    settlement_data = [
+                        {"Leave Category": "Annual Holiday", "Approved Days": summary["holiday"], "Affects Holiday Balance": "Yes"},
+                        {"Leave Category": "Sick Leave", "Approved Days": summary["sick"], "Affects Holiday Balance": "No"},
+                        {"Leave Category": "Unpaid Leave", "Approved Days": summary["unpaid"], "Affects Holiday Balance": "No"},
+                        {"Leave Category": "Maternity Leave", "Approved Days": summary["maternity"], "Affects Holiday Balance": "No"},
+                        {"Leave Category": "Paternity Leave", "Approved Days": summary["paternity"], "Affects Holiday Balance": "No"},
+                    ]
+                    st.dataframe(pd.DataFrame(settlement_data), use_container_width=True, hide_index=True)
+                    st.divider()
+                    st.subheader("Settlement Calculation")
+                    st.write(f"**Employee:** {settlement_employee['name']}")
+                    st.write(f"**Employee ID:** {settlement_employee['emp_id']}")
+                    st.write(f"**Entitlement:** {entitlement:.1f} days")
+                    st.write(f"**Approved Holiday Used:** {holiday_used:.1f} days")
+                    st.write(f"**Remaining Holiday:** {remaining:.1f} days")
+                    if remaining < 0:
+                        st.warning(f"Employee is {abs(remaining):.1f} days over the current entitlement.")
+                    else:
+                        st.success(f"{remaining:.1f} days remaining.")
+        else:
+            st.subheader("📊 My Report")
+            entitlement, _, _, _ = _hrp_get_employee_entitlement(emp)
+            holiday_used = _hrp_get_approved_holiday_days(emp["emp_id"])
+            remaining = entitlement - holiday_used
+            col1, col2, col3 = st.columns(3)
+            with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
+            with col2: st.metric("Holiday Used", f"{holiday_used:.1f} days")
+            with col3: st.metric("Remaining", f"{remaining:.1f} days")
+            st.divider()
+            summary = _hrp_get_leave_summary(emp["emp_id"])
+            st.subheader("My Leave Summary")
+            col1, col2, col3 = st.columns(3)
+            with col1: st.metric("Annual Holiday", f"{summary['holiday']:.1f} days")
+            with col2: st.metric("Sick Leave", f"{summary['sick']:.1f} days")
+            with col3: st.metric("Other Leave", f"{(summary['unpaid'] + summary['maternity'] + summary['paternity']):.1f} days")
+            st.caption("Employee access is view-only.")
+
+
+# ════════════════════════════════════════════════════════════
+# 🏢 HR DEPARTMENT WRAPPER (Combines HR Portal + HR Leave Settlement)
+# ════════════════════════════════════════════════════════════
+def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name=""):
+    """
+    Combines the new HR Portal and the existing HR Leave Settlement into one tab structure.
+    Both Super Admin and Director will use this wrapper.
+    """
+    sub_portal_tab, sub_settlement_tab = st.tabs([
+        "🧑‍💼 HR Portal (Employee / Holiday / Leave)",
+        "💷 HR Leave Settlement (Director Approval)"
+    ])
+
+    with sub_portal_tab:
+        render_hr_portal(current_user_info)
+
+    with sub_settlement_tab:
+        if is_super_admin:
+            render_hr_leave_super_admin()
+        elif is_director:
+            render_hr_leave_director_portal(director_name)
+        else:
+            render_hr_leave_super_admin()
+
 
 def initialise_work_orders():
     safe_init_excel(WORK_ORDERS_PATH, WORK_ORDER_COLUMNS)
@@ -2753,7 +3156,7 @@ def store_deduction_pdf(req, force_regenerate=False, upload_to_drive=True):
         pdf.ln(6)
 
         pdf.set_font(family, "B", 11)
-        item_section_title = "ITEMS TO RETURN Claim" if is_addition else "ITEMS TO DEDUCT"
+        item_section_title = "ITEMS TO RETURN" if is_addition else "ITEMS TO DEDUCT"
         pdf.cell(0, 6, safe(item_section_title), ln=True); pdf.ln(2)
         pdf.set_font(family, "B", 10)
         pdf.cell(90, 7, safe("Item Name"), border=1)
@@ -3273,10 +3676,8 @@ def render_hr_leave_settings():
 def render_store_deduction_form(user_name, user_dept):
     st.subheader("📦 New Request — Store Department Deduction")
     st.caption("Submit unreturned company items for Director approval and final settlement deduction.")
-    
     departments = load_departments()
     all_deductions = load_store_deductions()
-    
     col1, col2 = st.columns(2)
     with col1:
         emp_name = st.text_input("👤 Employee Name", key="store_emp_name")
@@ -3286,14 +3687,11 @@ def render_store_deduction_form(user_name, user_dept):
         date_leaving = st.date_input("📅 Date of Leaving", value=date.today(), key="store_date_leaving")
         manager = st.text_input("👔 Line Manager", key="store_manager")
         st.markdown("<br>", unsafe_allow_html=True)
-        
     st.markdown("### 📦 Items to Deduct")
     if "store_form_items" not in st.session_state:
         st.session_state.store_form_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
-        
     store_items_master = load_store_items()
     item_options = [""] + [it["name"] for it in store_items_master]
-    
     for i, item_row in enumerate(st.session_state.store_form_items):
         c1, c2, c3, c4 = st.columns([3, 1.5, 2, 0.5])
         with c1:
@@ -3315,20 +3713,16 @@ def render_store_deduction_form(user_name, user_dept):
             if st.button("🗑️", key=f"store_item_remove_{i}"):
                 st.session_state.store_form_items.pop(i)
                 st.rerun()
-                
     if st.button("➕ Add Another Item", key="store_add_item_btn"):
         st.session_state.store_form_items.append({"item_name": "", "quantity": 1, "price": 0.0})
         st.rerun()
-        
     total_deduction = sum(item.get("quantity", 1) * item.get("price", 0.0) for item in st.session_state.store_form_items)
     st.markdown(f"<h4 style='text-align: right; color: #ef4444;'>Total Employee Deduction: £{total_deduction:.2f}</h4>", unsafe_allow_html=True)
     st.divider()
-    
     with st.form("store_deduction_form", clear_on_submit=False):
         files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="store_files")
         desc = st.text_area("📝 Description / Justification", key="store_desc")
         submitted = st.form_submit_button("📤 Send to Director", type="primary", use_container_width=True)
-        
     if submitted:
         valid_items = [it for it in st.session_state.store_form_items if it.get("item_name") and it.get("quantity", 0) > 0 and it.get("price", 0) > 0]
         if not emp_name.strip() or not manager.strip() or not desc.strip():
@@ -3345,22 +3739,11 @@ def render_store_deduction_form(user_name, user_dept):
                 with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
                 _upload_to_drive_bg(fp, fn)
                 attachments.append(fn)
-                
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            rec = {
-                "id": new_id, "emp_name": emp_name.strip(), "date_leaving": str(date_leaving),
-                "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit),
-                "type": "Deduction",
-                "items": valid_items, "total_deduction": total_deduction,
-                "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None",
-                "status": "pending", "director_comments": "", "rejection_reason": "",
-                "decision_date": "", "decision_by": "",
-                "submitted_by": user_name, "submitted_date": now, "pdf_path": ""
-            }
+            rec = {"id": new_id, "emp_name": emp_name.strip(), "date_leaving": str(date_leaving), "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit), "type": "Deduction", "items": valid_items, "total_deduction": total_deduction, "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending", "director_comments": "", "rejection_reason": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "submitted_date": now, "pdf_path": ""}
             all_deductions.append(rec)
             save_all_store_deductions(all_deductions)
             log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
-            
             st.session_state.store_form_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
             st.success(f"✅ Store Department Deduction #{new_id} sent to Director for approval.")
             st.rerun()
@@ -3368,11 +3751,8 @@ def render_store_deduction_form(user_name, user_dept):
 def render_store_return_form(user_name, user_dept):
     st.subheader("📦 New Request — Store Department Return (Addition)")
     st.caption("Process returned items to reverse a previous deduction, or add items not previously deducted.")
-    
     all_transactions = load_store_deductions()
     approved_deds = [d for d in all_transactions if d["status"] == "approved" and d.get("type", "Deduction") == "Deduction"]
-    
-    # Employee selection
     emp_options = sorted({d["emp_name"] for d in approved_deds})
     if not emp_options:
         st.info("No approved store deductions found in the system to return against.")
@@ -3382,17 +3762,12 @@ def render_store_return_form(user_name, user_dept):
         selected_emp = st.selectbox("👤 Select Employee (from previous deductions)", ["-- Manual Entry --"] + emp_options, key="store_ret_emp")
         if selected_emp == "-- Manual Entry --":
             selected_emp = st.text_input("👤 Employee Name (Manual Entry)", key="store_ret_manual_emp_2")
-
-    st.markdown("### 📦 Items to Return Claim")
+    st.markdown("### 📦 Items to Return")
     st.caption("If the item was deducted in this software, click the button below to load them. You can then adjust the quantities for partial returns or add new items manually.")
-    
     if "store_return_items" not in st.session_state:
         st.session_state.store_return_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
-        
     store_items_master = load_store_items()
     item_options = [""] + [it["name"] for it in store_items_master]
-    
-    # Button to fetch previous deductions
     if selected_emp and selected_emp != "-- Manual Entry --":
         if st.button("🔄 Fetch Approved Deductions for this Employee", key="store_fetch_deds_btn"):
             emp_deds = [d for d in approved_deds if d["emp_name"] == selected_emp]
@@ -3412,7 +3787,6 @@ def render_store_return_form(user_name, user_dept):
                 st.rerun()
             else:
                 st.warning("No items found in previous deductions for this employee.")
-
     for i, item_row in enumerate(st.session_state.store_return_items):
         c1, c2, c3, c4 = st.columns([3, 1.5, 2, 0.5])
         with c1:
@@ -3434,15 +3808,12 @@ def render_store_return_form(user_name, user_dept):
             if st.button("🗑️", key=f"store_ret_remove_{i}"):
                 st.session_state.store_return_items.pop(i)
                 st.rerun()
-                
     if st.button("➕ Add Another Item", key="store_add_ret_item_btn"):
         st.session_state.store_return_items.append({"item_name": "", "quantity": 1, "price": 0.0})
         st.rerun()
-        
     total_addition = sum(item.get("quantity", 1) * item.get("price", 0.0) for item in st.session_state.store_return_items)
     st.markdown(f"<h4 style='text-align: right; color: #10b981;'>Total Employee Addition: £{total_addition:.2f}</h4>", unsafe_allow_html=True)
     st.divider()
-    
     with st.form("store_return_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
@@ -3451,12 +3822,9 @@ def render_store_return_form(user_name, user_dept):
         with c2:
             date_submit = st.date_input("📅 Date of Submit", value=date.today(), key="store_ret_submit")
             st.markdown("<br>", unsafe_allow_html=True)
-            
         files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="store_ret_files")
         desc = st.text_area("📝 Description / Justification", key="store_ret_desc")
-        
         submitted = st.form_submit_button("📤 Send to Director for Approval", type="primary", use_container_width=True)
-        
         if submitted:
             valid_items = [it for it in st.session_state.store_return_items if it.get("item_name") and it.get("quantity", 0) > 0 and it.get("price", 0) > 0]
             if not selected_emp or selected_emp == "-- Manual Entry --" or not manager.strip() or not desc.strip():
@@ -3473,21 +3841,11 @@ def render_store_return_form(user_name, user_dept):
                     with open(fp, "wb") as out_file: out_file.write(f.getbuffer())
                     _upload_to_drive_bg(fp, fn)
                     attachments.append(fn)
-                    
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                rec = {
-                    "id": new_id, "emp_name": selected_emp, "date_leaving": str(date_return),
-                    "emp_dept": user_dept, "manager": manager.strip(), "date_submit": str(date_submit),
-                    "type": "Addition", "items": valid_items, "total_deduction": total_addition,
-                    "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None",
-                    "status": "pending", "director_comments": "", "rejection_reason": "",
-                    "decision_date": "", "decision_by": "",
-                    "submitted_by": user_name, "submitted_date": now, "pdf_path": ""
-                }
+                rec = {"id": new_id, "emp_name": selected_emp, "date_leaving": str(date_return), "emp_dept": user_dept, "manager": manager.strip(), "date_submit": str(date_submit), "type": "Addition", "items": valid_items, "total_deduction": total_addition, "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending", "director_comments": "", "rejection_reason": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "submitted_date": now, "pdf_path": ""}
                 all_transactions.append(rec)
                 save_all_store_deductions(all_transactions)
                 log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
-                
                 st.session_state.store_return_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
                 st.success(f"✅ Store Return #{new_id} sent to Director for approval.")
                 st.rerun()
@@ -3496,10 +3854,8 @@ def render_store_my_submissions(user_name):
     st.subheader("📋 My Submitted Store Requests")
     st.caption("All Store Department transactions (Deductions and Returns) you have submitted.")
     st.divider()
-
     records = load_store_deductions()
     mine = [r for r in records if r.get("submitted_by") == user_name]
-
     c1, c2, c3 = st.columns(3)
     with c1:
         search_name = st.text_input("🔎 Search by Employee Name", key="store_sub_search_name", placeholder="Type employee name...")
@@ -3511,7 +3867,6 @@ def render_store_my_submissions(user_name):
         search_date = None
         if use_date:
             search_date = st.date_input("Pick a date", value=date.today(), key="store_sub_search_date")
-
     filtered = list(mine)
     if search_name.strip():
         q = search_name.lower().strip()
@@ -3520,24 +3875,20 @@ def render_store_my_submissions(user_name):
         filtered = [r for r in filtered if str(r.get("emp_dept", "")) == search_dept]
     if search_date is not None:
         filtered = [r for r in filtered if str(r.get("date_submit", "")) == str(search_date)]
-
     m1, m2, m3, m4 = st.columns(4)
     with m1: st.metric("📋 Total Found", len(filtered))
     with m2: st.metric("🟡 Pending", len([r for r in filtered if r["status"] == "pending"]))
     with m3: st.metric("🟢 Approved", len([r for r in filtered if r["status"] == "approved"]))
     with m4: st.metric("🔴 Rejected", len([r for r in filtered if r["status"] == "rejected"]))
     st.divider()
-
     if not filtered:
         st.info("📋 No Store requests match your search.")
         return
-
     for r in reversed(filtered):
         status = r["status"]
         icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
         type_label = "Deduction" if r.get("type", "Deduction") == "Deduction" else "Return (Addition)"
         type_color = "#ef4444" if r.get("type", "Deduction") == "Deduction" else "#10b981"
-        
         with st.expander(f"{icon} #{r['id']} | {r['emp_name']} | {type_label} | £{r['total_deduction']:.2f} | {status.upper()}"):
             st.markdown(f"**Type:** <span style='color:{type_color}; font-weight:bold;'>{type_label}</span>", unsafe_allow_html=True)
             st.write(f"📅 **Leaving:** {r['date_leaving']} | **Submit:** {r['date_submit']}")
@@ -3561,12 +3912,10 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
     st.divider()
     records = load_store_deductions()
     filtered_records = [r for r in records if r.get("type", "Deduction") == type_filter]
-    
     pending  = [r for r in filtered_records if r["status"] == "pending"]
     approved = [r for r in filtered_records if r["status"] == "approved"]
     rejected = [r for r in filtered_records if r["status"] == "rejected"]
     t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
-
     def show_details(r):
         st.write(f"👤 **Employee:** {r['emp_name']} | 🏢 **Department:** {r['emp_dept']}")
         st.write(f"📅 **Date of Leaving:** {r['date_leaving']} | **Date of Submit:** {r['date_submit']}")
@@ -3578,7 +3927,6 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
         st.write(f"📝 **Submitted by:** {r['submitted_by']} on {r['submitted_date']}")
         st.info(f"📝 **Description:**\n{r['desc']}")
         st.divider(); st.markdown("#### 📎 Attachments"); display_attachments(r)
-
     with t1:
         if not pending: st.success(f"✅ No pending {type_filter.lower()} requests.")
         for r in reversed(pending):
@@ -3625,7 +3973,6 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
                     with rc2:
                         if st.button("Cancel", key=f"store_rej_cancel_{type_filter}_{rid}", use_container_width=True):
                             st.session_state[f"store_reject_modal_{type_filter}_{rid}"] = False; st.rerun()
-
     with t2:
         if not approved: st.info(f"✅ No approved {type_filter.lower()} requests.")
         for r in reversed(approved):
@@ -3636,7 +3983,6 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
                 st.divider()
                 st.markdown("#### 📄 PDF")
                 display_store_deduction_pdf_button(r, key_prefix=f"store_dir_app_{type_filter}_{director_name.replace(' ','_')}")
-
     with t3:
         if not rejected: st.info(f"❌ No rejected {type_filter.lower()} requests.")
         for r in reversed(rejected):
@@ -3655,12 +4001,10 @@ def render_store_super_admin(type_filter="Deduction"):
     st.divider()
     records = load_store_deductions()
     filtered_records = [r for r in records if r.get("type", "Deduction") == type_filter]
-    
     search = st.text_input("🔎 Search requests", placeholder="Search by ID, employee, department, amount, status...", key=f"store_sa_search_{type_filter}")
     if search.strip():
         q = search.lower().strip()
         filtered_records = [r for r in filtered_records if q in " ".join(str(v) for v in r.values()).lower()]
-        
     pending  = [r for r in filtered_records if r["status"] == "pending"]
     approved = [r for r in filtered_records if r["status"] == "approved"]
     rejected = [r for r in filtered_records if r["status"] == "rejected"]
@@ -3709,7 +4053,6 @@ def render_store_payroll_portal(type_filter="Deduction"):
     records = load_store_deductions()
     filtered_records = [r for r in records if r.get("type", "Deduction") == type_filter]
     approved = [r for r in filtered_records if r["status"] == "approved"]
-    
     st.metric(f"✅ Approved {type_filter}s", len(approved))
     st.divider()
     if not approved: st.info(f"No approved {type_filter.lower()} requests yet.")
@@ -3730,10 +4073,8 @@ def render_store_items_settings():
     st.markdown("### 📦 Store Items & Prices")
     st.caption("These items and prices will be available in the Store Department Deduction form dropdown.")
     items = load_store_items()
-
     if "editing_store_item_idx" not in st.session_state:
         st.session_state.editing_store_item_idx = None
-
     with st.form("add_store_item_form", clear_on_submit=True):
         new_item = st.text_input("➕ Add New Item", placeholder="e.g. Safety Helmet")
         new_price = st.number_input("💷 Price (£)", min_value=0.01, step=1.0, format="%.2f", value=50.00)
@@ -3746,9 +4087,7 @@ def render_store_items_settings():
                 st.rerun()
             elif any(it["name"].lower() == new_item.strip().lower() for it in items):
                 st.warning("⚠️ Item already exists.")
-
     st.divider()
-
     if not items:
         st.info("📋 No store items configured yet.")
     else:
@@ -3761,13 +4100,11 @@ def render_store_items_settings():
                         edit_name = st.text_input("Item Name", value=item['name'], key=f"edit_store_name_{i}")
                     with ec2:
                         edit_price = st.number_input("Price (£)", min_value=0.01, step=1.0, format="%.2f", value=float(item['price']), key=f"edit_store_price_{i}")
-
                     btn_col1, btn_col2, _ = st.columns([1, 1, 3])
                     with btn_col1:
                         save_btn = st.form_submit_button("💾 Save", type="primary", use_container_width=True)
                     with btn_col2:
                         cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
-
                     if save_btn:
                         if edit_name.strip():
                             old_data = {"name": item['name'], "price": item['price']}
@@ -4718,9 +5055,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
 
 elif role == "Director":
-    director_addition_tab, director_hr_tab, director_store_ded_tab, director_store_ret_tab, director_work_order_tab, director_inspector_tab = st.tabs([
+    director_addition_tab, director_hr_dept_tab, director_store_ded_tab, director_store_ret_tab, director_work_order_tab, director_inspector_tab = st.tabs([
         "➕ Addition & Deduction",
-        "👥 HR Leave Settlement",
+        "🏢 HR Department",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
@@ -4839,8 +5176,8 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
-    with director_hr_tab:
-        render_hr_leave_director_portal(full_name)
+    with director_hr_dept_tab:
+        render_hr_department(current_user_info=user_info, is_director=True, director_name=full_name)
     with director_store_ded_tab:
         render_store_director_portal(full_name, type_filter="Deduction")
     with director_store_ret_tab:
@@ -4849,9 +5186,9 @@ elif role == "Director":
     with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_hr_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
+    super_add_ded_tab, super_hr_dept_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
         "➕ Addition & Deduction",
-        "👥 HR Leave Settlement",
+        "🏢 HR Department",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
@@ -4909,8 +5246,8 @@ elif role == "Super Admin":
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
-    with super_hr_tab:
-        render_hr_leave_super_admin()
+    with super_hr_dept_tab:
+        render_hr_department(current_user_info=user_info, is_super_admin=True)
     with super_store_ded_tab:
         render_store_super_admin(type_filter="Deduction")
     with super_store_ret_tab:
