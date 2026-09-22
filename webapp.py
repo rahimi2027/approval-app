@@ -2180,11 +2180,9 @@ def render_hr_leave_approvals():
 
 def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
     """HR department area. Department managers get requests only; HR Manager keeps the full direct-entry portal."""
-    user_role = str((current_user_info or {}).get("role", "")).strip().lower()
-    user_dept = str((current_user_info or {}).get("dept", "")).strip().casefold()
-    if user_role == "manager" and user_dept != "hr" and not is_super_admin and not is_director:
-        render_department_manager_leave_request(current_user_info)
-        return
+    # If this function is reached, the user has explicit HR Department permission.
+    # Keep the full HR direct-entry portal regardless of whether the department is
+    # named "HR", "Human Resource", or another configured display name.
     sub_portal_tab, sub_settlement_tab = st.tabs([
         "🧑‍💼 HR Portal (Employee / Holiday / Leave)",
         "💷 HR Leave Settlement"
@@ -5784,8 +5782,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_store_deduction = user_info.get("can_access_store_deduction", False)
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
-    is_hr_manager_account = (str(role).strip().lower() == "manager" and str(dept).strip().casefold() == "hr")
-    if has_hr_leave and is_hr_manager_account:
+    # HR Department visibility is controlled by the explicit module permission.
+    # Do not depend on the literal department name (it may be "HR", "Human Resource", etc.).
+    if has_hr_leave:
         labels.append("🏢 HR Department")
     if has_leave_request:
         labels.append("📝 Leave Request")
@@ -5918,7 +5917,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                                         st.session_state.editing_request_id = req.get("id"); st.rerun()
             tab_idx += 1
-        if has_hr_leave and is_hr_manager_account:
+        if has_hr_leave:
             with tabs[tab_idx]:
                 render_hr_department(current_user_info=user_info, has_hr_access=True, director_name=full_name)
             tab_idx += 1
