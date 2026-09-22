@@ -2072,27 +2072,82 @@ def render_hr_portal(current_user_info=None):
         pass
 
 def render_department_manager_leave_request(current_user_info=None):
-    """Department-manager leave request workflow. Requests remain pending until HR approves them."""
+    """Department-manager leave request workflow.
+
+    Employees are maintained by HR in the persistent HR employee workbook.  This
+    module always refreshes that workbook when opened so a manager sees employees
+    added by HR even when the manager's Streamlit session was already open.
+    """
     user = current_user_info or {}
     manager_name = str(user.get("full_name", "Department Manager")).strip()
     manager_department = str(user.get("dept", "")).strip()
+
     st.subheader("📝 Leave Request")
     st.caption("Submit leave on behalf of an employee in your department. HR must approve the request before it becomes official leave.")
+
     if not manager_department:
         st.error("Your account is not assigned to a department. Please contact the Super Admin.")
         return
-    employees = [e for e in st.session_state.get("hrp_employees", []) if e.get("status", "Active") == "Active" and str(e.get("department", "")).strip() == manager_department]
+
+    # IMPORTANT: Do not depend on render_hr_portal() having run first. Department
+    # managers may only have the separate Leave Request module, so their session
+    # may never have loaded hrp_employees. Always refresh the persistent employee
+    # list here so HR additions are immediately available to managers.
+    try:
+        _hrp_init_storage()
+        refreshed_employees = _hrp_load_employees()
+        st.session_state.hrp_employees = refreshed_employees
+    except Exception as e:
+        st.error(f"Unable to load HR employee records: {e}")
+        return
+
+    manager_department_key = re.sub(r"\s+", " ", manager_department).strip().casefold()
+    employees = [
+        e for e in st.session_state.get("hrp_employees", [])
+        if e.get("status", "Active").strip().casefold() == "active"
+        and re.sub(r"\s+", " ", str(e.get("department", "")).strip()).casefold() == manager_department_key
+    ]
+
     if not employees:
         st.info(f"No active employees have been added to the **{manager_department}** department by HR yet.")
         return
+
+    # Keep the employee selector independent from Employee Details / HR Leave.
     employee_ids = [e["emp_id"] for e in employees]
     key_suffix = re.sub(r"[^A-Za-z0-9_]+", "_", manager_department) or "dept"
-    selected_id = st.selectbox("👤 Employee — Request Leave For", employee_ids, format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}", key=f"dept_leave_employee_{key_suffix}")
-    selected_employee = _hrp_get_employee(selected_id)
+    selector_key = f"dept_leave_employee_{key_suffix}"
+    previous_id = st.session_state.get(selector_key, employee_ids[0])
+    if previous_id not in employee_ids:
+        st.session_state[selector_key] = employee_ids[0]
+
+    selected_id = st.selectbox(
+        "👤 Employee — Request Leave For",
+        employee_ids,
+        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}",
+        key=selector_key,
+    )
+    selected_employee = next((e for e in employees if e.get("emp_id") == selected_id), None)
     if not selected_employee:
         st.error("Selected employee could not be found.")
         return
-    st.info(f"Requesting leave for **{selected_employee['name']}** ({selected_employee['emp_id']}) · {selected_employee.get('job_title', '')} · {manager_department}")
+
+    # Give the manager enough employee information to confirm they selected the
+    # correct person before submitting the request.
+    st.markdown("### 👤 Employee Details")
+    d1, d2, d3, d4 = st.columns(4)
+    with d1:
+        st.write(f"**Name**\n\n{selected_employee.get('name', '-')}")
+    with d2:
+        st.write(f"**Employee ID**\n\n{selected_employee.get('emp_id', '-')}")
+    with d3:
+        st.write(f"**Position**\n\n{selected_employee.get('job_title', '-')}")
+    with d4:
+        st.write(f"**Department**\n\n{selected_employee.get('department', '-')}")
+    st.info(
+        f"Requesting leave for **{selected_employee['name']}** ({selected_employee['emp_id']}) "
+        f"· Start date: {selected_employee.get('start_date', '-')} · Status: {selected_employee.get('status', '-') }"
+    )
+
     form_version = st.session_state.get(f"dept_leave_form_version_{key_suffix}", 0)
     with st.form(f"dept_leave_request_form_{key_suffix}_{form_version}", clear_on_submit=False):
         c1, c2 = st.columns(2)
@@ -2105,6 +2160,7 @@ def render_department_manager_leave_request(current_user_info=None):
         request_reference = st.text_input("Request Reference", placeholder="Optional email, call, or internal reference", key=f"dept_leave_ref_{key_suffix}_{form_version}")
         notes = st.text_area("Notes / Reason", placeholder="Reason or details supplied by the employee", key=f"dept_leave_notes_{key_suffix}_{form_version}")
         submitted = st.form_submit_button("📤 Submit Leave Request to HR", type="primary", use_container_width=True)
+
     if submitted:
         if leave_end < leave_start:
             st.error("End date cannot be before the start date.")
@@ -2113,25 +2169,67 @@ def render_department_manager_leave_request(current_user_info=None):
         if days <= 0:
             st.error("The selected dates do not contain any working days.")
             return
-        duplicate = next((r for r in st.session_state.hrp_leave_records if r.get("employee_id") == selected_employee["emp_id"] and r.get("date_from") == leave_start and r.get("date_to") == leave_end and r.get("type") == leave_type and r.get("status") == "Pending HR Approval"), None)
+        duplicate = next((
+            r for r in st.session_state.hrp_leave_records
+            if r.get("employee_id") == selected_employee["emp_id"]
+            and r.get("date_from") == leave_start
+            and r.get("date_to") == leave_end
+            and r.get("type") == leave_type
+            and r.get("status") == "Pending HR Approval"
+        ), None)
         if duplicate:
             st.warning(f"A leave request for these dates is already waiting for HR approval ({duplicate['leave_id']}).")
             return
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        record = {"leave_id": _hrp_create_leave_id(), "employee_id": selected_employee["emp_id"], "date_from": leave_start, "date_to": leave_end, "type": leave_type, "days": days, "status": "Pending HR Approval", "request_source": "Department Manager", "request_reference": request_reference.strip(), "notes": notes.strip(), "recorded_by": manager_name, "recorded_at": now, "entry_source": "Department Manager Request", "requested_by": manager_name, "requested_at": now, "approved_by": "", "approved_at": "", "rejection_reason": ""}
+        record = {
+            "leave_id": _hrp_create_leave_id(),
+            "employee_id": selected_employee["emp_id"],
+            "date_from": leave_start,
+            "date_to": leave_end,
+            "type": leave_type,
+            "days": days,
+            "status": "Pending HR Approval",
+            "request_source": "Department Manager",
+            "request_reference": request_reference.strip(),
+            "notes": notes.strip(),
+            "recorded_by": manager_name,
+            "recorded_at": now,
+            "entry_source": "Department Manager Request",
+            "requested_by": manager_name,
+            "requested_at": now,
+            "approved_by": "",
+            "approved_at": "",
+            "rejection_reason": "",
+        }
         st.session_state.hrp_leave_records.append(record)
         _hrp_save_leave_records()
         log_action("HR_PORTAL_LEAVE_REQUESTED", record["leave_id"], new_data=record)
         st.session_state[f"dept_leave_form_version_{key_suffix}"] = form_version + 1
         st.success(f"Leave request {record['leave_id']} submitted to HR for approval.")
         st.rerun()
-    pending = [r for r in st.session_state.hrp_leave_records if r.get("employee_id") in employee_ids and r.get("requested_by") == manager_name and r.get("status") in ("Pending HR Approval", "Rejected")]
+
+    pending = [
+        r for r in st.session_state.hrp_leave_records
+        if r.get("employee_id") in employee_ids
+        and r.get("requested_by") == manager_name
+        and r.get("status") in ("Pending HR Approval", "Rejected")
+    ]
     if pending:
-        st.divider(); st.subheader("📋 My Leave Requests")
+        st.divider()
+        st.subheader("📋 My Leave Requests")
         rows = []
         for r in reversed(pending):
             employee = _hrp_get_employee(r["employee_id"])
-            rows.append({"Leave ID": r["leave_id"], "Employee": employee["name"] if employee else r["employee_id"], "From": r["date_from"], "To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "HR Rejection Reason": r.get("rejection_reason", "")})
+            rows.append({
+                "Leave ID": r["leave_id"],
+                "Employee": employee["name"] if employee else r["employee_id"],
+                "From": r["date_from"],
+                "To": r["date_to"],
+                "Type": r["type"],
+                "Days": r["days"],
+                "Status": r["status"],
+                "HR Rejection Reason": r.get("rejection_reason", ""),
+            })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
