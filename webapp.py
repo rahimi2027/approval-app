@@ -93,7 +93,7 @@ os.makedirs(HR_LEAVE_PDF_DIR, exist_ok=True)
 
 HR_EMPLOYEE_COLUMNS = [
     "Employee ID", "Full Name", "Start Date", "Position / Job Title", "Department",
-    "Agreement Type", "Status", "Holiday Entitlement Override", "Entitlement Adjustment Note"
+    "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Holiday Entitlement Override", "Entitlement Adjustment Note"
 ]
 HR_PORTAL_LEAVE_COLUMNS = [
     "Leave ID", "Employee ID", "Date From", "Date To", "Leave Type", "Days",
@@ -590,6 +590,12 @@ def get_request_details(req_id):
     except Exception as e: print(f"⚠️ Audit lookup failed: {e}")
     return dept, amount, decision_by, decision_date
 
+def _audit_json(value):
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)[:300] if value else "-"
+    except Exception:
+        return str(value)[:300] if value is not None else "-"
+
 def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=None, decision_by=None, decision_date=None):
     if not st.session_state.get("logged_in"): return
     user_info = st.session_state.user_info
@@ -608,7 +614,7 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
         "HR_CATEGORY_ADDED", "HR_CATEGORY_DELETED",
         "HR_RATE_ADDED", "HR_RATE_UPDATED", "HR_RATE_DELETED",
         "STORE_ITEM_ADDED", "STORE_ITEM_EDITED", "STORE_ITEM_DELETED",
-        "HR_EMPLOYEE_ADDED", "HR_EMPLOYEE_EDITED", "HR_LEAVE_RECORDED",
+        "HR_EMPLOYEE_ADDED", "HR_EMPLOYEE_EDITED", "HR_LEAVE_RECORDED", "HR_LEAVE_EDITED", "HR_LEAVE_DELETED",
         "HR_ENTITLEMENT_ADJUSTED",
     ]
     if action in SETTING_ACTIONS:
@@ -626,11 +632,11 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "HR_RATE_ADDED": "💷 HR Daily Rate Added", "HR_RATE_UPDATED": "💷 HR Daily Rate Updated", "HR_RATE_DELETED": "💷 HR Daily Rate Deleted",
             "STORE_ITEM_ADDED": "📦 Store Item Added", "STORE_ITEM_EDITED": "📦 Store Item Edited", "STORE_ITEM_DELETED": "📦 Store Item Deleted",
             "HR_EMPLOYEE_ADDED": "🧑💼 HR Employee Added", "HR_EMPLOYEE_EDITED": "🧑💼 HR Employee Edited",
-            "HR_LEAVE_RECORDED": "📅 HR Leave Recorded", "HR_ENTITLEMENT_ADJUSTED": "📊 HR Entitlement Adjusted",
+            "HR_LEAVE_RECORDED": "📅 HR Leave Recorded", "HR_LEAVE_EDITED": "✏️ HR Leave Edited", "HR_LEAVE_DELETED": "🗑️ HR Leave Deleted", "HR_ENTITLEMENT_ADJUSTED": "📊 HR Entitlement Adjusted",
         }
         display_action = action_labels.get(action, action)
-        old_val = json.dumps(old_data, ensure_ascii=False, default=str)[:300] if old_data else "-"
-        new_val = json.dumps(new_data, ensure_ascii=False, default=str)[:300] if new_data else "-"
+        old_val = _audit_json(old_data)
+        new_val = _audit_json(new_data)
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": display_action, "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": decision_by or "-", "Decision_Date": decision_date or "-", "Field_Changed": "Settings", "Old_Value": old_val, "New_Value": new_val, "IP_Address": "Auto-Logged"})
         return
     dept, amount, saved_decision_by, saved_decision_date = get_request_details(req_id)
@@ -644,8 +650,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "WORK_ORDER_DIRECTOR_REJECTED": "🛠️ Work Order Rejected by Director", "WORK_ORDER_STATUS_CHANGED": "🛠️ Work Order Status Changed",
             "WORK_ORDER_EDITED": "🛠️ Work Order Edited", "WORK_ORDER_PAID": "🛠️ Work Order Paid",
         }
-        old_v = json.dumps(old_data, ensure_ascii=False, default=str)[:300] if old_data else "-"
-        new_v = json.dumps(new_data, ensure_ascii=False, default=str)[:300] if new_data else "-"
+        old_v = _audit_json(old_data)
+        new_v = _audit_json(new_data)
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": wo_labels.get(action, action), "Request_ID": str(req_id), "Department": dept, "Amount": amount, "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "Work Order Status", "Old_Value": old_v if old_data else "-", "New_Value": new_v if new_data else action.replace("WORK_ORDER_", "").replace("_", " ").title(), "IP_Address": "Auto-Logged"})
         return
     if action.startswith("HR_LEAVE_"):
@@ -655,8 +661,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "HR_LEAVE_REJECTED": "👥 HR Leave Settlement Rejected",
             "HR_LEAVE_STATUS_CHANGED": "👥 HR Leave Settlement Status Changed",
         }
-        old_v = json.dumps(old_data, ensure_ascii=False, default=str)[:300] if old_data else "-"
-        new_v = json.dumps(new_data, ensure_ascii=False, default=str)[:300] if new_data else "-"
+        old_v = _audit_json(old_data)
+        new_v = _audit_json(new_data)
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": hr_labels.get(action, action), "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "HR Leave Status", "Old_Value": old_v, "New_Value": new_v, "IP_Address": "Auto-Logged"})
         return
     if action.startswith("STORE_DEDUCTION_"):
@@ -666,8 +672,8 @@ def log_action(action, req_id="-", old_data=None, new_data=None, fields_changed=
             "STORE_DEDUCTION_REJECTED": "📦 Store Deduction Rejected",
             "STORE_DEDUCTION_STATUS_CHANGED": "📦 Store Deduction Status Changed",
         }
-        old_v = json.dumps(old_data, ensure_ascii=False, default=str)[:300] if old_data else "-"
-        new_v = json.dumps(new_data, ensure_ascii=False, default=str)[:300] if new_data else "-"
+        old_v = _audit_json(old_data)
+        new_v = _audit_json(new_data)
         save_audit_entry({"AuditID": _get_next_audit_id(), "Timestamp": timestamp, "User_Name": username, "User_Role": role, "Action": store_labels.get(action, action), "Request_ID": str(req_id), "Department": "-", "Amount": "-", "Decision_By": final_decision_by or "-", "Decision_Date": final_decision_date or timestamp, "Field_Changed": "Store Deduction Status", "Old_Value": old_v, "New_Value": new_v, "IP_Address": "Auto-Logged"})
         return
     if action in ["CREATED", "DELETED"]:
@@ -992,6 +998,8 @@ def _hrp_load_employees():
                 "job_title": str(r.get("Position / Job Title", "")).strip(),
                 "agreement_type": str(r.get("Agreement Type", "")).strip() or "Permanent",
                 "status": str(r.get("Status", "Active")).strip() or "Active",
+                "working_pattern": str(r.get("Working Pattern", "Regular hours")).strip() or "Regular hours",
+                "days_per_week": float(r.get("Days Worked Per Week", 5) or 5),
                 "entitlement_override": override,
                 "adjustment_note": str(r.get("Entitlement Adjustment Note", "")).strip(),
             })
@@ -1012,6 +1020,8 @@ def _hrp_save_employees():
             "Department": e.get("department", ""),
             "Agreement Type": e.get("agreement_type", ""),
             "Status": e.get("status", "Active"),
+            "Working Pattern": e.get("working_pattern", "Regular hours"),
+            "Days Worked Per Week": e.get("days_per_week", 5),
             "Holiday Entitlement Override": e.get("entitlement_override", "") if e.get("entitlement_override") is not None else "",
             "Entitlement Adjustment Note": e.get("adjustment_note", ""),
         })
@@ -1107,6 +1117,8 @@ def _hr_portal_init():
         st.session_state.hrp_adjustment_notes = {e["emp_id"]: e.get("adjustment_note", "") for e in st.session_state.hrp_employees if e.get("adjustment_note") }
     if "hrp_next_leave_number" not in st.session_state:
         st.session_state.hrp_next_leave_number = 1
+    if "hrp_leave_form_version" not in st.session_state:
+        st.session_state.hrp_leave_form_version = 0
 
 def _hrp_get_employee(employee_id):
     target = str(employee_id or "").strip().casefold()
@@ -1147,21 +1159,63 @@ def _hrp_calculate_service_years(start_date):
     return days / 365.25
 
 def _hrp_calculate_holiday_entitlement(employee):
+    """
+    UK statutory holiday calculation for regular-hours workers.
+
+    GOV.UK statutory minimum is 5.6 weeks, capped at 28 days. For a regular
+    5-day worker this is 28 days; for regular part-time workers it is
+    5.6 x contracted days per week. For a worker who starts part-way through
+    a leave year, this portal uses the calendar-day pro-rata method and rounds
+    the result up to the next half day, matching the GOV.UK calculator example.
+
+    The company's leave year is currently Jan 1-Dec 31 to match the leave-year
+    shown in the supplied GOV.UK calculator screenshot. Change the constants
+    below if the employment contract specifies another leave year.
+    """
     start_date = employee["start_date"]
     today = date.today()
-    if today.month >= 4:
-        holiday_year_start = date(today.year, 4, 1)
+    leave_year_start_month, leave_year_start_day = 1, 1
+    if today.month > leave_year_start_month or (today.month == leave_year_start_month and today.day >= leave_year_start_day):
+        holiday_year_start = date(today.year, leave_year_start_month, leave_year_start_day)
     else:
-        holiday_year_start = date(today.year - 1, 4, 1)
+        holiday_year_start = date(today.year - 1, leave_year_start_month, leave_year_start_day)
+    holiday_year_end = date(holiday_year_start.year + 1, leave_year_start_month, leave_year_start_day) - timedelta(days=1)
+
+    try:
+        days_per_week = float(employee.get("days_per_week", 5) or 5)
+    except Exception:
+        days_per_week = 5.0
+    days_per_week = max(0.0, min(days_per_week, 7.0))
+    full_year_entitlement = min(28.0, 5.6 * days_per_week)
     service_years = _hrp_calculate_service_years(start_date)
-    if start_date < holiday_year_start and service_years >= 1:
-        return 28.0, "Standard entitlement: 28 days for the current holiday year.", service_years
-    period_start = max(start_date, holiday_year_start)
-    days_in_period = (date(today.year + 1, 3, 31) - period_start).days + 1
-    days_in_year = 365
-    proportion = min(max(days_in_period / days_in_year, 0), 1)
-    entitlement = round(28 * proportion, 1)
-    return entitlement, f"Pro-rated entitlement based on start date {start_date.strftime('%d/%m/%Y')}.", service_years
+    working_pattern = str(employee.get("working_pattern", "Regular hours") or "Regular hours")
+
+    if working_pattern != "Regular hours":
+        return full_year_entitlement, (
+            "Irregular/part-year worker: GOV.UK requires leave to be accrued using the "
+            "12.07% of hours worked in each pay period method for leave years beginning "
+            "on or after 1 April 2024. Enter/pay-period hours are not stored in this portal yet, "
+            "so no 12.07% hours calculation has been assumed here."
+        ), service_years
+
+    # Full leave year already in progress before this employee started.
+    if start_date <= holiday_year_start:
+        return round(full_year_entitlement, 1), (
+            f"UK statutory minimum: {full_year_entitlement:.1f} days for {days_per_week:g} contracted days per week "
+            f"(5.6 weeks, capped at 28 days). Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
+        ), service_years
+
+    # First/partial leave year: pro-rate by calendar days remaining in the leave year.
+    employed_days = (holiday_year_end - start_date).days + 1
+    year_days = (holiday_year_end - holiday_year_start).days + 1
+    raw = full_year_entitlement * max(0.0, min(employed_days / year_days, 1.0))
+    # GOV.UK calculator rounds a fractional day up to the next half day.
+    entitlement = (int(raw * 2 + 0.999999) / 2.0)
+    return entitlement, (
+        f"UK statutory pro-rata: {full_year_entitlement:.1f} days full-year entitlement × "
+        f"{employed_days}/{year_days} calendar days remaining in the leave year, "
+        f"rounded up to the next half day. Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
+    ), service_years
 
 def _hrp_get_employee_entitlement(employee):
     employee_id = employee["emp_id"]
@@ -1370,32 +1424,46 @@ def render_hr_portal(current_user_info=None):
         st.subheader("Leave Management")
         if is_hr:
             st.info("HR records leave on behalf of the employee. All leave submitted by HR is automatically marked Approved.")
+            form_version = st.session_state.get("hrp_leave_form_version", 0)
             col1, col2 = st.columns(2)
             with col1:
-                leave_type = st.selectbox("Leave Type", options=HR_PORTAL_LEAVE_TYPES, key="hrp_leave_type")
-                leave_start = st.date_input("Start Date", value=date.today(), key="hrp_leave_start")
+                leave_type = st.selectbox("Leave Type", options=HR_PORTAL_LEAVE_TYPES, key=f"hrp_leave_type_{form_version}")
+                leave_start = st.date_input("Start Date", value=date.today(), key=f"hrp_leave_start_{form_version}")
             with col2:
-                leave_end = st.date_input("End Date", value=date.today(), key="hrp_leave_end")
-                half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key="hrp_half_day")
-            request_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], key="hrp_request_source")
-            request_reference = st.text_input("Email / Call Reference", placeholder="Optional email subject, date, or reference", key="hrp_request_reference")
-            notes = st.text_area("Notes / Reason", placeholder="e.g. holiday requested by email; sickness reported by phone; family emergency", key="hrp_leave_notes")
+                leave_end = st.date_input("End Date", value=date.today(), key=f"hrp_leave_end_{form_version}")
+                half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key=f"hrp_half_day_{form_version}")
+            request_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], key=f"hrp_request_source_{form_version}")
+            request_reference = st.text_input("Email / Call Reference", placeholder="Optional email subject, date, or reference", key=f"hrp_request_reference_{form_version}")
+            notes = st.text_area("Notes / Reason", placeholder="e.g. holiday requested by email; sickness reported by phone; family emergency", key=f"hrp_leave_notes_{form_version}")
             if leave_end < leave_start:
                 st.error("End date cannot be before the start date.")
             else:
                 calculated_days = _hrp_calculate_leave_days(leave_type, leave_start, leave_end, half_day)
                 st.metric("Calculated Leave Days", f"{calculated_days:.1f}")
                 st.caption("Weekends are excluded from the calculation.")
-                if st.button("📤 Record Leave — Automatically Approved", type="primary", key="hrp_record_leave"):
+                if st.button("📤 Record Leave — Automatically Approved", type="primary", key=f"hrp_record_leave_{form_version}"):
                     if calculated_days <= 0:
                         st.error("The selected dates do not contain any working days.")
                     else:
-                        new_record = {"leave_id": _hrp_create_leave_id(), "employee_id": emp["emp_id"], "date_from": leave_start, "date_to": leave_end, "type": leave_type, "days": calculated_days, "status": "Approved", "request_source": request_source, "request_reference": request_reference.strip(), "notes": notes.strip(), "recorded_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR", "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-                        st.session_state.hrp_leave_records.append(new_record)
-                        _hrp_save_leave_records()
-                        log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
-                        st.success(f"Leave recorded successfully for {emp['name']}. {calculated_days:.1f} day(s) — Approved.")
-                        st.rerun()
+                        # Prevent accidental double-submission of the same leave request.
+                        duplicate = next((r for r in st.session_state.hrp_leave_records
+                                          if r.get("employee_id") == emp["emp_id"]
+                                          and r.get("date_from") == leave_start
+                                          and r.get("date_to") == leave_end
+                                          and r.get("type") == leave_type
+                                          and float(r.get("days", 0)) == float(calculated_days)
+                                          and str(r.get("request_reference", "")).strip() == request_reference.strip()
+                                          and str(r.get("notes", "")).strip() == notes.strip()), None)
+                        if duplicate:
+                            st.warning(f"This leave has already been recorded as {duplicate['leave_id']}. The duplicate was not added.")
+                        else:
+                            new_record = {"leave_id": _hrp_create_leave_id(), "employee_id": emp["emp_id"], "date_from": leave_start, "date_to": leave_end, "type": leave_type, "days": calculated_days, "status": "Approved", "request_source": request_source, "request_reference": request_reference.strip(), "notes": notes.strip(), "recorded_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR", "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                            st.session_state.hrp_leave_records.append(new_record)
+                            _hrp_save_leave_records()
+                            log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
+                            st.session_state.hrp_leave_form_version = form_version + 1
+                            st.success(f"Leave recorded successfully for {emp['name']}. {calculated_days:.1f} day(s) — Approved. The form has been cleared for the next entry.")
+                            st.rerun()
         else:
             st.info("You are viewing your leave information. Leave is managed by HR.")
             employee_leave = _hrp_get_employee_leave(emp["emp_id"])
@@ -1413,6 +1481,56 @@ def render_hr_portal(current_user_info=None):
             history_data = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
             df_history = pd.DataFrame(history_data)
             st.dataframe(df_history, use_container_width=True, hide_index=True)
+            if is_hr:
+                st.divider()
+                st.subheader("✏️ Edit / 🗑️ Delete Leave Record")
+                st.caption("HR can correct a wrongly entered leave record or remove an accidental duplicate. Deleted records are removed from the HR leave ledger.")
+                leave_choices = [r["leave_id"] for r in employee_leave]
+                selected_leave_id = st.selectbox("Select Leave Record", leave_choices, key=f"hrp_leave_action_selector_{emp['emp_id']}")
+                selected_leave = next((r for r in employee_leave if r["leave_id"] == selected_leave_id), None)
+                if selected_leave:
+                    with st.form(f"hrp_edit_leave_form_{emp['emp_id']}_{selected_leave_id}"):
+                        ec1, ec2 = st.columns(2)
+                        with ec1:
+                            edit_leave_type = st.selectbox("Leave Type", HR_PORTAL_LEAVE_TYPES, index=HR_PORTAL_LEAVE_TYPES.index(selected_leave["type"]) if selected_leave["type"] in HR_PORTAL_LEAVE_TYPES else 0)
+                            edit_leave_start = st.date_input("Start Date", value=selected_leave["date_from"])
+                            edit_leave_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], index=["Email", "Phone Call", "In Person", "Other"].index(selected_leave.get("request_source", "Email")) if selected_leave.get("request_source", "Email") in ["Email", "Phone Call", "In Person", "Other"] else 0)
+                        with ec2:
+                            edit_leave_end = st.date_input("End Date", value=selected_leave["date_to"])
+                            edit_leave_reference = st.text_input("Email / Call Reference", value=selected_leave.get("request_reference", ""))
+                            edit_leave_notes = st.text_area("Notes / Reason", value=selected_leave.get("notes", ""))
+                        edit_half_day = edit_leave_type == "Half Day Holiday"
+                        edit_days = _hrp_calculate_leave_days(edit_leave_type, edit_leave_start, edit_leave_end, edit_half_day)
+                        st.caption(f"Calculated days: {edit_days:.1f}. HR edits remain Approved automatically.")
+                        if st.form_submit_button("💾 Save Leave Changes", type="primary"):
+                            if edit_leave_end < edit_leave_start or edit_days <= 0:
+                                st.error("Please select a valid working-day date range.")
+                            else:
+                                old_leave = dict(selected_leave)
+                                selected_leave.update({"date_from": edit_leave_start, "date_to": edit_leave_end, "type": edit_leave_type, "days": edit_days, "status": "Approved", "request_source": edit_leave_source, "request_reference": edit_leave_reference.strip(), "notes": edit_leave_notes.strip()})
+                                _hrp_save_leave_records()
+                                log_action("HR_LEAVE_EDITED", selected_leave_id, old_data=old_leave, new_data=dict(selected_leave))
+                                st.success(f"Leave record {selected_leave_id} updated.")
+                                st.rerun()
+                    delete_confirm_key = f"hrp_confirm_leave_delete_{selected_leave_id}"
+                    if st.button("🗑️ Delete This Leave Record", key=f"hrp_delete_leave_{selected_leave_id}"):
+                        st.session_state[delete_confirm_key] = True
+                    if st.session_state.get(delete_confirm_key):
+                        st.warning(f"This will permanently delete leave record {selected_leave_id}. This is appropriate for an accidental duplicate or incorrect entry.")
+                        cdel1, cdel2 = st.columns(2)
+                        with cdel1:
+                            if st.button("⚠️ Confirm Delete", type="primary", key=f"hrp_confirm_leave_delete_yes_{selected_leave_id}"):
+                                old_leave = dict(selected_leave)
+                                st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r.get("leave_id") != selected_leave_id]
+                                _hrp_save_leave_records()
+                                log_action("HR_LEAVE_DELETED", selected_leave_id, old_data=old_leave)
+                                st.session_state.pop(delete_confirm_key, None)
+                                st.success(f"Leave record {selected_leave_id} deleted.")
+                                st.rerun()
+                        with cdel2:
+                            if st.button("Cancel", key=f"hrp_confirm_leave_delete_no_{selected_leave_id}"):
+                                st.session_state.pop(delete_confirm_key, None)
+                                st.rerun()
             st.divider()
             summary = _hrp_get_leave_summary(emp["emp_id"])
             st.subheader("Leave Summary")
@@ -1444,6 +1562,7 @@ def render_hr_portal(current_user_info=None):
                             "Employee ID": e["emp_id"], "Name": e["name"], "Status": e.get("status", "Active"),
                             "Department": e.get("department", ""), "Position": e.get("job_title", ""),
                             "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
+                            "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
                             "Holiday Entitlement": pos["entitlement"], "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
                             "Company Owes": pos["company_owes_employee"], "Employee Owes": pos["employee_owes_company"],
                             "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
@@ -1465,6 +1584,8 @@ def render_hr_portal(current_user_info=None):
                     hr_software_departments = load_departments()
                     new_department = st.selectbox("Department", options=hr_software_departments, key="hrp_new_dept")
                     new_agreement = st.selectbox("Agreement Type", options=HR_PORTAL_AGREEMENT_TYPES, key="hrp_new_agree")
+                    new_pattern = st.selectbox("Working Pattern", ["Regular hours", "Irregular / Part-Year"], key="hrp_new_pattern")
+                    new_days_per_week = st.number_input("Contracted Days Per Week", min_value=0.5, max_value=7.0, value=5.0, step=0.5, key="hrp_new_days")
                 if st.button("➕ Create Employee", type="primary", key="hrp_create_emp"):
                     valid, result = _hrp_validate_employee_id(new_emp_id)
                     if not valid:
@@ -1474,7 +1595,7 @@ def render_hr_portal(current_user_info=None):
                     elif not new_position.strip():
                         st.error("Please enter the position / job title.")
                     else:
-                        new_employee = {"emp_id": result, "name": new_name.strip(), "start_date": new_start_date, "department": new_department, "job_title": new_position.strip(), "agreement_type": new_agreement, "status": "Active"}
+                        new_employee = {"emp_id": result, "name": new_name.strip(), "start_date": new_start_date, "department": new_department, "job_title": new_position.strip(), "agreement_type": new_agreement, "status": "Active", "working_pattern": new_pattern, "days_per_week": new_days_per_week}
                         st.session_state.hrp_employees.append(new_employee)
                         _hrp_save_employees()
                         if not st.session_state.get("hrp_current_emp_id"):
@@ -1511,6 +1632,9 @@ def render_hr_portal(current_user_info=None):
                             hr_software_departments = load_departments()
                             edit_dept = st.selectbox("Department", hr_software_departments, index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0)
                             edit_agreement = st.selectbox("Agreement Type", HR_PORTAL_AGREEMENT_TYPES, index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0)
+                            edit_pattern_options = ["Regular hours", "Irregular / Part-Year"]
+                            edit_pattern = st.selectbox("Working Pattern", edit_pattern_options, index=edit_pattern_options.index(edit_emp.get("working_pattern", "Regular hours")) if edit_emp.get("working_pattern", "Regular hours") in edit_pattern_options else 0)
+                            edit_days = st.number_input("Contracted Days Per Week", min_value=0.5, max_value=7.0, value=float(edit_emp.get("days_per_week", 5) or 5), step=0.5)
                             status_options = ["Active", "Inactive"]
                             edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")))
                             if edit_emp.get("status") == "Inactive":
@@ -1522,6 +1646,8 @@ def render_hr_portal(current_user_info=None):
                             edit_emp["job_title"] = edit_position.strip()
                             edit_emp["department"] = edit_dept
                             edit_emp["agreement_type"] = edit_agreement
+                            edit_emp["working_pattern"] = edit_pattern
+                            edit_emp["days_per_week"] = edit_days
                             edit_emp["status"] = edit_status
                             _hrp_save_employees()
                             log_action("HR_EMPLOYEE_EDITED", edit_emp_id, old_data=old_data, new_data=dict(edit_emp))
