@@ -1868,28 +1868,85 @@ def render_hr_portal(current_user_info=None):
     # ========== TAB 4: LEAVE HISTORY ==========
     with tab_history:
         st.subheader("Leave History")
-        if not emp:
-            st.info("Select an employee in **Employee Details** first." if is_hr else "No employee record is available.")
-        else:
-            employee_leave = _hrp_get_employee_leave(emp["emp_id"])
-            if employee_leave:
-                history_data = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
-                df_history = pd.DataFrame(history_data)
-                st.dataframe(df_history, use_container_width=True, hide_index=True)
-                if is_hr:
+
+        if is_hr:
+            # Leave History has its own employee selector. It is deliberately
+            # independent from Employee Details so changing one tab does not
+            # silently change the employee being viewed here.
+            history_employee_ids = [
+                e["emp_id"] for e in st.session_state.hrp_employees
+                if e.get("status", "Active") == "Active"
+            ]
+            # Include inactive employees if they already have leave history,
+            # so HR can still review historical records after deactivation.
+            for e in st.session_state.hrp_employees:
+                if e.get("emp_id") not in history_employee_ids:
+                    if _hrp_get_employee_leave(e.get("emp_id")):
+                        history_employee_ids.append(e.get("emp_id"))
+
+            if not history_employee_ids:
+                st.info("No employee records are available.")
+            else:
+                saved_history_id = st.session_state.get("hrp_history_employee_id")
+                if saved_history_id not in history_employee_ids:
+                    saved_history_id = history_employee_ids[0]
+
+                history_index = history_employee_ids.index(saved_history_id)
+                selected_history_employee_id = st.selectbox(
+                    "👤 Employee — View Leave History For",
+                    options=history_employee_ids,
+                    index=history_index,
+                    format_func=lambda eid: (
+                        f"{_hrp_get_employee(eid)['name']} — {eid}"
+                        if _hrp_get_employee(eid) else eid
+                    ),
+                    key="hrp_history_employee_selector",
+                )
+                st.session_state.hrp_history_employee_id = selected_history_employee_id
+                history_employee = _hrp_get_employee(selected_history_employee_id)
+
+                if history_employee:
+                    st.caption(
+                        f"Viewing leave history for **{history_employee['name']}** "
+                        f"(Employee ID: **{history_employee['emp_id']}**) · "
+                        f"{history_employee.get('department', '')} · "
+                        f"{history_employee.get('job_title', '')}"
+                    )
+
+                employee_leave = _hrp_get_employee_leave(selected_history_employee_id)
+                if employee_leave:
+                    history_data = [{
+                        "Leave ID": r["leave_id"], "Date From": r["date_from"],
+                        "Date To": r["date_to"], "Type": r["type"], "Days": r["days"],
+                        "Status": r["status"], "Notes": r["notes"]
+                    } for r in employee_leave]
+                    df_history = pd.DataFrame(history_data)
+                    st.dataframe(df_history, use_container_width=True, hide_index=True)
+
                     st.divider()
                     st.subheader("✏️ Edit / 🗑️ Delete Leave Record")
                     st.caption("HR can correct a wrongly entered leave record or remove an accidental duplicate. Deleted records are removed from the HR leave ledger.")
                     leave_choices = [r["leave_id"] for r in employee_leave]
-                    selected_leave_id = st.selectbox("Select Leave Record", leave_choices, key=f"hrp_leave_action_selector_{emp['emp_id']}")
+                    selected_leave_id = st.selectbox(
+                        "Select Leave Record",
+                        leave_choices,
+                        key=f"hrp_leave_action_selector_{selected_history_employee_id}"
+                    )
                     selected_leave = next((r for r in employee_leave if r["leave_id"] == selected_leave_id), None)
                     if selected_leave:
-                        with st.form(f"hrp_edit_leave_form_{emp['emp_id']}_{selected_leave_id}"):
+                        with st.form(f"hrp_edit_leave_form_{selected_history_employee_id}_{selected_leave_id}"):
                             ec1, ec2 = st.columns(2)
                             with ec1:
-                                edit_leave_type = st.selectbox("Leave Type", HR_PORTAL_LEAVE_TYPES, index=HR_PORTAL_LEAVE_TYPES.index(selected_leave["type"]) if selected_leave["type"] in HR_PORTAL_LEAVE_TYPES else 0)
+                                edit_leave_type = st.selectbox(
+                                    "Leave Type", HR_PORTAL_LEAVE_TYPES,
+                                    index=HR_PORTAL_LEAVE_TYPES.index(selected_leave["type"]) if selected_leave["type"] in HR_PORTAL_LEAVE_TYPES else 0
+                                )
                                 edit_leave_start = st.date_input("Start Date", value=selected_leave["date_from"])
-                                edit_leave_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], index=["Email", "Phone Call", "In Person", "Other"].index(selected_leave.get("request_source", "Email")) if selected_leave.get("request_source", "Email") in ["Email", "Phone Call", "In Person", "Other"] else 0)
+                                edit_leave_source = st.selectbox(
+                                    "Request / Notification Source",
+                                    ["Email", "Phone Call", "In Person", "Other"],
+                                    index=["Email", "Phone Call", "In Person", "Other"].index(selected_leave.get("request_source", "Email")) if selected_leave.get("request_source", "Email") in ["Email", "Phone Call", "In Person", "Other"] else 0
+                                )
                             with ec2:
                                 edit_leave_end = st.date_input("End Date", value=selected_leave["date_to"])
                                 edit_leave_reference = st.text_input("Email / Call Reference", value=selected_leave.get("request_reference", ""))
@@ -1911,14 +1968,15 @@ def render_hr_portal(current_user_info=None):
                                     log_action("HR_LEAVE_EDITED", selected_leave_id, old_data=old_leave, new_data=dict(selected_leave))
                                     st.success(f"Leave record {selected_leave_id} updated.")
                                     st.rerun()
-                        delete_confirm_key = f"hrp_confirm_leave_delete_{selected_leave_id}"
-                        if st.button("🗑️ Delete This Leave Record", key=f"hrp_delete_leave_{selected_leave_id}"):
+
+                        delete_confirm_key = f"hrp_confirm_leave_delete_{selected_history_employee_id}_{selected_leave_id}"
+                        if st.button("🗑️ Delete This Leave Record", key=f"hrp_delete_leave_{selected_history_employee_id}_{selected_leave_id}"):
                             st.session_state[delete_confirm_key] = True
                         if st.session_state.get(delete_confirm_key):
                             st.warning(f"This will permanently delete leave record {selected_leave_id}. This is appropriate for an accidental duplicate or incorrect entry.")
                             cdel1, cdel2 = st.columns(2)
                             with cdel1:
-                                if st.button("⚠️ Confirm Delete", type="primary", key=f"hrp_confirm_leave_delete_yes_{selected_leave_id}"):
+                                if st.button("⚠️ Confirm Delete", type="primary", key=f"hrp_confirm_leave_delete_yes_{selected_history_employee_id}_{selected_leave_id}"):
                                     old_leave = dict(selected_leave)
                                     st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r.get("leave_id") != selected_leave_id]
                                     _hrp_save_leave_records()
@@ -1927,22 +1985,36 @@ def render_hr_portal(current_user_info=None):
                                     st.success(f"Leave record {selected_leave_id} deleted.")
                                     st.rerun()
                             with cdel2:
-                                if st.button("Cancel", key=f"hrp_confirm_leave_delete_no_{selected_leave_id}"):
+                                if st.button("Cancel", key=f"hrp_confirm_leave_delete_no_{selected_history_employee_id}_{selected_leave_id}"):
                                     st.session_state.pop(delete_confirm_key, None)
                                     st.rerun()
-                st.divider()
-                summary = _hrp_get_leave_summary(emp["emp_id"])
-                st.subheader("Leave Summary")
-                col1, col2, col3, col4, col5 = st.columns(5)
-                with col1: st.metric("Holiday", f"{summary['holiday']:.1f}")
-                with col2: st.metric("Sick", f"{summary['sick']:.1f}")
-                with col3: st.metric("Unpaid", f"{summary['unpaid']:.1f}")
-                with col4: st.metric("Maternity", f"{summary['maternity']:.1f}")
-                with col5: st.metric("Paternity", f"{summary['paternity']:.1f}")
-                csv = df_history.to_csv(index=False)
-                st.download_button("📥 Export Leave History CSV", csv, file_name=f"{emp['emp_id']}_leave_history.csv", mime="text/csv", key="hrp_export_csv")
+
+                    st.divider()
+                    summary = _hrp_get_leave_summary(selected_history_employee_id)
+                    st.subheader("Leave Summary")
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    with col1: st.metric("Holiday", f"{summary['holiday']:.1f}")
+                    with col2: st.metric("Sick", f"{summary['sick']:.1f}")
+                    with col3: st.metric("Unpaid", f"{summary['unpaid']:.1f}")
+                    with col4: st.metric("Maternity", f"{summary['maternity']:.1f}")
+                    with col5: st.metric("Paternity", f"{summary['paternity']:.1f}")
+                    csv = df_history.to_csv(index=False)
+                    st.download_button(
+                        "📥 Export Leave History CSV", csv,
+                        file_name=f"{selected_history_employee_id}_leave_history.csv",
+                        mime="text/csv", key=f"hrp_export_csv_{selected_history_employee_id}"
+                    )
+                else:
+                    st.info(f"No leave history is currently recorded for {history_employee['name'] if history_employee else selected_history_employee_id}.")
+        elif emp:
+            employee_leave = _hrp_get_employee_leave(emp["emp_id"])
+            if employee_leave:
+                history_data = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
+                st.dataframe(pd.DataFrame(history_data), use_container_width=True, hide_index=True)
             else:
                 st.info("No leave history is currently recorded.")
+        else:
+            st.info("No employee record is available.")
 
     # ========== EMPLOYEE-ONLY VIEW ==========
     if not is_hr:
