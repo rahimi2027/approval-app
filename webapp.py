@@ -1275,6 +1275,8 @@ def render_hr_portal(current_user_info=None):
         st.session_state.hrp_current_emp_id = ""
     if "hrp_new_employee_form_version" not in st.session_state:
         st.session_state.hrp_new_employee_form_version = 0
+    if "hrp_leave_employee_id" not in st.session_state:
+        st.session_state.hrp_leave_employee_id = ""
 
     st.subheader("🏢 HR Portal — Employee Management")
     st.caption("HR-managed employee, holiday and leave management system")
@@ -1765,6 +1767,49 @@ def render_hr_portal(current_user_info=None):
             st.info("Select an employee in **Employee Details** first." if is_hr else "No employee record is available.")
         elif is_hr:
             st.info("HR records leave on behalf of the employee. All leave submitted by HR is automatically marked Approved.")
+
+            # Select the employee directly in the Leave tab. HR no longer
+            # needs to visit Employee Details before booking leave.
+            leave_employee_ids = [
+                e["emp_id"] for e in st.session_state.hrp_employees
+                if e.get("status", "Active") == "Active"
+            ]
+            if not leave_employee_ids:
+                st.warning("There are no active employees available to book leave for.")
+                st.stop()
+
+            leave_current_id = (
+                st.session_state.hrp_leave_employee_id
+                if st.session_state.get("hrp_leave_employee_id") in leave_employee_ids
+                else (
+                    st.session_state.hrp_current_emp_id
+                    if st.session_state.get("hrp_current_emp_id") in leave_employee_ids
+                    else leave_employee_ids[0]
+                )
+            )
+            leave_current_index = leave_employee_ids.index(leave_current_id)
+
+            selected_leave_employee_id = st.selectbox(
+                "👤 Employee — Book Leave For",
+                options=leave_employee_ids,
+                index=leave_current_index,
+                format_func=lambda eid: (
+                    f"{_hrp_get_employee(eid)['name']} — {eid}"
+                    if _hrp_get_employee(eid) else eid
+                ),
+                key="hrp_leave_employee_selector",
+            )
+            st.session_state.hrp_leave_employee_id = selected_leave_employee_id
+            leave_employee = _hrp_get_employee(selected_leave_employee_id)
+
+            if leave_employee:
+                st.caption(
+                    f"Booking leave for **{leave_employee['name']}** "
+                    f"(Employee ID: **{leave_employee['emp_id']}**) · "
+                    f"{leave_employee.get('department', '')} · "
+                    f"{leave_employee.get('job_title', '')}"
+                )
+
             form_version = st.session_state.get("hrp_leave_form_version", 0)
             col1, col2 = st.columns(2)
             with col1:
@@ -1798,7 +1843,7 @@ def render_hr_portal(current_user_info=None):
                             st.warning(f"This leave has already been recorded as {duplicate['leave_id']}. The duplicate was not added.")
                         else:
                             new_record = {
-                                "leave_id": _hrp_create_leave_id(), "employee_id": emp["emp_id"],
+                                "leave_id": _hrp_create_leave_id(), "employee_id": leave_employee["emp_id"],
                                 "date_from": leave_start, "date_to": leave_end, "type": leave_type,
                                 "days": calculated_days, "status": "Approved", "request_source": request_source,
                                 "request_reference": request_reference.strip(), "notes": notes.strip(),
@@ -1809,7 +1854,7 @@ def render_hr_portal(current_user_info=None):
                             _hrp_save_leave_records()
                             log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
                             st.session_state.hrp_leave_form_version = form_version + 1
-                            st.success(f"Leave recorded successfully for {emp['name']}. {calculated_days:.1f} day(s) — Approved. The form has been cleared for the next entry.")
+                            st.success(f"Leave recorded successfully for {leave_employee['name']}. {calculated_days:.1f} day(s) — Approved. The form has been cleared for the next entry.")
                             st.rerun()
         else:
             st.info("You are viewing your leave information. Leave is managed by HR.")
