@@ -182,6 +182,12 @@ try:
         creds_dict, scopes=SCOPES
     )
     drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    # Validate access to the configured backup folder, including Shared Drives.
+    drive_service.files().get(
+        fileId=GOOGLE_DRIVE_FOLDER_ID,
+        fields="id,name,mimeType,parents",
+        supportsAllDrives=True,
+    ).execute()
 except Exception as e:
     drive_service = None
     print(f"Google Drive initialisation failed; local storage will be used: {e}")
@@ -192,9 +198,9 @@ def upload_to_google_drive(local_file_path, display_filename):
     def _do(file_id=None):
         media = MediaFileUpload(local_file_path, resumable=False)
         if file_id:
-            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents").execute()
+            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
         metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
-        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents").execute()
+        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
     try:
         cached_id = _DRIVE_ID_CACHE.get(cache_key)
         if cached_id:
@@ -216,7 +222,7 @@ def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
     try:
         safe_name = str(filename).replace("'", "\\'")
         q = (f"name = '{safe_name}' and '{parent_id}' in parents and trashed = false")
-        result = drive_service.files().list(q=q, spaces="drive", fields="files(id,name,modifiedTime)", orderBy="modifiedTime desc", pageSize=10).execute()
+        result = drive_service.files().list(q=q, spaces="drive", fields="files(id,name,modifiedTime,parents)", orderBy="modifiedTime desc", pageSize=100, includeItemsFromAllDrives=True, supportsAllDrives=True).execute()
         files = result.get("files", [])
         return files[0] if files else None
     except Exception as e:
@@ -230,9 +236,9 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
     def _do(file_id=None):
         media = MediaFileUpload(local_path, resumable=False)
         if file_id:
-            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name").execute()
+            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
         metadata = {"name": filename, "parents": [parent_id]}
-        return drive_service.files().create(body=metadata, media_body=media, fields="id,name").execute()
+        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
     try:
         cached_id = _DRIVE_ID_CACHE.get(cache_key)
         if cached_id:
@@ -254,7 +260,7 @@ def _drive_download_file(file_id, local_path):
         return False
     tmp_path = f"{local_path}.tmp"
     try:
-        request = drive_service.files().get_media(fileId=file_id)
+        request = drive_service.files().get_media(fileId=file_id, supportsAllDrives=True)
         with open(tmp_path, "wb") as fh:
             downloader = MediaIoBaseDownload(fh, request)
             done = False
@@ -340,37 +346,42 @@ def sync_backup_file_to_drive(local_path):
         return None
 
 def sync_saved_file_to_drive(local_path):
+    """Synchronise a saved workbook immediately to Google Drive.
+
+    Every call uploads/updates both the live workbook and its explicit backup.
+    No fingerprint cache is used to decide whether the backup should be updated;
+    this guarantees that each software save is reflected in Drive.
+    """
     if drive_service is None or not os.path.exists(local_path):
-        return
-    try:
-        st_info = os.stat(local_path)
-        fingerprint = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
-    except Exception:
-        return
+        if drive_service is None:
+            print(f"Google Drive sync skipped for {os.path.basename(local_path)}: Drive service is not connected.")
+        return False
     with _DRIVE_SYNC_LOCK:
         try:
-            # Never let the live-file fingerprint cache prevent a missing backup
-            # from being recreated. This is important after deployment/restart or
-            # if someone deleted a backup file directly in Google Drive.
+            live_id = _drive_upload_path(local_path, os.path.basename(local_path))
+            if not live_id:
+                print(f"Google Drive live sync failed for {os.path.basename(local_path)}")
+                return False
+
             backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
-            backup_exists = False
+            backup_id = None
             if backup_name:
-                backup_exists = _drive_find_file(backup_name) is not None
+                backup_id = _drive_upload_path(local_path, backup_name)
+                if not backup_id:
+                    print(f"Google Drive backup sync failed for {backup_name}")
+                    return False
 
-            live_already_synced = _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint
-
-            if not live_already_synced:
-                if _drive_upload_path(local_path) is not None:
-                    _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
-                else:
-                    return
-
-            # Always ensure the explicit backup exists and is current.
-            if backup_name and (not backup_exists or not live_already_synced):
-                sync_backup_file_to_drive(local_path)
+            try:
+                st_info = os.stat(local_path)
+                _DRIVE_SYNC_FINGERPRINTS[local_path] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
+            except Exception:
+                pass
+            return True
         except Exception as e:
-            print(f"Drive sync failed for {local_path}: {e}")
+            print(f"Google Drive sync failed for {os.path.basename(local_path)}: {e}")
             _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
+            return False
+
 
 def ensure_all_drive_backups():
     """Ensure every configured backup workbook exists in Google Drive.
