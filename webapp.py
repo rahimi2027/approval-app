@@ -144,7 +144,7 @@ USER_DB_COLUMNS = [
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
     "can_approve_requests", "can_access_inspector_bonus",
     "can_access_addition_deduction", "can_access_work_orders",
-    "can_access_wo_total", "can_access_hr_leave", "can_access_leave_request", "can_access_store_deduction",
+    "can_access_wo_total", "can_access_hr_leave", "can_access_leave_request", "can_access_employee_hr_reports", "employee_id", "can_access_store_deduction",
     "is_active"
 ]
 
@@ -383,7 +383,7 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
     return False
 
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
-DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Work Order Employee", "Work Order Manager", "Director", "Payroll", "Super Admin"]
+DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Employee", "Work Order Employee", "Work Order Manager", "Director", "Payroll", "Super Admin"]
 DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd", "Store", "HR"]
 EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Category Reason", "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name", "Status", "Director Comments", "Decision Date", "Decision By", "Submitted By", "PDF File Path", "Edited From ID", "Old Data"]
 WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours", "Amount (£)", "Manager", "Description", "Attachment Name", "Status", "Site Address", "Customer Job No.", "Manager Comments", "Manager Decision Date", "Manager Decision By", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date", "Payroll By", "PDF File Path"]
@@ -399,6 +399,7 @@ DEFAULT_USERS = [
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "can_access_store_deduction": True, "is_active": True}
 ]
 PERMISSION_DEFAULTS = {
+    "Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_employee_hr_reports": True, "can_access_store_deduction": False},
     "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False},
     "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False},
     "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
@@ -419,6 +420,7 @@ PERMISSION_LABELS = {
     "can_access_wo_total": "💷 Approved Work Order Total",
     "can_access_hr_leave": "🏢 HR Department (Employee Management + Leave Settlement)",
     "can_access_leave_request": "📝 Leave Request (Department Manager)",
+    "can_access_employee_hr_reports": "👤 Employee HR Reports (View Only)",
     "can_access_store_deduction": "📦 Store Department Deduction"
 }
 
@@ -889,6 +891,8 @@ def save_users(users_dict):
             "can_access_wo_total": u.get("can_access_wo_total", False),
             "can_access_hr_leave": u.get("can_access_hr_leave", False),
             "can_access_leave_request": u.get("can_access_leave_request", False),
+            "can_access_employee_hr_reports": u.get("can_access_employee_hr_reports", False),
+            "employee_id": u.get("employee_id", ""),
             "can_access_store_deduction": u.get("can_access_store_deduction", False),
             "is_active": u.get("is_active", True)
         })
@@ -935,6 +939,8 @@ def load_users(force=False):
                 "can_access_wo_total": _flag_or_default(r.get("can_access_wo_total", ""), user_role, "can_access_wo_total"),
                 "can_access_hr_leave": _flag_or_default(r.get("can_access_hr_leave", ""), user_role, "can_access_hr_leave"),
                 "can_access_leave_request": _flag_or_default(r.get("can_access_leave_request", ""), user_role, "can_access_leave_request"),
+                "can_access_employee_hr_reports": _flag_or_default(r.get("can_access_employee_hr_reports", ""), user_role, "can_access_employee_hr_reports"),
+                "employee_id": str(r.get("employee_id", "")).strip(),
                 "can_access_store_deduction": _flag_or_default(r.get("can_access_store_deduction", ""), user_role, "can_access_store_deduction"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
@@ -5970,15 +5976,19 @@ def user_management_panel():
             perm_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=defaults.get("can_access_wo_total", False))
             perm_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=defaults.get("can_access_hr_leave", False))
             perm_leave_req = st.checkbox(PERMISSION_LABELS["can_access_leave_request"], value=defaults.get("can_access_leave_request", False))
+            perm_employee_reports = st.checkbox(PERMISSION_LABELS["can_access_employee_hr_reports"], value=defaults.get("can_access_employee_hr_reports", False))
             perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
+            employee_options = [""] + [f"{e.get('emp_id')} — {e.get('name')}" for e in _hrp_load_employees()]
+            selected_employee_link = st.selectbox("👤 Link to Employee (required for Employee HR Reports)", employee_options)
+            new_employee_id = selected_employee_link.split(" — ", 1)[0].strip() if " — " in selected_employee_link else ""
             new_active = st.checkbox("✅ Account Active", value=True, help="Uncheck to block this user from logging in.")
             if st.form_submit_button("✅ Create User Account", type="primary"):
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_store_deduction": perm_store, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "is_active": new_active}
                     save_users(USERS)
                     log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active})
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
@@ -5995,6 +6005,11 @@ def user_management_panel():
                 upd_role = st.selectbox("🎖️ Role", ROLES, index=ROLES.index(curr["role"]) if curr["role"] in ROLES else 0)
                 dept_list = load_departments()
                 upd_dept = st.selectbox("🏢 Department", dept_list, index=dept_list.index(curr["dept"]) if curr["dept"] in dept_list else 0)
+                employee_options_edit = [""] + [f"{e.get('emp_id')} — {e.get('name')}" for e in _hrp_load_employees()]
+                curr_emp_id = str(curr.get("employee_id", "")).strip()
+                curr_emp_label = next((x for x in employee_options_edit if x.startswith(curr_emp_id + " — ")), "") if curr_emp_id else ""
+                edit_employee_link = st.selectbox("👤 Link to Employee (required for Employee HR Reports)", employee_options_edit, index=employee_options_edit.index(curr_emp_label) if curr_emp_label in employee_options_edit else 0)
+                edit_employee_id = edit_employee_link.split(" — ", 1)[0].strip() if " — " in edit_employee_link else ""
                 st.markdown("### ✅ Update Permissions")
                 curr_perm_view = bool(curr.get("can_view_all_dept", False))
                 curr_perm_pdf = bool(curr.get("can_generate_pdf", False))
@@ -6019,6 +6034,7 @@ def user_management_panel():
                 edit_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=curr_perm_wo_total)
                 edit_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=curr_perm_hr)
                 edit_leave_req = st.checkbox(PERMISSION_LABELS["can_access_leave_request"], value=curr_perm_leave_req)
+                edit_employee_reports = st.checkbox(PERMISSION_LABELS["can_access_employee_hr_reports"], value=bool(curr.get("can_access_employee_hr_reports", False)))
                 edit_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=curr_perm_store)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
@@ -6026,7 +6042,7 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_store_deduction": edit_store, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -6043,6 +6059,8 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_wo_total"] = edit_wo_total
                         USERS[edit_user_sel]["can_access_hr_leave"] = edit_hr
                         USERS[edit_user_sel]["can_access_leave_request"] = edit_leave_req
+                        USERS[edit_user_sel]["can_access_employee_hr_reports"] = edit_employee_reports
+                        USERS[edit_user_sel]["employee_id"] = edit_employee_id
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["is_active"] = edit_active
                     save_users(USERS)
@@ -6105,10 +6123,126 @@ CATEGORIES = load_categories()
 
 st.divider()
 
+
+# ============================================================
+# 👤 EMPLOYEE HR REPORTS — VIEW ONLY
+# ============================================================
+def render_employee_hr_reports(current_user_info):
+    """Read-only HR dashboard restricted to the Employee ID linked to the login."""
+    linked_id = str((current_user_info or {}).get("employee_id", "")).strip()
+    if not linked_id:
+        st.subheader("👤 My HR Reports")
+        st.error("❌ Your account is not linked to an Employee ID. Please contact Super Admin.")
+        return
+
+    employees = _hrp_load_employees()
+    leave_records = _hrp_load_leave_records()
+    employee = next((e for e in employees if str(e.get("emp_id", "")).strip().casefold() == linked_id.casefold()), None)
+    if not employee:
+        st.subheader("👤 My HR Reports")
+        st.error(f"❌ Employee ID **{linked_id}** could not be found in the HR employee records.")
+        return
+
+    st.subheader("👤 My HR Reports")
+    st.caption("View only — you can see your own employee details, holiday position, absence records and calendar.")
+
+    entitlement_result = _hrp_calculate_holiday_entitlement(employee)
+    entitlement = float(entitlement_result[0]) if isinstance(entitlement_result, tuple) else float(entitlement_result)
+    approved_holiday = sum(float(r.get("days", 0) or 0) for r in leave_records
+                           if str(r.get("employee_id", "")).strip().casefold() == linked_id.casefold()
+                           and str(r.get("status", "")).strip().casefold() == "approved"
+                           and r.get("type") in HR_PORTAL_HOLIDAY_LEAVE_TYPES)
+    try:
+        balance = float(entitlement.get("entitlement", 0) if isinstance(entitlement, dict) else entitlement) - approved_holiday
+    except Exception:
+        balance = 0.0
+
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Holiday Entitlement", f"{entitlement:g} days")
+    d2.metric("Holiday Used", f"{approved_holiday:g} days")
+    d3.metric("Holiday Balance", f"{balance:g} days")
+    d4.metric("Department", employee.get("department", ""))
+
+    st.markdown("### 📋 My Employee Details")
+    details = pd.DataFrame([{
+        "Employee ID": employee.get("emp_id", ""), "Full Name": employee.get("name", ""),
+        "Department": employee.get("department", ""), "Position": employee.get("job_title", ""),
+        "Start Date": employee.get("start_date", ""), "Agreement": employee.get("agreement_type", ""),
+        "Status": employee.get("status", ""), "Working Pattern": employee.get("working_pattern", ""),
+        "Days Worked / Week": employee.get("days_per_week", 5),
+    }])
+    st.dataframe(details, use_container_width=True, hide_index=True)
+
+    st.markdown("### 📅 My Holiday & Absence Calendar")
+    year = st.number_input("Year", min_value=2020, max_value=2100, value=date.today().year, step=1, key="employee_hr_report_year")
+    first = date(int(year), 1, 1); last = date(int(year), 12, 31)
+    dates = []
+    cur = first
+    while cur <= last:
+        dates.append(cur); cur += timedelta(days=1)
+    own_records = [r for r in leave_records if str(r.get("employee_id", "")).strip().casefold() == linked_id.casefold()
+                   and str(r.get("status", "")).strip().casefold() != "rejected"]
+    lookup = {}
+    for r in own_records:
+        try:
+            a = r.get("date_from"); b = r.get("date_to")
+            if isinstance(a, str): a = pd.to_datetime(a).date()
+            if isinstance(b, str): b = pd.to_datetime(b).date()
+            code = _hrp_calendar_leave_code(r.get("type", ""), r.get("status", "Approved"))
+        except Exception:
+            continue
+        cur = a
+        while cur <= b:
+            lookup[cur] = code
+            cur += timedelta(days=1)
+    try:
+        emp_start = employee.get("start_date") if isinstance(employee.get("start_date"), date) else pd.to_datetime(employee.get("start_date")).date()
+    except Exception:
+        emp_start = None
+    row = {}
+    for d in dates:
+        col = d.strftime("%d %b")
+        if emp_start and d < emp_start:
+            row[col] = "NA"
+        else:
+            nonwork_code, _ = _hrp_non_working_reason(d)
+            row[col] = lookup.get(d, nonwork_code or "")
+    cal_df = pd.DataFrame([row])
+    def style_my_calendar(dataframe):
+        styles = pd.DataFrame("", index=dataframe.index, columns=dataframe.columns)
+        for c in dataframe.columns:
+            code = str(dataframe.at[0, c] or "").rstrip("*")
+            bg = HRP_CALENDAR_COLOURS.get(code)
+            if bg:
+                styles.at[0, c] = f"background-color: {bg}; color: #000000; font-weight: 800; text-align: center;"
+        return styles
+    st.dataframe(cal_df.style.apply(style_my_calendar, axis=None), use_container_width=True, hide_index=True)
+    st.caption("H Holiday · HD Half Day · BH Bank Holiday · UH Unpaid Holiday · C College · NA Closed / Not yet started · T Training · M Maternity · UA Unpaid Absence · S Sick · FE Family/Emergency · P Paternity · O Other · * Pending")
+
+    st.markdown("### 📝 My Leave & Absence Records")
+    visible = []
+    for r in sorted(own_records, key=lambda x: x.get("date_from", date.min), reverse=True):
+        visible.append({
+            "Leave ID": r.get("leave_id", ""), "Date From": r.get("date_from", ""), "Date To": r.get("date_to", ""),
+            "Leave Type": r.get("type", ""), "Days": r.get("days", 0), "Status": r.get("status", ""),
+            "Request Source": r.get("request_source", ""), "Notes": r.get("notes", ""),
+        })
+    if visible:
+        st.dataframe(pd.DataFrame(visible), use_container_width=True, hide_index=True)
+    else:
+        st.info("No holiday or absence records have been recorded for you yet.")
+
+if user_info.get("can_access_employee_hr_reports", False):
+    render_employee_hr_reports(user_info)
+
 # ============================================================
 # 📋 ROLE-BASED PORTALS
 # ============================================================
-if role == "Work Order Employee":
+if role == "Employee":
+    # Employee accounts are view-only HR report accounts.
+    pass
+
+elif role == "Work Order Employee":
     render_work_order_employee_portal(full_name, dept)
 
 elif role == "Payroll":
