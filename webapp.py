@@ -1485,7 +1485,14 @@ def _hrp_get_employee_entitlement(employee):
     return calculated, note, service_years, calculated
 
 def _hrp_get_employee_leave(employee_id):
-    return [r for r in st.session_state.hrp_leave_records if r["employee_id"] == employee_id]
+    # Employee HR Reports can be opened before the HR Portal page has
+    # initialised its session-state cache. Always fall back to the persistent
+    # workbook so a fresh/old Streamlit session cannot raise KeyError.
+    records = st.session_state.get("hrp_leave_records")
+    if records is None:
+        records = _hrp_load_leave_records()
+        st.session_state.hrp_leave_records = records
+    return [r for r in records if str(r.get("employee_id", "")).strip().casefold() == str(employee_id).strip().casefold()]
 
 def _hrp_get_company_closure_holiday_days(employee):
     """Return company-closure days that consume this employee's annual holiday allowance.
@@ -1513,12 +1520,16 @@ def _hrp_get_company_closure_holiday_days(employee):
 
 def _hrp_get_approved_holiday_days(employee_id):
     employee = _hrp_get_employee(employee_id)
+    records = st.session_state.get("hrp_leave_records")
+    if records is None:
+        records = _hrp_load_leave_records()
+        st.session_state.hrp_leave_records = records
     recorded_days = sum(
         float(r.get("days", 0) or 0)
-        for r in st.session_state.hrp_leave_records
-        if r["employee_id"] == employee_id
-        and r["status"] == "Approved"
-        and r["type"] in HR_PORTAL_HOLIDAY_LEAVE_TYPES
+        for r in records
+        if str(r.get("employee_id", "")).strip().casefold() == str(employee_id).strip().casefold()
+        and str(r.get("status", "Approved")).strip().casefold() == "approved"
+        and r.get("type") in HR_PORTAL_HOLIDAY_LEAVE_TYPES
     )
     closure_days = _hrp_get_company_closure_holiday_days(employee) if employee else 0.0
     return round(recorded_days + closure_days, 1)
@@ -6379,6 +6390,10 @@ st.divider()
 # ============================================================
 def render_employee_hr_reports(current_user_info):
     """Read-only HR dashboard restricted to the Employee ID linked to the login."""
+    # Initialise the HR portal data cache before using shared HR helper
+    # functions. This is essential when an employee opens My HR Reports
+    # directly after login, without first visiting the HR Portal.
+    _hr_portal_init()
     linked_id = str((current_user_info or {}).get("employee_id", "")).strip()
     if not linked_id:
         st.subheader("👤 My HR Reports")
