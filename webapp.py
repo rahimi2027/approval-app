@@ -348,15 +348,45 @@ def sync_saved_file_to_drive(local_path):
     except Exception:
         return
     with _DRIVE_SYNC_LOCK:
-        if _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint:
-            return
         try:
-            if _drive_upload_path(local_path) is not None:
-                _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
+            # Never let the live-file fingerprint cache prevent a missing backup
+            # from being recreated. This is important after deployment/restart or
+            # if someone deleted a backup file directly in Google Drive.
+            backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
+            backup_exists = False
+            if backup_name:
+                backup_exists = _drive_find_file(backup_name) is not None
+
+            live_already_synced = _DRIVE_SYNC_FINGERPRINTS.get(local_path) == fingerprint
+
+            if not live_already_synced:
+                if _drive_upload_path(local_path) is not None:
+                    _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
+                else:
+                    return
+
+            # Always ensure the explicit backup exists and is current.
+            if backup_name and (not backup_exists or not live_already_synced):
                 sync_backup_file_to_drive(local_path)
         except Exception as e:
             print(f"Drive sync failed for {local_path}: {e}")
             _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
+
+def ensure_all_drive_backups():
+    """Ensure every configured backup workbook exists in Google Drive.
+
+    This deliberately checks the Drive folder even when the local workbook has
+    not changed, so a missing/deleted backup is recreated automatically.
+    """
+    if drive_service is None:
+        return
+    with _DRIVE_SYNC_LOCK:
+        for local_path, backup_name in DRIVE_BACKUP_FILENAMES.items():
+            if os.path.exists(local_path):
+                try:
+                    sync_backup_file_to_drive(local_path)
+                except Exception as e:
+                    print(f"Drive backup check failed for {backup_name}: {e}")
 
 def _upload_to_drive_bg(local_path, filename):
     if drive_service is None or not os.path.exists(local_path):
@@ -389,6 +419,9 @@ def initialise_drive_storage():
             sync_persistent_file(path, columns)
             # Create/update the explicit backup copy as well.
             sync_backup_file_to_drive(path)
+        # Final explicit pass: recreate any missing backup files, even if the
+        # corresponding live workbook has not changed.
+        ensure_all_drive_backups()
         st.session_state["drive_storage_initialised"] = True
 
 def get_onedrive_token():
