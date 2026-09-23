@@ -1168,7 +1168,8 @@ def _hrp_get_working_days(start_date, end_date):
     total = 0
     current = start_date
     while current <= end_date:
-        if current.weekday() < 5: total += 1
+        if current.weekday() < 5 and current not in _hrp_non_working_dates(current.year):
+            total += 1
         current += timedelta(days=1)
     return total
 
@@ -1293,6 +1294,73 @@ def _hrp_create_leave_id():
 # ════════════════════════════════════════════════════════════
 # 📅 HR HOLIDAY CALENDAR — Excel-style yearly employee calendar
 # ════════════════════════════════════════════════════════════
+# UK / ACoole non-working dates used by the holiday calendar and leave validation.
+# Bank holidays are for England & Wales. Acoole also closes on 29-31 December
+# (shown as H in the supplied company calendar). These dates are blocked from
+# leave booking and do not consume an employee's annual-leave allowance.
+HRP_BANK_HOLIDAYS = {
+    2026: {
+        date(2026, 1, 1): "New Year’s Day",
+        date(2026, 4, 3): "Good Friday",
+        date(2026, 4, 6): "Easter Monday",
+        date(2026, 5, 4): "Early May bank holiday",
+        date(2026, 5, 25): "Spring bank holiday",
+        date(2026, 8, 31): "Summer bank holiday",
+        date(2026, 12, 25): "Christmas Day",
+        date(2026, 12, 28): "Boxing Day (substitute day)",
+    },
+    2027: {
+        date(2027, 1, 1): "New Year’s Day",
+        date(2027, 3, 26): "Good Friday",
+        date(2027, 3, 29): "Easter Monday",
+        date(2027, 5, 3): "Early May bank holiday",
+        date(2027, 5, 31): "Spring bank holiday",
+        date(2027, 8, 30): "Summer bank holiday",
+        date(2027, 12, 27): "Christmas Day (substitute day)",
+        date(2027, 12, 28): "Boxing Day (substitute day)",
+    },
+    2028: {
+        date(2028, 1, 3): "New Year’s Day (substitute day)",
+        date(2028, 4, 14): "Good Friday",
+        date(2028, 4, 17): "Easter Monday",
+        date(2028, 5, 1): "Early May bank holiday",
+        date(2028, 5, 29): "Spring bank holiday",
+        date(2028, 8, 28): "Summer bank holiday",
+        date(2028, 12, 25): "Christmas Day",
+        date(2028, 12, 26): "Boxing Day",
+    },
+}
+
+def _hrp_company_closure_dates(year):
+    # The supplied Acoole calendar shows 29, 30 and 31 December as H.
+    return {date(year, 12, day) for day in (29, 30, 31)}
+
+def _hrp_non_working_dates(year):
+    dates = set(HRP_BANK_HOLIDAYS.get(int(year), {}).keys())
+    dates.update(_hrp_company_closure_dates(int(year)))
+    return dates
+
+def _hrp_non_working_reason(day):
+    if day in HRP_BANK_HOLIDAYS.get(day.year, {}):
+        return "BH", HRP_BANK_HOLIDAYS[day.year][day]
+    if day in _hrp_company_closure_dates(day.year):
+        return "H", "Company Christmas closure"
+    if day.weekday() >= 5:
+        return "NA", "Weekend / non-working day"
+    return "", ""
+
+def _hrp_blocked_leave_dates(start_date, end_date):
+    if end_date < start_date:
+        return []
+    blocked = []
+    current = start_date
+    while current <= end_date:
+        if current in _hrp_non_working_dates(current.year):
+            code, reason = _hrp_non_working_reason(current)
+            blocked.append((current, code, reason))
+        current += timedelta(days=1)
+    return blocked
+
 HRP_CALENDAR_CODES = {
     "Full Day Holiday": "H",
     "Half Day Holiday": "HD",
@@ -1360,6 +1428,7 @@ def _hrp_render_holiday_calendar():
     # Build one lookup per employee/date. If more than one record falls on the
     # same date, approved leave takes precedence; otherwise concatenate codes.
     leave_lookup = {}
+    non_working_dates = _hrp_non_working_dates(int(calendar_year))
     for record in leave_records:
         status = str(record.get("status", "Approved")).strip()
         if status.casefold() == "rejected":
@@ -1385,6 +1454,9 @@ def _hrp_render_holiday_calendar():
         while current <= end:
             if current.year == int(calendar_year) and current.weekday() < 5:
                 key = (employee_id, current)
+                if current in non_working_dates:
+                    current += timedelta(days=1)
+                    continue
                 existing = leave_lookup.get(key, "")
                 if existing == "":
                     leave_lookup[key] = code
@@ -1404,6 +1476,14 @@ def _hrp_render_holiday_calendar():
         dates.append(current)
         current += timedelta(days=1)
 
+    non_working_dates = _hrp_non_working_dates(int(calendar_year))
+    for employee in filtered_employees:
+        employee_id = str(employee.get("emp_id", "")).strip()
+        for d in dates:
+            code, _reason = _hrp_non_working_reason(d)
+            if code:
+                leave_lookup[(employee_id, d)] = code
+
     columns = ["Employee Name", "Department", "Start Date"] + [d.strftime("%d %b") for d in dates]
     rows = []
     for employee in filtered_employees:
@@ -1413,8 +1493,8 @@ def _hrp_render_holiday_calendar():
             "Start Date": employee.get("start_date", ""),
         }
         for d in dates:
-            # Keep weekends visually identifiable, while leave is still shown
-            # only on working days just like the original workbook.
+            # Fixed non-working dates are displayed exactly like the company
+            # calendar: BH for bank holidays, H for company closure, NA for weekends.
             row[d.strftime("%d %b")] = leave_lookup.get((employee.get("emp_id", ""), d), "")
         rows.append(row)
 
@@ -1431,19 +1511,27 @@ def _hrp_render_holiday_calendar():
         for row_idx in dataframe.index:
             for d, col in zip(dates, date_columns):
                 value = str(dataframe.at[row_idx, col] or "").strip()
-                if d.weekday() >= 5:
-                    styles.at[row_idx, col] = "background-color: #eeeeee; color: #777777;"
-                if value:
-                    if value.endswith("*"):
-                        styles.at[row_idx, col] = "background-color: #fff2cc; color: #7f6000; font-weight: 700; text-align: center;"
-                    else:
-                        styles.at[row_idx, col] = "background-color: #c6efce; color: #006100; font-weight: 700; text-align: center;"
+                if value == "BH":
+                    styles.at[row_idx, col] = "background-color: #f4cccc; color: #990000; font-weight: 800; text-align: center;"
+                elif value == "H":
+                    styles.at[row_idx, col] = "background-color: #fce5cd; color: #783f04; font-weight: 800; text-align: center;"
+                elif value == "NA":
+                    styles.at[row_idx, col] = "background-color: #eeeeee; color: #777777; font-weight: 700; text-align: center;"
+                elif value.endswith("*"):
+                    styles.at[row_idx, col] = "background-color: #fff2cc; color: #7f6000; font-weight: 700; text-align: center;"
+                elif value:
+                    styles.at[row_idx, col] = "background-color: #c6efce; color: #006100; font-weight: 700; text-align: center;"
         return styles
 
     st.markdown(
-        "**Legend:** H = Holiday · HD = Half Day · S = Sick · FE = Family/Emergency · "
-        "UH = Unpaid Holiday · UA = Unpaid Absence · M = Maternity · P = Paternity · O = Other Absence · * = Pending approval"
+        "**Legend:** BH = Bank Holiday (blocked) · H = Company Closure (blocked) · NA = Weekend / non-working · "
+        "HD = Half Day · S = Sick · FE = Family/Emergency · UH = Unpaid Holiday · UA = Unpaid Absence · "
+        "M = Maternity · P = Paternity · O = Other Absence · * = Pending approval"
     )
+    bank_days = HRP_BANK_HOLIDAYS.get(int(calendar_year), {})
+    if bank_days:
+        st.info("**Bank holidays / blocked dates:** " + ", ".join(f"{d.strftime('%d %b')} — {name}" for d, name in sorted(bank_days.items())))
+    st.warning("**Company closure:** 29, 30 and 31 December are blocked as company holidays and do not consume annual leave.")
     st.caption(f"{len(filtered_employees)} employees · {len(dates)} calendar days · {calendar_year}")
 
     if df.empty:
@@ -2097,7 +2185,11 @@ def render_hr_portal(current_user_info=None):
                 st.metric("Calculated Leave Days", f"{calculated_days:.1f}")
                 st.caption("Weekends are excluded from the calculation.")
                 if st.button("📤 Record Leave — Automatically Approved", type="primary", key=f"hrp_record_leave_{form_version}"):
-                    if calculated_days <= 0:
+                    blocked_dates = _hrp_blocked_leave_dates(leave_start, leave_end)
+                    if blocked_dates:
+                        details = ", ".join(f"{d.strftime('%d/%m/%Y')} ({code} — {reason})" for d, code, reason in blocked_dates)
+                        st.error(f"Leave cannot be booked on company non-working dates: {details}")
+                    elif calculated_days <= 0:
                         st.error("The selected dates do not contain any working days.")
                     else:
                         duplicate = next((r for r in st.session_state.hrp_leave_records
@@ -2392,6 +2484,11 @@ def render_department_manager_leave_request(current_user_info=None):
     if submitted:
         if leave_end < leave_start:
             st.error("End date cannot be before the start date.")
+            return
+        blocked_dates = _hrp_blocked_leave_dates(leave_start, leave_end)
+        if blocked_dates:
+            details = ", ".join(f"{d.strftime('%d/%m/%Y')} ({code} — {reason})" for d, code, reason in blocked_dates)
+            st.error(f"Leave request cannot include company non-working dates: {details}")
             return
         days = _hrp_calculate_leave_days(leave_type, leave_start, leave_end, half_day)
         if days <= 0:
