@@ -1427,6 +1427,7 @@ HRP_CALENDAR_COLOURS = {
     "T": "#FFFF00",
     "M": "#B8D3EF",
     "UA": "#00FFFF",
+    "S": "#AFABAB",
 }
 
 
@@ -1587,11 +1588,11 @@ def _hrp_render_holiday_calendar():
                 base_code = base_codes[0] if base_codes else ""
                 bg = HRP_CALENDAR_COLOURS.get(base_code)
                 if bg:
-                    styles.at[row_idx, col] = f"background-color: {bg}; color: #000000; font-weight: 800; text-align: center;"
+                    styles.at[row_idx, col] = f"background-color: {bg}; color: #000000; font-weight: 800; text-align: center; vertical-align: middle;"
                 elif value.endswith("*"):
-                    styles.at[row_idx, col] = "font-weight: 700; text-align: center;"
+                    styles.at[row_idx, col] = "font-weight: 700; text-align: center; vertical-align: middle;"
                 elif value:
-                    styles.at[row_idx, col] = "font-weight: 700; text-align: center;"
+                    styles.at[row_idx, col] = "font-weight: 700; text-align: center; vertical-align: middle;"
         return styles
 
     st.markdown(
@@ -6258,7 +6259,7 @@ def render_employee_hr_reports(current_user_info):
             code = str(dataframe.at[0, c] or "").rstrip("*")
             bg = HRP_CALENDAR_COLOURS.get(code)
             if bg:
-                styles.at[0, c] = f"background-color: {bg}; color: #000000; font-weight: 800; text-align: center;"
+                styles.at[0, c] = f"background-color: {bg}; color: #000000; font-weight: 800; text-align: center; vertical-align: middle;"
         return styles
     st.dataframe(cal_df.style.apply(style_my_calendar, axis=None), use_container_width=True, hide_index=True)
     st.caption("H Holiday · HD Half Day · BH Bank Holiday · UH Unpaid Holiday · C College · NA Closed / Not yet started · T Training · M Maternity · UA Unpaid Absence · S Sick · FE Family/Emergency · P Paternity · O Other · * Pending")
