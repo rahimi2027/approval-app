@@ -308,6 +308,37 @@ def sync_persistent_file(local_path, columns=None):
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
             _drive_upload_path(local_path, filename)
 
+# Keep a clearly named backup copy in Google Drive for important persistent workbooks.
+# The live workbook keeps its normal filename; the backup copy is updated in place so
+# there is always an obvious backup file in Drive as well.
+DRIVE_BACKUP_FILENAMES = {
+    EXCEL_PATH: "backup_requests.xlsx",
+    USER_DB_PATH: "backup_users.xlsx",
+    SETTINGS_PATH: "backup_settings.xlsx",
+    AUDIT_LOG_PATH: "backup_audit_log.xlsx",
+    WORK_ORDERS_PATH: "backup_work_orders.xlsx",
+    INSPECTOR_BONUS_PATH: "backup_inspector_bonus.xlsx",
+    HR_LEAVE_PATH: "backup_hr_leave_requests.xlsx",
+    HR_DAILY_RATES_PATH: "backup_hr_daily_rates.xlsx",
+    STORE_DEDUCTION_PATH: "backup_store_transactions.xlsx",
+    STORE_ITEMS_PATH: "backup_store_items.xlsx",
+    HR_EMPLOYEES_PATH: "backup_hr_employee_records.xlsx",
+    HR_PORTAL_LEAVE_PATH: "backup_hr_portal_leave_records.xlsx",
+}
+
+def sync_backup_file_to_drive(local_path):
+    """Upload/update a clearly named backup copy in the configured Google Drive folder."""
+    if drive_service is None or not os.path.exists(local_path):
+        return None
+    backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
+    if not backup_name:
+        return None
+    try:
+        return _drive_upload_path(local_path, backup_name)
+    except Exception as e:
+        print(f"Drive backup sync failed for {backup_name}: {e}")
+        return None
+
 def sync_saved_file_to_drive(local_path):
     if drive_service is None or not os.path.exists(local_path):
         return
@@ -322,6 +353,7 @@ def sync_saved_file_to_drive(local_path):
         try:
             if _drive_upload_path(local_path) is not None:
                 _DRIVE_SYNC_FINGERPRINTS[local_path] = fingerprint
+                sync_backup_file_to_drive(local_path)
         except Exception as e:
             print(f"Drive sync failed for {local_path}: {e}")
             _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
@@ -355,6 +387,8 @@ def initialise_drive_storage():
         ]
         for path, columns in targets:
             sync_persistent_file(path, columns)
+            # Create/update the explicit backup copy as well.
+            sync_backup_file_to_drive(path)
         st.session_state["drive_storage_initialised"] = True
 
 def get_onedrive_token():
@@ -6918,6 +6952,8 @@ elif role == "Super Admin":
             ("📥 HR Daily Rates", HR_DAILY_RATES_PATH, "hr_daily_rates", "backup_hr_rates"),
             ("📥 Store Transactions", STORE_DEDUCTION_PATH, "store_transactions", "backup_store_transactions"),
             ("📥 Store Items", STORE_ITEMS_PATH, "store_items", "backup_store_items"),
+            ("📥 HR Employee Records", HR_EMPLOYEES_PATH, "hr_employee_records", "backup_hr_employee_records"),
+            ("📥 HR Portal Leave Records", HR_PORTAL_LEAVE_PATH, "hr_portal_leave_records", "backup_hr_portal_leave_records"),
             ("📥 Audit Log", AUDIT_LOG_PATH, "audit_log", "backup_audit_log"),
         ]
         backup_cols = st.columns(3)
