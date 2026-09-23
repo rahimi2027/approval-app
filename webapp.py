@@ -6203,7 +6203,14 @@ def render_employee_hr_reports(current_user_info):
             # matching the HR Holiday Calendar and the 3-day leave calculation.
             if cur.weekday() < 5 and cur not in _hrp_non_working_dates(cur.year):
                 existing = lookup.get(cur, "")
-                if not existing:
+                # One calendar cell represents one absence/leave status.
+                # Sick leave must display as S (not H/S), with its own colour.
+                # If sick leave overlaps another record, S takes precedence.
+                if code.rstrip("*") == "S":
+                    lookup[cur] = code
+                elif existing.rstrip("*") == "S":
+                    pass
+                elif not existing:
                     lookup[cur] = code
                 elif existing.endswith("*") and not code.endswith("*"):
                     lookup[cur] = code
@@ -6231,7 +6238,16 @@ def render_employee_hr_reports(current_user_info):
             if bg:
                 styles.at[0, c] = f"background-color: {bg}; color: #000000; font-weight: 800; text-align: center; vertical-align: middle;"
         return styles
-    st.dataframe(cal_df.style.apply(style_my_calendar, axis=None), use_container_width=True, hide_index=True)
+    calendar_style = (
+        cal_df.style
+        .apply(style_my_calendar, axis=None)
+        .set_properties(**{"text-align": "center", "vertical-align": "middle"})
+        .set_table_styles([
+            {"selector": "th", "props": [("text-align", "center"), ("vertical-align", "middle")]},
+            {"selector": "td", "props": [("text-align", "center"), ("vertical-align", "middle")]},
+        ])
+    )
+    st.dataframe(calendar_style, use_container_width=True, hide_index=True)
     st.caption("H Holiday · HD Half Day · BH Bank Holiday · UH Unpaid Holiday · C College · NA Closed / Not yet started · T Training · M Maternity · UA Unpaid Absence · S Sick · FE Family/Emergency · P Paternity · O Other · * Pending")
 
     st.markdown("### 📝 My Leave & Absence Records")
