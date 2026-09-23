@@ -1629,38 +1629,8 @@ def _hrp_render_holiday_calendar():
             column_config=column_config,
         )
 
-        # Optional detail list below the calendar for quick checking of all
-        # booked records in the selected year.
-        year_records = []
-        employee_map = {e.get("emp_id", ""): e for e in filtered_employees}
-        for r in leave_records:
-            if str(r.get("status", "Approved")).casefold() == "rejected":
-                continue
-            try:
-                d_from = r.get("date_from")
-                d_to = r.get("date_to")
-                if isinstance(d_from, str): d_from = pd.to_datetime(d_from).date()
-                if isinstance(d_to, str): d_to = pd.to_datetime(d_to).date()
-            except Exception:
-                continue
-            if d_from.year != int(calendar_year) and d_to.year != int(calendar_year):
-                continue
-            emp = employee_map.get(r.get("employee_id"))
-            if not emp:
-                continue
-            year_records.append({
-                "Employee": emp.get("name", ""),
-                "Department": emp.get("department", ""),
-                "Date From": d_from,
-                "Date To": d_to,
-                "Leave Type": r.get("type", ""),
-                "Days": r.get("days", 0),
-                "Status": r.get("status", ""),
-            })
-        if year_records:
-            st.divider()
-            st.subheader(f"Leave Records — {calendar_year}")
-            st.dataframe(pd.DataFrame(year_records), use_container_width=True, hide_index=True)
+        # Leave Records are intentionally not shown below the calendar.
+        # The detailed record list is available in the Leave History tab.
 
 
 def render_hr_portal(current_user_info=None):
