@@ -6360,8 +6360,11 @@ def render_employee_hr_reports(current_user_info):
     st.subheader("👤 My HR Reports")
     st.caption("View only — you can see your own employee details, holiday position, absence records and calendar.")
 
-    entitlement_result = _hrp_calculate_holiday_entitlement(employee)
+    entitlement_result = _hrp_get_employee_entitlement(employee)
+    # My HR Reports must use the HR-adjusted entitlement saved against the employee,
+    # not only the system-calculated entitlement.
     entitlement = float(entitlement_result[0]) if isinstance(entitlement_result, tuple) else float(entitlement_result)
+    entitlement_note = str(entitlement_result[1]) if isinstance(entitlement_result, tuple) and len(entitlement_result) > 1 else ""
     approved_holiday = sum(float(r.get("days", 0) or 0) for r in leave_records
                            if str(r.get("employee_id", "")).strip().casefold() == linked_id.casefold()
                            and str(r.get("status", "")).strip().casefold() == "approved"
@@ -6376,6 +6379,11 @@ def render_employee_hr_reports(current_user_info):
     d2.metric("Holiday Used", f"{approved_holiday:g} days")
     d3.metric("Holiday Balance", f"{balance:g} days")
     d4.metric("Department", employee.get("department", ""))
+    if entitlement_note == "HR-adjusted entitlement":
+        st.caption(f"⚙️ HR-adjusted holiday entitlement: **{entitlement:g} days**")
+        adjustment_note = str(employee.get("adjustment_note", "")).strip()
+        if adjustment_note:
+            st.caption(f"HR adjustment reason: {adjustment_note}")
 
     st.markdown("### 📋 My Employee Details")
     details = pd.DataFrame([{
