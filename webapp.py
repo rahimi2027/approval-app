@@ -1370,13 +1370,13 @@ def render_hr_portal(current_user_info=None):
             st.subheader("🧑‍💼 HR Management")
             if is_hr_manager:
                 st.caption("Employee Overview, Leave Approvals, HR Leave Settlement and Employee Directory")
-                employee_overview_tab, hr_approval_tab, hr_settlement_tab, hr_employee_tab = st.tabs([
-                    "📊 Employee Overview", "✅ Leave Approvals", "💷 HR Leave Settlement", "👤 Employee Directory"
+                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_settlement_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "💷 HR Leave Settlement"
                 ])
             else:
                 st.caption("Employee Overview, HR Leave Settlement and Employee Directory")
-                employee_overview_tab, hr_settlement_tab, hr_employee_tab = st.tabs([
-                    "📊 Employee Overview", "💷 HR Leave Settlement", "👤 Employee Directory"
+                hr_employee_tab, employee_overview_tab, hr_settlement_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "💷 HR Leave Settlement"
                 ])
 
             with employee_overview_tab:
