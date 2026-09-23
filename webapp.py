@@ -977,7 +977,7 @@ def load_users(force=False):
 # ════════════════════════════════════════════════════════════
 HR_PORTAL_DEPARTMENTS = ["HR", "Operations", "Sales", "Admin", "Finance"]
 HR_PORTAL_AGREEMENT_TYPES = ["Permanent", "Fixed Term", "Part-Time", "Temporary", "Apprentice", "Contractor"]
-HR_PORTAL_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday", "Sick Leave", "Family / Emergency Leave", "Unpaid Holiday", "Unpaid Absence", "Maternity Leave", "Paternity Leave", "Other Absence"]
+HR_PORTAL_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday", "Sick Leave", "Family / Emergency Leave", "Unpaid Holiday", "Unpaid Absence", "Maternity Leave", "Paternity Leave", "Other Absence", "College (Apprenticeship)", "Training Course"]
 HR_PORTAL_HOLIDAY_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday"]
 
 def _hrp_init_storage():
@@ -1364,6 +1364,7 @@ def _hrp_blocked_leave_dates(start_date, end_date):
 HRP_CALENDAR_CODES = {
     "Full Day Holiday": "H",
     "Half Day Holiday": "HD",
+    "Bank Holiday": "BH",
     "Sick Leave": "S",
     "Family / Emergency Leave": "FE",
     "Unpaid Holiday": "UH",
@@ -1371,6 +1372,21 @@ HRP_CALENDAR_CODES = {
     "Maternity Leave": "M",
     "Paternity Leave": "P",
     "Other Absence": "O",
+    "College (Apprenticeship)": "C",
+    "Training Course": "T",
+}
+
+# Exact colours requested for the Excel-style calendar.
+HRP_CALENDAR_COLOURS = {
+    "H": "#92D050",
+    "HD": "#FFC000",
+    "BH": "#E76153",
+    "UH": "#22989E",
+    "C": "#D86DCD",
+    "NA": "#B793FF",
+    "T": "#FFFF00",
+    "M": "#B8D3EF",
+    "UA": "#00FFFF",
 }
 
 
@@ -1492,10 +1508,18 @@ def _hrp_render_holiday_calendar():
             "Department": employee.get("department", ""),
             "Start Date": employee.get("start_date", ""),
         }
+        raw_start = employee.get("start_date", "")
+        try:
+            employee_start = raw_start if isinstance(raw_start, date) else pd.to_datetime(raw_start).date()
+        except Exception:
+            employee_start = None
         for d in dates:
-            # Fixed non-working dates are displayed exactly like the company
-            # calendar: BH for bank holidays, H for company closure, NA for weekends.
-            row[d.strftime("%d %b")] = leave_lookup.get((employee.get("emp_id", ""), d), "")
+            # Before an employee's start date, always show NA (not yet started).
+            # This takes precedence over weekends, bank holidays and company closure.
+            if employee_start and d < employee_start:
+                row[d.strftime("%d %b")] = "NA"
+            else:
+                row[d.strftime("%d %b")] = leave_lookup.get((employee.get("emp_id", ""), d), "")
         rows.append(row)
 
     df = pd.DataFrame(rows, columns=columns)
@@ -1508,26 +1532,35 @@ def _hrp_render_holiday_calendar():
 
     def _style_calendar(dataframe):
         styles = pd.DataFrame("", index=dataframe.index, columns=dataframe.columns)
+        employee_start_dates = {}
+        for row_idx, employee in enumerate(filtered_employees):
+            raw_start = employee.get("start_date", "")
+            try:
+                employee_start_dates[row_idx] = raw_start if isinstance(raw_start, date) else pd.to_datetime(raw_start).date()
+            except Exception:
+                employee_start_dates[row_idx] = None
+
         for row_idx in dataframe.index:
             for d, col in zip(dates, date_columns):
                 value = str(dataframe.at[row_idx, col] or "").strip()
-                if value == "BH":
-                    styles.at[row_idx, col] = "background-color: #f4cccc; color: #990000; font-weight: 800; text-align: center;"
-                elif value == "H":
-                    styles.at[row_idx, col] = "background-color: #fce5cd; color: #783f04; font-weight: 800; text-align: center;"
-                elif value == "NA":
-                    styles.at[row_idx, col] = "background-color: #eeeeee; color: #777777; font-weight: 700; text-align: center;"
+                base_codes = [part.rstrip("*").strip() for part in value.split("/") if part.strip()]
+                base_code = base_codes[0] if base_codes else ""
+                bg = HRP_CALENDAR_COLOURS.get(base_code)
+                if bg:
+                    styles.at[row_idx, col] = f"background-color: {bg}; color: #000000; font-weight: 800; text-align: center;"
                 elif value.endswith("*"):
-                    styles.at[row_idx, col] = "background-color: #fff2cc; color: #7f6000; font-weight: 700; text-align: center;"
+                    styles.at[row_idx, col] = "font-weight: 700; text-align: center;"
                 elif value:
-                    styles.at[row_idx, col] = "background-color: #c6efce; color: #006100; font-weight: 700; text-align: center;"
+                    styles.at[row_idx, col] = "font-weight: 700; text-align: center;"
         return styles
 
     st.markdown(
-        "**Legend:** BH = Bank Holiday (blocked) · H = Company Closure (blocked) · NA = Weekend / non-working · "
-        "HD = Half Day · S = Sick · FE = Family/Emergency · UH = Unpaid Holiday · UA = Unpaid Absence · "
-        "M = Maternity · P = Paternity · O = Other Absence · * = Pending approval"
+        "**Legend:** H = Holiday · HD = Half Day Holiday · BH = Bank Holiday · UH = Unpaid Holiday · "
+        "C = College (Apprenticeship) · NA = Closed (Weekend) / Not yet started · T = Training Course · "
+        "M = Maternity Leave · UA = Unpaid Absence · S = Sick · FE = Family/Emergency · "
+        "P = Paternity · O = Other Absence · * = Pending approval"
     )
+
     bank_days = HRP_BANK_HOLIDAYS.get(int(calendar_year), {})
     if bank_days:
         st.info("**Bank holidays / blocked dates:** " + ", ".join(f"{d.strftime('%d %b')} — {name}" for d, name in sorted(bank_days.items())))
