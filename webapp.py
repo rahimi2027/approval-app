@@ -1515,7 +1515,13 @@ def _hrp_render_holiday_calendar():
                     current += timedelta(days=1)
                     continue
                 existing = leave_lookup.get(key, "")
-                if existing == "":
+                # One calendar cell represents one leave status. Sick Leave
+                # always takes precedence so HR shows S (grey) rather than H/S.
+                if code.rstrip("*") == "S":
+                    leave_lookup[key] = code
+                elif existing.rstrip("*") == "S":
+                    pass
+                elif existing == "":
                     leave_lookup[key] = code
                 elif existing.endswith("*") and not code.endswith("*"):
                     leave_lookup[key] = code
@@ -1611,7 +1617,15 @@ def _hrp_render_holiday_calendar():
     if df.empty:
         st.info("No employees match the selected department.")
     else:
-        styled = df.style.apply(_style_calendar, axis=None)
+        styled = (
+            df.style
+            .apply(_style_calendar, axis=None)
+            .set_properties(**{"text-align": "center", "vertical-align": "middle"})
+            .set_table_styles([
+                {"selector": "th", "props": [("text-align", "center"), ("vertical-align", "middle")]},
+                {"selector": "td", "props": [("text-align", "center"), ("vertical-align", "middle")]},
+            ])
+        )
         # Small date columns reproduce the compact Excel calendar and allow
         # horizontal scrolling without hiding employee details.
         column_config = {
