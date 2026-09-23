@@ -1369,41 +1369,39 @@ def render_hr_portal(current_user_info=None):
         with tab_hr:
             st.subheader("🧑‍💼 HR Management")
             if is_hr_manager:
-                st.caption("Employee Management, Leave Approvals and HR Leave Settlement")
-                hr_employee_tab, hr_approval_tab, hr_settlement_tab = st.tabs([
-                    "👤 Employee Management", "✅ Leave Approvals", "💷 HR Leave Settlement"
+                st.caption("Employee Management, Employee Overview, Leave Approvals and HR Leave Settlement")
+                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_settlement_tab = st.tabs([
+                    "👤 Employee Management", "📊 Employee Overview", "✅ Leave Approvals", "💷 HR Leave Settlement"
                 ])
             else:
-                st.caption("Employee Management and HR Leave Settlement")
-                hr_employee_tab, hr_settlement_tab = st.tabs(["👤 Employee Management", "💷 HR Leave Settlement"])
-
-            with hr_employee_tab:
-                employee_overview_tab, employee_directory_tab = st.tabs([
-                    "📊 Employee Overview", "📁 Employee Directory"
+                st.caption("Employee Management, Employee Overview and HR Leave Settlement")
+                hr_employee_tab, employee_overview_tab, hr_settlement_tab = st.tabs([
+                    "👤 Employee Management", "📊 Employee Overview", "💷 HR Leave Settlement"
                 ])
 
-                with employee_overview_tab:
-                    st.subheader("📊 Employee Overview — All Employees")
-                    if st.session_state.hrp_employees:
-                        overview_rows = []
-                        for e in st.session_state.hrp_employees:
-                            pos = _hrp_get_holiday_position(e["emp_id"])
-                            summary = _hrp_get_leave_summary(e["emp_id"])
-                            overview_rows.append({
-                                "Employee ID": e["emp_id"], "Name": e["name"], "Status": e.get("status", "Active"),
-                                "Department": e.get("department", ""), "Position": e.get("job_title", ""),
-                                "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
-                                "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
-                                "Holiday Entitlement": pos["entitlement"], "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
-                                "Company Owes": pos["company_owes_employee"], "Employee Owes": pos["employee_owes_company"],
-                                "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
-                                "Unpaid Days": summary["unpaid"], "Other Absence": summary["other"],
-                            })
-                        st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No employee records yet. Register your first employee below.")
+            with employee_overview_tab:
+                st.subheader("📊 Employee Overview — All Employees")
+                if st.session_state.hrp_employees:
+                    overview_rows = []
+                    for e in st.session_state.hrp_employees:
+                        pos = _hrp_get_holiday_position(e["emp_id"])
+                        summary = _hrp_get_leave_summary(e["emp_id"])
+                        overview_rows.append({
+                            "Employee ID": e["emp_id"], "Name": e["name"], "Status": e.get("status", "Active"),
+                            "Department": e.get("department", ""), "Position": e.get("job_title", ""),
+                            "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
+                            "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
+                            "Holiday Entitlement": pos["entitlement"], "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
+                            "Company Owes": pos["company_owes_employee"], "Employee Owes": pos["employee_owes_company"],
+                            "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
+                            "Unpaid Days": summary["unpaid"], "Other Absence": summary["other"],
+                        })
+                    st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No employee records yet. Register your first employee below.")
 
-
+            with hr_employee_tab:
+                employee_directory_tab = st.container()
                 with employee_directory_tab:
                     st.divider()
                     st.subheader("➕ Add New Employee")
