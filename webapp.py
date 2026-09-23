@@ -6193,7 +6193,17 @@ def render_employee_hr_reports(current_user_info):
             continue
         cur = a
         while cur <= b:
-            lookup[cur] = code
+            # Only working days can carry employee leave. Weekends, bank holidays
+            # and company closure dates remain NA/BH/H in the personal calendar,
+            # matching the HR Holiday Calendar and the 3-day leave calculation.
+            if cur.weekday() < 5 and cur not in _hrp_non_working_dates(cur.year):
+                existing = lookup.get(cur, "")
+                if not existing:
+                    lookup[cur] = code
+                elif existing.endswith("*") and not code.endswith("*"):
+                    lookup[cur] = code
+                elif code not in existing.split("/"):
+                    lookup[cur] = f"{existing}/{code}"
             cur += timedelta(days=1)
     try:
         emp_start = employee.get("start_date") if isinstance(employee.get("start_date"), date) else pd.to_datetime(employee.get("start_date")).date()
