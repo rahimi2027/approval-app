@@ -1487,8 +1487,41 @@ def _hrp_get_employee_entitlement(employee):
 def _hrp_get_employee_leave(employee_id):
     return [r for r in st.session_state.hrp_leave_records if r["employee_id"] == employee_id]
 
+def _hrp_get_company_closure_holiday_days(employee):
+    """Return company-closure days that consume this employee's annual holiday allowance.
+
+    29, 30 and 31 December are Acoole company holidays. Only scheduled
+    working days on/after the employee's start date are deducted; weekends and
+    bank holidays never consume annual leave.
+    """
+    raw_start = employee.get("start_date", "")
+    try:
+        employee_start = raw_start if isinstance(raw_start, date) else pd.to_datetime(raw_start).date()
+    except Exception:
+        employee_start = None
+
+    total = 0.0
+    # Count closure days for the current holiday/calendar year. The holiday
+    # position is based on the current leave year, so include the closure in
+    # the year containing the current date.
+    year = date.today().year
+    for closure_day in sorted(_hrp_company_closure_dates(year)):
+        if closure_day.weekday() < 5 and (employee_start is None or closure_day >= employee_start):
+            if closure_day not in HRP_BANK_HOLIDAYS.get(year, {}):
+                total += 1.0
+    return total
+
 def _hrp_get_approved_holiday_days(employee_id):
-    return sum(r["days"] for r in st.session_state.hrp_leave_records if r["employee_id"] == employee_id and r["status"] == "Approved" and r["type"] in HR_PORTAL_HOLIDAY_LEAVE_TYPES)
+    employee = _hrp_get_employee(employee_id)
+    recorded_days = sum(
+        float(r.get("days", 0) or 0)
+        for r in st.session_state.hrp_leave_records
+        if r["employee_id"] == employee_id
+        and r["status"] == "Approved"
+        and r["type"] in HR_PORTAL_HOLIDAY_LEAVE_TYPES
+    )
+    closure_days = _hrp_get_company_closure_holiday_days(employee) if employee else 0.0
+    return round(recorded_days + closure_days, 1)
 
 def _hrp_get_holiday_position(employee_id):
     """Return signed balance plus explicit company/employee owed amounts."""
@@ -1509,7 +1542,7 @@ def _hrp_get_holiday_position(employee_id):
 def _hrp_get_leave_summary(employee_id):
     records = _hrp_get_employee_leave(employee_id)
     return {
-        "holiday": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] in HR_PORTAL_HOLIDAY_LEAVE_TYPES),
+        "holiday": _hrp_get_approved_holiday_days(employee_id),
         "sick": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] == "Sick Leave"),
         "family": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] == "Family / Emergency Leave"),
         "other": sum(r["days"] for r in records if r["status"] == "Approved" and r["type"] == "Other Absence"),
@@ -1529,8 +1562,10 @@ def _hrp_create_leave_id():
 # ════════════════════════════════════════════════════════════
 # UK / ACoole non-working dates used by the holiday calendar and leave validation.
 # Bank holidays are for England & Wales. Acoole also closes on 29-31 December
-# (shown as H in the supplied company calendar). These dates are blocked from
-# leave booking and do not consume an employee's annual-leave allowance.
+# (shown as H in the supplied company calendar). These three company-closure
+# days are paid annual-holiday days and therefore consume holiday allowance.
+# They are handled automatically in holiday-used calculations, so HR does not
+# need to create a separate leave record for them.
 HRP_BANK_HOLIDAYS = {
     2026: {
         date(2026, 1, 1): "New Year’s Day",
@@ -1804,7 +1839,8 @@ def _hrp_render_holiday_calendar():
     bank_days = HRP_BANK_HOLIDAYS.get(int(calendar_year), {})
     if bank_days:
         st.info("**Bank holidays / blocked dates:** " + ", ".join(f"{d.strftime('%d %b')} — {name}" for d, name in sorted(bank_days.items())))
-    st.warning("**Company closure:** 29, 30 and 31 December are blocked as company holidays and do not consume annual leave.")
+    closure_working_days = sum(1 for d in _hrp_company_closure_dates(int(calendar_year)) if d.weekday() < 5 and d not in HRP_BANK_HOLIDAYS.get(int(calendar_year), {}))
+    st.warning(f"**Company closure:** 29, 30 and 31 December are company holidays and automatically consume {closure_working_days} annual-holiday day(s) for employees employed on those working days. No separate leave entry is required.")
     st.caption(f"{len(filtered_employees)} employees · {len(dates)} calendar days · {calendar_year}")
 
     if df.empty:
@@ -6365,10 +6401,7 @@ def render_employee_hr_reports(current_user_info):
     # not only the system-calculated entitlement.
     entitlement = float(entitlement_result[0]) if isinstance(entitlement_result, tuple) else float(entitlement_result)
     entitlement_note = str(entitlement_result[1]) if isinstance(entitlement_result, tuple) and len(entitlement_result) > 1 else ""
-    approved_holiday = sum(float(r.get("days", 0) or 0) for r in leave_records
-                           if str(r.get("employee_id", "")).strip().casefold() == linked_id.casefold()
-                           and str(r.get("status", "")).strip().casefold() == "approved"
-                           and r.get("type") in HR_PORTAL_HOLIDAY_LEAVE_TYPES)
+    approved_holiday = _hrp_get_approved_holiday_days(linked_id)
     try:
         balance = float(entitlement.get("entitlement", 0) if isinstance(entitlement, dict) else entitlement) - approved_holiday
     except Exception:
@@ -6415,9 +6448,9 @@ def render_employee_hr_reports(current_user_info):
             continue
         cur = a
         while cur <= b:
-            # Only working days can carry employee leave. Weekends, bank holidays
-            # and company closure dates remain NA/BH/H in the personal calendar,
-            # matching the HR Holiday Calendar and the 3-day leave calculation.
+            # Only working days can carry employee-entered leave. Weekends and
+            # bank holidays remain NA/BH; company closure dates remain H because
+            # they are automatic company holidays that already count as used.
             if cur.weekday() < 5 and cur not in _hrp_non_working_dates(cur.year):
                 existing = lookup.get(cur, "")
                 # One calendar cell represents one absence/leave status.
