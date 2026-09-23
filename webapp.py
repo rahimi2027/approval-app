@@ -332,12 +332,12 @@ DRIVE_BACKUP_FILENAMES = {
     AUDIT_LOG_PATH: "backup_audit_log.xlsx",
     WORK_ORDERS_PATH: "backup_work_orders.xlsx",
     INSPECTOR_BONUS_PATH: "backup_inspector_bonus.xlsx",
-    HR_LEAVE_PATH: "backup_hr_leave_requests.xlsx",
-    HR_DAILY_RATES_PATH: "backup_hr_daily_rates.xlsx",
-    STORE_DEDUCTION_PATH: "backup_store_transactions.xlsx",
-    STORE_ITEMS_PATH: "backup_store_items.xlsx",
-    HR_EMPLOYEES_PATH: "backup_hr_employee_records.xlsx",
-    HR_PORTAL_LEAVE_PATH: "backup_hr_portal_leave_records.xlsx",
+    HR_LEAVE_PATH: "BACKUP_hr_leave_requests.xlsx",
+    HR_DAILY_RATES_PATH: "BACKUP_hr_daily_rates.xlsx",
+    STORE_DEDUCTION_PATH: "BACKUP_store_transactions.xlsx",
+    STORE_ITEMS_PATH: "BACKUP_store_items.xlsx",
+    HR_EMPLOYEES_PATH: "BACKUP_hr_employee_records.xlsx",
+    HR_PORTAL_LEAVE_PATH: "BACKUP_hr_portal_leave_records.xlsx",
 }
 
 def sync_backup_file_to_drive(local_path):
