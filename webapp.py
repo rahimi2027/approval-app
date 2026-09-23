@@ -1289,8 +1289,220 @@ def _hrp_create_leave_id():
     st.session_state.hrp_next_leave_number += 1
     return leave_id
 
+
+# ════════════════════════════════════════════════════════════
+# 📅 HR HOLIDAY CALENDAR — Excel-style yearly employee calendar
+# ════════════════════════════════════════════════════════════
+HRP_CALENDAR_CODES = {
+    "Full Day Holiday": "H",
+    "Half Day Holiday": "HD",
+    "Sick Leave": "S",
+    "Family / Emergency Leave": "FE",
+    "Unpaid Holiday": "UH",
+    "Unpaid Absence": "UA",
+    "Maternity Leave": "M",
+    "Paternity Leave": "P",
+    "Other Absence": "O",
+}
+
+
+def _hrp_calendar_leave_code(leave_type, status):
+    """Return the compact code used in the Excel-style calendar."""
+    code = HRP_CALENDAR_CODES.get(str(leave_type or "").strip(), "L")
+    status = str(status or "Approved").strip().casefold()
+    if status == "pending":
+        return f"{code}*"
+    if status == "rejected":
+        return ""
+    return code
+
+
+def _hrp_render_holiday_calendar():
+    """Render an Excel-style yearly holiday/absence calendar from live HR data."""
+    st.subheader("📅 Holiday & Absence Calendar")
+    st.caption(
+        "Excel-style yearly calendar showing every employee, department, start date and approved leave. "
+        "Pending department-manager requests are marked with * and are not treated as approved leave."
+    )
+
+    # Always refresh from the persistent workbooks so the calendar reflects
+    # employees/leave added by another user's session.
+    employees = _hrp_load_employees()
+    leave_records = _hrp_load_leave_records()
+    st.session_state.hrp_employees = employees
+    st.session_state.hrp_leave_records = leave_records
+
+    c1, c2, c3 = st.columns([1, 2, 2])
+    with c1:
+        calendar_year = st.number_input(
+            "Calendar Year", min_value=2020, max_value=2100,
+            value=date.today().year, step=1, key="hrp_calendar_year"
+        )
+    with c2:
+        departments = sorted({str(e.get("department", "")).strip() for e in employees if str(e.get("department", "")).strip()})
+        department_filter = st.selectbox(
+            "Department", ["All Departments"] + departments,
+            key="hrp_calendar_department"
+        )
+    with c3:
+        status_filter = st.selectbox(
+            "Leave shown", ["Approved + Pending", "Approved only"],
+            key="hrp_calendar_status"
+        )
+
+    filtered_employees = [
+        e for e in employees
+        if department_filter == "All Departments"
+        or str(e.get("department", "")).strip().casefold() == department_filter.casefold()
+    ]
+    filtered_employees.sort(key=lambda e: (str(e.get("department", "")).casefold(), str(e.get("name", "")).casefold()))
+
+    # Build one lookup per employee/date. If more than one record falls on the
+    # same date, approved leave takes precedence; otherwise concatenate codes.
+    leave_lookup = {}
+    for record in leave_records:
+        status = str(record.get("status", "Approved")).strip()
+        if status.casefold() == "rejected":
+            continue
+        if status_filter == "Approved only" and status.casefold() != "approved":
+            continue
+        try:
+            start = record["date_from"]
+            end = record["date_to"]
+            if isinstance(start, str):
+                start = pd.to_datetime(start).date()
+            if isinstance(end, str):
+                end = pd.to_datetime(end).date()
+        except Exception:
+            continue
+        if end < start:
+            start, end = end, start
+        code = _hrp_calendar_leave_code(record.get("type", ""), status)
+        if not code:
+            continue
+        employee_id = str(record.get("employee_id", "")).strip()
+        current = start
+        while current <= end:
+            if current.year == int(calendar_year) and current.weekday() < 5:
+                key = (employee_id, current)
+                existing = leave_lookup.get(key, "")
+                if existing == "":
+                    leave_lookup[key] = code
+                elif existing.endswith("*") and not code.endswith("*"):
+                    leave_lookup[key] = code
+                elif code not in existing.split("/"):
+                    leave_lookup[key] = f"{existing}/{code}"
+            current += timedelta(days=1)
+
+    # Generate the full year exactly as the spreadsheet does: employee details
+    # first, then one column for every calendar date.
+    first_day = date(int(calendar_year), 1, 1)
+    last_day = date(int(calendar_year), 12, 31)
+    dates = []
+    current = first_day
+    while current <= last_day:
+        dates.append(current)
+        current += timedelta(days=1)
+
+    columns = ["Employee Name", "Department", "Start Date"] + [d.strftime("%d %b") for d in dates]
+    rows = []
+    for employee in filtered_employees:
+        row = {
+            "Employee Name": employee.get("name", ""),
+            "Department": employee.get("department", ""),
+            "Start Date": employee.get("start_date", ""),
+        }
+        for d in dates:
+            # Keep weekends visually identifiable, while leave is still shown
+            # only on working days just like the original workbook.
+            row[d.strftime("%d %b")] = leave_lookup.get((employee.get("emp_id", ""), d), "")
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=columns)
+    if not df.empty:
+        df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
+
+    # Colour/format the date cells using the same idea as the supplied Excel
+    # workbook: weekends are shaded and booked leave is highlighted.
+    date_columns = [d.strftime("%d %b") for d in dates]
+
+    def _style_calendar(dataframe):
+        styles = pd.DataFrame("", index=dataframe.index, columns=dataframe.columns)
+        for row_idx in dataframe.index:
+            for d, col in zip(dates, date_columns):
+                value = str(dataframe.at[row_idx, col] or "").strip()
+                if d.weekday() >= 5:
+                    styles.at[row_idx, col] = "background-color: #eeeeee; color: #777777;"
+                if value:
+                    if value.endswith("*"):
+                        styles.at[row_idx, col] = "background-color: #fff2cc; color: #7f6000; font-weight: 700; text-align: center;"
+                    else:
+                        styles.at[row_idx, col] = "background-color: #c6efce; color: #006100; font-weight: 700; text-align: center;"
+        return styles
+
+    st.markdown(
+        "**Legend:** H = Holiday · HD = Half Day · S = Sick · FE = Family/Emergency · "
+        "UH = Unpaid Holiday · UA = Unpaid Absence · M = Maternity · P = Paternity · O = Other Absence · * = Pending approval"
+    )
+    st.caption(f"{len(filtered_employees)} employees · {len(dates)} calendar days · {calendar_year}")
+
+    if df.empty:
+        st.info("No employees match the selected department.")
+    else:
+        styled = df.style.apply(_style_calendar, axis=None)
+        # Small date columns reproduce the compact Excel calendar and allow
+        # horizontal scrolling without hiding employee details.
+        column_config = {
+            "Employee Name": st.column_config.TextColumn("Employee Name", width="medium"),
+            "Department": st.column_config.TextColumn("Department", width="medium"),
+            "Start Date": st.column_config.TextColumn("Start Date", width="small"),
+        }
+        for col in date_columns:
+            column_config[col] = st.column_config.TextColumn(col, width="small")
+        st.dataframe(
+            styled,
+            use_container_width=True,
+            hide_index=True,
+            height=650,
+            column_config=column_config,
+        )
+
+        # Optional detail list below the calendar for quick checking of all
+        # booked records in the selected year.
+        year_records = []
+        employee_map = {e.get("emp_id", ""): e for e in filtered_employees}
+        for r in leave_records:
+            if str(r.get("status", "Approved")).casefold() == "rejected":
+                continue
+            try:
+                d_from = r.get("date_from")
+                d_to = r.get("date_to")
+                if isinstance(d_from, str): d_from = pd.to_datetime(d_from).date()
+                if isinstance(d_to, str): d_to = pd.to_datetime(d_to).date()
+            except Exception:
+                continue
+            if d_from.year != int(calendar_year) and d_to.year != int(calendar_year):
+                continue
+            emp = employee_map.get(r.get("employee_id"))
+            if not emp:
+                continue
+            year_records.append({
+                "Employee": emp.get("name", ""),
+                "Department": emp.get("department", ""),
+                "Date From": d_from,
+                "Date To": d_to,
+                "Leave Type": r.get("type", ""),
+                "Days": r.get("days", 0),
+                "Status": r.get("status", ""),
+            })
+        if year_records:
+            st.divider()
+            st.subheader(f"Leave Records — {calendar_year}")
+            st.dataframe(pd.DataFrame(year_records), use_container_width=True, hide_index=True)
+
+
 def render_hr_portal(current_user_info=None):
-    """HR Portal — HR Management, Employee Details, Leave and Leave History."""
+    """HR Portal — HR Management, Holiday Calendar, Employee Details, Leave and Leave History."""
     # Defensive initialization: Streamlit sessions may survive code/data changes.
     _hr_portal_init()
     if "hrp_role" not in st.session_state:
@@ -1343,15 +1555,17 @@ def render_hr_portal(current_user_info=None):
     # not see HR Management.
     if is_hr:
         if is_hr_manager:
-            tab_hr, tab_details, tab_leave, tab_history = st.tabs([
+            tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
                 "🧑‍💼 HR Management",
+                "📅 Holiday Calendar",
                 "👤 Employee Details",
                 "✏️ Leave",
                 "📋 Leave History",
             ])
         else:
-            tab_hr, tab_details, tab_leave, tab_history = st.tabs([
+            tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
                 "🧑‍💼 HR Management",
+                "📅 Holiday Calendar",
                 "👤 Employee Details",
                 "✏️ Leave",
                 "📋 Leave History",
@@ -1363,6 +1577,7 @@ def render_hr_portal(current_user_info=None):
             "📋 Leave History",
         ])
         tab_hr = None
+        tab_calendar = None
 
     # ========== TAB 1: HR MANAGEMENT ==========
     if is_hr and tab_hr is not None:
@@ -1676,6 +1891,11 @@ def render_hr_portal(current_user_info=None):
                         st.success(f"{remaining:.1f} days remaining.")
                 else:
                     st.info("No employees are registered yet.")
+
+    # ========== TAB 2: HOLIDAY CALENDAR ==========
+    if is_hr and tab_calendar is not None:
+        with tab_calendar:
+            _hrp_render_holiday_calendar()
 
     # ========== TAB 2: EMPLOYEE DETAILS ==========
     with tab_details:
