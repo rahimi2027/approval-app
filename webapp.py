@@ -1346,20 +1346,20 @@ def render_hr_portal(current_user_info=None):
             tab_hr, tab_details, tab_leave, tab_history = st.tabs([
                 "🧑‍💼 HR Management",
                 "👤 Employee Details",
-                "✏️ Submit Leave",
+                "✏️ Leave",
                 "📋 Leave History",
             ])
         else:
             tab_hr, tab_details, tab_leave, tab_history = st.tabs([
                 "🧑‍💼 HR Management",
                 "👤 Employee Details",
-                "✏️ Submit Leave",
+                "✏️ Leave",
                 "📋 Leave History",
             ])
     else:
         tab_details, tab_leave, tab_history = st.tabs([
             "👤 Employee Details",
-            "✏️ Submit Leave",
+            "✏️ Leave",
             "📋 Leave History",
         ])
         tab_hr = None
@@ -1378,243 +1378,249 @@ def render_hr_portal(current_user_info=None):
                 hr_employee_tab, hr_settlement_tab = st.tabs(["👤 Employee Management", "💷 HR Leave Settlement"])
 
             with hr_employee_tab:
-                st.subheader("📊 Employee Overview — All Employees")
-                if st.session_state.hrp_employees:
-                    overview_rows = []
-                    for e in st.session_state.hrp_employees:
-                        pos = _hrp_get_holiday_position(e["emp_id"])
-                        summary = _hrp_get_leave_summary(e["emp_id"])
-                        overview_rows.append({
-                            "Employee ID": e["emp_id"], "Name": e["name"], "Status": e.get("status", "Active"),
-                            "Department": e.get("department", ""), "Position": e.get("job_title", ""),
-                            "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
-                            "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
-                            "Holiday Entitlement": pos["entitlement"], "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
-                            "Company Owes": pos["company_owes_employee"], "Employee Owes": pos["employee_owes_company"],
-                            "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
-                            "Unpaid Days": summary["unpaid"], "Other Absence": summary["other"],
-                        })
-                    st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
-                else:
-                    st.info("No employee records yet. Register your first employee below.")
+                employee_overview_tab, employee_directory_tab = st.tabs([
+                    "📊 Employee Overview", "📁 Employee Directory"
+                ])
 
-                st.divider()
-                st.subheader("➕ Add New Employee")
-                st.info("HR enters the company Employee ID manually. Any unique letters/numbers format used by your company is accepted.")
-
-                # Versioned form keys guarantee that a successful submission
-                # renders a completely fresh form on the next rerun.
-                new_form_version = st.session_state.hrp_new_employee_form_version
-                with st.form(f"hrp_new_employee_form_{new_form_version}", clear_on_submit=False):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        new_emp_id = st.text_input(
-                            "Employee ID",
-                            placeholder="e.g. 001, EMP-001, A102 or your company batch number",
-                            key=f"hrp_new_emp_id_{new_form_version}",
-                        )
-                        new_name = st.text_input(
-                            "Full Name",
-                            placeholder="e.g. John Smith",
-                            key=f"hrp_new_name_{new_form_version}",
-                        )
-                        new_start_date = st.date_input(
-                            "Start Date",
-                            value=date.today(),
-                            key=f"hrp_new_start_{new_form_version}",
-                        )
-                        new_position = st.text_input(
-                            "Position / Job Title",
-                            placeholder="e.g. Electrician",
-                            key=f"hrp_new_pos_{new_form_version}",
-                        )
-                    with col2:
-                        hr_software_departments = load_departments()
-                        new_department = st.selectbox(
-                            "Department",
-                            options=hr_software_departments,
-                            key=f"hrp_new_dept_{new_form_version}",
-                        )
-                        new_agreement = st.selectbox(
-                            "Agreement Type",
-                            options=HR_PORTAL_AGREEMENT_TYPES,
-                            key=f"hrp_new_agree_{new_form_version}",
-                        )
-                        new_pattern = st.selectbox(
-                            "Working Pattern",
-                            ["Regular hours", "Irregular / Part-Year"],
-                            key=f"hrp_new_pattern_{new_form_version}",
-                        )
-                        new_days_per_week = st.number_input(
-                            "Contracted Days Per Week",
-                            min_value=0.5,
-                            max_value=7.0,
-                            value=5.0,
-                            step=0.5,
-                            key=f"hrp_new_days_{new_form_version}",
-                        )
-
-                    create_employee = st.form_submit_button("➕ Create Employee", type="primary", use_container_width=True)
-
-                if create_employee:
-                    valid, result = _hrp_validate_employee_id(new_emp_id)
-                    if not valid:
-                        st.error(result)
-                    elif not new_name.strip():
-                        st.error("Please enter the employee's full name.")
-                    elif not new_position.strip():
-                        st.error("Please enter the position / job title.")
+                with employee_overview_tab:
+                    st.subheader("📊 Employee Overview — All Employees")
+                    if st.session_state.hrp_employees:
+                        overview_rows = []
+                        for e in st.session_state.hrp_employees:
+                            pos = _hrp_get_holiday_position(e["emp_id"])
+                            summary = _hrp_get_leave_summary(e["emp_id"])
+                            overview_rows.append({
+                                "Employee ID": e["emp_id"], "Name": e["name"], "Status": e.get("status", "Active"),
+                                "Department": e.get("department", ""), "Position": e.get("job_title", ""),
+                                "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
+                                "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
+                                "Holiday Entitlement": pos["entitlement"], "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
+                                "Company Owes": pos["company_owes_employee"], "Employee Owes": pos["employee_owes_company"],
+                                "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
+                                "Unpaid Days": summary["unpaid"], "Other Absence": summary["other"],
+                            })
+                        st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
                     else:
-                        new_employee = {
-                            "emp_id": result,
-                            "name": new_name.strip(),
-                            "start_date": new_start_date,
-                            "department": new_department,
-                            "job_title": new_position.strip(),
-                            "agreement_type": new_agreement,
-                            "status": "Active",
-                            "working_pattern": new_pattern,
-                            "days_per_week": new_days_per_week,
-                            "entitlement_override": None,
-                            "adjustment_note": "",
-                        }
-                        st.session_state.hrp_employees.append(new_employee)
-                        _hrp_save_employees()
-                        st.session_state.hrp_current_emp_id = result
-                        log_action("HR_EMPLOYEE_ADDED", result, new_data=new_employee)
-                        # Change every widget key used by the form. On rerun
-                        # Streamlit therefore creates a blank form for the next employee.
-                        st.session_state.hrp_new_employee_form_version = new_form_version + 1
-                        st.success(f"Employee {result} created successfully. The form is ready for the next employee.")
-                        st.rerun()
+                        st.info("No employee records yet. Register your first employee below.")
 
-                st.divider()
-                st.subheader("Employee Directory")
-                st.caption("Edit active/inactive records or permanently delete an employee record. Deactivation is recommended when someone leaves the company so their history is retained.")
 
-                employee_table = [
-                    {
-                        "Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"],
-                        "Position": e["job_title"], "Department": e["department"],
-                        "Agreement": e["agreement_type"], "Status": e["status"],
-                    }
-                    for e in st.session_state.hrp_employees
-                ]
-                if employee_table:
-                    st.dataframe(pd.DataFrame(employee_table), use_container_width=True, hide_index=True)
-                else:
-                    st.info("No employee records yet.")
+                with employee_directory_tab:
+                    st.divider()
+                    st.subheader("➕ Add New Employee")
+                    st.info("HR enters the company Employee ID manually. Any unique letters/numbers format used by your company is accepted.")
 
-                st.markdown("### ✏️ Edit / Deactivate Employee")
-                edit_employee_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
-                if edit_employee_ids:
-                    edit_emp_id = st.selectbox(
-                        "Select Employee",
-                        options=edit_employee_ids,
-                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid)['status']}",
-                        key="hrp_edit_emp_selector",
-                    )
-                    edit_emp = _hrp_get_employee(edit_emp_id)
-                else:
-                    edit_emp_id = ""
-                    edit_emp = None
-
-                if edit_emp:
-                    with st.form(f"hrp_edit_employee_form_{edit_emp_id}"):
-                        ec1, ec2 = st.columns(2)
-                        with ec1:
-                            edit_name = st.text_input("Full Name", value=edit_emp["name"])
-                            edit_start = st.date_input("Start Date", value=edit_emp["start_date"])
-                            edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
-                        with ec2:
+                    # Versioned form keys guarantee that a successful submission
+                    # renders a completely fresh form on the next rerun.
+                    new_form_version = st.session_state.hrp_new_employee_form_version
+                    with st.form(f"hrp_new_employee_form_{new_form_version}", clear_on_submit=False):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            new_emp_id = st.text_input(
+                                "Employee ID",
+                                placeholder="e.g. 001, EMP-001, A102 or your company batch number",
+                                key=f"hrp_new_emp_id_{new_form_version}",
+                            )
+                            new_name = st.text_input(
+                                "Full Name",
+                                placeholder="e.g. John Smith",
+                                key=f"hrp_new_name_{new_form_version}",
+                            )
+                            new_start_date = st.date_input(
+                                "Start Date",
+                                value=date.today(),
+                                key=f"hrp_new_start_{new_form_version}",
+                            )
+                            new_position = st.text_input(
+                                "Position / Job Title",
+                                placeholder="e.g. Electrician",
+                                key=f"hrp_new_pos_{new_form_version}",
+                            )
+                        with col2:
                             hr_software_departments = load_departments()
-                            edit_dept = st.selectbox(
+                            new_department = st.selectbox(
                                 "Department",
-                                hr_software_departments,
-                                index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0,
+                                options=hr_software_departments,
+                                key=f"hrp_new_dept_{new_form_version}",
                             )
-                            edit_agreement = st.selectbox(
+                            new_agreement = st.selectbox(
                                 "Agreement Type",
-                                HR_PORTAL_AGREEMENT_TYPES,
-                                index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0,
+                                options=HR_PORTAL_AGREEMENT_TYPES,
+                                key=f"hrp_new_agree_{new_form_version}",
                             )
-                            edit_pattern_options = ["Regular hours", "Irregular / Part-Year"]
-                            edit_pattern = st.selectbox(
+                            new_pattern = st.selectbox(
                                 "Working Pattern",
-                                edit_pattern_options,
-                                index=edit_pattern_options.index(edit_emp.get("working_pattern", "Regular hours")) if edit_emp.get("working_pattern", "Regular hours") in edit_pattern_options else 0,
+                                ["Regular hours", "Irregular / Part-Year"],
+                                key=f"hrp_new_pattern_{new_form_version}",
                             )
-                            edit_days = st.number_input(
+                            new_days_per_week = st.number_input(
                                 "Contracted Days Per Week",
                                 min_value=0.5,
                                 max_value=7.0,
-                                value=float(edit_emp.get("days_per_week", 5) or 5),
+                                value=5.0,
                                 step=0.5,
+                                key=f"hrp_new_days_{new_form_version}",
                             )
-                            status_options = ["Active", "Inactive"]
-                            edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")))
-                            if edit_emp.get("status") == "Inactive":
-                                st.caption("This employee is inactive. Their leave history is retained.")
-                        if st.form_submit_button("💾 Save Employee Changes", type="primary"):
-                            old_data = dict(edit_emp)
-                            edit_emp["name"] = edit_name.strip()
-                            edit_emp["start_date"] = edit_start
-                            edit_emp["job_title"] = edit_position.strip()
-                            edit_emp["department"] = edit_dept
-                            edit_emp["agreement_type"] = edit_agreement
-                            edit_emp["working_pattern"] = edit_pattern
-                            edit_emp["days_per_week"] = edit_days
-                            edit_emp["status"] = edit_status
+
+                        create_employee = st.form_submit_button("➕ Create Employee", type="primary", use_container_width=True)
+
+                    if create_employee:
+                        valid, result = _hrp_validate_employee_id(new_emp_id)
+                        if not valid:
+                            st.error(result)
+                        elif not new_name.strip():
+                            st.error("Please enter the employee's full name.")
+                        elif not new_position.strip():
+                            st.error("Please enter the position / job title.")
+                        else:
+                            new_employee = {
+                                "emp_id": result,
+                                "name": new_name.strip(),
+                                "start_date": new_start_date,
+                                "department": new_department,
+                                "job_title": new_position.strip(),
+                                "agreement_type": new_agreement,
+                                "status": "Active",
+                                "working_pattern": new_pattern,
+                                "days_per_week": new_days_per_week,
+                                "entitlement_override": None,
+                                "adjustment_note": "",
+                            }
+                            st.session_state.hrp_employees.append(new_employee)
                             _hrp_save_employees()
-                            log_action("HR_EMPLOYEE_EDITED", edit_emp_id, old_data=old_data, new_data=dict(edit_emp))
-                            st.success(f"Employee {edit_emp_id} updated successfully.")
+                            st.session_state.hrp_current_emp_id = result
+                            log_action("HR_EMPLOYEE_ADDED", result, new_data=new_employee)
+                            # Change every widget key used by the form. On rerun
+                            # Streamlit therefore creates a blank form for the next employee.
+                            st.session_state.hrp_new_employee_form_version = new_form_version + 1
+                            st.success(f"Employee {result} created successfully. The form is ready for the next employee.")
                             st.rerun()
 
-                st.markdown("### 🔴 Deactivate / Delete")
-                dc1, dc2 = st.columns(2)
-                with dc1:
-                    if edit_emp and edit_emp.get("status") == "Active":
-                        if st.button("🚪 Deactivate Employee", key=f"hrp_deactivate_{edit_emp_id}", use_container_width=True):
-                            old_status = edit_emp.get("status", "Active")
-                            edit_emp["status"] = "Inactive"
-                            _hrp_save_employees()
-                            log_action("HR_EMPLOYEE_DEACTIVATED", edit_emp_id, old_data={"status": old_status}, new_data={"status": "Inactive"})
-                            st.success(f"Employee {edit_emp_id} has been deactivated. Their records and leave history have been retained.")
-                            st.rerun()
-                    elif edit_emp:
-                        if st.button("🟢 Reactivate Employee", key=f"hrp_reactivate_{edit_emp_id}", use_container_width=True):
-                            edit_emp["status"] = "Active"
-                            _hrp_save_employees()
-                            log_action("HR_EMPLOYEE_REACTIVATED", edit_emp_id, old_data={"status": "Inactive"}, new_data={"status": "Active"})
-                            st.success(f"Employee {edit_emp_id} has been reactivated.")
-                            st.rerun()
-                with dc2:
+                    st.subheader("Employee Directory")
+                    st.caption("Edit active/inactive records or permanently delete an employee record. Deactivation is recommended when someone leaves the company so their history is retained.")
+
+                    employee_table = [
+                        {
+                            "Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"],
+                            "Position": e["job_title"], "Department": e["department"],
+                            "Agreement": e["agreement_type"], "Status": e["status"],
+                        }
+                        for e in st.session_state.hrp_employees
+                    ]
+                    if employee_table:
+                        st.dataframe(pd.DataFrame(employee_table), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No employee records yet.")
+
+                    st.markdown("### ✏️ Edit / Deactivate Employee")
+                    edit_employee_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
+                    if edit_employee_ids:
+                        edit_emp_id = st.selectbox(
+                            "Select Employee",
+                            options=edit_employee_ids,
+                            format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid)['status']}",
+                            key="hrp_edit_emp_selector",
+                        )
+                        edit_emp = _hrp_get_employee(edit_emp_id)
+                    else:
+                        edit_emp_id = ""
+                        edit_emp = None
+
                     if edit_emp:
-                        if st.button("🗑️ Permanently Delete Employee", key=f"hrp_delete_{edit_emp_id}", use_container_width=True):
-                            st.session_state[f"hrp_confirm_delete_{edit_emp_id}"] = True
-                    if edit_emp and st.session_state.get(f"hrp_confirm_delete_{edit_emp_id}", False):
-                        st.warning("This permanently removes the employee record and their HR portal leave records. Use Deactivate instead when an employee leaves the company.")
-                        cc1, cc2 = st.columns(2)
-                        with cc1:
-                            if st.button("⚠️ Confirm Permanent Delete", key=f"hrp_confirm_delete_yes_{edit_emp_id}", type="primary", use_container_width=True):
-                                deleted = _hrp_get_employee(edit_emp_id)
-                                st.session_state.hrp_employees = [e for e in st.session_state.hrp_employees if e["emp_id"] != edit_emp_id]
-                                st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r["employee_id"] != edit_emp_id]
-                                st.session_state.hrp_entitlement_overrides.pop(edit_emp_id, None)
-                                st.session_state.hrp_adjustment_notes.pop(edit_emp_id, None)
+                        with st.form(f"hrp_edit_employee_form_{edit_emp_id}"):
+                            ec1, ec2 = st.columns(2)
+                            with ec1:
+                                edit_name = st.text_input("Full Name", value=edit_emp["name"])
+                                edit_start = st.date_input("Start Date", value=edit_emp["start_date"])
+                                edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
+                            with ec2:
+                                hr_software_departments = load_departments()
+                                edit_dept = st.selectbox(
+                                    "Department",
+                                    hr_software_departments,
+                                    index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0,
+                                )
+                                edit_agreement = st.selectbox(
+                                    "Agreement Type",
+                                    HR_PORTAL_AGREEMENT_TYPES,
+                                    index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0,
+                                )
+                                edit_pattern_options = ["Regular hours", "Irregular / Part-Year"]
+                                edit_pattern = st.selectbox(
+                                    "Working Pattern",
+                                    edit_pattern_options,
+                                    index=edit_pattern_options.index(edit_emp.get("working_pattern", "Regular hours")) if edit_emp.get("working_pattern", "Regular hours") in edit_pattern_options else 0,
+                                )
+                                edit_days = st.number_input(
+                                    "Contracted Days Per Week",
+                                    min_value=0.5,
+                                    max_value=7.0,
+                                    value=float(edit_emp.get("days_per_week", 5) or 5),
+                                    step=0.5,
+                                )
+                                status_options = ["Active", "Inactive"]
+                                edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")))
+                                if edit_emp.get("status") == "Inactive":
+                                    st.caption("This employee is inactive. Their leave history is retained.")
+                            if st.form_submit_button("💾 Save Employee Changes", type="primary"):
+                                old_data = dict(edit_emp)
+                                edit_emp["name"] = edit_name.strip()
+                                edit_emp["start_date"] = edit_start
+                                edit_emp["job_title"] = edit_position.strip()
+                                edit_emp["department"] = edit_dept
+                                edit_emp["agreement_type"] = edit_agreement
+                                edit_emp["working_pattern"] = edit_pattern
+                                edit_emp["days_per_week"] = edit_days
+                                edit_emp["status"] = edit_status
                                 _hrp_save_employees()
-                                _hrp_save_leave_records()
-                                log_action("HR_EMPLOYEE_DELETED", edit_emp_id, old_data=deleted)
-                                st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
-                                if st.session_state.get("hrp_current_emp_id") == edit_emp_id:
-                                    active_ids = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
-                                    st.session_state.hrp_current_emp_id = active_ids[0] if active_ids else ""
-                                st.success(f"Employee {edit_emp_id} permanently deleted.")
+                                log_action("HR_EMPLOYEE_EDITED", edit_emp_id, old_data=old_data, new_data=dict(edit_emp))
+                                st.success(f"Employee {edit_emp_id} updated successfully.")
                                 st.rerun()
-                        with cc2:
-                            if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", use_container_width=True):
-                                st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
+
+                    st.markdown("### 🔴 Deactivate / Delete")
+                    dc1, dc2 = st.columns(2)
+                    with dc1:
+                        if edit_emp and edit_emp.get("status") == "Active":
+                            if st.button("🚪 Deactivate Employee", key=f"hrp_deactivate_{edit_emp_id}", use_container_width=True):
+                                old_status = edit_emp.get("status", "Active")
+                                edit_emp["status"] = "Inactive"
+                                _hrp_save_employees()
+                                log_action("HR_EMPLOYEE_DEACTIVATED", edit_emp_id, old_data={"status": old_status}, new_data={"status": "Inactive"})
+                                st.success(f"Employee {edit_emp_id} has been deactivated. Their records and leave history have been retained.")
                                 st.rerun()
+                        elif edit_emp:
+                            if st.button("🟢 Reactivate Employee", key=f"hrp_reactivate_{edit_emp_id}", use_container_width=True):
+                                edit_emp["status"] = "Active"
+                                _hrp_save_employees()
+                                log_action("HR_EMPLOYEE_REACTIVATED", edit_emp_id, old_data={"status": "Inactive"}, new_data={"status": "Active"})
+                                st.success(f"Employee {edit_emp_id} has been reactivated.")
+                                st.rerun()
+                    with dc2:
+                        if edit_emp:
+                            if st.button("🗑️ Permanently Delete Employee", key=f"hrp_delete_{edit_emp_id}", use_container_width=True):
+                                st.session_state[f"hrp_confirm_delete_{edit_emp_id}"] = True
+                        if edit_emp and st.session_state.get(f"hrp_confirm_delete_{edit_emp_id}", False):
+                            st.warning("This permanently removes the employee record and their HR portal leave records. Use Deactivate instead when an employee leaves the company.")
+                            cc1, cc2 = st.columns(2)
+                            with cc1:
+                                if st.button("⚠️ Confirm Permanent Delete", key=f"hrp_confirm_delete_yes_{edit_emp_id}", type="primary", use_container_width=True):
+                                    deleted = _hrp_get_employee(edit_emp_id)
+                                    st.session_state.hrp_employees = [e for e in st.session_state.hrp_employees if e["emp_id"] != edit_emp_id]
+                                    st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r["employee_id"] != edit_emp_id]
+                                    st.session_state.hrp_entitlement_overrides.pop(edit_emp_id, None)
+                                    st.session_state.hrp_adjustment_notes.pop(edit_emp_id, None)
+                                    _hrp_save_employees()
+                                    _hrp_save_leave_records()
+                                    log_action("HR_EMPLOYEE_DELETED", edit_emp_id, old_data=deleted)
+                                    st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
+                                    if st.session_state.get("hrp_current_emp_id") == edit_emp_id:
+                                        active_ids = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
+                                        st.session_state.hrp_current_emp_id = active_ids[0] if active_ids else ""
+                                    st.success(f"Employee {edit_emp_id} permanently deleted.")
+                                    st.rerun()
+                            with cc2:
+                                if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", use_container_width=True):
+                                    st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
+                                    st.rerun()
 
             if is_hr_manager:
                 with hr_approval_tab:
