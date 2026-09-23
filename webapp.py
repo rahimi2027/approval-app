@@ -162,6 +162,9 @@ os.makedirs(INSPECTOR_BONUS_PDF_DIR, exist_ok=True)
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 drive_service = None
+DRIVE_CONNECTION_ERROR = ""
+DRIVE_LAST_SYNC = {}
+DRIVE_LAST_SYNC_ERROR = {}
 
 _DRIVE_ID_CACHE = {}
 _DRIVE_SYNC_FINGERPRINTS = {}
@@ -183,14 +186,17 @@ try:
     )
     drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
     # Validate access to the configured backup folder, including Shared Drives.
-    drive_service.files().get(
+    folder_check = drive_service.files().get(
         fileId=GOOGLE_DRIVE_FOLDER_ID,
         fields="id,name,mimeType,parents",
         supportsAllDrives=True,
     ).execute()
+    DRIVE_CONNECTION_ERROR = ""
+    print(f"Google Drive connected: {folder_check.get('name', GOOGLE_DRIVE_FOLDER_ID)}")
 except Exception as e:
     drive_service = None
-    print(f"Google Drive initialisation failed; local storage will be used: {e}")
+    DRIVE_CONNECTION_ERROR = f"{type(e).__name__}: {e}"
+    print(f"Google Drive initialisation failed; local storage will be used: {DRIVE_CONNECTION_ERROR}")
 
 def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None or not os.path.exists(local_file_path): return None
@@ -214,7 +220,8 @@ def upload_to_google_drive(local_file_path, display_filename):
         _DRIVE_ID_CACHE[cache_key] = created.get("id")
         return created.get("id")
     except Exception as e:
-        print(f"Google Drive upload failed: {e}")
+        DRIVE_LAST_SYNC_ERROR[display_filename] = f"{type(e).__name__}: {e}"
+        print(f"Google Drive upload failed for {display_filename}: {e}")
         return None
 
 def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
@@ -252,6 +259,7 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
         _DRIVE_ID_CACHE[cache_key] = created.get("id")
         return created.get("id")
     except Exception as e:
+        DRIVE_LAST_SYNC_ERROR[filename] = f"{type(e).__name__}: {e}"
         print(f"Drive upload failed for {filename}: {e}")
         return None
 
@@ -348,28 +356,41 @@ def sync_backup_file_to_drive(local_path):
 def sync_saved_file_to_drive(local_path):
     """Synchronise a saved workbook immediately to Google Drive.
 
-    Every call uploads/updates both the live workbook and its explicit backup.
-    No fingerprint cache is used to decide whether the backup should be updated;
-    this guarantees that each software save is reflected in Drive.
+    Every save updates the live workbook and, where configured, its backup copy.
+    The result/error is retained so the HR/Super Admin diagnostic panel can show
+    the real Google Drive status instead of silently failing.
     """
+    filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
+        msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
+        DRIVE_LAST_SYNC_ERROR[filename] = msg
         if drive_service is None:
-            print(f"Google Drive sync skipped for {os.path.basename(local_path)}: Drive service is not connected.")
+            print(f"Google Drive sync skipped for {filename}: {msg}")
         return False
+
     with _DRIVE_SYNC_LOCK:
         try:
-            live_id = _drive_upload_path(local_path, os.path.basename(local_path))
+            live_id = _drive_upload_path(local_path, filename)
             if not live_id:
-                print(f"Google Drive live sync failed for {os.path.basename(local_path)}")
+                msg = DRIVE_LAST_SYNC_ERROR.get(filename, "Live Google Drive upload returned no file ID.")
+                DRIVE_LAST_SYNC_ERROR[filename] = msg
+                print(f"Google Drive live sync failed for {filename}: {msg}")
                 return False
 
             backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
-            backup_id = None
             if backup_name:
                 backup_id = _drive_upload_path(local_path, backup_name)
                 if not backup_id:
-                    print(f"Google Drive backup sync failed for {backup_name}")
+                    msg = DRIVE_LAST_SYNC_ERROR.get(backup_name, "Backup Google Drive upload returned no file ID.")
+                    DRIVE_LAST_SYNC_ERROR[filename] = msg
+                    print(f"Google Drive backup sync failed for {backup_name}: {msg}")
                     return False
+
+            DRIVE_LAST_SYNC[filename] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            DRIVE_LAST_SYNC_ERROR.pop(filename, None)
+            if backup_name:
+                DRIVE_LAST_SYNC[backup_name] = DRIVE_LAST_SYNC[filename]
+                DRIVE_LAST_SYNC_ERROR.pop(backup_name, None)
 
             try:
                 st_info = os.stat(local_path)
@@ -378,10 +399,11 @@ def sync_saved_file_to_drive(local_path):
                 pass
             return True
         except Exception as e:
-            print(f"Google Drive sync failed for {os.path.basename(local_path)}: {e}")
+            msg = f"{type(e).__name__}: {e}"
+            DRIVE_LAST_SYNC_ERROR[filename] = msg
             _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
+            print(f"Google Drive sync failed for {filename}: {e}")
             return False
-
 
 def ensure_all_drive_backups():
     """Ensure every configured backup workbook exists in Google Drive.
@@ -407,6 +429,84 @@ def _upload_to_drive_bg(local_path, filename):
             upload_to_google_drive(local_path, filename)
         except Exception as e:
             print(f"Drive upload failed for {filename}: {e}")
+
+def _drive_status_rows():
+    files = [
+        ("HR Leave Requests", HR_LEAVE_PATH),
+        ("HR Daily Rates", HR_DAILY_RATES_PATH),
+        ("Store Transactions", STORE_DEDUCTION_PATH),
+        ("Store Items", STORE_ITEMS_PATH),
+        ("HR Employee Records", HR_EMPLOYEES_PATH),
+        ("HR Portal Leave Records", HR_PORTAL_LEAVE_PATH),
+    ]
+    rows = []
+    for label, path in files:
+        live = os.path.basename(path)
+        backup = DRIVE_BACKUP_FILENAMES.get(path, "")
+        local_exists = os.path.exists(path)
+        live_remote = _drive_find_file(live) if drive_service is not None else None
+        backup_remote = _drive_find_file(backup) if (drive_service is not None and backup) else None
+        err = DRIVE_LAST_SYNC_ERROR.get(live) or DRIVE_LAST_SYNC_ERROR.get(backup, "")
+        rows.append({
+            "File": label,
+            "Local": "OK" if local_exists else "Missing",
+            "Live in Drive": "YES" if live_remote else "NO",
+            "Backup in Drive": "YES" if backup_remote else "NO",
+            "Last Sync": DRIVE_LAST_SYNC.get(live, "-"),
+            "Error": err or "",
+        })
+    return rows
+
+
+def render_google_drive_status():
+    """Visible diagnostic and manual recovery control for Google Drive backups."""
+    if not st.session_state.get("logged_in"):
+        return
+    role = str(st.session_state.get("user_info", {}).get("role", "")).strip()
+    if role not in {"Super Admin", "Director"}:
+        return
+
+    with st.sidebar.expander("☁️ Google Drive Backup Status", expanded=False):
+        if drive_service is None:
+            st.error("Google Drive is NOT connected.")
+            st.code(DRIVE_CONNECTION_ERROR or "No connection error was captured.")
+            st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
+        else:
+            st.success("Google Drive is connected.")
+            try:
+                folder = drive_service.files().get(
+                    fileId=GOOGLE_DRIVE_FOLDER_ID,
+                    fields="id,name,mimeType,parents",
+                    supportsAllDrives=True,
+                ).execute()
+                st.write(f"**Folder:** {folder.get('name', '-')}")
+                st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
+            except Exception as e:
+                st.error(f"Folder access failed: {type(e).__name__}: {e}")
+
+        if st.button("🔄 Test / Force Sync All 6 Files", key="force_drive_sync_all"):
+            if drive_service is None:
+                st.error("Cannot sync because Google Drive is not connected.")
+            else:
+                results = []
+                with st.spinner("Uploading the six workbooks to Google Drive..."):
+                    for label, path in [
+                        ("HR Leave Requests", HR_LEAVE_PATH),
+                        ("HR Daily Rates", HR_DAILY_RATES_PATH),
+                        ("Store Transactions", STORE_DEDUCTION_PATH),
+                        ("Store Items", STORE_ITEMS_PATH),
+                        ("HR Employee Records", HR_EMPLOYEES_PATH),
+                        ("HR Portal Leave Records", HR_PORTAL_LEAVE_PATH),
+                    ]:
+                        ok = sync_saved_file_to_drive(path)
+                        results.append((label, ok))
+                for label, ok in results:
+                    st.write(("✅ " if ok else "❌ ") + label)
+                st.rerun()
+
+        rows = _drive_status_rows()
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.caption("Every successful software save calls the same sync function, so changes are uploaded immediately.")
 
 def initialise_drive_storage():
     if drive_service is None or st.session_state.get("drive_storage_initialised"): return
@@ -5882,6 +5982,8 @@ def display_company_header():
 
 def change_my_password_form():
     if not st.session_state.get("logged_in") or not st.session_state.get("user_info"): return
+    render_google_drive_status()
+
     with st.sidebar.expander("🔑 Change My Password", expanded=False):
         USERS = load_users()
         current_username = st.session_state.user_info.get("username")
