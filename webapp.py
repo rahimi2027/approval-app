@@ -486,7 +486,7 @@ PERMISSION_LABELS = {
     "can_access_work_orders": "🛠️ Work Orders",
     "can_access_wo_total": "💷 Approved Work Order Total",
     "can_access_hr_leave": "🏢 HR Department (Employee Management + Leave Settlement)",
-    "can_access_leave_request": "📝 Leave Request (Department Manager)",
+    "can_access_leave_request": "📝 Leave Request By Departments (Department Manager)",
     "can_access_employee_hr_reports": "👤 Employee HR Reports (View Only)",
     "can_access_store_deduction": "📦 Store Department Deduction"
 }
@@ -2489,7 +2489,7 @@ def render_department_manager_leave_request(current_user_info=None):
     manager_name = str(user.get("full_name", "Department Manager")).strip()
     manager_department = str(user.get("dept", "")).strip()
 
-    st.subheader("📝 Leave Request")
+    st.subheader("📝 Leave Request By Departments")
     st.caption("Submit leave on behalf of an employee in your department. HR must approve the request before it becomes official leave.")
 
     if not manager_department:
@@ -6525,7 +6525,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
     if has_hr_leave:
         labels.append("🏢 HR Department")
     if has_leave_request:
-        labels.append("📝 Leave Request")
+        labels.append("📝 Leave Request By Departments")
     if has_store_deduction: labels.append("📦 Store Deduction")
     if has_store_deduction: labels.append("📦 Store Return (Addition)")
     if has_store_deduction: labels.append("📋 My Submitted Store Requests")
