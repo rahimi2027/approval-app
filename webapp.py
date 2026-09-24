@@ -599,32 +599,76 @@ def render_google_drive_status():
         pending = len(DRIVE_PENDING_SYNC)
         st.caption(f"Every successful software save is queued automatically. Pending Drive uploads: {pending}. Local saves do not wait for Google Drive.")
 
-def initialise_drive_storage():
-    if drive_service is None or st.session_state.get("drive_storage_initialised"): return
-    os.makedirs(APP_FOLDER, exist_ok=True)
-    with _DRIVE_SYNC_LOCK:
-        targets = [
-            (EXCEL_PATH, EXCEL_COLUMNS),
-            (USER_DB_PATH, USER_DB_COLUMNS),
-            (SETTINGS_PATH, ["setting", "value"]),
-            (AUDIT_LOG_PATH, AUDIT_COLUMNS),
-            (WORK_ORDERS_PATH, WORK_ORDER_COLUMNS),
-            (INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS),
-            (HR_LEAVE_PATH, HR_LEAVE_COLUMNS),
-            (HR_DAILY_RATES_PATH, HR_DAILY_RATES_COLUMNS),
-            (STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS),
-            (STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS),
-            (HR_EMPLOYEES_PATH, HR_EMPLOYEE_COLUMNS),
-            (HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS),
-        ]
+def _background_initialise_remaining_drive_storage(targets):
+    """Finish non-critical Drive initialisation without blocking the first page render."""
+    try:
         for path, columns in targets:
+            try:
+                sync_persistent_file(path, columns)
+            except Exception as e:
+                print(f"Background Drive initialisation failed for {os.path.basename(path)}: {e}")
+        # Backups are maintenance work, not a reason to hold up the login page.
+        try:
+            ensure_all_drive_backups()
+        except Exception as e:
+            print(f"Background Drive backup initialisation failed: {e}")
+    finally:
+        st.session_state["drive_background_initialised"] = True
+
+
+def initialise_drive_storage():
+    """Initialise only the files required for the first screen synchronously.
+
+    The previous version downloaded/checked all 12 workbooks and then checked
+    every backup on every fresh Streamlit server start. That could require dozens
+    of Google Drive API calls before the login page was rendered.
+
+    We now synchronously prepare only the core files needed immediately:
+    requests, users, settings, and the two HR workbooks. The remaining workbooks
+    and backup verification run in a daemon thread, while every normal save still
+    queues its live + BACKUP_ upload through the existing background sync worker.
+    """
+    if drive_service is None or st.session_state.get("drive_storage_initialised"):
+        return
+    os.makedirs(APP_FOLDER, exist_ok=True)
+
+    critical = [
+        (EXCEL_PATH, EXCEL_COLUMNS),
+        (USER_DB_PATH, USER_DB_COLUMNS),
+        (SETTINGS_PATH, ["setting", "value"]),
+        (HR_EMPLOYEES_PATH, HR_EMPLOYEE_COLUMNS),
+        (HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS),
+    ]
+    remaining = [
+        (AUDIT_LOG_PATH, AUDIT_COLUMNS),
+        (WORK_ORDERS_PATH, WORK_ORDER_COLUMNS),
+        (INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS),
+        (HR_LEAVE_PATH, HR_LEAVE_COLUMNS),
+        (HR_DAILY_RATES_PATH, HR_DAILY_RATES_COLUMNS),
+        (STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS),
+        (STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS),
+    ]
+
+    for path, columns in critical:
+        try:
             sync_persistent_file(path, columns)
-            # Create/update the explicit backup copy as well.
-            sync_backup_file_to_drive(path)
-        # Final explicit pass: recreate any missing backup files, even if the
-        # corresponding live workbook has not changed.
-        ensure_all_drive_backups()
-        st.session_state["drive_storage_initialised"] = True
+        except Exception as e:
+            print(f"Critical Drive initialisation failed for {os.path.basename(path)}: {e}")
+
+    st.session_state["drive_storage_initialised"] = True
+
+    # Do not wait for secondary workbooks or backup verification before showing
+    # the application. They will finish independently after the page can render.
+    try:
+        t = threading.Thread(
+            target=_background_initialise_remaining_drive_storage,
+            args=(remaining,),
+            name="google-drive-startup-sync",
+            daemon=True,
+        )
+        t.start()
+    except Exception as e:
+        print(f"Could not start background Drive startup sync: {e}")
 
 def get_onedrive_token():
     if not ONEDRIVE_CLIENT_ID or not ONEDRIVE_CLIENT_SECRET: return None
