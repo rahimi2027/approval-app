@@ -1615,10 +1615,28 @@ def _hrp_get_approved_holiday_days(employee_id):
         and str(r.get("status", "Approved")).strip().casefold() == "approved"
         and r.get("type") in HR_PORTAL_HOLIDAY_LEAVE_TYPES
     )
-    # Bank holidays and Acoole company-closure days never consume annual
-    # holiday allowance. They are already excluded from the working-day
-    # calculation used when leave is recorded.
     return round(recorded_days, 1)
+
+def _hrp_get_company_closure_holiday_days(employee, start_date, end_date):
+    """Count Acoole's pre-booked 29, 30 and 31 December closure days.
+
+    These days are company-closed days but are treated as annual holiday taken
+    for the employee's holiday balance, just like pre-booked annual leave.
+    Bank holidays are excluded because they are handled separately.
+    """
+    if not employee or not start_date or not end_date or end_date < start_date:
+        return 0.0
+    try:
+        days_per_week = float(employee.get("days_per_week", 5) or 5)
+    except Exception:
+        days_per_week = 5.0
+    factor = min(1.0, max(0.0, days_per_week / 5.0))
+    total = 0.0
+    for year in range(start_date.year, end_date.year + 1):
+        for closure_day in sorted(_hrp_company_closure_dates(year)):
+            if start_date <= closure_day <= end_date and closure_day.weekday() < 5 and closure_day not in HRP_BANK_HOLIDAYS.get(year, {}):
+                total += factor
+    return round(total, 1)
 
 def _hrp_get_bank_holiday_days(employee, start_date, end_date):
     """Count bank holidays that fall during employment and on a normal weekday.
@@ -1787,7 +1805,7 @@ def _hrp_get_holiday_position(employee_id):
             "balance": 0.0, "employee_owes_company": 0.0, "company_owes_employee": 0.0,
         }
     entitlement, _, _, _ = _hrp_get_employee_entitlement(employee)
-    used = _hrp_get_approved_holiday_days(employee_id)
+    recorded_used = _hrp_get_approved_holiday_days(employee_id)
 
     today = date.today()
     start_date = employee.get("start_date")
@@ -1806,10 +1824,14 @@ def _hrp_get_holiday_position(employee_id):
         except Exception:
             pass
     bank_holidays = _hrp_get_bank_holiday_days(employee, start_date, end_date)
+    company_closure = _hrp_get_company_closure_holiday_days(employee, start_date, end_date)
+    used = round(recorded_used + company_closure, 1)
     balance = round(entitlement - used - bank_holidays, 1)
     return {
         "entitlement": entitlement,
         "used": used,
+        "recorded_used": recorded_used,
+        "company_closure": company_closure,
         "bank_holidays": bank_holidays,
         "balance": balance,
         "employee_owes_company": round(abs(balance), 1) if balance < 0 else 0.0,
@@ -2512,14 +2534,22 @@ def render_hr_portal(current_user_info=None):
                     leaving_date = st.date_input("Leaving date", value=default_leave_date, key=f"hrp_leaving_date_{leaving_id}")
                     leaving_reason = st.text_input("Leaving reason", value=leaving_emp.get("leaving_reason", ""), key=f"hrp_leaving_reason_{leaving_id}")
                     calc = _hrp_get_leaving_entitlement(leaving_emp, leaving_date)
-                    used_to_leave = _hrp_get_approved_holiday_days_to_date(leaving_id, leaving_date)
+                    recorded_used_to_leave = _hrp_get_approved_holiday_days_to_date(leaving_id, leaving_date)
+                    employee_start_for_leaving = leaving_emp.get("start_date")
+                    if not isinstance(employee_start_for_leaving, date):
+                        try:
+                            employee_start_for_leaving = pd.to_datetime(employee_start_for_leaving).date()
+                        except Exception:
+                            employee_start_for_leaving = leaving_date
+                    closure_to_leave = _hrp_get_company_closure_holiday_days(leaving_emp, employee_start_for_leaving, leaving_date)
+                    used_to_leave = round(recorded_used_to_leave + closure_to_leave, 1)
                     balance = round(calc["net"] - used_to_leave, 1)
                     st.divider()
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Holiday entitlement to leaving date", f"{calc['gross']:.1f} days")
                     c2.metric("Bank holidays in period", f"{calc['bank_holidays']:.1f} days")
                     c3.metric("Holiday available", f"{calc['net']:.1f} days")
-                    c4.metric("Holiday taken", f"{used_to_leave:.1f} days")
+                    c4.metric("Holiday taken / pre-booked", f"{used_to_leave:.1f} days")
                     if balance > 0:
                         st.success(f"🏢 Company owes employee: {balance:.1f} holiday day(s).")
                         settlement_direction = "Company Owes Employee"
@@ -2535,7 +2565,7 @@ def render_hr_portal(current_user_info=None):
                         settlement_direction = None
                         settlement_type = None
                         settlement_category = None
-                    st.caption(f"Leaving date: {leaving_date:%d/%m/%Y} · {calc['note']}")
+                    st.caption(f"Leaving date: {leaving_date:%d/%m/%Y} · Pre-booked 29–31 December closure included as holiday taken: {closure_to_leave:.1f} days · {calc['note']}")
                     st.divider()
                     if st.button("💾 Record Employee as Left", type="primary", key=f"hrp_record_left_{leaving_id}", use_container_width=True):
                         old_status = leaving_emp.get("status", "Active")
@@ -6788,7 +6818,20 @@ def render_employee_hr_reports(current_user_info):
     passed_bank_holiday_days = _hrp_get_bank_holiday_days(
         employee, employee_start, passed_bank_holiday_end
     )
-    pure_balance = entitlement - approved_holiday
+    company_closure_days = _hrp_get_company_closure_holiday_days(
+        employee, employee_start, passed_bank_holiday_end if passed_bank_holiday_end >= employee_start else employee_start
+    )
+    # The 29/30/31 December closure is pre-booked annual holiday. Include it
+    # in Holiday Used so it consumes the pure holiday allowance once, even
+    # though there is no individual leave record for those closure dates.
+    company_closure_future = _hrp_get_company_closure_holiday_days(
+        employee,
+        max(today + timedelta(days=1), employee_start),
+        date(today.year, 12, 31),
+    )
+    company_closure_reserved = round(company_closure_days + company_closure_future, 1)
+    approved_holiday_with_closure = round(approved_holiday + company_closure_reserved, 1)
+    pure_balance = entitlement - approved_holiday_with_closure
 
     # Future bank holidays in the employee's current leave year are also
     # reserved now. This means the displayed available balance already
@@ -6800,7 +6843,7 @@ def render_employee_hr_reports(current_user_info):
 
     d1, d2, d3, d4, d5, d6 = st.columns(6)
     d1.metric("Holiday Entitlement", f"{entitlement:g} days")
-    d2.metric("Holiday Used", f"{approved_holiday:g} days")
+    d2.metric("Holiday Used / Pre-booked", f"{approved_holiday_with_closure:g} days")
     d3.metric("Bank Holidays Passed", f"{passed_bank_holiday_days:g} days")
     d4.metric("Holiday Balance", f"{balance:g} days")
     if upcoming_bank_holidays:
@@ -6814,7 +6857,8 @@ def render_employee_hr_reports(current_user_info):
         f"🏦 Bank holidays passed since your start date: **{passed_bank_holiday_days:g} days** · "
         f"Bank holidays still to come: **{upcoming_bank_holiday_days:g} days** · "
         f"Bank holidays reserved/deducted from balance: **{bank_holidays_reserved:g} days** · "
-        f"Pure holiday balance before bank holidays: **{pure_balance:g} days** · "
+        f"Pre-booked company closure (29–31 Dec): **{company_closure_reserved:g} days** · "
+        f"Holiday used including pre-booked closure: **{approved_holiday_with_closure:g} days** · "
         f"Current available holiday balance: **{balance:g} days**"
     )
     if upcoming_bank_holidays:
