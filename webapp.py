@@ -6972,7 +6972,10 @@ def render_employee_hr_reports(current_user_info):
     else:
         st.info("No holiday or absence records have been recorded for you yet.")
 
-if user_info.get("can_access_employee_hr_reports", False):
+# Employee HR Reports is a standalone view for employee accounts.
+# For managers/staff/team members with the explicit permission, it is rendered
+# inside the same role-based tab set alongside Leave Request By Departments.
+if user_info.get("can_access_employee_hr_reports", False) and role not in ["Manager", "Staff", "Team Member"]:
     render_employee_hr_reports(user_info)
 
 # ============================================================
@@ -7179,6 +7182,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_work_orders = user_info.get("can_access_work_orders", False)
     has_hr_leave = user_info.get("can_access_hr_leave", False)
     has_leave_request = user_info.get("can_access_leave_request", False)
+    has_employee_hr_reports = user_info.get("can_access_employee_hr_reports", False)
     has_store_deduction = user_info.get("can_access_store_deduction", False)
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
@@ -7188,6 +7192,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
         labels.append("🏢 HR Department")
     if has_leave_request:
         labels.append("📝 Leave Request By Departments")
+    if has_employee_hr_reports:
+        labels.append("👤 My HR Report")
     if has_store_deduction: labels.append("📦 Store Deduction")
     if has_store_deduction: labels.append("📦 Store Return (Addition)")
     if has_store_deduction: labels.append("📋 My Submitted Store Requests")
@@ -7333,6 +7339,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     render_hr_leave_approvals()
                 else:
                     render_department_manager_leave_request(current_user_info=user_info)
+            tab_idx += 1
+        if has_employee_hr_reports:
+            with tabs[tab_idx]:
+                render_employee_hr_reports(user_info)
             tab_idx += 1
         if has_store_deduction:
             with tabs[tab_idx]:
