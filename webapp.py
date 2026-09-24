@@ -2594,7 +2594,12 @@ def render_hr_portal(current_user_info=None):
                         hr_records.append(rec)
                         save_all_hr_leave(hr_records)
                         log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
-                        st.success(f"Settlement #{new_id} created as {settlement_type} and sent through the existing HR Leave Settlement workflow.")
+                        # Keep the creator as the actual logged-in user's full name so
+                        # the settlement appears in "My Submitted Settlements".
+                        st.session_state["hr_leave_submission_notice"] = (
+                            f"Settlement #{new_id} created as {settlement_type} and sent through the existing HR Leave Settlement workflow."
+                        )
+                        st.rerun()
                     st.divider()
                     st.subheader("💷 Existing HR Leave Settlement Calculator")
                     st.caption("Use the existing calculator below for the employee's current holiday position. The leaving calculation above is specifically frozen at the leaving date.")
@@ -5443,12 +5448,29 @@ def render_hr_leave_form(user_name):
 
 
 def render_hr_leave_my_submissions(user_name):
+    # The leaving-settlement workflow stores the creator using the logged-in
+    # user's full name. Accept both full name and username so older records
+    # and records created from different entry points remain visible.
+    logged_user = st.session_state.get("user_info", {}) or {}
+    submitted_by_values = {
+        str(user_name or "").strip().casefold(),
+        str(logged_user.get("full_name", "")).strip().casefold(),
+        str(logged_user.get("username", "")).strip().casefold(),
+    }
+    submitted_by_values.discard("")
+
     st.subheader("📋 My Submitted HR Leave Requests")
     st.caption("All HR Leave Settlement requests you have submitted — filter by name, department or date.")
+    notice = st.session_state.pop("hr_leave_submission_notice", "")
+    if notice:
+        st.success(f"✅ {notice}")
     st.divider()
 
     hr_records = load_hr_leave()
-    mine = [r for r in hr_records if r.get("submitted_by") == user_name]
+    mine = [
+        r for r in hr_records
+        if str(r.get("submitted_by", "")).strip().casefold() in submitted_by_values
+    ]
 
     c1, c2, c3 = st.columns(3)
     with c1:
