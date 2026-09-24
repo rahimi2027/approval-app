@@ -1660,8 +1660,8 @@ def _hrp_get_bank_holiday_days(employee, start_date, end_date):
 def _hrp_get_leaving_entitlement(employee, leaving_date):
     """Calculate pure holiday entitlement accrued up to a leaving date.
 
-    Bank holidays are tracked separately for information only and do not reduce
-    the employee's holiday entitlement or final settlement balance.
+    Bank holidays are kept separate from the pure entitlement, but they are
+    deducted from the available holiday balance for the final settlement.
     """
     if not employee or not leaving_date:
         return {"gross": 0.0, "bank_holidays": 0.0, "net": 0.0, "note": ""}
@@ -1990,6 +1990,7 @@ HRP_CALENDAR_COLOURS = {
     "M": "#B8D3EF",
     "UA": "#00FFFF",
     "S": "#AFABAB",
+    "LEFT": "#FF0000",
 }
 
 
@@ -2122,11 +2123,18 @@ def _hrp_render_holiday_calendar():
             employee_start = raw_start if isinstance(raw_start, date) else pd.to_datetime(raw_start).date()
         except Exception:
             employee_start = None
+        raw_leaving = employee.get("leaving_date", "")
+        try:
+            employee_leaving = raw_leaving if isinstance(raw_leaving, date) else (pd.to_datetime(raw_leaving).date() if str(raw_leaving).strip() else None)
+        except Exception:
+            employee_leaving = None
         for d in dates:
-            # Before an employee's start date, always show NA (not yet started).
-            # This takes precedence over weekends, bank holidays and company closure.
+            # Before start = NA. After the recorded leaving date = LEFT.
+            # LEFT takes precedence over weekends, bank holidays and other leave.
             if employee_start and d < employee_start:
                 row[d.strftime("%d %b")] = "NA"
+            elif employee_leaving and d > employee_leaving:
+                row[d.strftime("%d %b")] = "LEFT"
             else:
                 row[d.strftime("%d %b")] = leave_lookup.get((employee.get("emp_id", ""), d), "")
         rows.append(row)
@@ -2580,12 +2588,13 @@ def render_hr_portal(current_user_info=None):
                             employee_start_for_leaving = leaving_date
                     closure_to_leave = _hrp_get_company_closure_holiday_days(leaving_emp, employee_start_for_leaving, leaving_date)
                     used_to_leave = round(recorded_used_to_leave + closure_to_leave, 1)
-                    balance = round(calc["net"] - used_to_leave - calc["bank_holidays"], 1)
+                    holiday_available_after_bank = round(calc["net"] - calc["bank_holidays"], 1)
+                    balance = round(holiday_available_after_bank - used_to_leave, 1)
                     st.divider()
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Holiday entitlement to leaving date", f"{calc['gross']:.1f} days")
+                    c1.metric("Pure holiday entitlement to leaving date", f"{calc['gross']:.1f} days")
                     c2.metric("Bank holidays in period", f"{calc['bank_holidays']:.1f} days")
-                    c3.metric("Holiday available", f"{calc['net']:.1f} days")
+                    c3.metric("Holiday available after bank holidays", f"{holiday_available_after_bank:.1f} days")
                     c4.metric("Holiday taken / pre-booked", f"{used_to_leave:.1f} days")
                     if balance > 0:
                         st.success(f"🏢 Company owes employee: {balance:.1f} holiday day(s).")
@@ -2602,7 +2611,7 @@ def render_hr_portal(current_user_info=None):
                         settlement_direction = None
                         settlement_type = None
                         settlement_category = None
-                    st.caption(f"Leaving date: {leaving_date:%d/%m/%Y} · Pre-booked 29–31 December closure included as holiday taken: {closure_to_leave:.1f} days · Bank holidays deducted from available balance: {calc['bank_holidays']:.1f} days · {calc['note']}")
+                    st.caption(f"Leaving date: {leaving_date:%d/%m/%Y} · Pure holiday entitlement: {calc['gross']:.1f} days · Bank holidays deducted from available balance: {calc['bank_holidays']:.1f} days · Holiday available after bank holidays: {holiday_available_after_bank:.1f} days · Pre-booked 29–31 December closure included as holiday taken: {closure_to_leave:.1f} days · Final settlement balance: {balance:.1f} days.")
                     st.divider()
                     if st.button("💾 Record Employee as Left", type="primary", key=f"hrp_record_left_{leaving_id}", use_container_width=True):
                         old_status = leaving_emp.get("status", "Active")
@@ -2624,7 +2633,7 @@ def render_hr_portal(current_user_info=None):
                             "id": new_id, "employee_id": leaving_emp.get("emp_id", ""), "emp_name": leaving_emp.get("name", ""), "emp_dept": dept,
                             "type": settlement_type, "category": settlement_category, "owe_owed": settlement_direction,
                             "date": str(leaving_date), "days": abs(balance), "amount": amount,
-                            "manager": str((current_user_info or {}).get("name", "HR")), "desc": f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Pure holiday entitlement {calc['gross']:.1f}; bank holidays in period {calc['bank_holidays']:.1f}; holiday available after bank holidays {calc['net'] - calc['bank_holidays']:.1f}; approved holiday taken {used_to_leave:.1f}; balance {balance:.1f}.",
+                            "manager": str((current_user_info or {}).get("name", "HR")), "desc": f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Pure holiday entitlement {calc['gross']:.1f}; bank holidays in period {calc['bank_holidays']:.1f}; holiday available after bank holidays {holiday_available_after_bank:.1f}; approved holiday taken {used_to_leave:.1f}; balance {balance:.1f}.",
                             "attachment_name": "None", "status": "pending", "director_comments": "", "rejection_reason": "",
                             "final_holiday_settlement": True,
                             "decision_date": "", "decision_by": "", "submitted_by": str((current_user_info or {}).get("name", "HR")), "submitted_date": now, "pdf_path": "",
@@ -7051,11 +7060,18 @@ def render_employee_hr_reports(current_user_info):
         emp_start = employee.get("start_date") if isinstance(employee.get("start_date"), date) else pd.to_datetime(employee.get("start_date")).date()
     except Exception:
         emp_start = None
+    raw_leaving = employee.get("leaving_date", "")
+    try:
+        emp_leaving = raw_leaving if isinstance(raw_leaving, date) else (pd.to_datetime(raw_leaving).date() if str(raw_leaving).strip() else None)
+    except Exception:
+        emp_leaving = None
     row = {}
     for d in dates:
         col = d.strftime("%d %b")
         if emp_start and d < emp_start:
             row[col] = "NA"
+        elif emp_leaving and d > emp_leaving:
+            row[col] = "LEFT"
         else:
             nonwork_code, _ = _hrp_non_working_reason(d)
             row[col] = lookup.get(d, nonwork_code or "")
@@ -7078,7 +7094,7 @@ def render_employee_hr_reports(current_user_info):
         ])
     )
     st.dataframe(calendar_style, use_container_width=True, hide_index=True)
-    st.caption("H Holiday · HD Half Day · BH Bank Holiday · UH Unpaid Holiday · C College · NA Closed / Not yet started · T Training · M Maternity · UA Unpaid Absence · S Sick · FE Family/Emergency · P Paternity · O Other · * Pending")
+    st.caption("H Holiday · HD Half Day · BH Bank Holiday · UH Unpaid Holiday · C College · NA Closed / Not yet started · T Training · M Maternity · UA Unpaid Absence · S Sick · FE Family/Emergency · P Paternity · O Other · LEFT Employee Left · * Pending")
 
     st.markdown("### 📝 My Leave & Absence Records")
     visible = []
