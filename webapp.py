@@ -1736,7 +1736,7 @@ def _hrp_get_upcoming_bank_holiday_days_for_employee(employee, from_date=None, e
     This is deliberately separate from the employee's pure holiday entitlement.
     The entitlement remains the contractual/statutory annual holiday allowance;
     this value is only used to show how many future bank-holiday days are still
-    coming and to subtract those days from the *available holiday balance*.
+    coming and to reserve those days against the *available holiday balance*.
     """
     if not employee:
         return 0.0
@@ -1779,16 +1779,38 @@ def _hrp_get_upcoming_bank_holiday_days_for_employee(employee, from_date=None, e
 
 
 def _hrp_get_holiday_position(employee_id):
-    """Return signed balance plus explicit company/employee owed amounts."""
+    """Return the current holiday balance after reserving all bank holidays in the employment year."""
     employee = _hrp_get_employee(employee_id)
     if not employee:
-        return {"entitlement": 0.0, "used": 0.0, "balance": 0.0, "employee_owes_company": 0.0, "company_owes_employee": 0.0}
+        return {
+            "entitlement": 0.0, "used": 0.0, "bank_holidays": 0.0,
+            "balance": 0.0, "employee_owes_company": 0.0, "company_owes_employee": 0.0,
+        }
     entitlement, _, _, _ = _hrp_get_employee_entitlement(employee)
     used = _hrp_get_approved_holiday_days(employee_id)
-    balance = round(entitlement - used, 1)
+
+    today = date.today()
+    start_date = employee.get("start_date")
+    if not isinstance(start_date, date):
+        try:
+            start_date = pd.to_datetime(start_date).date()
+        except Exception:
+            start_date = today
+    end_date = date(today.year, 12, 31)
+    leaving_date = employee.get("leaving_date")
+    if leaving_date:
+        try:
+            if not isinstance(leaving_date, date):
+                leaving_date = pd.to_datetime(leaving_date).date()
+            end_date = min(end_date, leaving_date)
+        except Exception:
+            pass
+    bank_holidays = _hrp_get_bank_holiday_days(employee, start_date, end_date)
+    balance = round(entitlement - used - bank_holidays, 1)
     return {
         "entitlement": entitlement,
         "used": used,
+        "bank_holidays": bank_holidays,
         "balance": balance,
         "employee_owes_company": round(abs(balance), 1) if balance < 0 else 0.0,
         "company_owes_employee": round(balance, 1) if balance > 0 else 0.0,
@@ -6743,9 +6765,9 @@ def render_employee_hr_reports(current_user_info):
     approved_holiday = _hrp_get_approved_holiday_days(linked_id)
 
     # Bank holidays are separate from the employee's pure annual entitlement.
-    # Once a bank holiday has actually passed during the employee's employment,
-    # it is deducted from the *remaining holiday balance*. Future bank holidays
-    # are not deducted until they occur.
+    # Both passed and upcoming bank holidays for the employee's current leave
+    # year are reserved against the *available holiday balance*. The entitlement
+    # figure itself is never changed.
     today = date.today()
     try:
         employee_start = employee.get("start_date")
@@ -6767,11 +6789,14 @@ def render_employee_hr_reports(current_user_info):
         employee, employee_start, passed_bank_holiday_end
     )
     pure_balance = entitlement - approved_holiday
-    balance = round(pure_balance - passed_bank_holiday_days, 1)
 
-    # Future bank holidays remain informational until their actual date.
+    # Future bank holidays in the employee's current leave year are also
+    # reserved now. This means the displayed available balance already
+    # accounts for both bank holidays that have passed and those still to come.
     upcoming_bank_holidays = _hrp_get_upcoming_bank_holidays(today + timedelta(days=1), limit=5)
     upcoming_bank_holiday_days = _hrp_get_upcoming_bank_holiday_days_for_employee(employee, today + timedelta(days=1))
+    bank_holidays_reserved = round(passed_bank_holiday_days + upcoming_bank_holiday_days, 1)
+    balance = round(pure_balance - bank_holidays_reserved, 1)
 
     d1, d2, d3, d4, d5, d6 = st.columns(6)
     d1.metric("Holiday Entitlement", f"{entitlement:g} days")
@@ -6788,6 +6813,7 @@ def render_employee_hr_reports(current_user_info):
     st.caption(
         f"🏦 Bank holidays passed since your start date: **{passed_bank_holiday_days:g} days** · "
         f"Bank holidays still to come: **{upcoming_bank_holiday_days:g} days** · "
+        f"Bank holidays reserved/deducted from balance: **{bank_holidays_reserved:g} days** · "
         f"Pure holiday balance before bank holidays: **{pure_balance:g} days** · "
         f"Current available holiday balance: **{balance:g} days**"
     )
