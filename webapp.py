@@ -2120,12 +2120,25 @@ def _hrp_render_holiday_calendar():
         }
         raw_start = employee.get("start_date", "")
         try:
-            employee_start = raw_start if isinstance(raw_start, date) else pd.to_datetime(raw_start).date()
+            if raw_start is None or pd.isna(raw_start) or not str(raw_start).strip():
+                employee_start = None
+            elif isinstance(raw_start, date) and not isinstance(raw_start, pd.Timestamp):
+                employee_start = raw_start
+            else:
+                parsed_start = pd.to_datetime(raw_start, errors="coerce")
+                employee_start = None if pd.isna(parsed_start) else parsed_start.date()
         except Exception:
             employee_start = None
+
         raw_leaving = employee.get("leaving_date", "")
         try:
-            employee_leaving = raw_leaving if isinstance(raw_leaving, date) else (pd.to_datetime(raw_leaving).date() if str(raw_leaving).strip() else None)
+            if raw_leaving is None or pd.isna(raw_leaving) or not str(raw_leaving).strip():
+                employee_leaving = None
+            elif isinstance(raw_leaving, date) and not isinstance(raw_leaving, pd.Timestamp):
+                employee_leaving = raw_leaving
+            else:
+                parsed_leaving = pd.to_datetime(raw_leaving, errors="coerce")
+                employee_leaving = None if pd.isna(parsed_leaving) else parsed_leaving.date()
         except Exception:
             employee_leaving = None
         for d in dates:
