@@ -1450,7 +1450,10 @@ def _hrp_get_working_days(start_date, end_date):
 
 def _hrp_calculate_leave_days(leave_type, start_date, end_date, half_day=False):
     if end_date < start_date: return 0.0
-    if leave_type == "Half Day Holiday" or half_day: return 0.5
+    # Bank holidays, weekends and Acoole company-closure days are closed days
+    # and never consume annual holiday allowance, including a half-day request.
+    if leave_type == "Half Day Holiday" or half_day:
+        return 0.5 if _hrp_get_working_days(start_date, end_date) > 0 else 0.0
     return float(_hrp_get_working_days(start_date, end_date))
 
 def _hrp_calculate_service_years(start_date):
@@ -1505,15 +1508,19 @@ def _hrp_calculate_holiday_entitlement(employee):
             f"(5.6 weeks, capped at 28 days). Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
         ), service_years
 
-    # First/partial leave year: pro-rate by calendar days remaining in the leave year.
-    employed_days = (holiday_year_end - start_date).days + 1
-    year_days = (holiday_year_end - holiday_year_start).days + 1
-    raw = full_year_entitlement * max(0.0, min(employed_days / year_days, 1.0))
+    # First/partial leave year: pro-rate by available working days, excluding
+    # weekends, England & Wales bank holidays and Acoole company closure days.
+    # This ensures a new starter is not given an allowance calculation that
+    # treats company-closed days as working/holiday days.
+    employed_days = _hrp_get_working_days(start_date, holiday_year_end)
+    year_days = _hrp_get_working_days(holiday_year_start, holiday_year_end)
+    raw = full_year_entitlement * max(0.0, min(employed_days / year_days if year_days else 0.0, 1.0))
     # GOV.UK calculator rounds a fractional day up to the next half day.
     entitlement = (int(raw * 2 + 0.999999) / 2.0)
     return entitlement, (
-        f"UK statutory pro-rata: {full_year_entitlement:.1f} days full-year entitlement × "
-        f"{employed_days}/{year_days} calendar days remaining in the leave year, "
+        f"Company pro-rata: {full_year_entitlement:.1f} days full-year entitlement × "
+        f"{employed_days}/{year_days} available working days remaining in the leave year "
+        f"(excluding weekends, bank holidays and company closure), "
         f"rounded up to the next half day. Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
     ), service_years
 
@@ -1536,30 +1543,6 @@ def _hrp_get_employee_leave(employee_id):
         st.session_state.hrp_leave_records = records
     return [r for r in records if str(r.get("employee_id", "")).strip().casefold() == str(employee_id).strip().casefold()]
 
-def _hrp_get_company_closure_holiday_days(employee):
-    """Return company-closure days that consume this employee's annual holiday allowance.
-
-    29, 30 and 31 December are Acoole company holidays. Only scheduled
-    working days on/after the employee's start date are deducted; weekends and
-    bank holidays never consume annual leave.
-    """
-    raw_start = employee.get("start_date", "")
-    try:
-        employee_start = raw_start if isinstance(raw_start, date) else pd.to_datetime(raw_start).date()
-    except Exception:
-        employee_start = None
-
-    total = 0.0
-    # Count closure days for the current holiday/calendar year. The holiday
-    # position is based on the current leave year, so include the closure in
-    # the year containing the current date.
-    year = date.today().year
-    for closure_day in sorted(_hrp_company_closure_dates(year)):
-        if closure_day.weekday() < 5 and (employee_start is None or closure_day >= employee_start):
-            if closure_day not in HRP_BANK_HOLIDAYS.get(year, {}):
-                total += 1.0
-    return total
-
 def _hrp_get_approved_holiday_days(employee_id):
     employee = _hrp_get_employee(employee_id)
     records = st.session_state.get("hrp_leave_records")
@@ -1573,8 +1556,10 @@ def _hrp_get_approved_holiday_days(employee_id):
         and str(r.get("status", "Approved")).strip().casefold() == "approved"
         and r.get("type") in HR_PORTAL_HOLIDAY_LEAVE_TYPES
     )
-    closure_days = _hrp_get_company_closure_holiday_days(employee) if employee else 0.0
-    return round(recorded_days + closure_days, 1)
+    # Bank holidays and Acoole company-closure days never consume annual
+    # holiday allowance. They are already excluded from the working-day
+    # calculation used when leave is recorded.
+    return round(recorded_days, 1)
 
 def _hrp_get_holiday_position(employee_id):
     """Return signed balance plus explicit company/employee owed amounts."""
@@ -1615,10 +1600,8 @@ def _hrp_create_leave_id():
 # ════════════════════════════════════════════════════════════
 # UK / ACoole non-working dates used by the holiday calendar and leave validation.
 # Bank holidays are for England & Wales. Acoole also closes on 29-31 December
-# (shown as H in the supplied company calendar). These three company-closure
-# days are paid annual-holiday days and therefore consume holiday allowance.
-# They are handled automatically in holiday-used calculations, so HR does not
-# need to create a separate leave record for them.
+# (shown as H in the supplied company calendar). Bank holidays and company
+# closure days do NOT consume annual holiday allowance.
 HRP_BANK_HOLIDAYS = {
     2026: {
         date(2026, 1, 1): "New Year’s Day",
@@ -1893,7 +1876,7 @@ def _hrp_render_holiday_calendar():
     if bank_days:
         st.info("**Bank holidays / blocked dates:** " + ", ".join(f"{d.strftime('%d %b')} — {name}" for d, name in sorted(bank_days.items())))
     closure_working_days = sum(1 for d in _hrp_company_closure_dates(int(calendar_year)) if d.weekday() < 5 and d not in HRP_BANK_HOLIDAYS.get(int(calendar_year), {}))
-    st.warning(f"**Company closure:** 29, 30 and 31 December are company holidays and automatically consume {closure_working_days} annual-holiday day(s) for employees employed on those working days. No separate leave entry is required.")
+    st.info(f"**Company closure:** 29, 30 and 31 December are company-closed days. They do **not** consume annual holiday allowance, and no separate leave entry is required.")
     st.caption(f"{len(filtered_employees)} employees · {len(dates)} calendar days · {calendar_year}")
 
     if df.empty:
