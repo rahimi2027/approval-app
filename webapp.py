@@ -1730,6 +1730,54 @@ def _hrp_get_upcoming_bank_holidays(from_date=None, limit=5):
     return upcoming[:max(1, int(limit))]
 
 
+def _hrp_get_upcoming_bank_holiday_days_for_employee(employee, from_date=None, end_date=None):
+    """Count future England & Wales bank holidays for this employee.
+
+    This is deliberately separate from the employee's pure holiday entitlement.
+    The entitlement remains the contractual/statutory annual holiday allowance;
+    this value is only used to show how many future bank-holiday days are still
+    coming and to subtract those days from the *available holiday balance*.
+    """
+    if not employee:
+        return 0.0
+    start = from_date or date.today()
+    start_date = employee.get("start_date")
+    if isinstance(start_date, date):
+        start = max(start, start_date)
+    elif start_date:
+        try:
+            start = max(start, pd.to_datetime(start_date).date())
+        except Exception:
+            pass
+
+    if end_date is None:
+        leaving_date = employee.get("leaving_date")
+        if isinstance(leaving_date, date):
+            end_date = leaving_date
+        elif leaving_date:
+            try:
+                end_date = pd.to_datetime(leaving_date).date()
+            except Exception:
+                end_date = date(start.year, 12, 31)
+        else:
+            end_date = date(start.year, 12, 31)
+    if end_date < start:
+        return 0.0
+
+    try:
+        days_per_week = float(employee.get("days_per_week", 5) or 5)
+    except Exception:
+        days_per_week = 5.0
+    factor = min(1.0, max(0.0, days_per_week / 5.0))
+
+    total = 0.0
+    for year in range(start.year, end_date.year + 1):
+        for bank_day in HRP_BANK_HOLIDAYS.get(year, {}):
+            if start <= bank_day <= end_date and bank_day.weekday() < 5:
+                total += factor
+    return round(total, 1)
+
+
 def _hrp_get_holiday_position(employee_id):
     """Return signed balance plus explicit company/employee owed amounts."""
     employee = _hrp_get_employee(employee_id)
@@ -6693,10 +6741,11 @@ def render_employee_hr_reports(current_user_info):
     entitlement = float(entitlement_result[0]) if isinstance(entitlement_result, tuple) else float(entitlement_result)
     entitlement_note = str(entitlement_result[1]) if isinstance(entitlement_result, tuple) and len(entitlement_result) > 1 else ""
     approved_holiday = _hrp_get_approved_holiday_days(linked_id)
-    try:
-        balance = float(entitlement.get("entitlement", 0) if isinstance(entitlement, dict) else entitlement) - approved_holiday
-    except Exception:
-        balance = 0.0
+    pure_balance = entitlement - approved_holiday
+    upcoming_bank_holiday_days = _hrp_get_upcoming_bank_holiday_days_for_employee(employee, date.today())
+    # Keep the entitlement as pure annual holiday. The displayed balance is the
+    # holiday still available after accounting for future bank-holiday closures.
+    balance = max(0.0, pure_balance - upcoming_bank_holiday_days)
 
     upcoming_bank_holidays = _hrp_get_upcoming_bank_holidays(date.today(), limit=5)
     d1, d2, d3, d4, d5 = st.columns(5)
@@ -6710,6 +6759,11 @@ def render_employee_hr_reports(current_user_info):
     else:
         d4.metric("Upcoming Bank Holiday", "None")
     d5.metric("Department", employee.get("department", ""))
+    st.caption(
+        f"🏦 Bank holidays still to come: **{upcoming_bank_holiday_days:g} days** · "
+        f"Pure holiday balance before bank holidays: **{pure_balance:g} days** · "
+        f"Available holiday balance after bank holidays: **{balance:g} days**"
+    )
     if upcoming_bank_holidays:
         with st.expander("📅 Upcoming Bank Holidays", expanded=False):
             st.dataframe(
