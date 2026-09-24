@@ -288,7 +288,42 @@ def _drive_download_file(file_id, local_path):
         print(f"Drive download failed for {local_path}: {e}")
         return False
 
+def _drive_remote_workbook_has_rows(file_id):
+    """Return True when a remote Excel workbook contains at least one data row.
+
+    Used only during startup/recovery so a newly-created empty local workbook
+    can never replace an existing non-empty Drive workbook.
+    """
+    if drive_service is None or not file_id:
+        return False
+    tmp_path = os.path.join(APP_FOLDER, f".__drive_check_{file_id}.xlsx")
+    try:
+        if not _drive_download_file(file_id, tmp_path):
+            return False
+        df = pd.read_excel(tmp_path, engine="openpyxl")
+        return not df.empty
+    except Exception as e:
+        print(f"Drive workbook row check failed: {e}")
+        return False
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+
 def sync_persistent_file(local_path, columns=None):
+    """Initialise a persistent workbook safely from Google Drive.
+
+    Google Drive is the source of truth when a remote workbook already exists.
+    A fresh Streamlit deployment may have a newly-created/empty local workbook;
+    comparing timestamps can incorrectly treat that empty file as newer and upload
+    it over yesterday's real data. Never do that. Download the remote live workbook
+    first, and if the live workbook is empty but its BACKUP_ copy contains data,
+    recover the backup instead. Only create/upload a new workbook when neither
+    remote copy exists.
+    """
     if drive_service is None:
         if not os.path.exists(local_path) and columns is not None:
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
@@ -296,32 +331,39 @@ def sync_persistent_file(local_path, columns=None):
 
     with _DRIVE_SYNC_LOCK:
         filename = os.path.basename(local_path)
+        backup_name = DRIVE_BACKUP_FILENAMES.get(local_path, "")
         remote = _drive_find_file(filename)
+
         if remote:
-            try:
-                rmt = str(remote.get("modifiedTime", "")).rstrip("Z")
-                local_newer = False
-                if os.path.exists(local_path) and rmt:
-                    try:
-                        from datetime import timezone
-                        if "." in rmt:
-                            remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc)
-                        else:
-                            remote_dt = datetime.strptime(rmt, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-                        local_dt = datetime.fromtimestamp(os.path.getmtime(local_path), timezone.utc)
-                        local_newer = local_dt > remote_dt
-                    except Exception:
-                        local_newer = False
-                if not local_newer:
-                    if not _drive_download_file(remote["id"], local_path):
-                        print(f"Using local copy of {filename} (Drive download failed)")
-            except Exception as e:
-                print(f"Drive sync check failed for {filename}: {e}")
-                if not os.path.exists(local_path) and columns is not None:
-                    pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
-        elif os.path.exists(local_path):
-            _drive_upload_path(local_path, filename)
-        elif columns is not None:
+            # If the live Drive workbook is empty but the explicit BACKUP_ copy
+            # contains data, restore the non-empty backup instead of propagating
+            # an empty deployment file.
+            if backup_name:
+                backup_remote = _drive_find_file(backup_name)
+                if backup_remote and not _drive_remote_workbook_has_rows(remote["id"]):
+                    if _drive_remote_workbook_has_rows(backup_remote["id"]):
+                        if _drive_download_file(backup_remote["id"], local_path):
+                            print(f"Recovered {filename} from non-empty Drive backup {backup_name}")
+                            return
+
+            # Remote live workbook exists: it is authoritative on startup.
+            # Do not compare timestamps with a fresh local deployment copy.
+            if _drive_download_file(remote["id"], local_path):
+                return
+            print(f"Using local copy of {filename} because Drive download failed")
+            if os.path.exists(local_path):
+                return
+
+        # No live workbook exists. Recover from the explicit backup if available.
+        if backup_name:
+            backup_remote = _drive_find_file(backup_name)
+            if backup_remote and _drive_remote_workbook_has_rows(backup_remote["id"]):
+                if _drive_download_file(backup_remote["id"], local_path):
+                    print(f"Recovered missing {filename} from Drive backup {backup_name}")
+                    return
+
+        # Only create a brand-new empty workbook when Drive has no usable copy.
+        if not os.path.exists(local_path) and columns is not None:
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
             _drive_upload_path(local_path, filename)
 
