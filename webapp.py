@@ -103,11 +103,11 @@ HR_PORTAL_LEAVE_COLUMNS = [
 ]
 
 HR_LEAVE_COLUMNS = [
-    "ID", "Employee Name", "Employee Department", "Transaction Type",
+    "ID", "Employee ID", "Employee Name", "Employee Department", "Transaction Type",
     "Category Reason", "Owe Owed", "Date", "Number of Days", "Amount (£)",
     "Line Manager", "Description", "Attachment Name", "Status",
     "Director Comments", "Rejection Reason", "Decision Date", "Decision By",
-    "Submitted By", "Submitted Date", "PDF File Path"
+    "Submitted By", "Submitted Date", "PDF File Path", "Final Holiday Settlement"
 ]
 HR_DAILY_RATES_COLUMNS = ["Department", "Transaction Type", "Daily Rate (£)", "Active"]
 DEFAULT_HR_CATEGORIES = [
@@ -1796,6 +1796,39 @@ def _hrp_get_upcoming_bank_holiday_days_for_employee(employee, from_date=None, e
     return round(total, 1)
 
 
+def _hrp_get_approved_final_settlement_offset(employee_id):
+    """Return the signed amount of an approved final holiday settlement.
+
+    Addition settlements are positive (company owes employee) and deduction
+    settlements are negative (employee owes company).  Applying this signed
+    offset to the live holiday balance makes an approved final settlement close
+    the employee's holiday account at zero.
+    """
+    try:
+        records = load_hr_leave(force=True)
+    except Exception:
+        return 0.0
+    total = 0.0
+    target = str(employee_id or "").strip().casefold()
+    for r in records:
+        if str(r.get("status", "")).strip().casefold() != "approved":
+            continue
+        if not r.get("final_holiday_settlement", False):
+            continue
+        rid = str(r.get("employee_id", "")).strip().casefold()
+        if rid != target:
+            continue
+        try:
+            days = abs(float(r.get("days", 0) or 0))
+        except Exception:
+            days = 0.0
+        if str(r.get("type", "")).strip().casefold() == "addition":
+            total += days
+        elif str(r.get("type", "")).strip().casefold() == "deduction":
+            total -= days
+    return round(total, 1)
+
+
 def _hrp_get_holiday_position(employee_id):
     """Return the current holiday balance after reserving all bank holidays in the employment year."""
     employee = _hrp_get_employee(employee_id)
@@ -1826,13 +1859,17 @@ def _hrp_get_holiday_position(employee_id):
     bank_holidays = _hrp_get_bank_holiday_days(employee, start_date, end_date)
     company_closure = _hrp_get_company_closure_holiday_days(employee, start_date, end_date)
     used = round(recorded_used + company_closure, 1)
-    balance = round(entitlement - used - bank_holidays, 1)
+    raw_balance = round(entitlement - used - bank_holidays, 1)
+    final_settlement_offset = _hrp_get_approved_final_settlement_offset(employee_id)
+    balance = round(raw_balance - final_settlement_offset, 1)
     return {
         "entitlement": entitlement,
         "used": used,
         "recorded_used": recorded_used,
         "company_closure": company_closure,
         "bank_holidays": bank_holidays,
+        "raw_balance": raw_balance,
+        "final_settlement_offset": final_settlement_offset,
         "balance": balance,
         "employee_owes_company": round(abs(balance), 1) if balance < 0 else 0.0,
         "company_owes_employee": round(balance, 1) if balance > 0 else 0.0,
@@ -2543,7 +2580,7 @@ def render_hr_portal(current_user_info=None):
                             employee_start_for_leaving = leaving_date
                     closure_to_leave = _hrp_get_company_closure_holiday_days(leaving_emp, employee_start_for_leaving, leaving_date)
                     used_to_leave = round(recorded_used_to_leave + closure_to_leave, 1)
-                    balance = round(calc["net"] - used_to_leave, 1)
+                    balance = round(calc["net"] - used_to_leave - calc["bank_holidays"], 1)
                     st.divider()
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Holiday entitlement to leaving date", f"{calc['gross']:.1f} days")
@@ -2565,7 +2602,7 @@ def render_hr_portal(current_user_info=None):
                         settlement_direction = None
                         settlement_type = None
                         settlement_category = None
-                    st.caption(f"Leaving date: {leaving_date:%d/%m/%Y} · Pre-booked 29–31 December closure included as holiday taken: {closure_to_leave:.1f} days · {calc['note']}")
+                    st.caption(f"Leaving date: {leaving_date:%d/%m/%Y} · Pre-booked 29–31 December closure included as holiday taken: {closure_to_leave:.1f} days · Bank holidays deducted from available balance: {calc['bank_holidays']:.1f} days · {calc['note']}")
                     st.divider()
                     if st.button("💾 Record Employee as Left", type="primary", key=f"hrp_record_left_{leaving_id}", use_container_width=True):
                         old_status = leaving_emp.get("status", "Active")
@@ -2584,11 +2621,12 @@ def render_hr_portal(current_user_info=None):
                         amount = round(rate * abs(balance), 2) if rate else 0.01
                         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         rec = {
-                            "id": new_id, "emp_name": leaving_emp.get("name", ""), "emp_dept": dept,
+                            "id": new_id, "employee_id": leaving_emp.get("emp_id", ""), "emp_name": leaving_emp.get("name", ""), "emp_dept": dept,
                             "type": settlement_type, "category": settlement_category, "owe_owed": settlement_direction,
                             "date": str(leaving_date), "days": abs(balance), "amount": amount,
-                            "manager": "HR", "desc": f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Pure holiday entitlement {calc['gross']:.1f}; bank holidays in period {calc['bank_holidays']:.1f} (not deducted); holiday available {calc['net']:.1f}; approved holiday taken {used_to_leave:.1f}; balance {balance:.1f}.",
+                            "manager": str((current_user_info or {}).get("name", "HR")), "desc": f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Pure holiday entitlement {calc['gross']:.1f}; bank holidays in period {calc['bank_holidays']:.1f}; holiday available after bank holidays {calc['net'] - calc['bank_holidays']:.1f}; approved holiday taken {used_to_leave:.1f}; balance {balance:.1f}.",
                             "attachment_name": "None", "status": "pending", "director_comments": "", "rejection_reason": "",
+                            "final_holiday_settlement": True,
                             "decision_date": "", "decision_by": "", "submitted_by": str((current_user_info or {}).get("name", "HR")), "submitted_date": now, "pdf_path": "",
                         }
                         hr_records.append(rec)
@@ -4385,6 +4423,7 @@ def load_inspector_bonus(force=False):
                 "submitted_by": str(r.get("Submitted By", "")).strip(),
                 "submitted_date": str(r.get("Submitted Date", "")).strip(),
                 "pdf_path": str(r.get("PDF File Path", "")).strip(),
+                "final_holiday_settlement": str(r.get("Final Holiday Settlement", "")).strip().casefold() in {"yes", "true", "1"},
             })
         _set_data_cache("_inspector_bonus_cache", records)
         return list(records)
@@ -4782,6 +4821,7 @@ def load_hr_leave(force=False):
             except Exception: days = 0.0
             records.append({
                 "id": rid,
+                "employee_id": str(r.get("Employee ID", "")).strip(),
                 "emp_name": str(r.get("Employee Name", "")).strip(),
                 "emp_dept": str(r.get("Employee Department", "")).strip(),
                 "type": str(r.get("Transaction Type", "")).strip(),
@@ -4810,6 +4850,7 @@ def load_hr_leave(force=False):
 def save_all_hr_leave(records, sync=True):
     rows = [{
         "ID": int(r.get("id", 0)),
+        "Employee ID": str(r.get("employee_id", "")),
         "Employee Name": str(r.get("emp_name", "")),
         "Employee Department": str(r.get("emp_dept", "")),
         "Transaction Type": str(r.get("type", "")),
@@ -4829,6 +4870,7 @@ def save_all_hr_leave(records, sync=True):
         "Submitted By": str(r.get("submitted_by", "")),
         "Submitted Date": str(r.get("submitted_date", "")),
         "PDF File Path": str(r.get("pdf_path", "")),
+        "Final Holiday Settlement": "Yes" if r.get("final_holiday_settlement", False) else "No",
     } for r in records]
     pd.DataFrame(rows, columns=HR_LEAVE_COLUMNS).to_excel(HR_LEAVE_PATH, index=False, engine="openpyxl")
     _set_data_cache("_hr_leave_cache", list(records))
@@ -5349,10 +5391,12 @@ def display_store_deduction_pdf_button(req, key_prefix="store"):
 # ============================================================
 def render_hr_leave_form(user_name):
     st.subheader("👥 New Request — HR Leave Settlement")
-    st.caption("Submit a holiday settlement (payout / deduction) for Director approval.")
+    st.caption("Submit a holiday settlement for Director approval. Employees recorded as Left are available for final holiday settlement.")
     hr_records = load_hr_leave()
     hr_cats = load_hr_categories()
     departments = load_departments()
+    employees = _hrp_load_employees()
+    left_employees = [e for e in employees if str(e.get("status", "")).strip().casefold() == "left" or e.get("leaving_date")]
 
     form_version = st.session_state.get("hr_leave_form_version", 0)
     K_EMP   = f"hr_emp_v{form_version}"
@@ -5366,47 +5410,97 @@ def render_hr_leave_form(user_name):
     K_FILES = f"hr_files_v{form_version}"
     K_DESC  = f"hr_desc_v{form_version}"
 
-    col_left, col_right = st.columns(2)
+    left_options = ["-- Select employee who has left --"] + [
+        f"{e['name']} — {e['emp_id']}" for e in left_employees
+    ]
+    employee_by_label = {
+        f"{e['name']} — {e['emp_id']}": e for e in left_employees
+    }
 
+    col_left, col_right = st.columns(2)
     with col_left:
-        emp_name = st.text_input("👤 Employee Name", key=K_EMP)
-        owe_owed = st.selectbox("⚖️ Owe / Owed", DEFAULT_OWE_OWED, key=K_OWE)
+        selected_left_label = st.selectbox(
+            "👤 Employee Name",
+            left_options,
+            key=f"hr_left_employee_v{form_version}",
+        )
+        selected_left = employee_by_label.get(selected_left_label)
+        if not selected_left:
+            emp_name = st.text_input("Manual Employee Name", key=K_EMP)
+        else:
+            emp_name = selected_left.get("name", "")
+            st.caption(f"Employee ID: {selected_left.get('emp_id', '')} · Status: Left · Leaving date: {selected_left.get('leaving_date') or '-'}")
 
     with col_right:
-        dt_val = st.date_input("📅 Date", value=date.today(), key=K_DATE)
-        emp_dept = st.selectbox("🏢 Employee Department", departments, key=K_DEPT)
+        if selected_left:
+            emp_dept = selected_left.get("department", "Other")
+            st.text_input("🏢 Employee Department", value=emp_dept, disabled=True, key=f"hr_left_dept_v{form_version}")
+        else:
+            emp_dept = st.selectbox("🏢 Employee Department", departments, key=K_DEPT)
+        dt_val = st.date_input("📅 Date", value=(selected_left.get("leaving_date") or date.today()) if selected_left else date.today(), key=K_DATE)
 
-    transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
+    final_settlement = bool(selected_left)
+    if selected_left:
+        # Calculate the exact final balance at the recorded leaving date.  This
+        # includes actual holiday, bank holidays and the 29-31 December closure.
+        leaving_date = selected_left.get("leaving_date") or dt_val
+        if not isinstance(leaving_date, date):
+            try:
+                leaving_date = pd.to_datetime(leaving_date).date()
+            except Exception:
+                leaving_date = dt_val
+        calc = _hrp_get_leaving_entitlement(selected_left, leaving_date)
+        recorded_used = _hrp_get_approved_holiday_days_to_date(selected_left.get("emp_id"), leaving_date)
+        start_date = selected_left.get("start_date")
+        if not isinstance(start_date, date):
+            try: start_date = pd.to_datetime(start_date).date()
+            except Exception: start_date = leaving_date
+        closure = _hrp_get_company_closure_holiday_days(selected_left, start_date, leaving_date)
+        used_to_leave = round(recorded_used + closure, 1)
+        final_balance = round(calc["net"] - used_to_leave - calc["bank_holidays"], 1)
+        transaction_type = "Addition" if final_balance > 0 else "Deduction" if final_balance < 0 else "Addition"
+        owe_owed = "Company Owes Employee" if final_balance >= 0 else "Employee Owes Company"
+        default_category = "Unused Holiday Payout" if final_balance >= 0 else "Overused Holiday Deduction"
+        default_days = abs(final_balance)
+        st.info(f"Final holiday settlement: **{default_days:.1f} days**. After Director approval, this settlement will close the employee holiday balance at **0.0 days**.")
+    else:
+        owe_owed = st.selectbox("⚖️ Owe / Owed", DEFAULT_OWE_OWED, key=K_OWE)
+        transaction_type = "Addition" if owe_owed == "Company Owes Employee" else "Deduction"
+        default_category = None
+        default_days = None
+
+    if final_settlement:
+        category = default_category if default_category in hr_cats else ("Unused Holiday Payout" if final_balance >= 0 else "Overused Holiday Deduction")
+        st.text_input("🏷️ Category / Reason", value=category, disabled=True)
+        num_days = st.number_input("🔢 Number of Days", min_value=0.0, value=float(default_days), step=0.5, format="%.2f", disabled=True)
+    else:
+        category = st.selectbox("🏷️ Category / Reason", hr_cats, key=K_CAT)
+        num_days = st.number_input("🔢 Number of Days", min_value=0.0, step=0.5, format="%.2f", key=K_DAYS)
 
     rate = get_hr_daily_rate(emp_dept, transaction_type)
-
     col_left2, col_right2 = st.columns(2)
-
     with col_left2:
-        category = st.selectbox("🏷️ Category / Reason", hr_cats, key=K_CAT)
-        num_days = st.number_input("🔢 Number of Days", min_value=0.0, step=0.5,
-                                   format="%.2f", key=K_DAYS)
-
-    with col_right2:
         manager = st.text_input("👔 Line Manager", key=K_MGR)
-        recalc_signature = f"{emp_dept}|{transaction_type}|{float(num_days)}"
+    with col_right2:
+        recalc_signature = f"{emp_dept}|{transaction_type}|{float(num_days)}|{final_settlement}"
         if st.session_state.get("_hr_amt_sig") != recalc_signature:
             if rate:
                 st.session_state[K_AMT] = round(rate * float(num_days), 2)
             elif K_AMT not in st.session_state:
                 st.session_state[K_AMT] = 0.01
             st.session_state["_hr_amt_sig"] = recalc_signature
-        amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0,
-                                 format="%.2f", key=K_AMT)
+        amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", key=K_AMT)
         if rate:
             st.caption(f"ℹ️ Auto-calc: {num_days} × £{rate:.2f} = £{round(rate * float(num_days), 2):.2f} (editable)")
         else:
             st.caption("⚠️ No daily rate configured for this department/type — enter manually.")
 
     with st.form(f"hr_leave_form_v{form_version}", clear_on_submit=False):
-        files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"],
-                                 accept_multiple_files=True, key=K_FILES)
-        desc = st.text_area("📝 Description / Justification", key=K_DESC)
+        files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=K_FILES)
+        desc_default = ""
+        if final_settlement:
+            desc_default = f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Final balance to settle: {abs(final_balance):.1f} day(s)."
+        desc = st.text_area("📝 Description / Justification", value=desc_default if not st.session_state.get(K_DESC) else st.session_state.get(K_DESC), key=K_DESC)
         submitted = st.form_submit_button("📤 Send to Director", type="primary", use_container_width=True)
 
     if submitted:
@@ -5416,6 +5510,8 @@ def render_hr_leave_form(user_name):
             st.error("⚠️ Number of Days must be greater than 0.")
         elif float(amount) <= 0:
             st.error("⚠️ Amount must be greater than 0.")
+        elif final_settlement and abs(float(num_days) - abs(float(final_balance))) > 0.01:
+            st.error("⚠️ The final settlement days must match the calculated leaving balance.")
         else:
             new_id = get_next_hr_leave_id(hr_records)
             attachments = []
@@ -5428,7 +5524,9 @@ def render_hr_leave_form(user_name):
                 attachments.append(fn)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             rec = {
-                "id": new_id, "emp_name": emp_name.strip(), "emp_dept": emp_dept,
+                "id": new_id,
+                "employee_id": selected_left.get("emp_id", "") if selected_left else "",
+                "emp_name": emp_name.strip(), "emp_dept": emp_dept,
                 "type": transaction_type, "category": category, "owe_owed": owe_owed,
                 "date": str(dt_val), "days": float(num_days), "amount": float(amount),
                 "manager": manager.strip(), "desc": desc.strip(),
@@ -5436,14 +5534,15 @@ def render_hr_leave_form(user_name):
                 "status": "pending", "director_comments": "", "rejection_reason": "",
                 "decision_date": "", "decision_by": "",
                 "submitted_by": user_name, "submitted_date": now, "pdf_path": "",
+                "final_holiday_settlement": final_settlement,
             }
             hr_records.append(rec)
             save_all_hr_leave(hr_records)
             log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
-            for k in [K_EMP, K_OWE, K_CAT, K_DAYS, K_AMT, K_DATE, K_DEPT, K_MGR, K_FILES, K_DESC, "_hr_amt_sig"]:
+            for k in [K_EMP, K_OWE, K_CAT, K_DAYS, K_AMT, K_DATE, K_DEPT, K_MGR, K_FILES, K_DESC, "_hr_amt_sig", f"hr_left_employee_v{form_version}"]:
                 st.session_state.pop(k, None)
             st.session_state["hr_leave_form_version"] = form_version + 1
-            st.success(f"✅ HR Leave Settlement #{new_id} sent to Director for approval.")
+            st.session_state["hr_leave_submission_notice"] = f"HR Leave Settlement #{new_id} sent to Director for approval."
             st.rerun()
 
 
