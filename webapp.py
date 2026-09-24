@@ -1556,10 +1556,9 @@ def _hrp_calculate_holiday_entitlement(employee):
             f"(5.6 weeks, capped at 28 days). Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
         ), service_years
 
-    # First/partial leave year: calculate the gross entitlement by calendar-day
-    # pro-rata. Applicable bank holidays are removed separately in
-    # _hrp_get_employee_entitlement so HR can see exactly how many bank holidays
-    # have reduced the allowance. Company closure days remain a separate holiday-used item.
+    # First/partial leave year: calculate the employee's pure annual holiday
+    # entitlement by calendar-day pro-rata. Bank holidays are non-working days
+    # shown separately in the calendar and are never deducted from this allowance.
     employed_days = (holiday_year_end - start_date).days + 1
     year_days = (holiday_year_end - holiday_year_start).days + 1
     raw = full_year_entitlement * max(0.0, min(employed_days / year_days, 1.0))
@@ -1568,36 +1567,30 @@ def _hrp_calculate_holiday_entitlement(employee):
     return entitlement, (
         f"Gross UK pro-rata: {full_year_entitlement:.1f} days full-year entitlement × "
         f"{employed_days}/{year_days} calendar days remaining in the leave year, "
-        f"rounded up to the next half day. Applicable bank holidays are then deducted from the allowance. "
+        f"rounded up to the next half day. Bank holidays are separate non-working days and are not deducted from the allowance. "
         f"Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
     ), service_years
 
 def _hrp_get_employee_entitlement(employee):
-    """Return the currently available allowance after deducting bank holidays already applicable.
+    """Return the employee's pure annual holiday entitlement.
 
-    The gross entitlement is calculated first. Bank holidays falling on the employee's
-    employment period are then removed from the allowance so the displayed entitlement
-    represents the holiday the employee can actually request separately.
+    Bank holidays are separate non-working days and are never deducted from
+    annual holiday entitlement. This keeps the entitlement as the employee's
+    actual holiday allowance (for example, 28 days), while bank holidays are
+    displayed separately in the calendar and HR reports.
     """
     employee_id = employee["emp_id"]
     calculated, note, service_years = _hrp_calculate_holiday_entitlement(employee)
-    gross = calculated
+    entitlement = calculated
     if employee.get("entitlement_override") is not None:
-        gross = float(employee["entitlement_override"])
-        note = "HR-adjusted gross entitlement; applicable bank holidays are deducted separately."
+        entitlement = float(employee["entitlement_override"])
+        note = "HR-adjusted pure holiday entitlement; bank holidays are separate and are not deducted."
     elif employee_id in st.session_state.hrp_entitlement_overrides:
-        gross = float(st.session_state.hrp_entitlement_overrides[employee_id])
-        note = "HR-adjusted gross entitlement; applicable bank holidays are deducted separately."
-    today = date.today()
-    start_date = employee.get("start_date")
-    try:
-        start_date = start_date if isinstance(start_date, date) else pd.to_datetime(start_date).date()
-    except Exception:
-        start_date = today
-    bank_days = _hrp_get_bank_holiday_days(employee, start_date, today) if today >= start_date else 0.0
-    net = max(0.0, round(gross - bank_days, 1))
-    note = f"{note} Bank holidays deducted to date: {bank_days:.1f} day(s)."
-    return net, note, service_years, gross
+        entitlement = float(st.session_state.hrp_entitlement_overrides[employee_id])
+        note = "HR-adjusted pure holiday entitlement; bank holidays are separate and are not deducted."
+    entitlement = max(0.0, round(entitlement, 1))
+    note = f"{note} Bank holidays are not deducted from holiday entitlement."
+    return entitlement, note, service_years, calculated
 
 def _hrp_get_employee_leave(employee_id):
     # Employee HR Reports can be opened before the HR Portal page has
@@ -1647,7 +1640,11 @@ def _hrp_get_bank_holiday_days(employee, start_date, end_date):
     return round(total, 1)
 
 def _hrp_get_leaving_entitlement(employee, leaving_date):
-    """Calculate entitlement accrued up to a leaving date, then remove applicable bank holidays."""
+    """Calculate pure holiday entitlement accrued up to a leaving date.
+
+    Bank holidays are tracked separately for information only and do not reduce
+    the employee's holiday entitlement or final settlement balance.
+    """
     if not employee or not leaving_date:
         return {"gross": 0.0, "bank_holidays": 0.0, "net": 0.0, "note": ""}
     start_date = employee.get("start_date")
@@ -1686,12 +1683,14 @@ def _hrp_get_leaving_entitlement(employee, leaving_date):
         except Exception:
             pass
     bank_days = _hrp_get_bank_holiday_days(employee, employed_start, employed_end)
-    net = max(0.0, round(gross - bank_days, 1))
+    # Bank holidays are separate non-working days and are NOT deducted from
+    # annual holiday entitlement. Keep the count only as an informational value.
+    pure_entitlement = max(0.0, round(gross, 1))
     return {
-        "gross": round(gross, 1),
+        "gross": pure_entitlement,
         "bank_holidays": bank_days,
-        "net": net,
-        "note": f"Gross entitlement to leaving date less {bank_days:.1f} applicable bank holiday day(s).",
+        "net": pure_entitlement,
+        "note": f"Pure holiday entitlement to leaving date: {pure_entitlement:.1f} days. {bank_days:.1f} bank holiday day(s) occurred in the employment period; none are deducted.",
     }
 
 def _hrp_get_approved_holiday_days_to_date(employee_id, end_date):
@@ -1719,6 +1718,17 @@ def _hrp_get_approved_holiday_days_to_date(employee_id, end_date):
             continue
         total += _hrp_calculate_leave_days(r.get("type"), d_from, effective_to)
     return round(total, 1)
+
+def _hrp_get_upcoming_bank_holidays(from_date=None, limit=5):
+    """Return the next England & Wales bank holidays from the supplied date."""
+    start = from_date or date.today()
+    upcoming = []
+    for year in sorted(HRP_BANK_HOLIDAYS):
+        for bank_day, name in sorted(HRP_BANK_HOLIDAYS.get(year, {}).items()):
+            if bank_day >= start:
+                upcoming.append((bank_day, name))
+    return upcoming[:max(1, int(limit))]
+
 
 def _hrp_get_holiday_position(employee_id):
     """Return signed balance plus explicit company/employee owed amounts."""
@@ -2176,7 +2186,7 @@ def render_hr_portal(current_user_info=None):
                             "Department": e.get("department", ""), "Position": e.get("job_title", ""),
                             "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
                             "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
-                            "Holiday Entitlement": pos["entitlement"], "Bank Holidays Deducted": _hrp_get_bank_holiday_days(e, e.get("start_date"), date.today()), "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
+                            "Holiday Entitlement": pos["entitlement"], "Bank Holidays (Separate)": _hrp_get_bank_holiday_days(e, e.get("start_date"), date.today()), "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
                             "Company Owes": pos["company_owes_employee"], "Employee Owes": pos["employee_owes_company"],
                             "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
                             "Unpaid Days": summary["unpaid"], "Other Absence": summary["other"],
@@ -2415,7 +2425,7 @@ def render_hr_portal(current_user_info=None):
 
             with hr_settlement_tab:
                 st.subheader("🚪 Employee Leaving & Holiday Settlement")
-                st.info("Select an employee, enter the leaving date and the system will calculate the holiday entitlement earned up to that date, deduct applicable bank holidays, and compare it with approved holiday taken.")
+                st.info("Select an employee, enter the leaving date and the system will calculate the pure holiday entitlement earned up to that date and compare it with approved holiday taken. Bank holidays are separate non-working days and are not deducted.")
                 leaving_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
                 if leaving_ids:
                     leaving_id = st.selectbox(
@@ -2436,8 +2446,8 @@ def render_hr_portal(current_user_info=None):
                     balance = round(calc["net"] - used_to_leave, 1)
                     st.divider()
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Gross entitlement", f"{calc['gross']:.1f} days")
-                    c2.metric("Bank holidays deducted", f"{calc['bank_holidays']:.1f} days")
+                    c1.metric("Holiday entitlement to leaving date", f"{calc['gross']:.1f} days")
+                    c2.metric("Bank holidays in period", f"{calc['bank_holidays']:.1f} days")
                     c3.metric("Holiday available", f"{calc['net']:.1f} days")
                     c4.metric("Holiday taken", f"{used_to_leave:.1f} days")
                     if balance > 0:
@@ -2477,7 +2487,7 @@ def render_hr_portal(current_user_info=None):
                             "id": new_id, "emp_name": leaving_emp.get("name", ""), "emp_dept": dept,
                             "type": settlement_type, "category": settlement_category, "owe_owed": settlement_direction,
                             "date": str(leaving_date), "days": abs(balance), "amount": amount,
-                            "manager": "HR", "desc": f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Gross entitlement {calc['gross']:.1f}; bank holidays deducted {calc['bank_holidays']:.1f}; holiday available {calc['net']:.1f}; approved holiday taken {used_to_leave:.1f}; balance {balance:.1f}.",
+                            "manager": "HR", "desc": f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Pure holiday entitlement {calc['gross']:.1f}; bank holidays in period {calc['bank_holidays']:.1f} (not deducted); holiday available {calc['net']:.1f}; approved holiday taken {used_to_leave:.1f}; balance {balance:.1f}.",
                             "attachment_name": "None", "status": "pending", "director_comments": "", "rejection_reason": "",
                             "decision_date": "", "decision_by": "", "submitted_by": str((current_user_info or {}).get("name", "HR")), "submitted_date": now, "pdf_path": "",
                         }
@@ -6688,12 +6698,29 @@ def render_employee_hr_reports(current_user_info):
     except Exception:
         balance = 0.0
 
-    d1, d2, d3, d4 = st.columns(4)
+    upcoming_bank_holidays = _hrp_get_upcoming_bank_holidays(date.today(), limit=5)
+    d1, d2, d3, d4, d5 = st.columns(5)
     d1.metric("Holiday Entitlement", f"{entitlement:g} days")
     d2.metric("Holiday Used", f"{approved_holiday:g} days")
     d3.metric("Holiday Balance", f"{balance:g} days")
-    d4.metric("Department", employee.get("department", ""))
-    if entitlement_note == "HR-adjusted entitlement":
+    if upcoming_bank_holidays:
+        next_bank_date, next_bank_name = upcoming_bank_holidays[0]
+        d4.metric("Upcoming Bank Holiday", next_bank_date.strftime("%d %b %Y"))
+        d4.caption(next_bank_name)
+    else:
+        d4.metric("Upcoming Bank Holiday", "None")
+    d5.metric("Department", employee.get("department", ""))
+    if upcoming_bank_holidays:
+        with st.expander("📅 Upcoming Bank Holidays", expanded=False):
+            st.dataframe(
+                pd.DataFrame([
+                    {"Date": bank_date.strftime("%d/%m/%Y"), "Bank Holiday": bank_name}
+                    for bank_date, bank_name in upcoming_bank_holidays
+                ]),
+                use_container_width=True,
+                hide_index=True,
+            )
+    if "HR-adjusted" in entitlement_note:
         st.caption(f"⚙️ HR-adjusted holiday entitlement: **{entitlement:g} days**")
         adjustment_note = str(employee.get("adjustment_note", "")).strip()
         if adjustment_note:
