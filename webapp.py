@@ -1,11 +1,11 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.27
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.28
 # ============================================================
 # ✅ v4.27 (HR DEPARTMENT TAB):
 #    • New "🏢 HR Department" tab containing 2 sub-tabs:
 #        1. 🧑💼 HR Portal (Employee mgmt, Holiday allowance, Leave records, HR Settlement calc)
 #        2. 💷 HR Leave Settlement (existing Director approval module)
-#    • Added to Super Admin and Director portals
+#    • Added Director HR Leave Settlement approval tab for final holiday settlements
 # ✅ v4.26 (DUPLICATE KEY FIX)
 # ✅ v4.25 (STORE RETURN REDESIGN & KEYERROR FIX)
 # ✅ v4.24 (STORE RETURN / ADDITION + AUTO-FILL FIX)
@@ -7487,8 +7487,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
 
 elif role == "Director":
-    director_addition_tab, director_store_ded_tab, director_store_ret_tab, director_work_order_tab, director_inspector_tab = st.tabs([
+    director_addition_tab, director_hr_leave_tab, director_store_ded_tab, director_store_ret_tab, director_work_order_tab, director_inspector_tab = st.tabs([
         "➕ Addition & Deduction",
+        "👥 HR Leave Settlement",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
@@ -7607,6 +7608,13 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
+    with director_hr_leave_tab:
+        # Final holiday settlements submitted by HR/managers are approved here.
+        # Director approval updates the HR Leave Settlement record to approved;
+        # approved final settlements are then included in the employee holiday
+        # position calculation so the employee's final holiday balance closes at 0.0.
+        render_hr_leave_director_portal(full_name)
+
     with director_store_ded_tab:
         render_store_director_portal(full_name, type_filter="Deduction")
     with director_store_ret_tab:
