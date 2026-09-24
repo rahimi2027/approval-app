@@ -94,7 +94,7 @@ os.makedirs(HR_LEAVE_PDF_DIR, exist_ok=True)
 
 HR_EMPLOYEE_COLUMNS = [
     "Employee ID", "Full Name", "Start Date", "Position / Job Title", "Department",
-    "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Holiday Entitlement Override", "Entitlement Adjustment Note"
+    "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Holiday Entitlement Override", "Entitlement Adjustment Note", "Leaving Date", "Leaving Reason"
 ]
 HR_PORTAL_LEAVE_COLUMNS = [
     "Leave ID", "Employee ID", "Date From", "Date To", "Leave Type", "Days",
@@ -1292,6 +1292,8 @@ def _hrp_load_employees():
                 "days_per_week": float(r.get("Days Worked Per Week", 5) or 5),
                 "entitlement_override": override,
                 "adjustment_note": str(r.get("Entitlement Adjustment Note", "")).strip(),
+                "leaving_date": (pd.to_datetime(r.get("Leaving Date", "")).date() if str(r.get("Leaving Date", "")).strip() and pd.notna(pd.to_datetime(r.get("Leaving Date", ""), errors="coerce")) else None),
+                "leaving_reason": str(r.get("Leaving Reason", "")).strip(),
             })
         return records
     except Exception as e:
@@ -1314,6 +1316,8 @@ def _hrp_save_employees():
             "Days Worked Per Week": e.get("days_per_week", 5),
             "Holiday Entitlement Override": e.get("entitlement_override", "") if e.get("entitlement_override") is not None else "",
             "Entitlement Adjustment Note": e.get("adjustment_note", ""),
+            "Leaving Date": e.get("leaving_date", "") or "",
+            "Leaving Reason": e.get("leaving_reason", ""),
         })
     pd.DataFrame(rows, columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH, index=False, engine="openpyxl")
     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
@@ -1393,12 +1397,12 @@ def _hr_portal_init():
     # this key, which previously caused a KeyError in the View As selector.
     if "hrp_role" not in st.session_state:
         st.session_state.hrp_role = "hr"
-    if st.session_state.get("hrp_storage_version") != 2:
+    if st.session_state.get("hrp_storage_version") != 3:
         # Load the persistent HR workbooks instead of keeping the old demo/sample employees
         # that existed in earlier versions of this portal.
         st.session_state.hrp_employees = _hrp_load_employees()
         st.session_state.hrp_leave_records = _hrp_load_leave_records()
-        st.session_state.hrp_storage_version = 2
+        st.session_state.hrp_storage_version = 3
     elif "hrp_employees" not in st.session_state:
         st.session_state.hrp_employees = _hrp_load_employees()
     elif "hrp_leave_records" not in st.session_state:
@@ -1508,30 +1512,48 @@ def _hrp_calculate_holiday_entitlement(employee):
             f"(5.6 weeks, capped at 28 days). Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
         ), service_years
 
-    # First/partial leave year: pro-rate by available working days, excluding
-    # weekends, England & Wales bank holidays and Acoole company closure days.
-    # This ensures a new starter is not given an allowance calculation that
-    # treats company-closed days as working/holiday days.
-    employed_days = _hrp_get_working_days(start_date, holiday_year_end)
-    year_days = _hrp_get_working_days(holiday_year_start, holiday_year_end)
-    raw = full_year_entitlement * max(0.0, min(employed_days / year_days if year_days else 0.0, 1.0))
+    # First/partial leave year: calculate the gross entitlement by calendar-day
+    # pro-rata. Applicable bank holidays are removed separately in
+    # _hrp_get_employee_entitlement so HR can see exactly how many bank holidays
+    # have reduced the allowance. Company closure days remain a separate holiday-used item.
+    employed_days = (holiday_year_end - start_date).days + 1
+    year_days = (holiday_year_end - holiday_year_start).days + 1
+    raw = full_year_entitlement * max(0.0, min(employed_days / year_days, 1.0))
     # GOV.UK calculator rounds a fractional day up to the next half day.
     entitlement = (int(raw * 2 + 0.999999) / 2.0)
     return entitlement, (
-        f"Company pro-rata: {full_year_entitlement:.1f} days full-year entitlement × "
-        f"{employed_days}/{year_days} available working days remaining in the leave year "
-        f"(excluding weekends, bank holidays and company closure), "
-        f"rounded up to the next half day. Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
+        f"Gross UK pro-rata: {full_year_entitlement:.1f} days full-year entitlement × "
+        f"{employed_days}/{year_days} calendar days remaining in the leave year, "
+        f"rounded up to the next half day. Applicable bank holidays are then deducted from the allowance. "
+        f"Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
     ), service_years
 
 def _hrp_get_employee_entitlement(employee):
+    """Return the currently available allowance after deducting bank holidays already applicable.
+
+    The gross entitlement is calculated first. Bank holidays falling on the employee's
+    employment period are then removed from the allowance so the displayed entitlement
+    represents the holiday the employee can actually request separately.
+    """
     employee_id = employee["emp_id"]
     calculated, note, service_years = _hrp_calculate_holiday_entitlement(employee)
+    gross = calculated
     if employee.get("entitlement_override") is not None:
-        return float(employee["entitlement_override"]), "HR-adjusted entitlement", service_years, calculated
-    if employee_id in st.session_state.hrp_entitlement_overrides:
-        return st.session_state.hrp_entitlement_overrides[employee_id], "HR-adjusted entitlement", service_years, calculated
-    return calculated, note, service_years, calculated
+        gross = float(employee["entitlement_override"])
+        note = "HR-adjusted gross entitlement; applicable bank holidays are deducted separately."
+    elif employee_id in st.session_state.hrp_entitlement_overrides:
+        gross = float(st.session_state.hrp_entitlement_overrides[employee_id])
+        note = "HR-adjusted gross entitlement; applicable bank holidays are deducted separately."
+    today = date.today()
+    start_date = employee.get("start_date")
+    try:
+        start_date = start_date if isinstance(start_date, date) else pd.to_datetime(start_date).date()
+    except Exception:
+        start_date = today
+    bank_days = _hrp_get_bank_holiday_days(employee, start_date, today) if today >= start_date else 0.0
+    net = max(0.0, round(gross - bank_days, 1))
+    note = f"{note} Bank holidays deducted to date: {bank_days:.1f} day(s)."
+    return net, note, service_years, gross
 
 def _hrp_get_employee_leave(employee_id):
     # Employee HR Reports can be opened before the HR Portal page has
@@ -1560,6 +1582,99 @@ def _hrp_get_approved_holiday_days(employee_id):
     # holiday allowance. They are already excluded from the working-day
     # calculation used when leave is recorded.
     return round(recorded_days, 1)
+
+def _hrp_get_bank_holiday_days(employee, start_date, end_date):
+    """Count bank holidays that fall during employment and on a normal weekday.
+    For regular 5-day workers each weekday bank holiday is one day. For part-time
+    workers the stored working-days-per-week figure is used as a proportional factor.
+    """
+    if not employee or not start_date or not end_date or end_date < start_date:
+        return 0.0
+    try:
+        days_per_week = float(employee.get("days_per_week", 5) or 5)
+    except Exception:
+        days_per_week = 5.0
+    factor = min(1.0, max(0.0, days_per_week / 5.0))
+    total = 0.0
+    for year in range(start_date.year, end_date.year + 1):
+        for bank_day in HRP_BANK_HOLIDAYS.get(year, {}):
+            if start_date <= bank_day <= end_date and bank_day.weekday() < 5:
+                total += factor
+    return round(total, 1)
+
+def _hrp_get_leaving_entitlement(employee, leaving_date):
+    """Calculate entitlement accrued up to a leaving date, then remove applicable bank holidays."""
+    if not employee or not leaving_date:
+        return {"gross": 0.0, "bank_holidays": 0.0, "net": 0.0, "note": ""}
+    start_date = employee.get("start_date")
+    if not isinstance(start_date, date):
+        try:
+            start_date = pd.to_datetime(start_date).date()
+        except Exception:
+            start_date = leaving_date
+    if leaving_date < start_date:
+        return {"gross": 0.0, "bank_holidays": 0.0, "net": 0.0, "note": "Leaving date is before the employee start date."}
+    try:
+        days_per_week = float(employee.get("days_per_week", 5) or 5)
+    except Exception:
+        days_per_week = 5.0
+    full_year = min(28.0, 5.6 * max(0.0, min(days_per_week, 7.0)))
+    year_start = date(leaving_date.year, 1, 1)
+    year_end = date(leaving_date.year, 12, 31)
+    employed_start = max(start_date, year_start)
+    employed_end = min(leaving_date, year_end)
+    if employed_end < employed_start:
+        gross = 0.0
+    elif employed_start == year_start and employed_end == year_end:
+        gross = full_year
+    else:
+        employed_days = (employed_end - employed_start).days + 1
+        year_days = (year_end - year_start).days + 1
+        gross = full_year * (employed_days / year_days)
+        gross = int(gross * 2 + 0.999999) / 2.0
+    if employee.get("entitlement_override") is not None:
+        try:
+            override = float(employee.get("entitlement_override"))
+            if employed_start == year_start and employed_end == year_end:
+                gross = override
+            else:
+                gross = int((override * ((employed_end - employed_start).days + 1) / ((year_end - year_start).days + 1)) * 2 + 0.999999) / 2.0
+        except Exception:
+            pass
+    bank_days = _hrp_get_bank_holiday_days(employee, employed_start, employed_end)
+    net = max(0.0, round(gross - bank_days, 1))
+    return {
+        "gross": round(gross, 1),
+        "bank_holidays": bank_days,
+        "net": net,
+        "note": f"Gross entitlement to leaving date less {bank_days:.1f} applicable bank holiday day(s).",
+    }
+
+def _hrp_get_approved_holiday_days_to_date(employee_id, end_date):
+    """Approved annual leave used up to a leaving date."""
+    employee = _hrp_get_employee(employee_id)
+    if not employee or not end_date:
+        return 0.0
+    records = st.session_state.get("hrp_leave_records")
+    if records is None:
+        records = _hrp_load_leave_records()
+        st.session_state.hrp_leave_records = records
+    total = 0.0
+    for r in records:
+        if str(r.get("employee_id", "")).strip().casefold() != str(employee_id).strip().casefold():
+            continue
+        if str(r.get("status", "Approved")).strip().casefold() != "approved" or r.get("type") not in HR_PORTAL_HOLIDAY_LEAVE_TYPES:
+            continue
+        d_from, d_to = r.get("date_from"), r.get("date_to")
+        if not isinstance(d_from, date) or not isinstance(d_to, date):
+            continue
+        if d_from > end_date:
+            continue
+        effective_to = min(d_to, end_date)
+        if effective_to < d_from:
+            continue
+        total += _hrp_calculate_leave_days(r.get("type"), d_from, effective_to)
+    return round(total, 1)
 
 def _hrp_get_holiday_position(employee_id):
     """Return signed balance plus explicit company/employee owed amounts."""
@@ -2017,7 +2132,7 @@ def render_hr_portal(current_user_info=None):
                             "Department": e.get("department", ""), "Position": e.get("job_title", ""),
                             "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
                             "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
-                            "Holiday Entitlement": pos["entitlement"], "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
+                            "Holiday Entitlement": pos["entitlement"], "Bank Holidays Deducted": _hrp_get_bank_holiday_days(e, e.get("start_date"), date.today()), "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
                             "Company Owes": pos["company_owes_employee"], "Employee Owes": pos["employee_owes_company"],
                             "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
                             "Unpaid Days": summary["unpaid"], "Other Absence": summary["other"],
@@ -2181,10 +2296,12 @@ def render_hr_portal(current_user_info=None):
                                     value=float(edit_emp.get("days_per_week", 5) or 5),
                                     step=0.5,
                                 )
-                                status_options = ["Active", "Inactive"]
-                                edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")))
-                                if edit_emp.get("status") == "Inactive":
-                                    st.caption("This employee is inactive. Their leave history is retained.")
+                                status_options = ["Active", "Inactive", "Left"]
+                                edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")) if edit_emp.get("status", "Active") in status_options else 0)
+                                edit_leaving_date = st.date_input("Leaving Date", value=edit_emp.get("leaving_date") or date.today())
+                                edit_leaving_reason = st.text_input("Leaving Reason", value=edit_emp.get("leaving_reason", ""), placeholder="e.g. Resigned, redundancy, end of contract")
+                                if edit_emp.get("status") in ("Inactive", "Left"):
+                                    st.caption("This employee is not active. Their leave history is retained.")
                             if st.form_submit_button("💾 Save Employee Changes", type="primary"):
                                 old_data = dict(edit_emp)
                                 edit_emp["name"] = edit_name.strip()
@@ -2195,6 +2312,8 @@ def render_hr_portal(current_user_info=None):
                                 edit_emp["working_pattern"] = edit_pattern
                                 edit_emp["days_per_week"] = edit_days
                                 edit_emp["status"] = edit_status
+                                edit_emp["leaving_date"] = edit_leaving_date if edit_status == "Left" else edit_emp.get("leaving_date")
+                                edit_emp["leaving_reason"] = edit_leaving_reason.strip() if edit_status == "Left" else edit_emp.get("leaving_reason", "")
                                 _hrp_save_employees()
                                 log_action("HR_EMPLOYEE_EDITED", edit_emp_id, old_data=old_data, new_data=dict(edit_emp))
                                 st.success(f"Employee {edit_emp_id} updated successfully.")
@@ -2251,6 +2370,84 @@ def render_hr_portal(current_user_info=None):
                     render_hr_leave_approvals()
 
             with hr_settlement_tab:
+                st.subheader("🚪 Employee Leaving & Holiday Settlement")
+                st.info("Select an employee, enter the leaving date and the system will calculate the holiday entitlement earned up to that date, deduct applicable bank holidays, and compare it with approved holiday taken.")
+                leaving_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
+                if leaving_ids:
+                    leaving_id = st.selectbox(
+                        "Employee leaving",
+                        leaving_ids,
+                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}" if _hrp_get_employee(eid) else eid,
+                        key="hrp_leaving_employee",
+                    )
+                    leaving_emp = _hrp_get_employee(leaving_id)
+                else:
+                    leaving_emp = None
+                if leaving_emp:
+                    default_leave_date = leaving_emp.get("leaving_date") or date.today()
+                    leaving_date = st.date_input("Leaving date", value=default_leave_date, key=f"hrp_leaving_date_{leaving_id}")
+                    leaving_reason = st.text_input("Leaving reason", value=leaving_emp.get("leaving_reason", ""), key=f"hrp_leaving_reason_{leaving_id}")
+                    calc = _hrp_get_leaving_entitlement(leaving_emp, leaving_date)
+                    used_to_leave = _hrp_get_approved_holiday_days_to_date(leaving_id, leaving_date)
+                    balance = round(calc["net"] - used_to_leave, 1)
+                    st.divider()
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Gross entitlement", f"{calc['gross']:.1f} days")
+                    c2.metric("Bank holidays deducted", f"{calc['bank_holidays']:.1f} days")
+                    c3.metric("Holiday available", f"{calc['net']:.1f} days")
+                    c4.metric("Holiday taken", f"{used_to_leave:.1f} days")
+                    if balance > 0:
+                        st.success(f"🏢 Company owes employee: {balance:.1f} holiday day(s).")
+                        settlement_direction = "Company Owes Employee"
+                        settlement_type = "Addition"
+                        settlement_category = "Unused Holiday Payout"
+                    elif balance < 0:
+                        st.warning(f"👤 Employee owes company: {abs(balance):.1f} holiday day(s).")
+                        settlement_direction = "Employee Owes Company"
+                        settlement_type = "Deduction"
+                        settlement_category = "Overused Holiday Deduction"
+                    else:
+                        st.info("Holiday settlement is exactly balanced: 0.0 days owed.")
+                        settlement_direction = None
+                        settlement_type = None
+                        settlement_category = None
+                    st.caption(f"Leaving date: {leaving_date:%d/%m/%Y} · {calc['note']}")
+                    st.divider()
+                    if st.button("💾 Record Employee as Left", type="primary", key=f"hrp_record_left_{leaving_id}", use_container_width=True):
+                        old_status = leaving_emp.get("status", "Active")
+                        leaving_emp["status"] = "Left"
+                        leaving_emp["leaving_date"] = leaving_date
+                        leaving_emp["leaving_reason"] = leaving_reason.strip()
+                        _hrp_save_employees()
+                        log_action("HR_EMPLOYEE_LEFT", leaving_id, old_data={"status": old_status}, new_data={"status": "Left", "leaving_date": str(leaving_date), "leaving_reason": leaving_reason.strip()})
+                        st.success(f"{leaving_emp['name']} has been recorded as leaving on {leaving_date:%d/%m/%Y}.")
+                        st.rerun()
+                    if settlement_direction and st.button(f"🧾 Create {settlement_type} Settlement — {abs(balance):.1f} days", key=f"hrp_create_leaving_settlement_{leaving_id}", use_container_width=True):
+                        hr_records = load_hr_leave()
+                        new_id = get_next_hr_leave_id(hr_records)
+                        dept = leaving_emp.get("department", "")
+                        rate = get_hr_daily_rate(dept, settlement_type)
+                        amount = round(rate * abs(balance), 2) if rate else 0.01
+                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        rec = {
+                            "id": new_id, "emp_name": leaving_emp.get("name", ""), "emp_dept": dept,
+                            "type": settlement_type, "category": settlement_category, "owe_owed": settlement_direction,
+                            "date": str(leaving_date), "days": abs(balance), "amount": amount,
+                            "manager": "HR", "desc": f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Gross entitlement {calc['gross']:.1f}; bank holidays deducted {calc['bank_holidays']:.1f}; holiday available {calc['net']:.1f}; approved holiday taken {used_to_leave:.1f}; balance {balance:.1f}.",
+                            "attachment_name": "None", "status": "pending", "director_comments": "", "rejection_reason": "",
+                            "decision_date": "", "decision_by": "", "submitted_by": str((current_user_info or {}).get("name", "HR")), "submitted_date": now, "pdf_path": "",
+                        }
+                        hr_records.append(rec)
+                        save_all_hr_leave(hr_records)
+                        log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
+                        st.success(f"Settlement #{new_id} created as {settlement_type} and sent through the existing HR Leave Settlement workflow.")
+                    st.divider()
+                    st.subheader("💷 Existing HR Leave Settlement Calculator")
+                    st.caption("Use the existing calculator below for the employee's current holiday position. The leaving calculation above is specifically frozen at the leaving date.")
+                else:
+                    st.info("No employees are registered yet.")
+
+                # Existing live settlement calculator retained below.
                 st.subheader("💷 HR Leave Settlement Calculator")
                 st.info("Compute an employee's leave settlement based on their entitlement and approved leave records.")
                 settlement_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
