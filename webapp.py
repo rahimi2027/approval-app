@@ -1452,6 +1452,60 @@ def _hrp_save_leave_records():
     sync_saved_file_to_drive(HR_PORTAL_LEAVE_PATH)
 
 
+def _hrp_enforce_ace_id_format(employees):
+    """Migrate any legacy employee IDs to ACE-ID### once, preserving all linked history."""
+    employees = list(employees or [])
+    used = set()
+    next_no = 1
+    for e in employees:
+        eid = str(e.get("emp_id", "")).strip().upper()
+        m = re.fullmatch(r"ACE-ID([0-9]+)", eid)
+        if m:
+            n = int(m.group(1))
+            used.add(n)
+            next_no = max(next_no, n + 1)
+    changes = []
+    for e in employees:
+        old = str(e.get("emp_id", "")).strip()
+        if re.fullmatch(r"ACE-ID[0-9]+", old.upper()):
+            e["emp_id"] = old.upper()
+            continue
+        while next_no in used:
+            next_no += 1
+        new = f"ACE-ID{next_no:03d}"
+        used.add(next_no)
+        next_no += 1
+        e["emp_id"] = new
+        changes.append((old, new))
+    if not changes:
+        return employees
+
+    # Cascade legacy IDs through every HR-linked store before saving the employee master.
+    users = load_users()
+    for old, new in changes:
+        for u in users.values():
+            if str(u.get("employee_id", "")).strip().casefold() == old.casefold():
+                u["employee_id"] = new
+    save_users(users)
+
+    hr_leave = load_hr_leave(force=True)
+    for r in hr_leave:
+        for old, new in changes:
+            if str(r.get("employee_id", "")).strip().casefold() == old.casefold():
+                r["employee_id"] = new
+    save_all_hr_leave(hr_leave)
+
+    portal_leave = _hrp_load_leave_records()
+    for r in portal_leave:
+        for old, new in changes:
+            if str(r.get("employee_id", "")).strip().casefold() == old.casefold():
+                r["employee_id"] = new
+    # Save through the normal portal writer.
+    st.session_state.hrp_leave_records = portal_leave
+    _hrp_save_leave_records()
+    return employees
+
+
 def _hr_portal_init():
     _hrp_init_storage()
     # Always initialise the HR portal view state. Older sessions may not have
@@ -1461,14 +1515,15 @@ def _hr_portal_init():
     if st.session_state.get("hrp_storage_version") != 3:
         # Load the persistent HR workbooks instead of keeping the old demo/sample employees
         # that existed in earlier versions of this portal.
-        st.session_state.hrp_employees = _hrp_load_employees()
+        st.session_state.hrp_employees = _hrp_enforce_ace_id_format(_hrp_load_employees())
+        _hrp_save_employees()
         st.session_state.hrp_leave_records = _hrp_load_leave_records()
         st.session_state.hrp_storage_version = 3
     elif "hrp_employees" not in st.session_state:
-        st.session_state.hrp_employees = _hrp_load_employees()
+        st.session_state.hrp_employees = _hrp_enforce_ace_id_format(_hrp_load_employees())
+        _hrp_save_employees()
     elif "hrp_leave_records" not in st.session_state:
         st.session_state.hrp_leave_records = _hrp_load_leave_records()
-    _hrp_normalize_existing_employee_ids()
     active = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
     # If the previously selected employee was deleted/deactivated, clear the
     # stale ID and select the first active employee (or none if the database is empty).
@@ -1486,118 +1541,65 @@ def _hr_portal_init():
         st.session_state.hrp_leave_form_version = 0
 
 def _hrp_get_employee(employee_id):
+    """Return an employee from the current HR cache, refreshing once if a stale ID is found."""
     target = str(employee_id or "").strip().casefold()
-    for emp in st.session_state.get("hrp_employees", []):
+    employees = st.session_state.get("hrp_employees", []) or []
+    for emp in employees:
         if str(emp.get("emp_id", "")).strip().casefold() == target:
             return emp
+
+    # Super Admin can edit Employee IDs directly. If that happened in the same
+    # server session, the old in-memory employee list can contain stale IDs.
+    # Refresh from the persistent workbook before giving up.
+    try:
+        refreshed = _hrp_load_employees()
+        if refreshed:
+            st.session_state.hrp_employees = refreshed
+            for emp in refreshed:
+                if str(emp.get("emp_id", "")).strip().casefold() == target:
+                    return emp
+    except Exception as e:
+        print(f"HR employee refresh failed while resolving {employee_id}: {e}")
     return None
 
+
+def _hrp_employee_label(employee_id, include_status=False):
+    """Safe Streamlit selectbox label; never crashes if a stale ID is present."""
+    emp = _hrp_get_employee(employee_id)
+    if not emp:
+        return f"Employee not found — {employee_id}"
+    name = str(emp.get("name", "")).strip() or "Unnamed employee"
+    label = f"{name} — {employee_id}"
+    if include_status:
+        label += f" — {emp.get('status', 'Active')}"
+    return label
+
 def _hrp_validate_employee_id(employee_id, exclude_id=None):
-    """Validate the permanent HR employee ID format: ACE-ID + digits."""
-    employee_id = str(employee_id or "").strip().upper()
+    """Employee IDs are always ACE-ID followed by digits, e.g. ACE-ID001."""
+    employee_id = str(employee_id).strip().upper()
     if not employee_id:
-        return False, "Employee ID is required."
-    if not re.fullmatch(r"ACE-ID\d+", employee_id):
-        return False, "Employee ID must start with ACE-ID followed by the number chosen by HR (for example ACE-ID001)."
-    excluded = str(exclude_id or "").strip().casefold()
+        return False, "Employee ID is required. Use ACE-ID followed by the employee number, e.g. ACE-ID001."
+    if not re.fullmatch(r"ACE-ID[0-9]+", employee_id):
+        return False, "Employee ID must start with ACE-ID and then contain numbers only, e.g. ACE-ID001."
     for emp in st.session_state.get("hrp_employees", []):
-        existing = str(emp.get("emp_id", "")).strip()
-        if existing.casefold() == employee_id.casefold() and existing.casefold() != excluded:
+        existing = str(emp.get("emp_id", "")).strip().upper()
+        if exclude_id is not None and existing == str(exclude_id).strip().upper():
+            continue
+        if existing == employee_id:
             return False, "This Employee ID already exists."
     return True, employee_id
 
 
-def _hrp_next_available_id(used_ids):
-    """Return the next unused ACE-ID number for migrating legacy employee IDs."""
-    used_numbers = set()
-    for value in used_ids:
-        m = re.fullmatch(r"ACE-ID(\d+)", str(value or "").strip().upper())
-        if m:
-            used_numbers.add(int(m.group(1)))
-    n = 1
-    while n in used_numbers:
-        n += 1
-    return f"ACE-ID{n:03d}"
-
-
-def _hrp_normalize_existing_employee_ids():
-    """Repair legacy employee IDs once, preserving all links to the employee."""
-    employees = st.session_state.get("hrp_employees", [])
-    if not employees:
+def _hrp_is_final_holiday_settlement_record(record):
+    """Only genuine final holiday close-out records belong in Director HR Leave Settlement."""
+    if not bool(record.get("final_holiday_settlement", False)):
         return False
-
-    changed = False
-    used = [str(e.get("emp_id", "")).strip().upper() for e in employees if re.fullmatch(r"ACE-ID\d+", str(e.get("emp_id", "")).strip().upper())]
-    used_set = set(used)
-    mapping = {}
-
-    for emp in employees:
-        old_id = str(emp.get("emp_id", "")).strip()
-        canonical = old_id.upper()
-        if re.fullmatch(r"ACE-ID\d+", canonical) and canonical not in mapping:
-            if old_id != canonical:
-                emp["emp_id"] = canonical
-                changed = True
-            continue
-        new_id = _hrp_next_available_id(used_set)
-        used_set.add(new_id)
-        emp["emp_id"] = new_id
-        mapping[old_id] = new_id
-        changed = True
-
-    if not changed:
-        return False
-
-    # Keep every known employee-linked data source pointing to the repaired ID.
-    if mapping:
-        try:
-            users = load_users()
-            users_changed = False
-            for u in users.values():
-                oid = str(u.get("employee_id", "")).strip()
-                if oid in mapping:
-                    u["employee_id"] = mapping[oid]
-                    users_changed = True
-            if users_changed:
-                save_users(users)
-        except Exception as e:
-            print(f"HR employee ID user-link repair failed: {e}")
-
-        try:
-            hr_leave = load_hr_leave(force=True)
-            hr_changed = False
-            for r in hr_leave:
-                oid = str(r.get("employee_id", "")).strip()
-                if oid in mapping:
-                    r["employee_id"] = mapping[oid]
-                    hr_changed = True
-            if hr_changed:
-                save_all_hr_leave(hr_leave)
-        except Exception as e:
-            print(f"HR leave ID repair failed: {e}")
-
-        try:
-            portal = st.session_state.get("hrp_leave_records", [])
-            portal_changed = False
-            for r in portal:
-                oid = str(r.get("employee_id", "")).strip()
-                if oid in mapping:
-                    r["employee_id"] = mapping[oid]
-                    portal_changed = True
-            if portal_changed:
-                st.session_state.hrp_leave_records = portal
-        except Exception as e:
-            print(f"HR portal leave ID repair failed: {e}")
-
-    # Save the repaired employee master immediately so this is a one-time migration.
-    try:
-        _hrp_save_employees()
-        if mapping:
-            # Save the portal leave workbook after its employee links were repaired.
-            _hrp_save_leave_records()
-    except Exception as e:
-        print(f"HR employee ID migration save failed: {e}")
-    return True
+    category = str(record.get("category", "")).strip().casefold()
+    rtype = str(record.get("type", "")).strip().casefold()
+    desc = str(record.get("desc", "")).strip().casefold()
+    valid_category = category in {"unused holiday payout", "overused holiday deduction"}
+    valid_type = rtype in {"addition", "deduction"}
+    return valid_type and (valid_category or "final holiday settlement" in desc)
 
 def _hrp_get_working_days(start_date, end_date):
     if end_date < start_date: return 0
@@ -2384,6 +2386,198 @@ def _hrp_render_holiday_calendar():
         # The detailed record list is available in the Leave History tab.
 
 
+def _hrp_work_duration(start_date, end_date):
+    """Return a readable employment duration using calendar years/months/days."""
+    try:
+        start = pd.to_datetime(start_date).date() if not isinstance(start_date, date) else start_date
+        end = pd.to_datetime(end_date).date() if not isinstance(end_date, date) else end_date
+        if end < start:
+            return "0 days"
+        # Calendar-based duration without requiring dateutil.
+        years = end.year - start.year
+        months = end.month - start.month
+        days = end.day - start.day
+        if days < 0:
+            months -= 1
+            prev_month = end.month - 1 or 12
+            prev_year = end.year if end.month > 1 else end.year - 1
+            import calendar as _calendar
+            days += _calendar.monthrange(prev_year, prev_month)[1]
+        if months < 0:
+            years -= 1
+            months += 12
+        parts = []
+        if years: parts.append(f"{years} year" + ("s" if years != 1 else ""))
+        if months: parts.append(f"{months} month" + ("s" if months != 1 else ""))
+        if days or not parts: parts.append(f"{days} day" + ("s" if days != 1 else ""))
+        return ", ".join(parts)
+    except Exception:
+        return "-"
+
+
+def _hrp_leaver_history(employee):
+    """Build a complete history payload for a leaver from HR employee/leave/settlement records."""
+    emp_id = str(employee.get("emp_id", "")).strip()
+    leaving_date = employee.get("leaving_date")
+    if not leaving_date:
+        return {"leave_records": [], "settlements": [], "holiday_taken": 0.0, "types": {}}
+    try:
+        leaving_date = pd.to_datetime(leaving_date).date()
+    except Exception:
+        pass
+    leave_records = []
+    types = {}
+    holiday_taken = 0.0
+    for r in _hrp_load_leave_records():
+        if str(r.get("employee_id", "")).strip().casefold() != emp_id.casefold():
+            continue
+        if str(r.get("status", "")).strip().casefold() != "approved":
+            continue
+        try:
+            d_from = pd.to_datetime(r.get("date_from")).date()
+        except Exception:
+            d_from = None
+        if d_from and isinstance(leaving_date, date) and d_from > leaving_date:
+            continue
+        days = float(r.get("days", 0) or 0)
+        leave_type = str(r.get("type", r.get("leave_type", "Other")) or "Other").strip()
+        types[leave_type] = round(types.get(leave_type, 0.0) + days, 1)
+        if leave_type.casefold() in {"holiday", "annual holiday", "annual leave", "holiday leave"}:
+            holiday_taken += days
+        leave_records.append(r)
+    settlements = [
+        r for r in load_hr_leave(force=True)
+        if r.get("final_holiday_settlement", False)
+        and str(r.get("employee_id", "")).strip().casefold() == emp_id.casefold()
+    ]
+    return {"leave_records": leave_records, "settlements": settlements, "holiday_taken": round(holiday_taken,1), "types": types}
+
+
+def _hrp_leaver_history_pdf(employee, history):
+    """Generate a downloadable complete leaver history PDF."""
+    if not PDF_AVAILABLE:
+        return None
+    try:
+        pdf = FPDF()
+        pdf.add_page()
+        regular_font, bold_font = _pdf_font_paths()
+        if regular_font and bold_font:
+            pdf.add_font("DejaVu", "", regular_font)
+            pdf.add_font("DejaVu", "B", bold_font)
+            family = "DejaVu"
+        else:
+            family = "Helvetica"
+        def safe(v):
+            txt = _pdf_text(v)
+            return txt if family == "DejaVu" else txt.encode("latin-1", "replace").decode("latin-1")
+        if os.path.exists(LOGO_PATH):
+            try: pdf.image(LOGO_PATH, x=75, y=10, w=60); pdf.ln(28)
+            except Exception: pdf.ln(5)
+        pdf.set_font(family, "B", 16); pdf.cell(0, 10, safe("EMPLOYEE LEAVER COMPLETE HISTORY"), ln=True, align="C"); pdf.ln(3)
+        pdf.set_font(family, "B", 11); pdf.cell(0, 7, safe("EMPLOYEE DETAILS"), ln=True)
+        pdf.set_font(family, "", 10)
+        details = [
+            ("Employee ID", employee.get("emp_id")), ("Full Name", employee.get("name")),
+            ("Department", employee.get("department")), ("Position", employee.get("job_title")),
+            ("Start Date", employee.get("start_date")), ("End / Leaving Date", employee.get("leaving_date")),
+            ("Duration of Work", _hrp_work_duration(employee.get("start_date"), employee.get("leaving_date"))),
+            ("Agreement", employee.get("agreement_type")), ("Working Pattern", employee.get("working_pattern")),
+            ("Days Per Week", employee.get("days_per_week")), ("Reason for Leaving", employee.get("leaving_reason")),
+        ]
+        for label, value in details:
+            pdf.set_font(family, "B", 9); pdf.cell(48, 6, safe(f"{label}:")); pdf.set_font(family, "", 9); pdf.multi_cell(0, 6, safe(value if value not in (None, "") else "-"))
+        pdf.ln(3); pdf.set_font(family, "B", 11); pdf.cell(0, 7, safe("HOLIDAY / LEAVE HISTORY"), ln=True)
+        pdf.set_font(family, "", 9)
+        if history["types"]:
+            for typ, days in history["types"].items(): pdf.cell(0, 6, safe(f"{typ}: {days:.1f} day(s)"), ln=True)
+        else: pdf.cell(0, 6, safe("No approved leave records found."), ln=True)
+        pdf.ln(2); pdf.set_font(family, "B", 10); pdf.cell(0, 6, safe(f"Approved annual holiday taken: {history['holiday_taken']:.1f} days"), ln=True)
+        pdf.ln(3); pdf.set_font(family, "B", 11); pdf.cell(0, 7, safe("FINAL HOLIDAY SETTLEMENTS"), ln=True)
+        pdf.set_font(family, "", 9)
+        if history["settlements"]:
+            for r in history["settlements"]:
+                typ = r.get("type", "")
+                status = str(r.get("status", "")).title()
+                pdf.multi_cell(0, 6, safe(f"Settlement #{r.get('id')} | {typ} | {float(r.get('days',0) or 0):.1f} days | £{float(r.get('amount',0) or 0):.2f} | {status} | {r.get('date','')}"))
+                if r.get("director_comments"): pdf.multi_cell(0, 5, safe(f"Director comments: {r.get('director_comments')}"))
+                if r.get("rejection_reason"): pdf.multi_cell(0, 5, safe(f"Rejection reason: {r.get('rejection_reason')}"))
+        else: pdf.cell(0, 6, safe("No final holiday settlement records found."), ln=True)
+        pdf.ln(3); pdf.set_font(family, "B", 10); pdf.cell(0, 6, safe("LEAVE RECORDS"), ln=True); pdf.set_font(family, "", 8)
+        for r in history["leave_records"]:
+            pdf.multi_cell(0, 5, safe(f"{r.get('date_from','')} → {r.get('date_to','')} | {r.get('type','')} | {float(r.get('days',0) or 0):.1f} days | {r.get('status','')} | {r.get('notes','')}"))
+        os.makedirs(PDF_DIR, exist_ok=True)
+        safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(employee.get("emp_id", "leaver")))
+        path = os.path.join(PDF_DIR, f"Leaver_History_{safe_id}.pdf")
+        pdf.output(path)
+        _upload_to_drive_bg(path, os.path.basename(path))
+        return path
+    except Exception as e:
+        st.error(f"Leaver history PDF error: {e}")
+        return None
+
+
+def _hrp_render_leavers_tab():
+    st.subheader("📚 Leavers")
+    st.caption("Complete history for employees who have left the company. Leavers are removed from the live Holiday Calculator.")
+    leavers = [e for e in st.session_state.get("hrp_employees", []) if str(e.get("status", "")).strip().casefold() == "left" or e.get("leaving_date")]
+    if not leavers:
+        st.info("No employees have been recorded as Left.")
+        return
+    st.markdown("### Leaver List")
+    list_rows = [{"Employee ID":e.get("emp_id"),"Full Name":e.get("name"),"Department":e.get("department"),"Start Date":e.get("start_date"),"Left Date":e.get("leaving_date"),"Reason":e.get("leaving_reason")} for e in leavers]
+    st.dataframe(pd.DataFrame(list_rows), use_container_width=True, hide_index=True)
+    options = [f"{e.get('name','')} — {e.get('emp_id','')}" for e in leavers]
+    by_label = dict(zip(options, leavers))
+    search = st.text_input("🔎 Search Leaver", placeholder="Search by name or ACE-ID / Employee ID...", key="hrp_leaver_search")
+    filtered = [e for e in leavers if not search.strip() or search.casefold().strip() in (str(e.get('name',''))+' '+str(e.get('emp_id',''))).casefold()]
+    if not filtered:
+        st.warning("No leaver matches your search.")
+        return
+    labels = [f"{e.get('name','')} — {e.get('emp_id','')}" for e in filtered]
+    selected_label = st.selectbox("Select Leaver", labels, key="hrp_selected_leaver")
+    employee = next(e for e in filtered if f"{e.get('name','')} — {e.get('emp_id','')}" == selected_label)
+    history = _hrp_leaver_history(employee)
+    st.divider(); st.subheader("👤 Complete Employee History")
+    c1,c2,c3 = st.columns(3)
+    c1.write(f"**Employee ID:** {employee.get('emp_id','')}")
+    c1.write(f"**Full Name:** {employee.get('name','')}")
+    c1.write(f"**Department:** {employee.get('department','')}")
+    c2.write(f"**Start Date:** {employee.get('start_date','')}")
+    c2.write(f"**End Date:** {employee.get('leaving_date','')}")
+    c2.write(f"**Duration:** {_hrp_work_duration(employee.get('start_date'), employee.get('leaving_date'))}")
+    c3.write(f"**Position:** {employee.get('job_title','')}")
+    c3.write(f"**Reason for Leaving:** {employee.get('leaving_reason','') or '-'}")
+    c3.write(f"**Agreement:** {employee.get('agreement_type','')}")
+    st.markdown("### Holidays / Leave Taken")
+    if history["types"]:
+        st.dataframe(pd.DataFrame([{"Leave Type":k,"Approved Days":v} for k,v in history["types"].items()]), use_container_width=True, hide_index=True)
+    else: st.info("No approved leave records found.")
+    st.markdown("### Final Holiday Settlement")
+    try:
+        leave_end = pd.to_datetime(employee.get("leaving_date")).date()
+        leave_calc = _hrp_get_leaving_entitlement(employee, leave_end)
+        leave_used = _hrp_get_approved_holiday_days_to_date(employee.get("emp_id"), leave_end)
+        start_dt = pd.to_datetime(employee.get("start_date")).date()
+        closure_days = _hrp_get_company_closure_holiday_days(employee, start_dt, leave_end)
+        st.dataframe(pd.DataFrame([{
+            "Pure Holiday Entitlement": leave_calc.get("gross", 0.0),
+            "Bank Holidays": leave_calc.get("bank_holidays", 0.0),
+            "Holiday Taken": round(leave_used + closure_days, 1),
+            "Final Settlement Days": leave_calc.get("net", 0.0) - leave_used - closure_days - leave_calc.get("bank_holidays", 0.0),
+        }]), use_container_width=True, hide_index=True)
+    except Exception:
+        pass
+    if history["settlements"]:
+        st.dataframe(pd.DataFrame([{"Settlement ID":r.get('id'),"Type":r.get('type'),"Days":float(r.get('days',0) or 0),"Amount (£)":float(r.get('amount',0) or 0),"Status":r.get('status','').title(),"Date":r.get('date')} for r in history["settlements"]]), use_container_width=True, hide_index=True)
+    else: st.info("No final holiday settlement found.")
+    if st.button("📄 Generate Complete Leaver History PDF", key=f"gen_leaver_pdf_{employee.get('emp_id')}", type="primary"):
+        with st.spinner("Generating leaver history PDF..."):
+            pdf_path = _hrp_leaver_history_pdf(employee, history)
+        if pdf_path and os.path.exists(pdf_path):
+            with open(pdf_path, "rb") as f: st.download_button("⬇️ Download Complete Leaver History PDF", f.read(), file_name=os.path.basename(pdf_path), mime="application/pdf", type="primary", key=f"leaver_pdf_{employee.get('emp_id')}")
+        else:
+            st.error("Could not generate the leaver history PDF.")
+
 def render_hr_portal(current_user_info=None):
     """HR Portal — HR Management, Holiday Calendar, Employee Details, Leave and Leave History."""
     # Defensive initialization: Streamlit sessions may survive code/data changes.
@@ -2459,13 +2653,13 @@ def render_hr_portal(current_user_info=None):
             st.subheader("🧑‍💼 HR Management")
             if is_hr_manager:
                 st.caption("Employee Overview, Leave Approvals, Holiday Calculator, Employee Leaving and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, employee_edit_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "✏️ Edit / Deactivate Employee"
+                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee"
                 ])
             else:
                 st.caption("Employee Overview, Holiday Calculator, Employee Leaving and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, employee_edit_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "✏️ Edit / Deactivate Employee"
+                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee"
                 ])
                 hr_approval_tab = None
 
@@ -2607,7 +2801,7 @@ def render_hr_portal(current_user_info=None):
                     edit_emp_id = st.selectbox(
                         "Select Employee",
                         options=edit_employee_ids,
-                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid)['status']}",
+                        format_func=lambda eid: _hrp_employee_label(eid, include_status=True),
                         key="hrp_edit_emp_selector",
                     )
                     edit_emp = _hrp_get_employee(edit_emp_id)
@@ -2619,7 +2813,7 @@ def render_hr_portal(current_user_info=None):
                     with st.form(f"hrp_edit_employee_form_{edit_emp_id}"):
                         ec1, ec2 = st.columns(2)
                         with ec1:
-                            edit_emp_id_new = st.text_input("Employee ID", value=edit_emp["emp_id"], help="Must be ACE-ID followed by the number assigned by HR, e.g. ACE-ID001.")
+                            edit_id = st.text_input("Employee ID", value=edit_emp["emp_id"], help="Must be ACE-ID followed by numbers, e.g. ACE-ID001.")
                             edit_name = st.text_input("Full Name", value=edit_emp["name"])
                             edit_start = st.date_input("Start Date", value=edit_emp["start_date"])
                             edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
@@ -2661,12 +2855,12 @@ def render_hr_portal(current_user_info=None):
                             if edit_emp.get("status") == "Left":
                                 st.caption("This employee is recorded as Left. Use Employee Leaving to manage the leaving date and final holiday settlement.")
                         if st.form_submit_button("💾 Save Employee Changes", type="primary"):
-                            valid_id, validated_id = _hrp_validate_employee_id(edit_emp_id_new, exclude_id=edit_emp_id)
+                            old_id = str(edit_emp.get("emp_id", "")).strip()
+                            valid_id, validated_id = _hrp_validate_employee_id(edit_id, exclude_id=old_id)
                             if not valid_id:
                                 st.error(validated_id)
                                 st.stop()
                             old_data = dict(edit_emp)
-                            old_id = str(edit_emp.get("emp_id", "")).strip()
                             edit_emp["emp_id"] = validated_id
                             edit_emp["name"] = edit_name.strip()
                             edit_emp["start_date"] = edit_start
@@ -2679,29 +2873,24 @@ def render_hr_portal(current_user_info=None):
                             if edit_emp.get("status") != "Left":
                                 edit_emp["status"] = edit_status
                             if validated_id != old_id:
-                                # Cascade the ID change through every employee-linked data source.
                                 users = load_users()
-                                users_changed = False
                                 for u in users.values():
                                     if str(u.get("employee_id", "")).strip().casefold() == old_id.casefold():
                                         u["employee_id"] = validated_id
-                                        users_changed = True
-                                if users_changed:
-                                    save_users(users)
+                                save_users(users)
                                 hr_leave = load_hr_leave(force=True)
                                 for r in hr_leave:
                                     if str(r.get("employee_id", "")).strip().casefold() == old_id.casefold():
                                         r["employee_id"] = validated_id
                                 save_all_hr_leave(hr_leave)
-                                portal = _hrp_load_leave_records()
-                                for r in portal:
+                                portal_leave = _hrp_load_leave_records()
+                                for r in portal_leave:
                                     if str(r.get("employee_id", "")).strip().casefold() == old_id.casefold():
                                         r["employee_id"] = validated_id
-                                st.session_state.hrp_leave_records = portal
+                                st.session_state.hrp_leave_records = portal_leave
                                 _hrp_save_leave_records()
-                                if str(st.session_state.get("hrp_current_emp_id", "")).strip().casefold() == old_id.casefold():
-                                    st.session_state.hrp_current_emp_id = validated_id
                             _hrp_save_employees()
+                            st.session_state.hrp_current_emp_id = validated_id
                             log_action("HR_EMPLOYEE_EDITED", validated_id, old_data=old_data, new_data=dict(edit_emp))
                             st.success(f"Employee {validated_id} updated successfully.")
                             st.rerun()
@@ -2759,7 +2948,7 @@ def render_hr_portal(current_user_info=None):
                     leaving_id = st.selectbox(
                         "Employee",
                         leaving_ids,
-                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid).get('status', 'Active')}",
+                        format_func=lambda eid: _hrp_employee_label(eid, include_status=True),
                         key="hrp_leaving_employee",
                     )
                     leaving_emp = _hrp_get_employee(leaving_id)
@@ -2950,16 +3139,20 @@ def render_hr_portal(current_user_info=None):
                                     st.session_state["hr_leave_last_created_id"] = new_id
                                     st.rerun()
 
-            # Submitted final settlements are shown directly below the leaving\n            # workflow. Once submitted, the employee is removed from the selector\n            # above, so the page is effectively cleared for the next employee.\n            st.divider()\n            st.subheader("📋 Submitted Final Holiday Settlements")\n            final_records = [r for r in load_hr_leave(force=True) if r.get("final_holiday_settlement", False)]\n            if final_records:\n                for r in final_records[:20]:\n                    status = str(r.get("status", "pending")).strip().casefold()\n                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")\n                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):\n                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")\n                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")\n                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")\n                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")\n                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")\n                        # Pending final settlements can be edited before Director approval.\n                        if status == "pending":\n                            edit_key = f"hrp_edit_final_{r.get('id')}"\n                            if st.button("✏️ Edit Pending Settlement", key=edit_key):\n                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True\n                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):\n                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")\n                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")\n                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")\n                                ec1, ec2 = st.columns(2)\n                                with ec1:\n                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", use_container_width=True):\n                                        records = load_hr_leave(force=True)\n                                        for rr in records:\n                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):\n                                                rr['manager'] = new_manager.strip()\n                                                rr['amount'] = float(new_amount)\n                                                rr['desc'] = new_desc.strip()\n                                                break\n                                        save_all_hr_leave(records)\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.success(f"Settlement #{r.get('id')} updated.")\n                                        st.rerun()\n                                with ec2:\n                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", use_container_width=True):\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.rerun()\n            else:\n                st.info("No final holiday settlements have been submitted yet.")\n\n            # ========== LIVE HOLIDAY CALCULATOR TAB ==========
+            # Submitted final settlements are shown directly below the leaving\n            # workflow. Once submitted, the employee is removed from the selector\n            # above, so the page is effectively cleared for the next employee.\n            st.divider()\n            st.subheader("📋 Submitted Final Holiday Settlements")\n            final_records = [r for r in load_hr_leave(force=True) if _hrp_is_final_holiday_settlement_record(r)]\n            if final_records:\n                for r in final_records[:20]:\n                    status = str(r.get("status", "pending")).strip().casefold()\n                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")\n                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):\n                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")\n                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")\n                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")\n                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")\n                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")\n                        # Pending final settlements can be edited before Director approval.\n                        if status == "pending":\n                            edit_key = f"hrp_edit_final_{r.get('id')}"\n                            if st.button("✏️ Edit Pending Settlement", key=edit_key):\n                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True\n                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):\n                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")\n                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")\n                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")\n                                ec1, ec2 = st.columns(2)\n                                with ec1:\n                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", use_container_width=True):\n                                        records = load_hr_leave(force=True)\n                                        for rr in records:\n                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):\n                                                rr['manager'] = new_manager.strip()\n                                                rr['amount'] = float(new_amount)\n                                                rr['desc'] = new_desc.strip()\n                                                break\n                                        save_all_hr_leave(records)\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.success(f"Settlement #{r.get('id')} updated.")\n                                        st.rerun()\n                                with ec2:\n                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", use_container_width=True):\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.rerun()\n            else:\n                st.info("No final holiday settlements have been submitted yet.")\n\n            # ========== LEAVERS TAB ==========
+            with hr_leavers_tab:
+                _hrp_render_leavers_tab()
+
+            # ========== LIVE HOLIDAY CALCULATOR TAB ==========
             with hr_holiday_calc_tab:
                 st.subheader("📊 Holiday Calculator")
                 st.info("Calculate an employee's current holiday position. Employees recorded as Left are closed and show 0.0 days in the live holiday position. Final leaving settlements are handled separately in Employee Leaving and approved by the Director.")
-                settlement_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
+                settlement_ids = [e["emp_id"] for e in st.session_state.hrp_employees if str(e.get("status", "")).strip().casefold() == "active"]
                 if settlement_ids:
                     settlement_employee_id = st.selectbox(
                         "Employee",
                         options=settlement_ids,
-                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}" if _hrp_get_employee(eid) else "No employees registered",
+                        format_func=lambda eid: _hrp_employee_label(eid),
                         key="hrp_settlement_emp",
                     )
                     settlement_employee = _hrp_get_employee(settlement_employee_id)
@@ -3021,7 +3214,7 @@ def render_hr_portal(current_user_info=None):
                     "Current Employee",
                     options=selector_options,
                     index=current_index,
-                    format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}",
+                    format_func=lambda eid: _hrp_employee_label(eid),
                     key="hrp_current_employee_details_selector",
                 )
                 if selected_from_dropdown != st.session_state.hrp_current_emp_id:
@@ -3174,10 +3367,7 @@ def render_hr_portal(current_user_info=None):
                 "👤 Employee — Book Leave For",
                 options=leave_employee_ids,
                 index=leave_current_index,
-                format_func=lambda eid: (
-                    f"{_hrp_get_employee(eid)['name']} — {eid}"
-                    if _hrp_get_employee(eid) else eid
-                ),
+                format_func=lambda eid: _hrp_employee_label(eid),
                 key="hrp_leave_employee_selector",
             )
             st.session_state.hrp_leave_employee_id = selected_leave_employee_id
@@ -3467,7 +3657,7 @@ def render_department_manager_leave_request(current_user_info=None):
     selected_id = st.selectbox(
         "👤 Employee — Request Leave For",
         employee_ids,
-        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}",
+        format_func=lambda eid: _hrp_employee_label(eid),
         key=selector_key,
     )
     selected_employee = next((e for e in employees if e.get("emp_id") == selected_id), None)
@@ -5964,7 +6154,7 @@ def render_hr_leave_director_portal(director_name):
     st.subheader("👥 HR Leave Settlement — Director Approval")
     st.info("Review HR leave settlement requests. The Director can move any request between Pending, Approved and Rejected. Rejection requires a reason.")
     st.divider()
-    records = load_hr_leave()
+    records = [r for r in load_hr_leave(force=True) if r.get("final_holiday_settlement", False)]
     pending = [r for r in records if str(r.get("status", "")).strip().lower() == "pending"]
     approved = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
     rejected = [r for r in records if str(r.get("status", "")).strip().lower() == "rejected"]
@@ -6259,11 +6449,13 @@ def _super_admin_transaction_control():
                 new_reason=st.text_input("Leaving Reason", value=emp.get("leaving_reason",""))
                 save_emp=st.form_submit_button("💾 Save Complete Employee Record", type="primary", use_container_width=True)
             if save_emp:
+                new_id=str(new_id).strip().upper()
                 valid_id, validated_id = _hrp_validate_employee_id(new_id, exclude_id=old_id)
                 if not valid_id:
                     st.error(validated_id)
                 else:
                     new_id = validated_id
+                if valid_id:
                     emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["job_title"]=new_position.strip(); emp["department"]=new_dept; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]=new_reason.strip()
                     # Cascade an ACE-ID change through linked user and HR leave records.
                     if new_id != old_id:
