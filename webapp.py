@@ -639,18 +639,17 @@ def render_google_drive_status():
         pending = len(DRIVE_PENDING_SYNC)
         st.caption(f"Every successful software save is queued automatically. Pending Drive uploads: {pending}. Local saves do not wait for Google Drive.")
 
-def initialise_drive_storage():
-    """Prepare the small set of critical workbooks once per Streamlit server process.
+@st.cache_resource(show_spinner=False)
+def _initialise_drive_storage_once():
+    """Initialise critical Drive workbooks once per Streamlit process.
 
-    Google Drive remains the source of truth on a fresh server, but repeated
-    Streamlit sessions/reruns must not re-download the same Excel files.
-    Secondary workbooks are loaded only when their module is used.
+    Streamlit reruns the script for every widget interaction. The old module
+    global flag was recreated on each rerun, causing repeated Google Drive
+    downloads of five workbooks. This cache survives normal reruns.
     """
-    global _DRIVE_STORAGE_PROCESS_READY
-    if drive_service is None or _DRIVE_STORAGE_PROCESS_READY:
-        return
+    if drive_service is None:
+        return False
     os.makedirs(APP_FOLDER, exist_ok=True)
-
     critical = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, USER_DB_COLUMNS),
@@ -658,19 +657,19 @@ def initialise_drive_storage():
         (HR_EMPLOYEES_PATH, HR_EMPLOYEE_COLUMNS),
         (HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS),
     ]
-
     for path, columns in critical:
         try:
-            sync_persistent_file(path, columns)
+            # Recover from Drive only when the local deployment has no usable
+            # workbook. Existing local files are the active working copies.
+            if not os.path.exists(path) or os.path.getsize(path) == 0:
+                sync_persistent_file(path, columns)
         except Exception as e:
             print(f"Critical Drive initialisation failed for {os.path.basename(path)}: {e}")
-
-    _DRIVE_STORAGE_PROCESS_READY = True
-    # Do not touch st.session_state here. This function is also called during
-    # module import, before Streamlit has a ScriptRunContext. Accessing
-    # st.session_state at import/startup can emit missing-context warnings and
-    # has contributed to unstable hot-reload behaviour.
     print("Critical Drive workbooks initialised once for this Streamlit server process.")
+    return True
+
+def initialise_drive_storage():
+    return _initialise_drive_storage_once()
 
 def get_onedrive_token():
     if not ONEDRIVE_CLIENT_ID or not ONEDRIVE_CLIENT_SECRET: return None
@@ -1091,6 +1090,8 @@ def refresh_data_button():
                     if remote:
                         _drive_download_file(remote["id"], path)
             _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count", "_hr_leave_cache", "_hr_daily_rates_cache", "_store_deduction_cache", "_store_items_cache")
+            st.session_state["hrp_force_reload"] = True
+            st.session_state["hrp_data_loaded"] = False
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 
@@ -1576,7 +1577,7 @@ def _hrp_reconcile_leaver_statuses():
     """
     employees = st.session_state.get("hrp_employees", [])
     settlements = [
-        r for r in load_hr_leave(force=True)
+        r for r in load_hr_leave(force=False)
         if _hrp_is_final_holiday_settlement_record(r)
         and str(r.get("status", "")).strip().casefold() in {"pending", "approved"}
     ]
@@ -1607,23 +1608,28 @@ def _hrp_reconcile_leaver_statuses():
 
 
 def _hr_portal_init():
-    _hrp_init_storage()
-    # Always initialise the HR portal view state. Older sessions may not have
-    # this key, which previously caused a KeyError in the View As selector.
+    # Do not reread both HR workbooks on every widget interaction. Streamlit
+    # reruns the script when a selectbox/date/text input changes; keeping the
+    # current HR data in session state makes those interactions much faster.
+    # Explicit Refresh Data sets hrp_force_reload so cross-session changes can
+    # still be pulled from the persistent workbooks.
     if "hrp_role" not in st.session_state:
         st.session_state.hrp_role = "hr"
-    # Reload the persistent employee master on each portal render. This prevents
-    # a stale Streamlit session from showing an employee as Active after another
-    # action/session has recorded the employee as Left.
-    loaded_employees = _hrp_enforce_ace_id_format(_hrp_load_employees())
-    st.session_state.hrp_employees = loaded_employees
-    # Keep the portal leave cache in step with the persistent workbook too.
-    st.session_state.hrp_leave_records = _hrp_load_leave_records()
-    st.session_state.hrp_storage_version = 3
-    _hrp_reconcile_leaver_statuses()
+
+    needs_reload = (
+        not st.session_state.get("hrp_data_loaded", False)
+        or bool(st.session_state.pop("hrp_force_reload", False))
+    )
+
+    if needs_reload:
+        _hrp_init_storage()
+        st.session_state.hrp_employees = _hrp_enforce_ace_id_format(_hrp_load_employees())
+        st.session_state.hrp_leave_records = _hrp_load_leave_records()
+        st.session_state.hrp_storage_version = 4
+        _hrp_reconcile_leaver_statuses()
+        st.session_state.hrp_data_loaded = True
+
     active = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
-    # If the previously selected employee was deleted/deactivated, clear the
-    # stale ID and select the first active employee (or none if the database is empty).
     current_emp_id = str(st.session_state.get("hrp_current_emp_id", "") or "").strip()
     active_lookup = {str(x).casefold() for x in active}
     if current_emp_id.casefold() not in active_lookup:
@@ -2017,7 +2023,7 @@ def _hrp_get_approved_final_settlement_offset(employee_id):
     the employee's holiday account at zero.
     """
     try:
-        records = load_hr_leave(force=True)
+        records = load_hr_leave(force=False)
     except Exception:
         return 0.0
     total = 0.0
@@ -2046,7 +2052,7 @@ def _hrp_get_final_settlement_records(employee_id):
     """Return final holiday settlement requests for an employee, newest first."""
     target = str(employee_id or "").strip().casefold()
     try:
-        records = load_hr_leave(force=True)
+        records = load_hr_leave(force=False)
     except Exception:
         return []
     out = []
@@ -3325,7 +3331,7 @@ def render_hr_portal(current_user_info=None):
                                     st.session_state["hr_leave_last_created_id"] = new_id
                                     st.rerun()
 
-            # Submitted final settlements are shown directly below the leaving\n            # workflow. Once submitted, the employee is removed from the selector\n            # above, so the page is effectively cleared for the next employee.\n            st.divider()\n            st.subheader("📋 Submitted Final Holiday Settlements")\n            final_records = [r for r in load_hr_leave(force=True) if _hrp_is_final_holiday_settlement_record(r)]\n            if final_records:\n                for r in final_records[:20]:\n                    status = str(r.get("status", "pending")).strip().casefold()\n                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")\n                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):\n                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")\n                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")\n                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")\n                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")\n                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")\n                        # Pending final settlements can be edited before Director approval.\n                        if status == "pending":\n                            edit_key = f"hrp_edit_final_{r.get('id')}"\n                            if st.button("✏️ Edit Pending Settlement", key=edit_key):\n                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True\n                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):\n                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")\n                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")\n                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")\n                                ec1, ec2 = st.columns(2)\n                                with ec1:\n                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", width="stretch"):\n                                        records = load_hr_leave(force=True)\n                                        for rr in records:\n                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):\n                                                rr['manager'] = new_manager.strip()\n                                                rr['amount'] = float(new_amount)\n                                                rr['desc'] = new_desc.strip()\n                                                break\n                                        save_all_hr_leave(records)\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.success(f"Settlement #{r.get('id')} updated.")\n                                        st.rerun()\n                                with ec2:\n                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", width="stretch"):\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.rerun()\n            else:\n                st.info("No final holiday settlements have been submitted yet.")\n\n            # ========== LEAVERS TAB ==========
+            # Submitted final settlements are shown directly below the leaving\n            # workflow. Once submitted, the employee is removed from the selector\n            # above, so the page is effectively cleared for the next employee.\n            st.divider()\n            st.subheader("📋 Submitted Final Holiday Settlements")\n            final_records = [r for r in load_hr_leave(force=False) if _hrp_is_final_holiday_settlement_record(r)]\n            if final_records:\n                for r in final_records[:20]:\n                    status = str(r.get("status", "pending")).strip().casefold()\n                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")\n                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):\n                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")\n                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")\n                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")\n                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")\n                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")\n                        # Pending final settlements can be edited before Director approval.\n                        if status == "pending":\n                            edit_key = f"hrp_edit_final_{r.get('id')}"\n                            if st.button("✏️ Edit Pending Settlement", key=edit_key):\n                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True\n                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):\n                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")\n                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")\n                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")\n                                ec1, ec2 = st.columns(2)\n                                with ec1:\n                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", width="stretch"):\n                                        records = load_hr_leave(force=True)\n                                        for rr in records:\n                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):\n                                                rr['manager'] = new_manager.strip()\n                                                rr['amount'] = float(new_amount)\n                                                rr['desc'] = new_desc.strip()\n                                                break\n                                        save_all_hr_leave(records)\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.success(f"Settlement #{r.get('id')} updated.")\n                                        st.rerun()\n                                with ec2:\n                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", width="stretch"):\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.rerun()\n            else:\n                st.info("No final holiday settlements have been submitted yet.")\n\n            # ========== LEAVERS TAB ==========
             with hr_leavers_tab:
                 _hrp_render_leavers_tab()
 
@@ -6367,7 +6373,7 @@ def render_hr_leave_director_portal(director_name):
     st.subheader("👥 HR Leave Settlement — Director Approval")
     st.info("Review HR leave settlement requests. The Director can move any request between Pending, Approved and Rejected. Rejection requires a reason.")
     st.divider()
-    records = [r for r in load_hr_leave(force=True) if r.get("final_holiday_settlement", False)]
+    records = [r for r in load_hr_leave(force=False) if r.get("final_holiday_settlement", False)]
     pending = [r for r in records if str(r.get("status", "")).strip().lower() == "pending"]
     approved = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
     rejected = [r for r in records if str(r.get("status", "")).strip().lower() == "rejected"]
