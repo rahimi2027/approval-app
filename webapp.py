@@ -1479,24 +1479,63 @@ def _hrp_enforce_ace_id_format(employees):
     return employees
 
 
+def _hrp_reconcile_leaver_statuses():
+    """Repair employee status when a final holiday settlement already exists.
+
+    The leaving workflow is supposed to mark the employee as Left before the
+    final settlement is created. Older records can nevertheless contain a
+    pending/approved final settlement while the employee master still says
+    Active (for example after a session/cache mismatch). Treat the final
+    settlement as the authoritative close-out signal and repair the employee
+    master record so Leavers, Directory and Holiday Calculator agree.
+    """
+    employees = st.session_state.get("hrp_employees", [])
+    settlements = [
+        r for r in load_hr_leave(force=True)
+        if _hrp_is_final_holiday_settlement_record(r)
+        and str(r.get("status", "")).strip().casefold() in {"pending", "approved"}
+    ]
+    changed = False
+    for emp in employees:
+        eid = str(emp.get("emp_id", "")).strip().casefold()
+        matches = [r for r in settlements if str(r.get("employee_id", "")).strip().casefold() == eid]
+        if not matches:
+            continue
+        if str(emp.get("status", "")).strip().casefold() != "left":
+            emp["status"] = "Left"
+            changed = True
+        if not emp.get("leaving_date"):
+            raw_date = matches[0].get("date", "")
+            try:
+                parsed = pd.to_datetime(raw_date, errors="coerce")
+                if pd.notna(parsed):
+                    emp["leaving_date"] = parsed.date()
+                    changed = True
+            except Exception:
+                pass
+        if not str(emp.get("leaving_reason", "")).strip():
+            emp["leaving_reason"] = "Final holiday settlement"
+            changed = True
+    if changed:
+        _hrp_save_employees()
+    return changed
+
+
 def _hr_portal_init():
     _hrp_init_storage()
     # Always initialise the HR portal view state. Older sessions may not have
     # this key, which previously caused a KeyError in the View As selector.
     if "hrp_role" not in st.session_state:
         st.session_state.hrp_role = "hr"
-    if st.session_state.get("hrp_storage_version") != 3:
-        # Load the persistent HR workbooks instead of keeping the old demo/sample employees
-        # that existed in earlier versions of this portal.
-        st.session_state.hrp_employees = _hrp_enforce_ace_id_format(_hrp_load_employees())
-        _hrp_save_employees()
-        st.session_state.hrp_leave_records = _hrp_load_leave_records()
-        st.session_state.hrp_storage_version = 3
-    elif "hrp_employees" not in st.session_state:
-        st.session_state.hrp_employees = _hrp_enforce_ace_id_format(_hrp_load_employees())
-        _hrp_save_employees()
-    elif "hrp_leave_records" not in st.session_state:
-        st.session_state.hrp_leave_records = _hrp_load_leave_records()
+    # Reload the persistent employee master on each portal render. This prevents
+    # a stale Streamlit session from showing an employee as Active after another
+    # action/session has recorded the employee as Left.
+    loaded_employees = _hrp_enforce_ace_id_format(_hrp_load_employees())
+    st.session_state.hrp_employees = loaded_employees
+    # Keep the portal leave cache in step with the persistent workbook too.
+    st.session_state.hrp_leave_records = _hrp_load_leave_records()
+    st.session_state.hrp_storage_version = 3
+    _hrp_reconcile_leaver_statuses()
     active = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
     # If the previously selected employee was deleted/deactivated, clear the
     # stale ID and select the first active employee (or none if the database is empty).
@@ -2972,7 +3011,8 @@ def render_hr_portal(current_user_info=None):
                 # allowed to be resubmitted.
                 leaving_ids = [
                     e["emp_id"] for e in st.session_state.hrp_employees
-                    if not _hrp_has_active_final_settlement(e.get("emp_id", ""))
+                    if str(e.get("status", "")).strip().casefold() == "active"
+                    and not _hrp_has_active_final_settlement(e.get("emp_id", ""))
                 ]
                 if not leaving_ids:
                     st.success("✅ All employees currently recorded for leaving already have a pending or approved final settlement. No duplicate settlement can be raised.")
