@@ -5993,6 +5993,180 @@ def render_hr_leave_super_admin():
                 st.divider()
                 display_hr_leave_pdf_button(r, key_prefix="hr_sa_rej")
 
+
+def _super_admin_transaction_control():
+    """Super Admin master search/edit/delete for all transaction workbooks."""
+    st.subheader("🛡️ Super Admin — Transaction & Employee Control")
+    st.info("Search any transaction across the main request systems, edit or delete it, and manage the complete employee master record. Changes are saved to the live Excel files and Google Drive backup automatically.")
+    st.divider()
+
+    def _save_portal_leave(records):
+        _hr_portal_init()
+        st.session_state["hrp_leave_records"] = list(records)
+        _hrp_save_leave_records()
+
+    def source_records():
+        return [
+            ("Addition & Deduction", "AD", load_records_from_excel(force=True), save_all_records, "id"),
+            ("HR Leave Settlement", "HR", load_hr_leave(force=True), save_all_hr_leave, "id"),
+            ("Store Transactions", "ST", load_store_deductions(force=True), save_all_store_deductions, "id"),
+            ("Work Orders", "WO", load_work_orders(force=True), save_all_work_orders, "id"),
+            ("Inspector Bonus", "IB", load_inspector_bonus(force=True), save_all_inspector_bonus, "id"),
+            ("HR Portal Leave Records", "LV", (_hr_portal_init() or st.session_state.get("hrp_leave_records", [])), _save_portal_leave, "leave_id"),
+        ]
+
+    search_tab, employee_tab = st.tabs(["🔎 Transaction Search / Edit / Delete", "👤 Employee Master Edit"])
+
+    with search_tab:
+        sources = source_records()
+        all_rows=[]
+        for label, code, records, saver, id_key in sources:
+            for r in records:
+                rid = str(r.get(id_key, ""))
+                name = str(r.get("emp_name") or r.get("inspector_name") or "")
+                dept = str(r.get("emp_dept") or r.get("dept") or "")
+                status = str(r.get("status", ""))
+                amount = r.get("amount", r.get("total_deduction", r.get("bonus_amount", 0)))
+                try: amount=float(amount or 0)
+                except Exception: amount=0.0
+                typ = str(r.get("type") or ("Addition" if label == "Store Transactions" and str(r.get("type","")) == "Addition" else "") or "")
+                if label == "Inspector Bonus": typ = "Bonus"
+                all_rows.append({"source":label,"code":code,"id":rid,"name":name,"dept":dept,"status":status,"amount":amount,"type":typ,"record":r,"saver":saver,"id_key":id_key})
+
+        q=st.text_input("🔎 Search all transactions", placeholder="ID, employee, department, status, addition, deduction, category, amount, description...", key="sa_master_tx_search")
+        source_filter=st.selectbox("📂 Transaction type", ["All"]+[x[0] for x in sources], key="sa_master_tx_source")
+        status_filter=st.selectbox("📌 Status", ["All","pending","approved","rejected","pending_manager","pending_director"], key="sa_master_tx_status")
+        filtered=all_rows
+        if source_filter != "All": filtered=[x for x in filtered if x["source"]==source_filter]
+        if status_filter != "All": filtered=[x for x in filtered if x["status"].lower()==status_filter]
+        if q.strip():
+            qq=q.strip().casefold(); filtered=[x for x in filtered if qq in json.dumps(x["record"], default=str, ensure_ascii=False).casefold()]
+        st.metric("Transactions found", len(filtered))
+        st.divider()
+        if not filtered:
+            st.info("No transactions match the search.")
+        else:
+            for idx, item in enumerate(reversed(filtered)):
+                r=item["record"]; status=item["status"].lower(); icon="🟡" if "pending" in status else ("🟢" if status=="approved" else "🔴" if status=="rejected" else "⚪")
+                title=f"{icon} {item['source']} | ID #{item['id']} | {item['name'] or '—'} | {item['type'] or 'Transaction'} | £{item['amount']:.2f} | {status.upper()}"
+                with st.expander(title):
+                    st.caption(f"Source: {item['source']} • Department: {item['dept'] or '—'}")
+                    st.write("**All editable fields** — edit values below, then save. The transaction ID is kept fixed to prevent broken references.")
+                    editable={}
+                    with st.form(f"sa_edit_tx_{item['code']}_{item['id']}_{idx}"):
+                        cols=st.columns(2)
+                        for j,(k,v) in enumerate(r.items()):
+                            if k == item.get("id_key"): continue
+                            label=str(k).replace("_"," ").title()
+                            target=cols[j%2]
+                            if isinstance(v,(dict,list)):
+                                editable[k]=target.text_area(label, value=json.dumps(v, ensure_ascii=False, default=str, indent=2), height=90)
+                            else:
+                                txt="" if v is None else str(v)
+                                editable[k]=target.text_area(label, value=txt, height=68) if len(txt)>100 else target.text_input(label, value=txt)
+                        save_col, del_col=st.columns(2)
+                        with save_col:
+                            save_btn=st.form_submit_button("💾 Save Transaction Changes", type="primary", use_container_width=True)
+                        with del_col:
+                            delete_btn=st.form_submit_button("🗑️ Delete Transaction", use_container_width=True)
+                    if save_btn or delete_btn:
+                        records=item["saver"].__name__
+                        # Reload fresh records so the Super Admin edit cannot overwrite a newer change with stale cache data.
+                        fresh=next((x[2] for x in source_records() if x[0]==item["source"]), [])
+                        target_rec=next((x for x in fresh if str(x.get("id"))==str(item["id"])), None)
+                        if target_rec is None:
+                            st.error("Transaction no longer exists. Refresh the page.")
+                        elif delete_btn:
+                            fresh=[x for x in fresh if str(x.get("id"))!=str(item["id"])]
+                            item["saver"](fresh)
+                            log_action("SUPER_ADMIN_TRANSACTION_DELETED", item["id"], old_data={"source":item["source"],"record":target_rec}, decision_by="Super Admin", decision_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                            st.success(f"✅ {item['source']} #{item['id']} deleted.")
+                            st.rerun()
+                        else:
+                            for k, raw in editable.items():
+                                old=target_rec.get(k)
+                                if isinstance(old,(dict,list)):
+                                    try: target_rec[k]=json.loads(raw) if str(raw).strip() else ([] if isinstance(old,list) else {})
+                                    except Exception: st.error(f"Invalid JSON in {k}."); break
+                                elif isinstance(old,bool): target_rec[k]=str(raw).strip().casefold() in {"true","1","yes","y"}
+                                elif isinstance(old,int) and not isinstance(old,bool):
+                                    try: target_rec[k]=int(float(str(raw).strip() or 0))
+                                    except Exception: target_rec[k]=raw
+                                elif isinstance(old,float):
+                                    try: target_rec[k]=float(str(raw).strip() or 0)
+                                    except Exception: target_rec[k]=raw
+                                else: target_rec[k]=raw
+                            item["saver"](fresh)
+                            log_action("SUPER_ADMIN_TRANSACTION_EDITED", item["id"], old_data={"source":item["source"]}, new_data={"source":item["source"],"record":target_rec}, decision_by="Super Admin", decision_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                            st.success(f"✅ {item['source']} #{item['id']} updated.")
+                            st.rerun()
+
+    with employee_tab:
+        st.subheader("👤 Employee Master — Full Edit")
+        employees=_hrp_load_employees()
+        if not employees:
+            st.info("No employees found.")
+        else:
+            labels=[f"{e.get('emp_id')} — {e.get('name')}" for e in employees]
+            selected=st.selectbox("Select employee", labels, key="sa_employee_master_select")
+            emp=employees[labels.index(selected)]
+            old_id=str(emp.get("emp_id",""))
+            with st.form("sa_employee_master_form", clear_on_submit=False):
+                c1,c2=st.columns(2)
+                new_id=c1.text_input("ACE-ID / Employee ID", value=old_id)
+                new_name=c2.text_input("Full Name", value=emp.get("name",""))
+                new_start=c1.date_input("Start Date", value=emp.get("start_date") or date.today())
+                new_position=c2.text_input("Position / Job Title", value=emp.get("job_title",""))
+                depts=load_departments(); dept_idx=depts.index(emp.get("department")) if emp.get("department") in depts else 0
+                new_dept=c1.selectbox("Department", depts, index=dept_idx)
+                agreements=["Permanent","Temporary","Fixed Term","Apprenticeship","Other"]; ag_idx=agreements.index(emp.get("agreement_type")) if emp.get("agreement_type") in agreements else 0
+                new_agreement=c2.selectbox("Agreement Type", agreements, index=ag_idx)
+                statuses=["Active","Inactive","Left"]; st_idx=statuses.index(emp.get("status")) if emp.get("status") in statuses else 0
+                new_status=c1.selectbox("Status", statuses, index=st_idx)
+                patterns=["Regular hours","Irregular hours / Part-Year"]; wp_idx=patterns.index(emp.get("working_pattern")) if emp.get("working_pattern") in patterns else 0
+                new_pattern=c2.selectbox("Working Pattern", patterns, index=wp_idx)
+                new_days=c1.number_input("Days Worked Per Week", min_value=0.0, max_value=7.0, step=0.5, value=float(emp.get("days_per_week",5)))
+                ov=emp.get("entitlement_override")
+                new_override=c2.number_input("Holiday Entitlement Override (blank = automatic)", min_value=0.0, max_value=365.0, step=0.5, value=float(ov) if ov is not None else 0.0)
+                new_note=st.text_area("Entitlement Adjustment Note", value=emp.get("adjustment_note",""))
+                new_leave=st.date_input("Leaving Date (use 1970-01-01 for none)", value=emp.get("leaving_date") or date(1970,1,1))
+                new_reason=st.text_input("Leaving Reason", value=emp.get("leaving_reason",""))
+                save_emp=st.form_submit_button("💾 Save Complete Employee Record", type="primary", use_container_width=True)
+            if save_emp:
+                new_id=str(new_id).strip()
+                if not new_id:
+                    st.error("Employee ID cannot be blank.")
+                elif any(str(x.get("emp_id",""))==new_id and str(x.get("emp_id",""))!=old_id for x in employees):
+                    st.error(f"Employee ID {new_id} already exists.")
+                else:
+                    emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["job_title"]=new_position.strip(); emp["department"]=new_dept; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]=new_reason.strip()
+                    # Cascade an ACE-ID change through linked user and HR leave records.
+                    if new_id != old_id:
+                        users=load_users()
+                        changed=False
+                        for u in users.values():
+                            if str(u.get("employee_id",""))==old_id: u["employee_id"]=new_id; changed=True
+                        if changed: save_users(users)
+                        hr_leave=load_hr_leave(force=True)
+                        for r in hr_leave:
+                            if str(r.get("employee_id",""))==old_id: r["employee_id"]=new_id
+                        save_all_hr_leave(hr_leave)
+                        _hr_portal_init()
+                        portal=st.session_state.get("hrp_leave_records",[])
+                        for r in portal:
+                            if str(r.get("employee_id",""))==old_id: r["employee_id"]=new_id
+                        st.session_state["hrp_leave_records"]=portal
+                        _hrp_save_leave_records()
+                    # Save the complete employee workbook directly and refresh the portal cache.
+                    pd.DataFrame([{
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                    } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
+                    sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
+                    st.session_state.hrp_employees=employees
+                    log_action("SUPER_ADMIN_EMPLOYEE_EDITED", new_id, old_data={"employee_id":old_id}, new_data=emp, decision_by="Super Admin", decision_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    st.success(f"✅ Employee {new_id} updated successfully. Linked records were updated where required.")
+                    st.rerun()
+
 def render_hr_leave_payroll_portal():
     st.subheader("👥 HR Leave Settlement — Payroll (View Only)")
     st.info("View all approved HR Leave settlements for payroll processing.")
@@ -7929,12 +8103,13 @@ elif role == "Director":
     with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_system_mgmt_tab = st.tabs([
+    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab = st.tabs([
         "➕ Addition & Deduction",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus",
+        "🛡️ Data Control",
         "🔧 System Management"
     ])
     with super_add_ded_tab:
@@ -7996,6 +8171,8 @@ elif role == "Super Admin":
         render_work_orders_super_admin()
     with super_inspector_bonus_tab:
         render_inspector_bonus_super_admin()
+    with super_data_control_tab:
+        _super_admin_transaction_control()
     with super_system_mgmt_tab:
         st.subheader("🔧 System Management — Super Admin")
         st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
