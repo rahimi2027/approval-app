@@ -383,7 +383,7 @@ def sync_persistent_file(local_path, columns=None):
 # The live workbook keeps its normal filename; the backup copy is updated in place so
 # there is always an obvious backup file in Drive as well.
 DRIVE_BACKUP_FILENAMES = {
-    EXCEL_PATH: "BACKUP_hr_leave_requests.xlsx",
+    EXCEL_PATH: "BACKUP_requests.xlsx",
     USER_DB_PATH: "BACKUP_users.xlsx",
     SETTINGS_PATH: "BACKUP_settings.xlsx",
     AUDIT_LOG_PATH: "BACKUP_audit_log.xlsx",
@@ -1054,8 +1054,16 @@ def refresh_data_button():
         with st.spinner("Refreshing from Google Drive..."):
             if drive_service is not None:
                 for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH):
+                    # Never refresh a workbook from Drive while a newer local save is
+                    # waiting to be uploaded. Otherwise Refresh can overwrite the
+                    # newly-entered local data with the older Drive copy.
+                    with _DRIVE_SYNC_LOCK:
+                        pending = path in DRIVE_PENDING_SYNC
+                    if pending:
+                        continue
                     remote = _drive_find_file(os.path.basename(path))
-                    if remote: _drive_download_file(remote["id"], path)
+                    if remote:
+                        _drive_download_file(remote["id"], path)
             _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count", "_hr_leave_cache", "_hr_daily_rates_cache", "_store_deduction_cache", "_store_items_cache")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
@@ -1362,29 +1370,50 @@ def _hrp_save_employees():
 
 
 def _hrp_load_leave_records():
+    """Load the HR portal leave ledger without silently losing rows.
+
+    Leave records are persistent business records. A malformed date must never be
+    quietly discarded because that makes a genuine leave entry appear to vanish.
+    Instead, the loader raises a clear error identifying the affected Leave ID so
+    the workbook can be corrected rather than silently changing the ledger.
+    """
     _hrp_init_storage()
     try:
         df = _read_excel_records(HR_PORTAL_LEAVE_PATH)
         records = []
         max_no = 0
-        for r in df.to_dict(orient="records"):
+        for row_no, r in enumerate(df.to_dict(orient="records"), start=2):
             leave_id = str(r.get("Leave ID", "")).strip()
             if not leave_id:
-                continue
+                # Completely blank rows are harmless and can be ignored.
+                if all(str(v).strip() == "" for v in r.values()):
+                    continue
+                raise ValueError(f"HR leave workbook row {row_no} has no Leave ID")
             try:
                 n = int(str(leave_id).replace("LV-", ""))
                 max_no = max(max_no, n)
             except Exception:
                 pass
-            try:
-                d_from = pd.to_datetime(r.get("Date From", "")).date()
-                d_to = pd.to_datetime(r.get("Date To", "")).date()
-            except Exception:
-                continue
+
+            raw_from = r.get("Date From", "")
+            raw_to = r.get("Date To", "")
+            d_from_ts = pd.to_datetime(raw_from, errors="coerce")
+            d_to_ts = pd.to_datetime(raw_to, errors="coerce")
+            if pd.isna(d_from_ts) or pd.isna(d_to_ts):
+                raise ValueError(
+                    f"HR leave workbook row {row_no} (Leave ID {leave_id}) has an invalid "
+                    f"Date From/Date To value: {raw_from!r} / {raw_to!r}"
+                )
+            d_from = d_from_ts.date()
+            d_to = d_to_ts.date()
+
             try:
                 days = float(r.get("Days", 0) or 0)
-            except Exception:
-                days = 0.0
+            except Exception as exc:
+                raise ValueError(
+                    f"HR leave workbook row {row_no} (Leave ID {leave_id}) has an invalid Days value: {r.get('Days')!r}"
+                ) from exc
+
             records.append({
                 "leave_id": leave_id,
                 "employee_id": str(r.get("Employee ID", "")).strip(),
@@ -1408,7 +1437,7 @@ def _hrp_load_leave_records():
         return records
     except Exception as e:
         print(f"HR leave data load failed: {e}")
-        return []
+        raise
 
 
 def _hrp_save_leave_records(records=None, sync_drive=True):
