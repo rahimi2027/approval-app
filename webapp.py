@@ -3189,10 +3189,16 @@ def render_hr_portal(current_user_info=None):
                                 leaving_emp["leaving_date"] = leaving_date
                                 leaving_emp["leaving_reason"] = leaving_reason.strip()
                                 _hrp_save_employees()
-                                # Preserve the selected employee across the rerun.
-                                # Without this, changing Active -> Left removes the
-                                # employee from the selector before Step 2 can render.
-                                st.session_state["hrp_leaving_employee"] = leaving_id
+                                # The selectbox above already owns the
+                                # "hrp_leaving_employee" session-state key. Do not
+                                # assign to that key after the widget has been
+                                # instantiated; Streamlit raises
+                                # StreamlitWidgetAlreadyInstantiatedError.
+                                # The current selection is preserved automatically
+                                # across st.rerun(), and the leaving_ids logic above
+                                # deliberately keeps the newly-Left employee in
+                                # the selector until any final settlement is
+                                # pending/approved.
                                 log_action(
                                     "HR_EMPLOYEE_LEFT",
                                     leaving_id,
