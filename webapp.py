@@ -2462,8 +2462,6 @@ def render_hr_portal(current_user_info=None):
             with employee_edit_tab:
                 st.subheader("✏️ Edit / Deactivate Employee")
                 st.caption("Edit employee details or set Active / Inactive status. Use Employee Leaving for employees who have left and their final holiday settlement.")
-
-                st.markdown("### ✏️ Edit / Deactivate Employee")
                 edit_employee_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
                 if edit_employee_ids:
                     edit_emp_id = st.selectbox(
@@ -2732,7 +2730,15 @@ def render_hr_portal(current_user_info=None):
                                     rate = get_hr_daily_rate(dept, settlement_type)
                                     amount = round(rate * abs(balance), 2) if rate else 0.01
                                     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    creator_name = str((current_user_info or {}).get("name", "HR"))
+                                    _creator_info = current_user_info if isinstance(current_user_info, dict) else (st.session_state.get("user_info", {}) or {})
+                                    creator_name = str(
+                                        _creator_info.get("full_name")
+                                        or _creator_info.get("name")
+                                        or _creator_info.get("username")
+                                        or "HR"
+                                    ).strip()
+                                    if not creator_name:
+                                        creator_name = "HR"
                                     rec = {
                                         "id": new_id, "employee_id": leaving_emp.get("emp_id", ""), "emp_name": leaving_emp.get("name", ""), "emp_dept": dept,
                                         "type": settlement_type, "category": settlement_category, "owe_owed": settlement_direction,
@@ -2747,8 +2753,10 @@ def render_hr_portal(current_user_info=None):
                                     save_all_hr_leave(hr_records)
                                     log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
                                     st.session_state["hr_leave_submission_notice"] = (
-                                        f"Settlement #{new_id} created as {settlement_type} and sent to Director for approval."
+                                        f"Settlement #{new_id} created as {settlement_type} and sent to Director for approval. "
+                                        f"It is now available in HR Leave Settlement → My Submitted Settlements and in the Director's HR Leave Settlement → Pending requests."
                                     )
+                                    st.session_state["hr_leave_last_created_id"] = new_id
                                     st.rerun()
 
             # ========== LIVE HOLIDAY CALCULATOR TAB ==========
@@ -4948,6 +4956,7 @@ def load_hr_leave(force=False):
                 "submitted_by": str(r.get("Submitted By", "")).strip(),
                 "submitted_date": str(r.get("Submitted Date", "")).strip(),
                 "pdf_path": str(r.get("PDF File Path", "")).strip(),
+                "final_holiday_settlement": str(r.get("Final Holiday Settlement", "")).strip().casefold() in {"yes", "true", "1"},
             })
         _set_data_cache("_hr_leave_cache", records)
         return list(records)
