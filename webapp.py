@@ -1830,13 +1830,26 @@ def _hrp_get_approved_final_settlement_offset(employee_id):
 
 
 def _hrp_get_holiday_position(employee_id):
-    """Return the current holiday balance after reserving all bank holidays in the employment year."""
+    """Return the current holiday position; a departed employee has a closed balance of zero."""
     employee = _hrp_get_employee(employee_id)
     if not employee:
         return {
             "entitlement": 0.0, "used": 0.0, "bank_holidays": 0.0,
             "balance": 0.0, "employee_owes_company": 0.0, "company_owes_employee": 0.0,
         }
+    # Once an employee is recorded as Left, the live employee report/overview
+    # must show a closed holiday account. The final settlement is handled
+    # separately through HR Leave Settlement and does not leave a residual
+    # holiday balance on the employee report. Historical leave records remain
+    # available for audit/history.
+    if str(employee.get("status", "")).strip().casefold() == "left" or employee.get("leaving_date"):
+        return {
+            "entitlement": 0.0, "used": 0.0, "recorded_used": 0.0,
+            "company_closure": 0.0, "bank_holidays": 0.0, "raw_balance": 0.0,
+            "final_settlement_offset": 0.0, "balance": 0.0,
+            "employee_owes_company": 0.0, "company_owes_employee": 0.0,
+        }
+
     entitlement, _, _, _ = _hrp_get_employee_entitlement(employee)
     recorded_used = _hrp_get_approved_holiday_days(employee_id)
 
@@ -2319,9 +2332,9 @@ def render_hr_portal(current_user_info=None):
                     "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "💷 HR Leave Settlement"
                 ])
             else:
-                st.caption("Employee Overview, HR Leave Settlement and Employee Directory")
+                st.caption("Employee Overview, Holiday Calculator and Employee Directory")
                 hr_employee_tab, employee_overview_tab, hr_settlement_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "💷 HR Leave Settlement"
+                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator"
                 ])
 
             with employee_overview_tab:
@@ -2439,7 +2452,7 @@ def render_hr_portal(current_user_info=None):
                             st.rerun()
 
                     st.subheader("Employee Directory")
-                    st.caption("Edit active/inactive records or permanently delete an employee record. Deactivation is recommended when someone leaves the company so their history is retained.")
+                    st.caption("Edit employee details or permanently delete an employee record. Use Employee Leaving for all employee departures and final holiday settlement.")
 
                     employee_table = [
                         {
@@ -2500,12 +2513,13 @@ def render_hr_portal(current_user_info=None):
                                     value=float(edit_emp.get("days_per_week", 5) or 5),
                                     step=0.5,
                                 )
-                                status_options = ["Active", "Inactive", "Left"]
-                                edit_status = st.selectbox("Status", status_options, index=status_options.index(edit_emp.get("status", "Active")) if edit_emp.get("status", "Active") in status_options else 0)
-                                edit_leaving_date = st.date_input("Leaving Date", value=edit_emp.get("leaving_date") or date.today())
-                                edit_leaving_reason = st.text_input("Leaving Reason", value=edit_emp.get("leaving_reason", ""), placeholder="e.g. Resigned, redundancy, end of contract")
-                                if edit_emp.get("status") in ("Inactive", "Left"):
-                                    st.caption("This employee is not active. Their leave history is retained.")
+                                # Employee status is managed by the dedicated Employee Leaving workflow.
+                                # HR should not change Active/Left manually here because doing so could bypass
+                                # the final holiday settlement and calendar close-out process.
+                                edit_leaving_date = edit_emp.get("leaving_date")
+                                edit_leaving_reason = edit_emp.get("leaving_reason", "")
+                                if edit_emp.get("status") == "Left":
+                                    st.caption("This employee is recorded as Left. Use Employee Leaving to manage the leaving date and final holiday settlement.")
                             if st.form_submit_button("💾 Save Employee Changes", type="primary"):
                                 old_data = dict(edit_emp)
                                 edit_emp["name"] = edit_name.strip()
@@ -2515,59 +2529,41 @@ def render_hr_portal(current_user_info=None):
                                 edit_emp["agreement_type"] = edit_agreement
                                 edit_emp["working_pattern"] = edit_pattern
                                 edit_emp["days_per_week"] = edit_days
-                                edit_emp["status"] = edit_status
-                                edit_emp["leaving_date"] = edit_leaving_date if edit_status == "Left" else edit_emp.get("leaving_date")
-                                edit_emp["leaving_reason"] = edit_leaving_reason.strip() if edit_status == "Left" else edit_emp.get("leaving_reason", "")
+                                # Status/leaving fields are intentionally not edited from Employee Management.
+                                # The dedicated Employee Leaving workflow is the single source of truth.
                                 _hrp_save_employees()
                                 log_action("HR_EMPLOYEE_EDITED", edit_emp_id, old_data=old_data, new_data=dict(edit_emp))
                                 st.success(f"Employee {edit_emp_id} updated successfully.")
                                 st.rerun()
 
-                    st.markdown("### 🔴 Deactivate / Delete")
-                    dc1, dc2 = st.columns(2)
-                    with dc1:
-                        if edit_emp and edit_emp.get("status") == "Active":
-                            if st.button("🚪 Deactivate Employee", key=f"hrp_deactivate_{edit_emp_id}", use_container_width=True):
-                                old_status = edit_emp.get("status", "Active")
-                                edit_emp["status"] = "Inactive"
+                    st.markdown("### 🗑️ Employee Record")
+                    st.caption("Employee leaving is managed through Employee Leaving. The separate Deactivate/Reactivate status controls have been removed to avoid two different leaving processes.")
+                    if edit_emp:
+                        if st.button("🗑️ Permanently Delete Employee", key=f"hrp_delete_{edit_emp_id}", use_container_width=True):
+                            st.session_state[f"hrp_confirm_delete_{edit_emp_id}"] = True
+                    if edit_emp and st.session_state.get(f"hrp_confirm_delete_{edit_emp_id}", False):
+                        st.warning("This permanently removes the employee record and their HR portal leave records. Use Employee Leaving when an employee leaves the company so the final holiday settlement is processed correctly.")
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            if st.button("⚠️ Confirm Permanent Delete", key=f"hrp_confirm_delete_yes_{edit_emp_id}", type="primary", use_container_width=True):
+                                deleted = _hrp_get_employee(edit_emp_id)
+                                st.session_state.hrp_employees = [e for e in st.session_state.hrp_employees if e["emp_id"] != edit_emp_id]
+                                st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r["employee_id"] != edit_emp_id]
+                                st.session_state.hrp_entitlement_overrides.pop(edit_emp_id, None)
+                                st.session_state.hrp_adjustment_notes.pop(edit_emp_id, None)
                                 _hrp_save_employees()
-                                log_action("HR_EMPLOYEE_DEACTIVATED", edit_emp_id, old_data={"status": old_status}, new_data={"status": "Inactive"})
-                                st.success(f"Employee {edit_emp_id} has been deactivated. Their records and leave history have been retained.")
+                                _hrp_save_leave_records()
+                                log_action("HR_EMPLOYEE_DELETED", edit_emp_id, old_data=deleted)
+                                st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
+                                if st.session_state.get("hrp_current_emp_id") == edit_emp_id:
+                                    active_ids = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
+                                    st.session_state.hrp_current_emp_id = active_ids[0] if active_ids else ""
+                                st.success(f"Employee {edit_emp_id} permanently deleted.")
                                 st.rerun()
-                        elif edit_emp:
-                            if st.button("🟢 Reactivate Employee", key=f"hrp_reactivate_{edit_emp_id}", use_container_width=True):
-                                edit_emp["status"] = "Active"
-                                _hrp_save_employees()
-                                log_action("HR_EMPLOYEE_REACTIVATED", edit_emp_id, old_data={"status": "Inactive"}, new_data={"status": "Active"})
-                                st.success(f"Employee {edit_emp_id} has been reactivated.")
+                        with cc2:
+                            if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", use_container_width=True):
+                                st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
                                 st.rerun()
-                    with dc2:
-                        if edit_emp:
-                            if st.button("🗑️ Permanently Delete Employee", key=f"hrp_delete_{edit_emp_id}", use_container_width=True):
-                                st.session_state[f"hrp_confirm_delete_{edit_emp_id}"] = True
-                        if edit_emp and st.session_state.get(f"hrp_confirm_delete_{edit_emp_id}", False):
-                            st.warning("This permanently removes the employee record and their HR portal leave records. Use Deactivate instead when an employee leaves the company.")
-                            cc1, cc2 = st.columns(2)
-                            with cc1:
-                                if st.button("⚠️ Confirm Permanent Delete", key=f"hrp_confirm_delete_yes_{edit_emp_id}", type="primary", use_container_width=True):
-                                    deleted = _hrp_get_employee(edit_emp_id)
-                                    st.session_state.hrp_employees = [e for e in st.session_state.hrp_employees if e["emp_id"] != edit_emp_id]
-                                    st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r["employee_id"] != edit_emp_id]
-                                    st.session_state.hrp_entitlement_overrides.pop(edit_emp_id, None)
-                                    st.session_state.hrp_adjustment_notes.pop(edit_emp_id, None)
-                                    _hrp_save_employees()
-                                    _hrp_save_leave_records()
-                                    log_action("HR_EMPLOYEE_DELETED", edit_emp_id, old_data=deleted)
-                                    st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
-                                    if st.session_state.get("hrp_current_emp_id") == edit_emp_id:
-                                        active_ids = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
-                                        st.session_state.hrp_current_emp_id = active_ids[0] if active_ids else ""
-                                    st.success(f"Employee {edit_emp_id} permanently deleted.")
-                                    st.rerun()
-                            with cc2:
-                                if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", use_container_width=True):
-                                    st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
-                                    st.rerun()
 
             if is_hr_manager:
                 with hr_approval_tab:
@@ -2667,8 +2663,8 @@ def render_hr_portal(current_user_info=None):
                     st.info("No employees are registered yet.")
 
                 # Existing live settlement calculator retained below.
-                st.subheader("💷 HR Leave Settlement Calculator")
-                st.info("Compute an employee's leave settlement based on their entitlement and approved leave records.")
+                st.subheader("📊 Holiday Position Calculator")
+                st.info("Calculate an employee's current holiday position. Final leaving settlements are submitted separately through HR Leave Settlement for Director approval.")
                 settlement_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
                 if settlement_ids:
                     settlement_employee_id = st.selectbox(
@@ -6983,6 +6979,24 @@ def render_employee_hr_reports(current_user_info):
     upcoming_bank_holiday_days = _hrp_get_upcoming_bank_holiday_days_for_employee(employee, today + timedelta(days=1))
     bank_holidays_reserved = round(passed_bank_holiday_days + upcoming_bank_holiday_days, 1)
     balance = round(pure_balance - bank_holidays_reserved, 1)
+
+    employee_is_left = (
+        str(employee.get("status", "")).strip().casefold() == "left"
+        or bool(employee.get("leaving_date"))
+    )
+    if employee_is_left:
+        # A departed employee's live HR report is closed. The approved final
+        # settlement is the financial close-out; do not continue displaying an
+        # active holiday entitlement/balance after the employee has left.
+        entitlement = 0.0
+        approved_holiday = 0.0
+        company_closure_reserved = 0.0
+        approved_holiday_with_closure = 0.0
+        passed_bank_holiday_days = 0.0
+        upcoming_bank_holiday_days = 0.0
+        bank_holidays_reserved = 0.0
+        balance = 0.0
+        upcoming_bank_holidays = []
 
     d1, d2, d3, d4, d5, d6 = st.columns(6)
     d1.metric("Holiday Entitlement", f"{entitlement:g} days")
