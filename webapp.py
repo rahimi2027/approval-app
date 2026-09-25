@@ -1265,6 +1265,23 @@ def load_users(force=False):
                     "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False,
                     "can_access_store_deduction": True, "is_active": True
                 })
+            elif user_role == "Director":
+                # Directors have full approval/status-change access to every
+                # approval module. This is role-based and cannot be accidentally
+                # removed by an old/stale permission value in the user workbook.
+                users[username].update({
+                    "can_view_all_dept": True,
+                    "can_generate_pdf": True,
+                    "can_download_data": True,
+                    "can_approve_requests": True,
+                    "can_access_inspector_bonus": True,
+                    "can_access_addition_deduction": True,
+                    "can_access_work_orders": True,
+                    "can_access_wo_total": True,
+                    "can_access_hr_leave": True,
+                    "can_access_store_deduction": True,
+                    "is_active": users[username].get("is_active", True),
+                })
 
         # Existing installations may still have the old HR permission stored
         # for the built-in Director/Super Admin accounts. Migrate those records
@@ -5805,92 +5822,113 @@ def render_hr_leave_my_submissions(user_name):
 
 def render_hr_leave_director_portal(director_name):
     st.subheader("👥 HR Leave Settlement — Director Approval")
-    st.info("Review HR leave settlement requests. Rejection requires a mandatory reason.")
+    st.info("Review HR leave settlement requests. The Director can move any request between Pending, Approved and Rejected. Rejection requires a reason.")
     st.divider()
     records = load_hr_leave()
-    pending  = [r for r in records if r["status"] == "pending"]
-    approved = [r for r in records if r["status"] == "approved"]
-    rejected = [r for r in records if r["status"] == "rejected"]
+    pending = [r for r in records if str(r.get("status", "")).strip().lower() == "pending"]
+    approved = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
+    rejected = [r for r in records if str(r.get("status", "")).strip().lower() == "rejected"]
     t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
 
     def show_details(r):
-        st.write(f"👤 **Employee:** {r['emp_name']} | 🏢 **Department:** {r['emp_dept']}")
-        st.write(f"🔄 **Transaction Type:** {r['type']} | ⚖️ **Owe / Owed:** {r['owe_owed']}")
-        st.write(f"🏷️ **Category / Reason:** {r['category']} | 📅 **Date:** {r['date']}")
-        st.write(f"🔢 **Days:** {r['days']} | 💷 **Amount:** £{r['amount']:.2f}")
-        st.write(f"👔 **Line Manager:** {r['manager']}")
-        st.write(f"📝 **Submitted by:** {r['submitted_by']} on {r['submitted_date']}")
-        st.info(f"📝 **Description:**\n{r['desc']}")
-        st.divider(); st.markdown("#### 📎 Attachments"); display_attachments(r)
+        st.write(f"👤 **Employee:** {r.get('emp_name', '')} | 🏢 **Department:** {r.get('emp_dept', '')}")
+        st.write(f"🔄 **Transaction Type:** {r.get('type', '')} | ⚖️ **Owe / Owed:** {r.get('owe_owed', '')}")
+        st.write(f"🏷️ **Category / Reason:** {r.get('category', '')} | 📅 **Date:** {r.get('date', '')}")
+        st.write(f"🔢 **Days:** {r.get('days', 0)} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")
+        st.write(f"👔 **Line Manager:** {r.get('manager', '')}")
+        st.write(f"📝 **Submitted by:** {r.get('submitted_by', '')} on {r.get('submitted_date', '')}")
+        if r.get("final_holiday_settlement"):
+            st.success("🏁 Final Holiday Settlement")
+        st.info(f"📝 **Description:**\n{r.get('desc', '')}")
+        if r.get("director_comments"):
+            st.warning(f"💬 **Director Comments:** {r.get('director_comments')}")
+        display_attachments(r)
+
+    def change_status(rid, new_status, comments="", rejection_reason=""):
+        old_status = ""
+        for x in records:
+            if str(x.get("id")) == str(rid):
+                old_status = str(x.get("status", "pending")).strip().lower()
+                x["status"] = new_status
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                if new_status == "approved":
+                    x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
+                    x["decision_by"] = director_name
+                    x["decision_date"] = now
+                    x["rejection_reason"] = ""
+                elif new_status == "rejected":
+                    x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
+                    x["rejection_reason"] = rejection_reason.strip()
+                    x["decision_by"] = director_name
+                    x["decision_date"] = now
+                elif new_status == "pending":
+                    x["decision_by"] = ""
+                    x["decision_date"] = ""
+                    if comments.strip():
+                        x["director_comments"] = (str(x.get("director_comments", "")) + f"\n[{now[:16]}] Changed to Pending by {director_name}: {comments.strip()}").strip()
+                break
+        save_all_hr_leave(records)
+        log_action("HR_LEAVE_STATUS_CHANGED", rid,
+                   old_data={"status": old_status},
+                   new_data={"status": new_status, "comments": comments, "rejection_reason": rejection_reason},
+                   decision_by=director_name,
+                   decision_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        st.success(f"✅ HR Leave #{rid} changed to **{new_status.title()}**.")
+        st.rerun()
+
+    def render_record(r, current_status, key_prefix):
+        rid = r.get("id")
+        with st.expander(f"{'🟡' if current_status == 'pending' else '🟢' if current_status == 'approved' else '🔴'} #{rid} | {r.get('emp_name', '')} | £{float(r.get('amount', 0) or 0):.2f} | {current_status.upper()}"):
+            show_details(r)
+            st.markdown("### 🔄 Director Status Control")
+            comments = st.text_area("Director Comments (optional)", key=f"{key_prefix}_comm_{rid}")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if current_status != "pending" and st.button("⏳ Move to Pending", key=f"{key_prefix}_pending_{rid}", use_container_width=True):
+                    change_status(rid, "pending", comments)
+                elif current_status == "pending":
+                    st.button("⏳ Pending", key=f"{key_prefix}_pending_disabled_{rid}", disabled=True, use_container_width=True)
+            with c2:
+                if current_status != "approved" and st.button("✅ Set Approved", key=f"{key_prefix}_approved_{rid}", type="primary", use_container_width=True):
+                    change_status(rid, "approved", comments)
+                elif current_status == "approved":
+                    st.button("✅ Approved", key=f"{key_prefix}_approved_disabled_{rid}", disabled=True, use_container_width=True)
+            with c3:
+                if current_status != "rejected" and st.button("❌ Set Rejected", key=f"{key_prefix}_rejected_{rid}", use_container_width=True):
+                    st.session_state[f"hr_dir_reject_{rid}"] = True
+                elif current_status == "rejected":
+                    st.button("❌ Rejected", key=f"{key_prefix}_rejected_disabled_{rid}", disabled=True, use_container_width=True)
+            if st.session_state.get(f"hr_dir_reject_{rid}"):
+                reason = st.text_area("Rejection Reason (required)", key=f"{key_prefix}_reason_{rid}")
+                rc1, rc2 = st.columns(2)
+                with rc1:
+                    if st.button("Confirm Rejection", key=f"{key_prefix}_confirm_rej_{rid}", type="primary", use_container_width=True):
+                        if not reason.strip():
+                            st.error("❌ Rejection reason is required.")
+                        else:
+                            change_status(rid, "rejected", comments, reason)
+                with rc2:
+                    if st.button("Cancel", key=f"{key_prefix}_cancel_rej_{rid}", use_container_width=True):
+                        st.session_state[f"hr_dir_reject_{rid}"] = False
+                        st.rerun()
+            st.divider()
+            display_hr_leave_pdf_button(r, key_prefix=f"{key_prefix}_pdf_{rid}")
 
     with t1:
-        if not pending: st.success("✅ No pending HR Leave requests.")
+        if not pending:
+            st.success("✅ No pending HR Leave requests.")
         for r in reversed(pending):
-            rid = r["id"]
-            with st.expander(f"🟡 #{rid} | {r['emp_name']} | {r['emp_dept']} | £{r['amount']:.2f} | {r['type']}"):
-                show_details(r)
-                st.markdown("### ✍️ Director Decision")
-                comments = st.text_area("Director Comments (optional)", key=f"hr_dir_comm_{rid}")
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("✅ Approve", key=f"hr_dir_app_{rid}", type="primary", use_container_width=True):
-                        for x in records:
-                            if x["id"] == rid:
-                                x["status"] = "approved"; x["director_comments"] = comments.strip()
-                                x["decision_by"] = director_name
-                                x["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                break
-                        save_all_hr_leave(records)
-                        log_action("HR_LEAVE_APPROVED", rid, decision_by=director_name)
-                        st.success(f"✅ HR Leave #{rid} Approved."); st.rerun()
-                with c2:
-                    if st.button("❌ Reject", key=f"hr_dir_rej_{rid}", use_container_width=True):
-                        st.session_state[f"hr_reject_modal_{rid}"] = True
-                if st.session_state.get(f"hr_reject_modal_{rid}"):
-                    st.warning("⚠️ A rejection reason is required.")
-                    reason = st.text_area("Reason for Rejection (required)", key=f"hr_rej_reason_{rid}")
-                    rc1, rc2 = st.columns(2)
-                    with rc1:
-                        if st.button("Confirm Rejection", key=f"hr_rej_confirm_{rid}", type="primary", use_container_width=True):
-                            if not reason.strip():
-                                st.error("❌ Rejection reason cannot be empty.")
-                            else:
-                                for x in records:
-                                    if x["id"] == rid:
-                                        x["status"] = "rejected"; x["rejection_reason"] = reason.strip()
-                                        x["director_comments"] = comments.strip()
-                                        x["decision_by"] = director_name
-                                        x["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        break
-                                save_all_hr_leave(records)
-                                log_action("HR_LEAVE_REJECTED", rid, decision_by=director_name)
-                                st.session_state[f"hr_reject_modal_{rid}"] = False
-                                st.success(f"❌ HR Leave #{rid} Rejected."); st.rerun()
-                    with rc2:
-                        if st.button("Cancel", key=f"hr_rej_cancel_{rid}", use_container_width=True):
-                            st.session_state[f"hr_reject_modal_{rid}"] = False; st.rerun()
-
+            render_record(r, "pending", "hrdir_pending")
     with t2:
-        if not approved: st.info("✅ No approved HR Leave requests.")
+        if not approved:
+            st.info("✅ No approved HR Leave requests.")
         for r in reversed(approved):
-            with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['amount']:.2f} | ✅ {r['decision_by']}"):
-                show_details(r)
-                if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
-                st.write(f"📅 Decision Date: {r['decision_date']}")
-                st.divider()
-                st.markdown("#### 📄 HR Leave Settlement PDF")
-                display_hr_leave_pdf_button(r, key_prefix=f"hr_dir_app_{director_name.replace(' ','_')}")
-
+            render_record(r, "approved", "hrdir_approved")
     with t3:
-        if not rejected: st.info("❌ No rejected HR Leave requests.")
+        if not rejected:
+            st.info("❌ No rejected HR Leave requests.")
         for r in reversed(rejected):
-            with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['amount']:.2f} | ❌ {r['decision_by']}"):
-                show_details(r)
-                st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
-                if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
-                st.divider()
-                st.markdown("#### 📄 HR Leave Settlement PDF")
-                display_hr_leave_pdf_button(r, key_prefix=f"hr_dir_rej_{director_name.replace(' ','_')}")
+            render_record(r, "rejected", "hrdir_rejected")
 
 def render_hr_leave_super_admin():
     st.subheader("🛡️ HR Leave Settlement — Super Admin (View Only)")
@@ -6251,91 +6289,98 @@ def render_store_my_submissions(user_name):
 def render_store_director_portal(director_name, type_filter="Deduction"):
     title = "📦 Store Department Deduction" if type_filter == "Deduction" else "📦 Store Department Return (Addition)"
     st.subheader(f"{title} — Director Approval")
-    st.info(f"Review {type_filter.lower()} requests for final settlement. Rejection requires a mandatory reason.")
+    st.info(f"Review {type_filter.lower()} requests. The Director can move any request between Pending, Approved and Rejected. Rejection requires a reason.")
     st.divider()
     records = load_store_deductions()
     filtered_records = [r for r in records if r.get("type", "Deduction") == type_filter]
-    pending  = [r for r in filtered_records if r["status"] == "pending"]
-    approved = [r for r in filtered_records if r["status"] == "approved"]
-    rejected = [r for r in filtered_records if r["status"] == "rejected"]
+    pending = [r for r in filtered_records if str(r.get("status", "")).strip().lower() == "pending"]
+    approved = [r for r in filtered_records if str(r.get("status", "")).strip().lower() == "approved"]
+    rejected = [r for r in filtered_records if str(r.get("status", "")).strip().lower() == "rejected"]
     t1, t2, t3 = st.tabs([f"⏳ Pending ({len(pending)})", f"✅ Approved ({len(approved)})", f"❌ Rejected ({len(rejected)})"])
+
     def show_details(r):
-        st.write(f"👤 **Employee:** {r['emp_name']} | 🏢 **Department:** {r['emp_dept']}")
-        st.write(f"📅 **Date of Leaving:** {r['date_leaving']} | **Date of Submit:** {r['date_submit']}")
-        st.write(f"👔 **Line Manager:** {r['manager']}")
+        st.write(f"👤 **Employee:** {r.get('emp_name', '')} | 🏢 **Department:** {r.get('emp_dept', '')}")
+        st.write(f"📅 **Date of Leaving:** {r.get('date_leaving', '')} | **Date of Submit:** {r.get('date_submit', '')}")
+        st.write(f"👔 **Line Manager:** {r.get('manager', '')}")
         st.markdown("**Items:**")
         for item in r.get("items", []):
             st.write(f"- {item.get('item_name')} (Qty: {item.get('quantity', 1)}) : £{float(item.get('price', 0)):.2f}")
-        st.markdown(f"**Total: £{r['total_deduction']:.2f}**")
-        st.write(f"📝 **Submitted by:** {r['submitted_by']} on {r['submitted_date']}")
-        st.info(f"📝 **Description:**\n{r['desc']}")
-        st.divider(); st.markdown("#### 📎 Attachments"); display_attachments(r)
+        st.markdown(f"**Total: £{float(r.get('total_deduction', 0) or 0):.2f}**")
+        st.write(f"📝 **Submitted by:** {r.get('submitted_by', '')} on {r.get('submitted_date', '')}")
+        st.info(f"📝 **Description:**\n{r.get('desc', '')}")
+        display_attachments(r)
+        if r.get("director_comments"):
+            st.warning(f"💬 **Director Comments:** {r.get('director_comments')}")
+
+    def change_status(rid, new_status, comments="", rejection_reason=""):
+        old_status = ""
+        for x in records:
+            if str(x.get("id")) == str(rid):
+                old_status = str(x.get("status", "pending")).strip().lower()
+                x["status"] = new_status
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                if new_status == "approved":
+                    x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
+                    x["decision_by"] = director_name
+                    x["decision_date"] = now
+                    x["rejection_reason"] = ""
+                elif new_status == "rejected":
+                    x["director_comments"] = comments.strip() if comments.strip() else x.get("director_comments", "")
+                    x["rejection_reason"] = rejection_reason.strip()
+                    x["decision_by"] = director_name
+                    x["decision_date"] = now
+                elif new_status == "pending":
+                    x["decision_by"] = ""
+                    x["decision_date"] = ""
+                    if comments.strip():
+                        x["director_comments"] = (str(x.get("director_comments", "")) + f"\n[{now[:16]}] Changed to Pending by {director_name}: {comments.strip()}").strip()
+                break
+        save_all_store_deductions(records)
+        log_action("STORE_DEDUCTION_STATUS_CHANGED", rid, old_data={"status": old_status}, new_data={"status": new_status}, decision_by=director_name)
+        st.success(f"✅ Request #{rid} changed to **{new_status.title()}**.")
+        st.rerun()
+
+    def render_record(r, current_status, prefix):
+        rid = r.get("id")
+        with st.expander(f"{'🟡' if current_status == 'pending' else '🟢' if current_status == 'approved' else '🔴'} #{rid} | {r.get('emp_name', '')} | £{float(r.get('total_deduction', 0) or 0):.2f} | {current_status.upper()}"):
+            show_details(r)
+            st.markdown("### 🔄 Director Status Control")
+            comments = st.text_area("Director Comments (optional)", key=f"{prefix}_comm_{rid}")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if current_status != "pending" and st.button("⏳ Move to Pending", key=f"{prefix}_pending_{rid}", use_container_width=True):
+                    change_status(rid, "pending", comments)
+            with c2:
+                if current_status != "approved" and st.button("✅ Set Approved", key=f"{prefix}_approved_{rid}", type="primary", use_container_width=True):
+                    change_status(rid, "approved", comments)
+            with c3:
+                if current_status != "rejected" and st.button("❌ Set Rejected", key=f"{prefix}_rejected_{rid}", use_container_width=True):
+                    st.session_state[f"store_dir_reject_{type_filter}_{rid}"] = True
+            if st.session_state.get(f"store_dir_reject_{type_filter}_{rid}"):
+                reason = st.text_area("Rejection Reason (required)", key=f"{prefix}_reason_{rid}")
+                rc1, rc2 = st.columns(2)
+                with rc1:
+                    if st.button("Confirm Rejection", key=f"{prefix}_confirm_rej_{rid}", type="primary", use_container_width=True):
+                        if not reason.strip():
+                            st.error("❌ Rejection reason is required.")
+                        else:
+                            change_status(rid, "rejected", comments, reason)
+                with rc2:
+                    if st.button("Cancel", key=f"{prefix}_cancel_rej_{rid}", use_container_width=True):
+                        st.session_state[f"store_dir_reject_{type_filter}_{rid}"] = False
+                        st.rerun()
+            st.divider()
+            display_store_deduction_pdf_button(r, key_prefix=f"store_dir_{type_filter}_{rid}")
+
     with t1:
         if not pending: st.success(f"✅ No pending {type_filter.lower()} requests.")
-        for r in reversed(pending):
-            rid = r["id"]
-            with st.expander(f"🟡 #{rid} | {r['emp_name']} | {r['emp_dept']} | £{r['total_deduction']:.2f}"):
-                show_details(r)
-                st.markdown("### ✍️ Director Decision")
-                comments = st.text_area("Director Comments (optional)", key=f"store_dir_comm_{type_filter}_{rid}")
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("✅ Approve", key=f"store_dir_app_{type_filter}_{rid}", type="primary", use_container_width=True):
-                        for x in records:
-                            if x["id"] == rid:
-                                x["status"] = "approved"; x["director_comments"] = comments.strip()
-                                x["decision_by"] = director_name
-                                x["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                break
-                        save_all_store_deductions(records)
-                        log_action("STORE_DEDUCTION_APPROVED", rid, decision_by=director_name)
-                        st.success(f"✅ Request #{rid} Approved."); st.rerun()
-                with c2:
-                    if st.button("❌ Reject", key=f"store_dir_rej_{type_filter}_{rid}", use_container_width=True):
-                        st.session_state[f"store_reject_modal_{type_filter}_{rid}"] = True
-                if st.session_state.get(f"store_reject_modal_{type_filter}_{rid}"):
-                    st.warning("⚠️ A rejection reason is required.")
-                    reason = st.text_area("Reason for Rejection (required)", key=f"store_rej_reason_{type_filter}_{rid}")
-                    rc1, rc2 = st.columns(2)
-                    with rc1:
-                        if st.button("Confirm Rejection", key=f"store_rej_confirm_{type_filter}_{rid}", type="primary", use_container_width=True):
-                            if not reason.strip():
-                                st.error("❌ Rejection reason cannot be empty.")
-                            else:
-                                for x in records:
-                                    if x["id"] == rid:
-                                        x["status"] = "rejected"; x["rejection_reason"] = reason.strip()
-                                        x["director_comments"] = comments.strip()
-                                        x["decision_by"] = director_name
-                                        x["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        break
-                                save_all_store_deductions(records)
-                                log_action("STORE_DEDUCTION_REJECTED", rid, decision_by=director_name)
-                                st.session_state[f"store_reject_modal_{type_filter}_{rid}"] = False
-                                st.success(f"❌ Request #{rid} Rejected."); st.rerun()
-                    with rc2:
-                        if st.button("Cancel", key=f"store_rej_cancel_{type_filter}_{rid}", use_container_width=True):
-                            st.session_state[f"store_reject_modal_{type_filter}_{rid}"] = False; st.rerun()
+        for r in reversed(pending): render_record(r, "pending", f"store_dir_p_{type_filter}")
     with t2:
         if not approved: st.info(f"✅ No approved {type_filter.lower()} requests.")
-        for r in reversed(approved):
-            with st.expander(f"🟢 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f} | ✅ {r['decision_by']}"):
-                show_details(r)
-                if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
-                st.write(f"📅 Decision Date: {r['decision_date']}")
-                st.divider()
-                st.markdown("#### 📄 PDF")
-                display_store_deduction_pdf_button(r, key_prefix=f"store_dir_app_{type_filter}_{director_name.replace(' ','_')}")
+        for r in reversed(approved): render_record(r, "approved", f"store_dir_a_{type_filter}")
     with t3:
         if not rejected: st.info(f"❌ No rejected {type_filter.lower()} requests.")
-        for r in reversed(rejected):
-            with st.expander(f"🔴 #{r['id']} | {r['emp_name']} | £{r['total_deduction']:.2f} | ❌ {r['decision_by']}"):
-                show_details(r)
-                st.error(f"❌ Rejection Reason: {r['rejection_reason']}")
-                if r.get("director_comments"): st.info(f"💬 Director Comments: {r['director_comments']}")
-                st.divider()
-                st.markdown("#### 📄 PDF")
-                display_store_deduction_pdf_button(r, key_prefix=f"store_dir_rej_{type_filter}_{director_name.replace(' ','_')}")
+        for r in reversed(rejected): render_record(r, "rejected", f"store_dir_r_{type_filter}")
 
 def render_store_super_admin(type_filter="Deduction"):
     title = "Store Department Deduction" if type_filter == "Deduction" else "Store Department Return (Addition)"
