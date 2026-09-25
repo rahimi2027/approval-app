@@ -411,7 +411,14 @@ def sync_backup_file_to_drive(local_path):
         return None
 
 def _sync_saved_file_to_drive_now(local_path):
-    """Perform the actual Google Drive upload in the background worker."""
+    """Upload a saved workbook to Drive without letting a missing live file
+    prevent the configured BACKUP_ copy from being updated.
+
+    This is important for this deployment because the service account may not
+    have quota to CREATE a brand-new live Drive file. Existing BACKUP_ files can
+    still be UPDATED. The backup is therefore attempted independently and is the
+    persistence copy we rely on when the live Drive workbook cannot be created.
+    """
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
         msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
@@ -419,41 +426,60 @@ def _sync_saved_file_to_drive_now(local_path):
         return False
 
     with _DRIVE_SYNC_LOCK:
+        live_ok = False
+        backup_ok = False
+        live_error = ""
+        backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
+
+        # 1) Try the normal live workbook. This may fail with a service-account
+        # storage-quota error when the file does not already exist in Drive.
         try:
-            # Upload the live workbook and its explicit BACKUP_ copy.
             live_id = _drive_upload_path(local_path, filename)
-            if not live_id:
-                msg = DRIVE_LAST_SYNC_ERROR.get(filename, "Live Google Drive upload returned no file ID.")
-                DRIVE_LAST_SYNC_ERROR[filename] = msg
-                return False
+            if live_id:
+                live_ok = True
+                DRIVE_LAST_SYNC[filename] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                DRIVE_LAST_SYNC_ERROR.pop(filename, None)
+            else:
+                live_error = DRIVE_LAST_SYNC_ERROR.get(
+                    filename, "Live Google Drive upload returned no file ID."
+                )
+        except Exception as e:
+            live_error = f"{type(e).__name__}: {e}"
+            DRIVE_LAST_SYNC_ERROR[filename] = live_error
 
-            backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
-            if backup_name:
+        # 2) ALWAYS attempt the explicit backup independently. Do not return
+        # early just because the live file could not be created.
+        if backup_name:
+            try:
                 backup_id = _drive_upload_path(local_path, backup_name)
-                if not backup_id:
-                    msg = DRIVE_LAST_SYNC_ERROR.get(backup_name, "Backup Google Drive upload returned no file ID.")
-                    DRIVE_LAST_SYNC_ERROR[filename] = msg
-                    return False
+                if backup_id:
+                    backup_ok = True
+                    synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    DRIVE_LAST_SYNC[backup_name] = synced_at
+                    DRIVE_LAST_SYNC_ERROR.pop(backup_name, None)
+                else:
+                    DRIVE_LAST_SYNC_ERROR[backup_name] = DRIVE_LAST_SYNC_ERROR.get(
+                        backup_name, "Backup Google Drive upload returned no file ID."
+                    )
+            except Exception as e:
+                DRIVE_LAST_SYNC_ERROR[backup_name] = f"{type(e).__name__}: {e}"
 
-            synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            DRIVE_LAST_SYNC[filename] = synced_at
-            DRIVE_LAST_SYNC_ERROR.pop(filename, None)
-            if backup_name:
-                DRIVE_LAST_SYNC[backup_name] = synced_at
-                DRIVE_LAST_SYNC_ERROR.pop(backup_name, None)
+        if live_error and not live_ok:
+            print(f"Google Drive live workbook sync unavailable for {filename}: {live_error}")
 
+        if backup_name and not backup_ok:
+            print(f"Google Drive backup sync failed for {backup_name}: {DRIVE_LAST_SYNC_ERROR.get(backup_name, '')}")
+
+        if live_ok or backup_ok:
             try:
                 st_info = os.stat(local_path)
                 _DRIVE_SYNC_FINGERPRINTS[local_path] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
             except Exception:
                 pass
             return True
-        except Exception as e:
-            msg = f"{type(e).__name__}: {e}"
-            DRIVE_LAST_SYNC_ERROR[filename] = msg
-            _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
-            print(f"Google Drive sync failed for {filename}: {e}")
-            return False
+
+        _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
+        return False
 
 
 def _drive_sync_worker():
