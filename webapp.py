@@ -1829,6 +1829,33 @@ def _hrp_get_approved_final_settlement_offset(employee_id):
     return round(total, 1)
 
 
+
+def _hrp_get_final_settlement_records(employee_id):
+    """Return final holiday settlement requests for an employee, newest first."""
+    target = str(employee_id or "").strip().casefold()
+    try:
+        records = load_hr_leave(force=True)
+    except Exception:
+        return []
+    out = []
+    for r in records:
+        if not r.get("final_holiday_settlement", False):
+            continue
+        if str(r.get("employee_id", "")).strip().casefold() != target:
+            continue
+        out.append(r)
+    out.sort(key=lambda r: int(r.get("id", 0) or 0), reverse=True)
+    return out
+
+
+def _hrp_has_active_final_settlement(employee_id):
+    """True when a final settlement is already pending or approved."""
+    return any(
+        str(r.get("status", "")).strip().casefold() in {"pending", "approved"}
+        for r in _hrp_get_final_settlement_records(employee_id)
+    )
+
+
 def _hrp_get_holiday_position(employee_id):
     """Return the current holiday position; a departed employee has a closed balance of zero."""
     employee = _hrp_get_employee(employee_id)
@@ -2575,9 +2602,16 @@ def render_hr_portal(current_user_info=None):
                 st.subheader("🚪 Employee Leaving")
                 st.info("Select an employee to review their full employment details, enter the leaving date and reason, then record the employee as Left. After the employee is recorded as Left, the final holiday balance is calculated and you can submit an Addition or Deduction settlement for Director approval.")
 
-                leaving_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
+                # Once a final settlement is pending or approved, do not offer the
+                # employee again in the leaving workflow. This prevents duplicate
+                # additions/deductions for the same employee. Rejected requests are
+                # allowed to be resubmitted.
+                leaving_ids = [
+                    e["emp_id"] for e in st.session_state.hrp_employees
+                    if not _hrp_has_active_final_settlement(e.get("emp_id", ""))
+                ]
                 if not leaving_ids:
-                    st.info("No employees are registered yet.")
+                    st.success("✅ All employees currently recorded for leaving already have a pending or approved final settlement. No duplicate settlement can be raised.")
                 else:
                     leaving_id = st.selectbox(
                         "Employee",
@@ -2725,6 +2759,20 @@ def render_hr_portal(current_user_info=None):
                                     type="primary",
                                 ):
                                     hr_records = load_hr_leave()
+                                    existing_final = [
+                                        r for r in hr_records
+                                        if r.get("final_holiday_settlement", False)
+                                        and str(r.get("employee_id", "")).strip().casefold() == str(leaving_id).strip().casefold()
+                                        and str(r.get("status", "")).strip().casefold() in {"pending", "approved"}
+                                    ]
+                                    if existing_final:
+                                        existing = sorted(existing_final, key=lambda r: int(r.get("id", 0) or 0), reverse=True)[0]
+                                        st.warning(
+                                            f"⚠️ A final holiday settlement already exists for {leaving_emp.get('name', leaving_id)} "
+                                            f"(Settlement #{existing.get('id')}, {str(existing.get('status', '')).title()}). "
+                                            "A duplicate settlement cannot be created."
+                                        )
+                                        st.stop()
                                     new_id = get_next_hr_leave_id(hr_records)
                                     dept = leaving_emp.get("department", "")
                                     rate = get_hr_daily_rate(dept, settlement_type)
@@ -2759,7 +2807,7 @@ def render_hr_portal(current_user_info=None):
                                     st.session_state["hr_leave_last_created_id"] = new_id
                                     st.rerun()
 
-            # ========== LIVE HOLIDAY CALCULATOR TAB ==========
+            # Submitted final settlements are shown directly below the leaving\n            # workflow. Once submitted, the employee is removed from the selector\n            # above, so the page is effectively cleared for the next employee.\n            st.divider()\n            st.subheader("📋 Submitted Final Holiday Settlements")\n            final_records = [r for r in load_hr_leave(force=True) if r.get("final_holiday_settlement", False)]\n            if final_records:\n                for r in final_records[:20]:\n                    status = str(r.get("status", "pending")).strip().casefold()\n                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")\n                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):\n                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")\n                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")\n                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")\n                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")\n                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")\n                        # Pending final settlements can be edited before Director approval.\n                        if status == "pending":\n                            edit_key = f"hrp_edit_final_{r.get('id')}"\n                            if st.button("✏️ Edit Pending Settlement", key=edit_key):\n                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True\n                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):\n                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")\n                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")\n                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")\n                                ec1, ec2 = st.columns(2)\n                                with ec1:\n                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", use_container_width=True):\n                                        records = load_hr_leave(force=True)\n                                        for rr in records:\n                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):\n                                                rr['manager'] = new_manager.strip()\n                                                rr['amount'] = float(new_amount)\n                                                rr['desc'] = new_desc.strip()\n                                                break\n                                        save_all_hr_leave(records)\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.success(f"Settlement #{r.get('id')} updated.")\n                                        st.rerun()\n                                with ec2:\n                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", use_container_width=True):\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.rerun()\n            else:\n                st.info("No final holiday settlements have been submitted yet.")\n\n            # ========== LIVE HOLIDAY CALCULATOR TAB ==========
             with hr_holiday_calc_tab:
                 st.subheader("📊 Holiday Calculator")
                 st.info("Calculate an employee's current holiday position. Employees recorded as Left are closed and show 0.0 days in the live holiday position. Final leaving settlements are handled separately in Employee Leaving and approved by the Director.")
@@ -5513,7 +5561,11 @@ def render_hr_leave_form(user_name):
     hr_cats = load_hr_categories()
     departments = load_departments()
     employees = _hrp_load_employees()
-    left_employees = [e for e in employees if str(e.get("status", "")).strip().casefold() == "left" or e.get("leaving_date")]
+    left_employees = [
+        e for e in employees
+        if (str(e.get("status", "")).strip().casefold() == "left" or e.get("leaving_date"))
+        and not _hrp_has_active_final_settlement(e.get("emp_id", ""))
+    ]
 
     form_version = st.session_state.get("hr_leave_form_version", 0)
     K_EMP   = f"hr_emp_v{form_version}"
@@ -5630,6 +5682,9 @@ def render_hr_leave_form(user_name):
         elif final_settlement and abs(float(num_days) - abs(float(final_balance))) > 0.01:
             st.error("⚠️ The final settlement days must match the calculated leaving balance.")
         else:
+            if final_settlement and _hrp_has_active_final_settlement(selected_left.get("emp_id", "")):
+                st.error(f"⚠️ A pending or approved final settlement already exists for {selected_left.get('name', selected_left.get('emp_id', 'this employee'))}. A duplicate cannot be submitted.")
+                st.stop()
             new_id = get_next_hr_leave_id(hr_records)
             attachments = []
             for i, f in enumerate(files or [], 1):
@@ -7109,6 +7164,33 @@ def render_employee_hr_reports(current_user_info):
     else:
         d5.metric("Upcoming Bank Holiday", "None")
     d6.metric("Department", employee.get("department", ""))
+
+    # A departed employee's live balance is intentionally zero, but the HR
+    # report should still make the financial close-out visible. Show the latest
+    # final settlement separately without putting it back into the live balance.
+    if employee_is_left:
+        final_records = _hrp_get_final_settlement_records(linked_id)
+        active_final = [
+            r for r in final_records
+            if str(r.get("status", "")).strip().casefold() in {"pending", "approved"}
+        ]
+        if active_final:
+            latest_final = active_final[0]
+            final_status = str(latest_final.get("status", "")).strip().title()
+            final_type = str(latest_final.get("type", "")).strip()
+            final_days = float(latest_final.get("days", 0) or 0)
+            final_amount = float(latest_final.get("amount", 0) or 0)
+            if final_status == "Approved":
+                st.success(
+                    f"💷 Final holiday settlement: **{final_type} — {final_days:g} days (£{final_amount:,.2f}) — Approved**. "
+                    "The employee's live holiday balance remains **0 days**."
+                )
+            else:
+                st.info(
+                    f"⏳ Final holiday settlement: **{final_type} — {final_days:g} days (£{final_amount:,.2f}) — Pending Director approval**. "
+                    "The employee's live holiday balance remains **0 days**."
+                )
+
     st.caption(
         f"🏦 Bank holidays passed since your start date: **{passed_bank_holiday_days:g} days** · "
         f"Bank holidays still to come: **{upcoming_bank_holiday_days:g} days** · "
