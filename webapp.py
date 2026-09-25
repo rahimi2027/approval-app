@@ -2294,25 +2294,16 @@ def render_hr_portal(current_user_info=None):
     selected_employee_id = st.session_state.hrp_current_emp_id
     emp = _hrp_get_employee(selected_employee_id) if selected_employee_id else None
 
-    # HR gets the requested four-tab layout. Employees remain view-only and do
-    # not see HR Management.
+    # HR gets separate tabs for the live holiday calculator and the employee
+    # leaving/final-settlement workflow. Employees remain view-only.
     if is_hr:
-        if is_hr_manager:
-            tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
-                "🧑‍💼 HR Management",
-                "📅 Holiday Calendar",
-                "👤 Employee Details",
-                "✏️ Leave",
-                "📋 Leave History",
-            ])
-        else:
-            tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
-                "🧑‍💼 HR Management",
-                "📅 Holiday Calendar",
-                "👤 Employee Details",
-                "✏️ Leave",
-                "📋 Leave History",
-            ])
+        tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
+            "🧑‍💼 HR Management",
+            "📅 Holiday Calendar",
+            "👤 Employee Details",
+            "✏️ Leave",
+            "📋 Leave History",
+        ])
     else:
         tab_details, tab_leave, tab_history = st.tabs([
             "👤 Employee Details",
@@ -2327,15 +2318,16 @@ def render_hr_portal(current_user_info=None):
         with tab_hr:
             st.subheader("🧑‍💼 HR Management")
             if is_hr_manager:
-                st.caption("Employee Overview, Leave Approvals, HR Leave Settlement and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_settlement_tab, employee_edit_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "💷 HR Leave Settlement", "✏️ Edit / Deactivate Employee"
+                st.caption("Employee Overview, Leave Approvals, Holiday Calculator, Employee Leaving and Employee Directory")
+                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, employee_edit_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "✏️ Edit / Deactivate Employee"
                 ])
             else:
-                st.caption("Employee Overview, Holiday Calculator and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_settlement_tab, employee_edit_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "✏️ Edit / Deactivate Employee"
+                st.caption("Employee Overview, Holiday Calculator, Employee Leaving and Employee Directory")
+                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, employee_edit_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "✏️ Edit / Deactivate Employee"
                 ])
+                hr_approval_tab = None
 
             with employee_overview_tab:
                 st.subheader("📊 Employee Overview — All Employees")
@@ -2580,106 +2572,193 @@ def render_hr_portal(current_user_info=None):
                 with hr_approval_tab:
                     render_hr_leave_approvals()
 
-            with hr_settlement_tab:
-                st.subheader("🚪 Employee Leaving & Holiday Settlement")
-                st.info("Select an employee, enter the leaving date and the system will calculate the pure holiday entitlement earned up to that date and compare it with approved holiday taken. Bank holidays are separate non-working days and are not deducted.")
+            # ========== EMPLOYEE LEAVING / FINAL SETTLEMENT TAB ==========
+            with hr_leaving_tab:
+                st.subheader("🚪 Employee Leaving")
+                st.info("Select an employee to review their full employment details, enter the leaving date and reason, then record the employee as Left. After the employee is recorded as Left, the final holiday balance is calculated and you can submit an Addition or Deduction settlement for Director approval.")
+
                 leaving_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
-                if leaving_ids:
+                if not leaving_ids:
+                    st.info("No employees are registered yet.")
+                else:
                     leaving_id = st.selectbox(
-                        "Employee leaving",
+                        "Employee",
                         leaving_ids,
-                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}" if _hrp_get_employee(eid) else eid,
+                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid).get('status', 'Active')}",
                         key="hrp_leaving_employee",
                     )
                     leaving_emp = _hrp_get_employee(leaving_id)
-                else:
-                    leaving_emp = None
-                if leaving_emp:
-                    default_leave_date = leaving_emp.get("leaving_date") or date.today()
-                    leaving_date = st.date_input("Leaving date", value=default_leave_date, key=f"hrp_leaving_date_{leaving_id}")
-                    leaving_reason = st.text_input("Leaving reason", value=leaving_emp.get("leaving_reason", ""), key=f"hrp_leaving_reason_{leaving_id}")
-                    calc = _hrp_get_leaving_entitlement(leaving_emp, leaving_date)
-                    recorded_used_to_leave = _hrp_get_approved_holiday_days_to_date(leaving_id, leaving_date)
-                    employee_start_for_leaving = leaving_emp.get("start_date")
-                    if not isinstance(employee_start_for_leaving, date):
-                        try:
-                            employee_start_for_leaving = pd.to_datetime(employee_start_for_leaving).date()
-                        except Exception:
-                            employee_start_for_leaving = leaving_date
-                    closure_to_leave = _hrp_get_company_closure_holiday_days(leaving_emp, employee_start_for_leaving, leaving_date)
-                    used_to_leave = round(recorded_used_to_leave + closure_to_leave, 1)
-                    holiday_available_after_bank = round(calc["net"] - calc["bank_holidays"], 1)
-                    balance = round(holiday_available_after_bank - used_to_leave, 1)
-                    st.divider()
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Pure holiday entitlement to leaving date", f"{calc['gross']:.1f} days")
-                    c2.metric("Bank holidays in period", f"{calc['bank_holidays']:.1f} days")
-                    c3.metric("Holiday available after bank holidays", f"{holiday_available_after_bank:.1f} days")
-                    c4.metric("Holiday taken / pre-booked", f"{used_to_leave:.1f} days")
-                    if balance > 0:
-                        st.success(f"🏢 Company owes employee: {balance:.1f} holiday day(s).")
-                        settlement_direction = "Company Owes Employee"
-                        settlement_type = "Addition"
-                        settlement_category = "Unused Holiday Payout"
-                    elif balance < 0:
-                        st.warning(f"👤 Employee owes company: {abs(balance):.1f} holiday day(s).")
-                        settlement_direction = "Employee Owes Company"
-                        settlement_type = "Deduction"
-                        settlement_category = "Overused Holiday Deduction"
-                    else:
-                        st.info("Holiday settlement is exactly balanced: 0.0 days owed.")
-                        settlement_direction = None
-                        settlement_type = None
-                        settlement_category = None
-                    st.caption(f"Leaving date: {leaving_date:%d/%m/%Y} · Pure holiday entitlement: {calc['gross']:.1f} days · Bank holidays deducted from available balance: {calc['bank_holidays']:.1f} days · Holiday available after bank holidays: {holiday_available_after_bank:.1f} days · Pre-booked 29–31 December closure included as holiday taken: {closure_to_leave:.1f} days · Final settlement balance: {balance:.1f} days.")
-                    st.divider()
-                    if st.button("💾 Record Employee as Left", type="primary", key=f"hrp_record_left_{leaving_id}", use_container_width=True):
-                        old_status = leaving_emp.get("status", "Active")
-                        leaving_emp["status"] = "Left"
-                        leaving_emp["leaving_date"] = leaving_date
-                        leaving_emp["leaving_reason"] = leaving_reason.strip()
-                        _hrp_save_employees()
-                        log_action("HR_EMPLOYEE_LEFT", leaving_id, old_data={"status": old_status}, new_data={"status": "Left", "leaving_date": str(leaving_date), "leaving_reason": leaving_reason.strip()})
-                        st.success(f"{leaving_emp['name']} has been recorded as leaving on {leaving_date:%d/%m/%Y}.")
-                        st.rerun()
-                    if settlement_direction and st.button(f"🧾 Create {settlement_type} Settlement — {abs(balance):.1f} days", key=f"hrp_create_leaving_settlement_{leaving_id}", use_container_width=True):
-                        hr_records = load_hr_leave()
-                        new_id = get_next_hr_leave_id(hr_records)
-                        dept = leaving_emp.get("department", "")
-                        rate = get_hr_daily_rate(dept, settlement_type)
-                        amount = round(rate * abs(balance), 2) if rate else 0.01
-                        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        rec = {
-                            "id": new_id, "employee_id": leaving_emp.get("emp_id", ""), "emp_name": leaving_emp.get("name", ""), "emp_dept": dept,
-                            "type": settlement_type, "category": settlement_category, "owe_owed": settlement_direction,
-                            "date": str(leaving_date), "days": abs(balance), "amount": amount,
-                            "manager": str((current_user_info or {}).get("name", "HR")), "desc": f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Pure holiday entitlement {calc['gross']:.1f}; bank holidays in period {calc['bank_holidays']:.1f}; holiday available after bank holidays {holiday_available_after_bank:.1f}; approved holiday taken {used_to_leave:.1f}; balance {balance:.1f}.",
-                            "attachment_name": "None", "status": "pending", "director_comments": "", "rejection_reason": "",
-                            "final_holiday_settlement": True,
-                            "decision_date": "", "decision_by": "", "submitted_by": str((current_user_info or {}).get("name", "HR")), "submitted_date": now, "pdf_path": "",
-                        }
-                        hr_records.append(rec)
-                        save_all_hr_leave(hr_records)
-                        log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
-                        # Keep the creator as the actual logged-in user's full name so
-                        # the settlement appears in "My Submitted Settlements".
-                        st.session_state["hr_leave_submission_notice"] = (
-                            f"Settlement #{new_id} created as {settlement_type} and sent through the existing HR Leave Settlement workflow."
-                        )
-                        st.rerun()
-                    st.divider()
-                    st.subheader("💷 Existing HR Leave Settlement Calculator")
-                    st.caption("Use the existing calculator below for the employee's current holiday position. The leaving calculation above is specifically frozen at the leaving date.")
-                else:
-                    st.info("No employees are registered yet.")
 
-                # Existing live settlement calculator retained below.
-                st.subheader("📊 Holiday Position Calculator")
-                st.info("Calculate an employee's current holiday position. Final leaving settlements are submitted separately through HR Leave Settlement for Director approval.")
+                    if leaving_emp:
+                        st.markdown("### 👤 Employee Details")
+                        d1, d2, d3 = st.columns(3)
+                        d1.write(f"**Employee ID:** {leaving_emp.get('emp_id', '')}")
+                        d1.write(f"**Full Name:** {leaving_emp.get('name', '')}")
+                        d1.write(f"**Department:** {leaving_emp.get('department', '')}")
+                        d2.write(f"**Position:** {leaving_emp.get('job_title', '')}")
+                        d2.write(f"**Start Date:** {leaving_emp.get('start_date', '')}")
+                        d2.write(f"**Agreement:** {leaving_emp.get('agreement_type', '')}")
+                        d3.write(f"**Working Pattern:** {leaving_emp.get('working_pattern', '')}")
+                        d3.write(f"**Days Per Week:** {float(leaving_emp.get('days_per_week', 5) or 5):g}")
+                        d3.write(f"**Current Status:** {leaving_emp.get('status', 'Active')}")
+
+                        st.divider()
+                        st.markdown("### 📝 Leaving Details")
+                        default_leave_date = leaving_emp.get("leaving_date") or date.today()
+                        if not isinstance(default_leave_date, date):
+                            try:
+                                default_leave_date = pd.to_datetime(default_leave_date).date()
+                            except Exception:
+                                default_leave_date = date.today()
+
+                        with st.form(f"hrp_employee_leaving_form_{leaving_id}", clear_on_submit=False):
+                            lc1, lc2 = st.columns(2)
+                            with lc1:
+                                leaving_date = st.date_input(
+                                    "Leaving Date",
+                                    value=default_leave_date,
+                                    key=f"hrp_leaving_date_{leaving_id}",
+                                )
+                            with lc2:
+                                leaving_reason = st.text_input(
+                                    "Leaving Reason",
+                                    value=str(leaving_emp.get("leaving_reason", "") or ""),
+                                    key=f"hrp_leaving_reason_{leaving_id}",
+                                    placeholder="e.g. Resignation, redundancy, end of contract",
+                                )
+                            record_left = st.form_submit_button(
+                                "💾 Record Employee as Left",
+                                type="primary",
+                                use_container_width=True,
+                            )
+
+                        if record_left:
+                            start_for_leave = leaving_emp.get("start_date")
+                            if not isinstance(start_for_leave, date):
+                                try:
+                                    start_for_leave = pd.to_datetime(start_for_leave).date()
+                                except Exception:
+                                    start_for_leave = leaving_date
+                            if leaving_date < start_for_leave:
+                                st.error("Leaving Date cannot be before the employee Start Date.")
+                            elif not leaving_reason.strip():
+                                st.error("Please enter a Leaving Reason.")
+                            else:
+                                old_status = leaving_emp.get("status", "Active")
+                                leaving_emp["status"] = "Left"
+                                leaving_emp["leaving_date"] = leaving_date
+                                leaving_emp["leaving_reason"] = leaving_reason.strip()
+                                _hrp_save_employees()
+                                log_action(
+                                    "HR_EMPLOYEE_LEFT",
+                                    leaving_id,
+                                    old_data={"status": old_status},
+                                    new_data={"status": "Left", "leaving_date": str(leaving_date), "leaving_reason": leaving_reason.strip()},
+                                )
+                                st.success(f"{leaving_emp['name']} has been recorded as Left on {leaving_date:%d/%m/%Y}. The final holiday settlement is now ready for the next step.")
+                                st.rerun()
+
+                        # The settlement step only appears after the employee has
+                        # actually been recorded as Left.
+                        is_recorded_left = (
+                            str(leaving_emp.get("status", "")).strip().casefold() == "left"
+                            and bool(leaving_emp.get("leaving_date"))
+                        )
+                        if is_recorded_left:
+                            saved_leaving_date = leaving_emp.get("leaving_date")
+                            if not isinstance(saved_leaving_date, date):
+                                try:
+                                    saved_leaving_date = pd.to_datetime(saved_leaving_date).date()
+                                except Exception:
+                                    saved_leaving_date = leaving_date
+
+                            st.divider()
+                            st.subheader("💷 Step 2 — Final Holiday Settlement")
+                            st.info("The employee is now recorded as Left. The calculation below is frozen at the recorded leaving date. If the company owes holiday, submit an Addition; if the employee has overused holiday, submit a Deduction. The request goes to Director approval.")
+
+                            calc = _hrp_get_leaving_entitlement(leaving_emp, saved_leaving_date)
+                            recorded_used_to_leave = _hrp_get_approved_holiday_days_to_date(leaving_id, saved_leaving_date)
+                            employee_start_for_leaving = leaving_emp.get("start_date")
+                            if not isinstance(employee_start_for_leaving, date):
+                                try:
+                                    employee_start_for_leaving = pd.to_datetime(employee_start_for_leaving).date()
+                                except Exception:
+                                    employee_start_for_leaving = saved_leaving_date
+                            closure_to_leave = _hrp_get_company_closure_holiday_days(
+                                leaving_emp, employee_start_for_leaving, saved_leaving_date
+                            )
+                            used_to_leave = round(recorded_used_to_leave + closure_to_leave, 1)
+                            holiday_available_after_bank = round(calc["net"] - calc["bank_holidays"], 1)
+                            balance = round(holiday_available_after_bank - used_to_leave, 1)
+
+                            c1, c2, c3, c4 = st.columns(4)
+                            c1.metric("Pure holiday entitlement", f"{calc['gross']:.1f} days")
+                            c2.metric("Bank holidays", f"{calc['bank_holidays']:.1f} days")
+                            c3.metric("Holiday available", f"{holiday_available_after_bank:.1f} days")
+                            c4.metric("Holiday taken / pre-booked", f"{used_to_leave:.1f} days")
+
+                            if balance > 0:
+                                st.success(f"🏢 Company owes employee: {balance:.1f} holiday day(s).")
+                                settlement_direction = "Company Owes Employee"
+                                settlement_type = "Addition"
+                                settlement_category = "Unused Holiday Payout"
+                            elif balance < 0:
+                                st.warning(f"👤 Employee owes company: {abs(balance):.1f} holiday day(s).")
+                                settlement_direction = "Employee Owes Company"
+                                settlement_type = "Deduction"
+                                settlement_category = "Overused Holiday Deduction"
+                            else:
+                                st.success("✅ Final holiday position is exactly balanced at 0.0 days. No settlement is required.")
+                                settlement_direction = None
+                                settlement_type = None
+                                settlement_category = None
+
+                            st.caption(
+                                f"Leaving date: {saved_leaving_date:%d/%m/%Y} · Pure holiday entitlement: {calc['gross']:.1f} days · "
+                                f"Bank holidays: {calc['bank_holidays']:.1f} days · Holiday available after bank holidays: {holiday_available_after_bank:.1f} days · "
+                                f"Holiday taken / pre-booked: {used_to_leave:.1f} days · Final settlement: {balance:.1f} days."
+                            )
+
+                            if settlement_direction:
+                                if st.button(
+                                    f"🧾 Submit {settlement_type} Settlement — {abs(balance):.1f} days for Director Approval",
+                                    key=f"hrp_create_leaving_settlement_{leaving_id}",
+                                    use_container_width=True,
+                                    type="primary",
+                                ):
+                                    hr_records = load_hr_leave()
+                                    new_id = get_next_hr_leave_id(hr_records)
+                                    dept = leaving_emp.get("department", "")
+                                    rate = get_hr_daily_rate(dept, settlement_type)
+                                    amount = round(rate * abs(balance), 2) if rate else 0.01
+                                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    creator_name = str((current_user_info or {}).get("name", "HR"))
+                                    rec = {
+                                        "id": new_id, "employee_id": leaving_emp.get("emp_id", ""), "emp_name": leaving_emp.get("name", ""), "emp_dept": dept,
+                                        "type": settlement_type, "category": settlement_category, "owe_owed": settlement_direction,
+                                        "date": str(saved_leaving_date), "days": abs(balance), "amount": amount,
+                                        "manager": creator_name,
+                                        "desc": f"Final holiday settlement for employee leaving {saved_leaving_date:%d/%m/%Y}. Pure holiday entitlement {calc['gross']:.1f}; bank holidays {calc['bank_holidays']:.1f}; holiday available after bank holidays {holiday_available_after_bank:.1f}; holiday taken/pre-booked {used_to_leave:.1f}; final settlement {balance:.1f}.",
+                                        "attachment_name": "None", "status": "pending", "director_comments": "", "rejection_reason": "",
+                                        "final_holiday_settlement": True,
+                                        "decision_date": "", "decision_by": "", "submitted_by": creator_name, "submitted_date": now, "pdf_path": "",
+                                    }
+                                    hr_records.append(rec)
+                                    save_all_hr_leave(hr_records)
+                                    log_action("HR_LEAVE_CREATED", new_id, new_data=rec)
+                                    st.session_state["hr_leave_submission_notice"] = (
+                                        f"Settlement #{new_id} created as {settlement_type} and sent to Director for approval."
+                                    )
+                                    st.rerun()
+
+            # ========== LIVE HOLIDAY CALCULATOR TAB ==========
+            with hr_holiday_calc_tab:
+                st.subheader("📊 Holiday Calculator")
+                st.info("Calculate an employee's current holiday position. Employees recorded as Left are closed and show 0.0 days in the live holiday position. Final leaving settlements are handled separately in Employee Leaving and approved by the Director.")
                 settlement_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
                 if settlement_ids:
                     settlement_employee_id = st.selectbox(
-                        "Settlement Employee",
+                        "Employee",
                         options=settlement_ids,
                         format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}" if _hrp_get_employee(eid) else "No employees registered",
                         key="hrp_settlement_emp",
@@ -2696,7 +2775,7 @@ def render_hr_portal(current_user_info=None):
                     col1, col2, col3 = st.columns(3)
                     with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
                     with col2: st.metric("Approved Holiday Used", f"{holiday_used:.1f} days")
-                    with col3: st.metric("Balance", f"{remaining:.1f} days")
+                    with col3: st.metric("Balance", f"{holiday_position['balance']:.1f} days")
                     st.caption(entitlement_note)
                     owed1, owed2 = st.columns(2)
                     with owed1: st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
@@ -2718,11 +2797,11 @@ def render_hr_portal(current_user_info=None):
                     st.write(f"**Employee ID:** {settlement_employee['emp_id']}")
                     st.write(f"**Entitlement:** {entitlement:.1f} days")
                     st.write(f"**Approved Holiday Used:** {holiday_used:.1f} days")
-                    st.write(f"**Remaining Holiday:** {remaining:.1f} days")
-                    if remaining < 0:
-                        st.warning(f"Employee is {abs(remaining):.1f} days over the current entitlement.")
+                    st.write(f"**Live Holiday Balance:** {holiday_position['balance']:.1f} days")
+                    if holiday_position['balance'] < 0:
+                        st.warning(f"Employee is {abs(holiday_position['balance']):.1f} days over the current entitlement.")
                     else:
-                        st.success(f"{remaining:.1f} days remaining.")
+                        st.success(f"{holiday_position['balance']:.1f} days available.")
                 else:
                     st.info("No employees are registered yet.")
 
