@@ -595,26 +595,9 @@ def render_google_drive_status():
                 st.rerun()
 
         rows = _drive_status_rows()
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         pending = len(DRIVE_PENDING_SYNC)
         st.caption(f"Every successful software save is queued automatically. Pending Drive uploads: {pending}. Local saves do not wait for Google Drive.")
-
-def _background_initialise_remaining_drive_storage(targets):
-    """Finish non-critical Drive initialisation without blocking the first page render."""
-    try:
-        for path, columns in targets:
-            try:
-                sync_persistent_file(path, columns)
-            except Exception as e:
-                print(f"Background Drive initialisation failed for {os.path.basename(path)}: {e}")
-        # Backups are maintenance work, not a reason to hold up the login page.
-        try:
-            ensure_all_drive_backups()
-        except Exception as e:
-            print(f"Background Drive backup initialisation failed: {e}")
-    finally:
-        st.session_state["drive_background_initialised"] = True
-
 
 def initialise_drive_storage():
     """Initialise only the files required for the first screen synchronously.
@@ -657,18 +640,12 @@ def initialise_drive_storage():
 
     st.session_state["drive_storage_initialised"] = True
 
-    # Do not wait for secondary workbooks or backup verification before showing
-    # the application. They will finish independently after the page can render.
-    try:
-        t = threading.Thread(
-            target=_background_initialise_remaining_drive_storage,
-            args=(remaining,),
-            name="google-drive-startup-sync",
-            daemon=True,
-        )
-        t.start()
-    except Exception as e:
-        print(f"Could not start background Drive startup sync: {e}")
+    # IMPORTANT: do not initialise secondary Excel workbooks in a background
+    # thread. Streamlit reruns and openpyxl/pandas file access can overlap with
+    # that thread and cause native crashes/segmentation faults. Secondary files
+    # are initialised lazily by the normal application code when they are used.
+    # Automatic Google Drive uploads remain handled by the dedicated upload queue.
+    print("Secondary Drive workbook initialisation deferred to normal app usage.")
 
 def get_onedrive_token():
     if not ONEDRIVE_CLIENT_ID or not ONEDRIVE_CLIENT_SECRET: return None
@@ -2376,7 +2353,7 @@ def _hrp_render_holiday_calendar():
             column_config[col] = st.column_config.TextColumn(col, width="small")
         st.dataframe(
             styled,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=650,
             column_config=column_config,
@@ -2525,7 +2502,7 @@ def _hrp_render_leavers_tab():
         return
     st.markdown("### Leaver List")
     list_rows = [{"Employee ID":e.get("emp_id"),"Full Name":e.get("name"),"Department":e.get("department"),"Start Date":e.get("start_date"),"Left Date":e.get("leaving_date"),"Reason":e.get("leaving_reason")} for e in leavers]
-    st.dataframe(pd.DataFrame(list_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(list_rows), width="stretch", hide_index=True)
     options = [f"{e.get('name','')} — {e.get('emp_id','')}" for e in leavers]
     by_label = dict(zip(options, leavers))
     search = st.text_input("🔎 Search Leaver", placeholder="Search by name or ACE-ID / Employee ID...", key="hrp_leaver_search")
@@ -2550,7 +2527,7 @@ def _hrp_render_leavers_tab():
     c3.write(f"**Agreement:** {employee.get('agreement_type','')}")
     st.markdown("### Holidays / Leave Taken")
     if history["types"]:
-        st.dataframe(pd.DataFrame([{"Leave Type":k,"Approved Days":v} for k,v in history["types"].items()]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame([{"Leave Type":k,"Approved Days":v} for k,v in history["types"].items()]), width="stretch", hide_index=True)
     else: st.info("No approved leave records found.")
     st.markdown("### Final Holiday Settlement")
     try:
@@ -2564,11 +2541,11 @@ def _hrp_render_leavers_tab():
             "Bank Holidays": leave_calc.get("bank_holidays", 0.0),
             "Holiday Taken": round(leave_used + closure_days, 1),
             "Final Settlement Days": leave_calc.get("net", 0.0) - leave_used - closure_days - leave_calc.get("bank_holidays", 0.0),
-        }]), use_container_width=True, hide_index=True)
+        }]), width="stretch", hide_index=True)
     except Exception:
         pass
     if history["settlements"]:
-        st.dataframe(pd.DataFrame([{"Settlement ID":r.get('id'),"Type":r.get('type'),"Days":float(r.get('days',0) or 0),"Amount (£)":float(r.get('amount',0) or 0),"Status":r.get('status','').title(),"Date":r.get('date')} for r in history["settlements"]]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame([{"Settlement ID":r.get('id'),"Type":r.get('type'),"Days":float(r.get('days',0) or 0),"Amount (£)":float(r.get('amount',0) or 0),"Status":r.get('status','').title(),"Date":r.get('date')} for r in history["settlements"]]), width="stretch", hide_index=True)
     else: st.info("No final holiday settlement found.")
     if st.button("📄 Generate Complete Leaver History PDF", key=f"gen_leaver_pdf_{employee.get('emp_id')}", type="primary"):
         with st.spinner("Generating leaver history PDF..."):
@@ -2680,7 +2657,7 @@ def render_hr_portal(current_user_info=None):
                             "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
                             "Unpaid Days": summary["unpaid"], "Other Absence": summary["other"],
                         })
-                    st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(overview_rows), width="stretch", hide_index=True)
                 else:
                     st.info("No employee records yet. Register your first employee below.")
 
@@ -2743,7 +2720,7 @@ def render_hr_portal(current_user_info=None):
                                 key=f"hrp_new_days_{new_form_version}",
                             )
 
-                        create_employee = st.form_submit_button("➕ Create Employee", type="primary", use_container_width=True)
+                        create_employee = st.form_submit_button("➕ Create Employee", type="primary", width="stretch")
 
                     if create_employee:
                         valid, result = _hrp_validate_employee_id(new_emp_id)
@@ -2789,7 +2766,7 @@ def render_hr_portal(current_user_info=None):
                         for e in st.session_state.hrp_employees
                     ]
                     if employee_table:
-                        st.dataframe(pd.DataFrame(employee_table), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.DataFrame(employee_table), width="stretch", hide_index=True)
                     else:
                         st.info("No employee records yet.")
 
@@ -2898,13 +2875,13 @@ def render_hr_portal(current_user_info=None):
                 st.markdown("### 🗑️ Employee Record")
                 st.caption("Use Active / Inactive here for normal employee management. Use Employee Leaving when an employee has actually left the company.")
                 if edit_emp:
-                    if st.button("🗑️ Permanently Delete Employee", key=f"hrp_delete_{edit_emp_id}", use_container_width=True):
+                    if st.button("🗑️ Permanently Delete Employee", key=f"hrp_delete_{edit_emp_id}", width="stretch"):
                         st.session_state[f"hrp_confirm_delete_{edit_emp_id}"] = True
                 if edit_emp and st.session_state.get(f"hrp_confirm_delete_{edit_emp_id}", False):
                     st.warning("This permanently removes the employee record and their HR portal leave records. Use Employee Leaving when an employee leaves the company so the final holiday settlement is processed correctly.")
                     cc1, cc2 = st.columns(2)
                     with cc1:
-                        if st.button("⚠️ Confirm Permanent Delete", key=f"hrp_confirm_delete_yes_{edit_emp_id}", type="primary", use_container_width=True):
+                        if st.button("⚠️ Confirm Permanent Delete", key=f"hrp_confirm_delete_yes_{edit_emp_id}", type="primary", width="stretch"):
                             deleted = _hrp_get_employee(edit_emp_id)
                             st.session_state.hrp_employees = [e for e in st.session_state.hrp_employees if e["emp_id"] != edit_emp_id]
                             st.session_state.hrp_leave_records = [r for r in st.session_state.hrp_leave_records if r["employee_id"] != edit_emp_id]
@@ -2920,7 +2897,7 @@ def render_hr_portal(current_user_info=None):
                             st.success(f"Employee {edit_emp_id} permanently deleted.")
                             st.rerun()
                     with cc2:
-                        if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", use_container_width=True):
+                        if st.button("Cancel Delete", key=f"hrp_confirm_delete_no_{edit_emp_id}", width="stretch"):
                             st.session_state.pop(f"hrp_confirm_delete_{edit_emp_id}", None)
                             st.rerun()
 
@@ -2993,7 +2970,7 @@ def render_hr_portal(current_user_info=None):
                             record_left = st.form_submit_button(
                                 "💾 Record Employee as Left",
                                 type="primary",
-                                use_container_width=True,
+                                width="stretch",
                             )
 
                         if record_left:
@@ -3087,7 +3064,7 @@ def render_hr_portal(current_user_info=None):
                                 if st.button(
                                     f"🧾 Submit {settlement_type} Settlement — {abs(balance):.1f} days for Director Approval",
                                     key=f"hrp_create_leaving_settlement_{leaving_id}",
-                                    use_container_width=True,
+                                    width="stretch",
                                     type="primary",
                                 ):
                                     hr_records = load_hr_leave()
@@ -3139,7 +3116,7 @@ def render_hr_portal(current_user_info=None):
                                     st.session_state["hr_leave_last_created_id"] = new_id
                                     st.rerun()
 
-            # Submitted final settlements are shown directly below the leaving\n            # workflow. Once submitted, the employee is removed from the selector\n            # above, so the page is effectively cleared for the next employee.\n            st.divider()\n            st.subheader("📋 Submitted Final Holiday Settlements")\n            final_records = [r for r in load_hr_leave(force=True) if _hrp_is_final_holiday_settlement_record(r)]\n            if final_records:\n                for r in final_records[:20]:\n                    status = str(r.get("status", "pending")).strip().casefold()\n                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")\n                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):\n                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")\n                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")\n                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")\n                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")\n                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")\n                        # Pending final settlements can be edited before Director approval.\n                        if status == "pending":\n                            edit_key = f"hrp_edit_final_{r.get('id')}"\n                            if st.button("✏️ Edit Pending Settlement", key=edit_key):\n                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True\n                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):\n                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")\n                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")\n                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")\n                                ec1, ec2 = st.columns(2)\n                                with ec1:\n                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", use_container_width=True):\n                                        records = load_hr_leave(force=True)\n                                        for rr in records:\n                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):\n                                                rr['manager'] = new_manager.strip()\n                                                rr['amount'] = float(new_amount)\n                                                rr['desc'] = new_desc.strip()\n                                                break\n                                        save_all_hr_leave(records)\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.success(f"Settlement #{r.get('id')} updated.")\n                                        st.rerun()\n                                with ec2:\n                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", use_container_width=True):\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.rerun()\n            else:\n                st.info("No final holiday settlements have been submitted yet.")\n\n            # ========== LEAVERS TAB ==========
+            # Submitted final settlements are shown directly below the leaving\n            # workflow. Once submitted, the employee is removed from the selector\n            # above, so the page is effectively cleared for the next employee.\n            st.divider()\n            st.subheader("📋 Submitted Final Holiday Settlements")\n            final_records = [r for r in load_hr_leave(force=True) if _hrp_is_final_holiday_settlement_record(r)]\n            if final_records:\n                for r in final_records[:20]:\n                    status = str(r.get("status", "pending")).strip().casefold()\n                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")\n                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):\n                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")\n                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")\n                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")\n                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")\n                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")\n                        # Pending final settlements can be edited before Director approval.\n                        if status == "pending":\n                            edit_key = f"hrp_edit_final_{r.get('id')}"\n                            if st.button("✏️ Edit Pending Settlement", key=edit_key):\n                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True\n                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):\n                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")\n                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")\n                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")\n                                ec1, ec2 = st.columns(2)\n                                with ec1:\n                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", width="stretch"):\n                                        records = load_hr_leave(force=True)\n                                        for rr in records:\n                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):\n                                                rr['manager'] = new_manager.strip()\n                                                rr['amount'] = float(new_amount)\n                                                rr['desc'] = new_desc.strip()\n                                                break\n                                        save_all_hr_leave(records)\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.success(f"Settlement #{r.get('id')} updated.")\n                                        st.rerun()\n                                with ec2:\n                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", width="stretch"):\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.rerun()\n            else:\n                st.info("No final holiday settlements have been submitted yet.")\n\n            # ========== LEAVERS TAB ==========
             with hr_leavers_tab:
                 _hrp_render_leavers_tab()
 
@@ -3182,7 +3159,7 @@ def render_hr_portal(current_user_info=None):
                         {"Leave Category": "Maternity Leave", "Approved Days": summary["maternity"], "Affects Holiday Balance": "No"},
                         {"Leave Category": "Paternity Leave", "Approved Days": summary["paternity"], "Affects Holiday Balance": "No"},
                     ]
-                    st.dataframe(pd.DataFrame(settlement_data), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(settlement_data), width="stretch", hide_index=True)
                     st.divider()
                     st.subheader("Settlement Calculation")
                     st.write(f"**Employee:** {settlement_employee['name']}")
@@ -3441,7 +3418,7 @@ def render_hr_portal(current_user_info=None):
             employee_leave = _hrp_get_employee_leave(emp["emp_id"])
             if employee_leave:
                 display_records = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Leave Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
-                st.dataframe(pd.DataFrame(display_records), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(display_records), width="stretch", hide_index=True)
             else:
                 st.write("No leave records found.")
 
@@ -3501,7 +3478,7 @@ def render_hr_portal(current_user_info=None):
                         "Status": r["status"], "Notes": r["notes"]
                     } for r in employee_leave]
                     df_history = pd.DataFrame(history_data)
-                    st.dataframe(df_history, use_container_width=True, hide_index=True)
+                    st.dataframe(df_history, width="stretch", hide_index=True)
 
                     st.divider()
                     st.subheader("✏️ Edit / 🗑️ Delete Leave Record")
@@ -3590,7 +3567,7 @@ def render_hr_portal(current_user_info=None):
             employee_leave = [r for r in _hrp_get_employee_leave(emp["emp_id"]) if r.get("status") == "Approved"]
             if employee_leave:
                 history_data = [{"Leave ID": r["leave_id"], "Date From": r["date_from"], "Date To": r["date_to"], "Type": r["type"], "Days": r["days"], "Status": r["status"], "Notes": r["notes"]} for r in employee_leave]
-                st.dataframe(pd.DataFrame(history_data), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(history_data), width="stretch", hide_index=True)
             else:
                 st.info("No leave history is currently recorded.")
         else:
@@ -3693,7 +3670,7 @@ def render_department_manager_leave_request(current_user_info=None):
             half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key=f"dept_leave_half_{key_suffix}_{form_version}")
         request_reference = st.text_input("Request Reference", placeholder="Optional email, call, or internal reference", key=f"dept_leave_ref_{key_suffix}_{form_version}")
         notes = st.text_area("Notes / Reason", placeholder="Reason or details supplied by the employee", key=f"dept_leave_notes_{key_suffix}_{form_version}")
-        submitted = st.form_submit_button("📤 Submit Leave Request to HR", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("📤 Submit Leave Request to HR", type="primary", width="stretch")
 
     if submitted:
         if leave_end < leave_start:
@@ -3769,7 +3746,7 @@ def render_department_manager_leave_request(current_user_info=None):
                 "Status": r["status"],
                 "HR Rejection Reason": r.get("rejection_reason", ""),
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
 def render_hr_leave_approvals():
@@ -4189,7 +4166,7 @@ def render_work_order_total(records, scope_department=None, key_prefix="wo_total
     st.metric("📋 Work Orders Included", len(selected))
     if selected:
         rows = [{"Work Order No.": get_work_order_number(r), "Employee": r.get("emp_name", ""), "Work Date": r.get("work_date", ""), "Amount (£)": float(r.get("amount", 0) or 0), "Approved By": r.get("director_decision_by", "")} for r in selected]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         if st.button("📄 Generate & Download Total PDF", key=f"{key_prefix}_pdf", type="primary"):
             with st.spinner("Generating PDF..."):
                 path = work_order_total_pdf(selected, employee, from_date, to_date, prepared_by=prepared_by)
@@ -4360,8 +4337,8 @@ def render_work_order_employee_portal(current_user, current_dept):
                     if existing_att and existing_att.lower() not in ("none", "nan", ""):
                         st.caption(f"📎 Existing attachments: {existing_att}")
                     csave, ccancel = st.columns(2)
-                    with csave: save_edit = st.form_submit_button("💾 Save Changes & Resubmit", type="primary", use_container_width=True)
-                    with ccancel: cancel_edit = st.form_submit_button("❌ Cancel", use_container_width=True)
+                    with csave: save_edit = st.form_submit_button("💾 Save Changes & Resubmit", type="primary", width="stretch")
+                    with ccancel: cancel_edit = st.form_submit_button("❌ Cancel", width="stretch")
                     if save_edit:
                         if not e_wo_no.strip() or not e_emp.strip() or not e_manager.strip() or not e_desc.strip():
                             st.error("❌ Work Order No., Employee, Manager and Description are required.")
@@ -4418,7 +4395,7 @@ def render_work_order_employee_portal(current_user, current_dept):
             if managers: manager = st.selectbox("👔 Send to Manager", managers, key=K_MGR)
             else: manager = st.text_input("👔 Manager Name", key=K_MGR, placeholder="Enter manager name")
             files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=K_FILES)
-            submitted = st.form_submit_button("📤 Submit Work Order to Manager", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("📤 Submit Work Order to Manager", type="primary", width="stretch")
             if submitted:
                 errors = []
                 if not work_order_no.strip(): errors.append("Work Order No.")
@@ -4498,7 +4475,7 @@ def render_work_order_employee_portal(current_user, current_dept):
                 for r in sorted(dept_orders, key=lambda x: str(x.get("work_date", "")), reverse=True):
                     rows.append({"Work Order No.": get_work_order_number(r), "Employee": r.get("emp_name", ""), "Manager": r.get("manager", ""), "Work Date": r.get("work_date", ""), "Amount (£)": float(r.get("amount", 0) or 0), "Status": str(r.get("status", "")).replace("_", " ").upper(), "Submitted By": r.get("submitted_by", "")})
                 df_view = pd.DataFrame(rows)
-                st.dataframe(df_view, use_container_width=True, hide_index=True)
+                st.dataframe(df_view, width="stretch", hide_index=True)
                 st.caption(f"📊 {len(rows)} work order(s) in **{current_dept}**")
                 st.divider(); st.markdown("#### 📄 Full Details")
                 for r in reversed(dept_orders):
@@ -4537,8 +4514,8 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
                     e_amount = st.number_input("💷 Amount (£)", min_value=0.01, step=1.0, format="%.2f", value=max(float(rec.get("amount", 0.01) or 0.01), 0.01))
                     e_desc = st.text_area("📝 Description", value=str(rec.get("desc", "")), height=150)
                 csave, ccancel = st.columns(2)
-                with csave: save_edit = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
-                with ccancel: cancel_edit = st.form_submit_button("❌ Cancel", use_container_width=True)
+                with csave: save_edit = st.form_submit_button("💾 Save Changes", type="primary", width="stretch")
+                with ccancel: cancel_edit = st.form_submit_button("❌ Cancel", width="stretch")
                 if save_edit:
                     old_data = {"manual_work_order_no": rec.get("manual_work_order_no"), "emp_name": rec.get("emp_name"), "site_address": rec.get("site_address"), "customer_job_no": rec.get("customer_job_no"), "work_date": rec.get("work_date"), "amount": rec.get("amount"), "desc": rec.get("desc")}
                     for x in orders:
@@ -4583,7 +4560,7 @@ def render_work_order_manager_portal(manager_name, manager_dept, show_total=True
             director_names = sorted({str(u.get("full_name", "")).strip() for u in _all_users.values() if str(u.get("role", "")).strip().lower() == "director" and str(u.get("full_name", "")).strip()})
             director = director_names[0] if director_names else "Director"
             files = st.file_uploader("📎 Supporting Work Order Document (optional)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_wo_files_v{form_version}")
-            submitted = st.form_submit_button("📤 Submit Work Order", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("📤 Submit Work Order", type="primary", width="stretch")
         if submitted:
             errors = []
             if not work_order_no.strip(): errors.append("Work Order No.")
@@ -5117,8 +5094,8 @@ def render_inspector_bonus_portal(user_name, user_dept):
                     e_jobs = st.number_input("Total Jobs Completed:", min_value=0.0, step=1.0, format="%.2f", value=float(rec.get("total_jobs", 0) or 0))
                     e_amount = st.number_input("Bonus Amount (£):", min_value=0.01, step=1.0, format="%.2f", value=float(rec.get("bonus_amount", 0.01) or 0.01))
                 c_save, c_cancel = st.columns(2)
-                with c_save: save_edit = st.form_submit_button("💾 Save Changes & Resubmit", type="primary", use_container_width=True)
-                with c_cancel: cancel_edit = st.form_submit_button("❌ Cancel", use_container_width=True)
+                with c_save: save_edit = st.form_submit_button("💾 Save Changes & Resubmit", type="primary", width="stretch")
+                with c_cancel: cancel_edit = st.form_submit_button("❌ Cancel", width="stretch")
                 if save_edit:
                     if not e_inspector.strip() or not e_month.strip(): st.error("❌ Inspector Name and Month & Year are required.")
                     else:
@@ -5149,7 +5126,7 @@ def render_inspector_bonus_portal(user_name, user_dept):
             total_jobs = st.number_input("Total Jobs Completed:", min_value=0.0, step=1.0, format="%.2f")
             bonus_amount = st.number_input("Bonus Amount (£):", min_value=0.01, step=1.0, format="%.2f")
             st.caption("ℹ️ After submission, this will be sent to the Director for approval.")
-        submitted = st.form_submit_button("📤 Submit for Director Approval", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("📤 Submit for Director Approval", type="primary", width="stretch")
         if submitted:
             if not inspector_name.strip(): st.error("❌ Inspector Name is required.")
             elif not month_year.strip(): st.error("❌ Month & Year is required.")
@@ -6017,7 +5994,7 @@ def render_hr_leave_form(user_name):
         if final_settlement:
             desc_default = f"Final holiday settlement for employee leaving {leaving_date:%d/%m/%Y}. Final balance to settle: {abs(final_balance):.1f} day(s)."
         desc = st.text_area("📝 Description / Justification", value=desc_default if not st.session_state.get(K_DESC) else st.session_state.get(K_DESC), key=K_DESC)
-        submitted = st.form_submit_button("📤 Send to Director", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("📤 Send to Director", type="primary", width="stretch")
 
     if submitted:
         if not emp_name.strip() or not manager.strip() or not desc.strip():
@@ -6217,31 +6194,31 @@ def render_hr_leave_director_portal(director_name):
             comments = st.text_area("Director Comments (optional)", key=f"{key_prefix}_comm_{rid}")
             c1, c2, c3 = st.columns(3)
             with c1:
-                if current_status != "pending" and st.button("⏳ Move to Pending", key=f"{key_prefix}_pending_{rid}", use_container_width=True):
+                if current_status != "pending" and st.button("⏳ Move to Pending", key=f"{key_prefix}_pending_{rid}", width="stretch"):
                     change_status(rid, "pending", comments)
                 elif current_status == "pending":
-                    st.button("⏳ Pending", key=f"{key_prefix}_pending_disabled_{rid}", disabled=True, use_container_width=True)
+                    st.button("⏳ Pending", key=f"{key_prefix}_pending_disabled_{rid}", disabled=True, width="stretch")
             with c2:
-                if current_status != "approved" and st.button("✅ Set Approved", key=f"{key_prefix}_approved_{rid}", type="primary", use_container_width=True):
+                if current_status != "approved" and st.button("✅ Set Approved", key=f"{key_prefix}_approved_{rid}", type="primary", width="stretch"):
                     change_status(rid, "approved", comments)
                 elif current_status == "approved":
-                    st.button("✅ Approved", key=f"{key_prefix}_approved_disabled_{rid}", disabled=True, use_container_width=True)
+                    st.button("✅ Approved", key=f"{key_prefix}_approved_disabled_{rid}", disabled=True, width="stretch")
             with c3:
-                if current_status != "rejected" and st.button("❌ Set Rejected", key=f"{key_prefix}_rejected_{rid}", use_container_width=True):
+                if current_status != "rejected" and st.button("❌ Set Rejected", key=f"{key_prefix}_rejected_{rid}", width="stretch"):
                     st.session_state[f"hr_dir_reject_{rid}"] = True
                 elif current_status == "rejected":
-                    st.button("❌ Rejected", key=f"{key_prefix}_rejected_disabled_{rid}", disabled=True, use_container_width=True)
+                    st.button("❌ Rejected", key=f"{key_prefix}_rejected_disabled_{rid}", disabled=True, width="stretch")
             if st.session_state.get(f"hr_dir_reject_{rid}"):
                 reason = st.text_area("Rejection Reason (required)", key=f"{key_prefix}_reason_{rid}")
                 rc1, rc2 = st.columns(2)
                 with rc1:
-                    if st.button("Confirm Rejection", key=f"{key_prefix}_confirm_rej_{rid}", type="primary", use_container_width=True):
+                    if st.button("Confirm Rejection", key=f"{key_prefix}_confirm_rej_{rid}", type="primary", width="stretch"):
                         if not reason.strip():
                             st.error("❌ Rejection reason is required.")
                         else:
                             change_status(rid, "rejected", comments, reason)
                 with rc2:
-                    if st.button("Cancel", key=f"{key_prefix}_cancel_rej_{rid}", use_container_width=True):
+                    if st.button("Cancel", key=f"{key_prefix}_cancel_rej_{rid}", width="stretch"):
                         st.session_state[f"hr_dir_reject_{rid}"] = False
                         st.rerun()
             st.divider()
@@ -6382,9 +6359,9 @@ def _super_admin_transaction_control():
                                 editable[k]=target.text_area(label, value=txt, height=68) if len(txt)>100 else target.text_input(label, value=txt)
                         save_col, del_col=st.columns(2)
                         with save_col:
-                            save_btn=st.form_submit_button("💾 Save Transaction Changes", type="primary", use_container_width=True)
+                            save_btn=st.form_submit_button("💾 Save Transaction Changes", type="primary", width="stretch")
                         with del_col:
-                            delete_btn=st.form_submit_button("🗑️ Delete Transaction", use_container_width=True)
+                            delete_btn=st.form_submit_button("🗑️ Delete Transaction", width="stretch")
                     if save_btn or delete_btn:
                         records=item["saver"].__name__
                         # Reload fresh records so the Super Admin edit cannot overwrite a newer change with stale cache data.
@@ -6447,7 +6424,7 @@ def _super_admin_transaction_control():
                 new_note=st.text_area("Entitlement Adjustment Note", value=emp.get("adjustment_note",""))
                 new_leave=st.date_input("Leaving Date (use 1970-01-01 for none)", value=emp.get("leaving_date") or date(1970,1,1))
                 new_reason=st.text_input("Leaving Reason", value=emp.get("leaving_reason",""))
-                save_emp=st.form_submit_button("💾 Save Complete Employee Record", type="primary", use_container_width=True)
+                save_emp=st.form_submit_button("💾 Save Complete Employee Record", type="primary", width="stretch")
             if save_emp:
                 new_id=str(new_id).strip().upper()
                 valid_id, validated_id = _hrp_validate_employee_id(new_id, exclude_id=old_id)
@@ -6611,7 +6588,7 @@ def render_store_deduction_form(user_name, user_dept):
     with st.form("store_deduction_form", clear_on_submit=False):
         files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="store_files")
         desc = st.text_area("📝 Description / Justification", key="store_desc")
-        submitted = st.form_submit_button("📤 Send to Director", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("📤 Send to Director", type="primary", width="stretch")
     if submitted:
         valid_items = [it for it in st.session_state.store_form_items if it.get("item_name") and it.get("quantity", 0) > 0 and it.get("price", 0) > 0]
         if not emp_name.strip() or not manager.strip() or not desc.strip():
@@ -6713,7 +6690,7 @@ def render_store_return_form(user_name, user_dept):
             st.markdown("<br>", unsafe_allow_html=True)
         files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="store_ret_files")
         desc = st.text_area("📝 Description / Justification", key="store_ret_desc")
-        submitted = st.form_submit_button("📤 Send to Director for Approval", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("📤 Send to Director for Approval", type="primary", width="stretch")
         if submitted:
             valid_items = [it for it in st.session_state.store_return_items if it.get("item_name") and it.get("quantity", 0) > 0 and it.get("price", 0) > 0]
             if not selected_emp or selected_emp == "-- Manual Entry --" or not manager.strip() or not desc.strip():
@@ -6859,25 +6836,25 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
             comments = st.text_area("Director Comments (optional)", key=f"{prefix}_comm_{rid}")
             c1, c2, c3 = st.columns(3)
             with c1:
-                if current_status != "pending" and st.button("⏳ Move to Pending", key=f"{prefix}_pending_{rid}", use_container_width=True):
+                if current_status != "pending" and st.button("⏳ Move to Pending", key=f"{prefix}_pending_{rid}", width="stretch"):
                     change_status(rid, "pending", comments)
             with c2:
-                if current_status != "approved" and st.button("✅ Set Approved", key=f"{prefix}_approved_{rid}", type="primary", use_container_width=True):
+                if current_status != "approved" and st.button("✅ Set Approved", key=f"{prefix}_approved_{rid}", type="primary", width="stretch"):
                     change_status(rid, "approved", comments)
             with c3:
-                if current_status != "rejected" and st.button("❌ Set Rejected", key=f"{prefix}_rejected_{rid}", use_container_width=True):
+                if current_status != "rejected" and st.button("❌ Set Rejected", key=f"{prefix}_rejected_{rid}", width="stretch"):
                     st.session_state[f"store_dir_reject_{type_filter}_{rid}"] = True
             if st.session_state.get(f"store_dir_reject_{type_filter}_{rid}"):
                 reason = st.text_area("Rejection Reason (required)", key=f"{prefix}_reason_{rid}")
                 rc1, rc2 = st.columns(2)
                 with rc1:
-                    if st.button("Confirm Rejection", key=f"{prefix}_confirm_rej_{rid}", type="primary", use_container_width=True):
+                    if st.button("Confirm Rejection", key=f"{prefix}_confirm_rej_{rid}", type="primary", width="stretch"):
                         if not reason.strip():
                             st.error("❌ Rejection reason is required.")
                         else:
                             change_status(rid, "rejected", comments, reason)
                 with rc2:
-                    if st.button("Cancel", key=f"{prefix}_cancel_rej_{rid}", use_container_width=True):
+                    if st.button("Cancel", key=f"{prefix}_cancel_rej_{rid}", width="stretch"):
                         st.session_state[f"store_dir_reject_{type_filter}_{rid}"] = False
                         st.rerun()
             st.divider()
@@ -7001,9 +6978,9 @@ def render_store_items_settings():
                         edit_price = st.number_input("Price (£)", min_value=0.01, step=1.0, format="%.2f", value=float(item['price']), key=f"edit_store_price_{i}")
                     btn_col1, btn_col2, _ = st.columns([1, 1, 3])
                     with btn_col1:
-                        save_btn = st.form_submit_button("💾 Save", type="primary", use_container_width=True)
+                        save_btn = st.form_submit_button("💾 Save", type="primary", width="stretch")
                     with btn_col2:
-                        cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
+                        cancel_btn = st.form_submit_button("❌ Cancel", width="stretch")
                     if save_btn:
                         if edit_name.strip():
                             old_data = {"name": item['name'], "price": item['price']}
@@ -7276,7 +7253,7 @@ def display_attachments(req):
             is_image = name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
             if is_director and is_image:
                 st.markdown(f"### 🖼️ {name}")
-                st.image(path, caption=name, use_container_width=True)
+                st.image(path, caption=name, width="stretch")
                 with open(path, "rb") as f:
                     st.download_button(label=f"⬇️ Download {name}", data=f.read(), file_name=name, mime="image/*", key=f"director_att_{req.get('id', idx)}_{idx}")
             else:
@@ -7574,7 +7551,7 @@ if not st.session_state.logged_in:
         st.caption("Enter your credentials to access the system"); st.divider()
         username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
         password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
-        if st.form_submit_button("🔐 Authenticate Portal", type="primary", use_container_width=True):
+        if st.form_submit_button("🔐 Authenticate Portal", type="primary", width="stretch"):
             USERS = load_users()
             if username in USERS and USERS[username]["password"] == password:
                 if not USERS[username].get("is_active", True):
@@ -7762,7 +7739,7 @@ def render_employee_hr_reports(current_user_info):
                     {"Date": bank_date.strftime("%d/%m/%Y"), "Bank Holiday": bank_name}
                     for bank_date, bank_name in upcoming_bank_holidays
                 ]),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
     if "HR-adjusted" in entitlement_note:
@@ -7779,7 +7756,7 @@ def render_employee_hr_reports(current_user_info):
         "Status": employee.get("status", ""), "Working Pattern": employee.get("working_pattern", ""),
         "Days Worked / Week": employee.get("days_per_week", 5),
     }])
-    st.dataframe(details, use_container_width=True, hide_index=True)
+    st.dataframe(details, width="stretch", hide_index=True)
 
     st.markdown("### 📅 My Holiday & Absence Calendar")
     year = st.number_input("Year", min_value=2020, max_value=2100, value=date.today().year, step=1, key="employee_hr_report_year")
@@ -7857,7 +7834,7 @@ def render_employee_hr_reports(current_user_info):
             {"selector": "td", "props": [("text-align", "center"), ("vertical-align", "middle")]},
         ])
     )
-    st.dataframe(calendar_style, use_container_width=True, hide_index=True)
+    st.dataframe(calendar_style, width="stretch", hide_index=True)
     st.caption("H Holiday · HD Half Day · BH Bank Holiday · UH Unpaid Holiday · C College · NA Closed / Not yet started · T Training · M Maternity · UA Unpaid Absence · S Sick · FE Family/Emergency · P Paternity · O Other · LEFT Employee Left · * Pending")
 
     st.markdown("### 📝 My Leave & Absence Records")
@@ -7869,7 +7846,7 @@ def render_employee_hr_reports(current_user_info):
             "Request Source": r.get("request_source", ""), "Notes": r.get("notes", ""),
         })
     if visible:
-        st.dataframe(pd.DataFrame(visible), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(visible), width="stretch", hide_index=True)
     else:
         st.info("No holiday or absence records have been recorded for you yet.")
 
@@ -8530,38 +8507,38 @@ elif role == "Super Admin":
                 reset_col1, reset_col2, reset_col3, reset_col4 = st.columns(4)
                 with reset_col1:
                     if not st.session_state.get("confirm_clear_inspector_bonus", False):
-                        if st.button("💰 Clear Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", use_container_width=True):
+                        if st.button("💰 Clear Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", width="stretch"):
                             st.session_state["confirm_clear_inspector_bonus"] = True
                     else:
-                        if st.button("✅ Confirm", key="super_admin_confirm_clear_inspector_bonus", use_container_width=True):
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_inspector_bonus", width="stretch"):
                             clear_all_inspector_bonus()
                             log_action("SUPER_ADMIN_CLEAR_INSPECTOR_BONUS", "ALL", decision_by=full_name)
                             st.session_state["confirm_clear_inspector_bonus"] = False
                             st.success("✅ Cleared."); st.rerun()
                 with reset_col2:
                     if not st.session_state.get("confirm_clear_all_work_orders", False):
-                        if st.button("🛠️ Clear Work Orders", key="super_admin_clear_all_work_orders", type="secondary", use_container_width=True):
+                        if st.button("🛠️ Clear Work Orders", key="super_admin_clear_all_work_orders", type="secondary", width="stretch"):
                             st.session_state["confirm_clear_all_work_orders"] = True
                     else:
-                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_work_orders", use_container_width=True):
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_work_orders", width="stretch"):
                             save_all_work_orders([])
                             st.session_state["confirm_clear_all_work_orders"] = False
                             st.success("✅ Cleared."); st.rerun()
                 with reset_col3:
                     if not st.session_state.get("confirm_clear_hr_leave", False):
-                        if st.button("👥 Clear HR Leave", key="super_admin_clear_all_hr_leave", type="secondary", use_container_width=True):
+                        if st.button("👥 Clear HR Leave", key="super_admin_clear_all_hr_leave", type="secondary", width="stretch"):
                             st.session_state["confirm_clear_hr_leave"] = True
                     else:
-                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_hr_leave", use_container_width=True):
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_hr_leave", width="stretch"):
                             clear_all_hr_leave()
                             st.session_state["confirm_clear_hr_leave"] = False
                             st.success("✅ Cleared."); st.rerun()
                 with reset_col4:
                     if not st.session_state.get("confirm_clear_store_deduction", False):
-                        if st.button("📦 Clear Store Transactions", key="super_admin_clear_all_store_deduction", type="secondary", use_container_width=True):
+                        if st.button("📦 Clear Store Transactions", key="super_admin_clear_all_store_deduction", type="secondary", width="stretch"):
                             st.session_state["confirm_clear_store_deduction"] = True
                     else:
-                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_store_deduction", use_container_width=True):
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_store_deduction", width="stretch"):
                             clear_all_store_deductions()
                             st.session_state["confirm_clear_store_deduction"] = False
                             st.success("✅ Cleared."); st.rerun()
