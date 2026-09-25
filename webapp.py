@@ -383,7 +383,7 @@ def sync_persistent_file(local_path, columns=None):
 # The live workbook keeps its normal filename; the backup copy is updated in place so
 # there is always an obvious backup file in Drive as well.
 DRIVE_BACKUP_FILENAMES = {
-    EXCEL_PATH: "BACKUP_hr_leave_requests.xlsx",
+    EXCEL_PATH: "BACKUP_requests.xlsx",
     USER_DB_PATH: "BACKUP_users.xlsx",
     SETTINGS_PATH: "BACKUP_settings.xlsx",
     AUDIT_LOG_PATH: "BACKUP_audit_log.xlsx",
@@ -1052,10 +1052,22 @@ def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         with st.spinner("Refreshing from Google Drive..."):
             if drive_service is not None:
-                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH):
+                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH,
+                             INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH,
+                             HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH,
+                             HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH):
+                    # Never overwrite a file whose Drive upload is still pending.
+                    if path in DRIVE_PENDING_SYNC:
+                        print(f"Skipping refresh of {os.path.basename(path)} — upload pending.")
+                        continue
                     remote = _drive_find_file(os.path.basename(path))
-                    if remote: _drive_download_file(remote["id"], path)
-            _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count", "_hr_leave_cache", "_hr_daily_rates_cache", "_store_deduction_cache", "_store_items_cache")
+                    if remote:
+                        _drive_download_file(remote["id"], path)
+            _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache",
+                                   "_audit_log_cache", "_work_orders_cache",
+                                   "_inspector_bonus_cache", "_audit_log_count",
+                                   "_hr_leave_cache", "_hr_daily_rates_cache",
+                                   "_store_deduction_cache", "_store_items_cache")
             st.session_state["_last_refresh"] = datetime.now().isoformat()
         st.rerun()
 
@@ -1375,11 +1387,20 @@ def _hrp_load_leave_records():
                 max_no = max(max_no, n)
             except Exception:
                 pass
-            try:
-                d_from = pd.to_datetime(r.get("Date From", "")).date()
-                d_to = pd.to_datetime(r.get("Date To", "")).date()
-            except Exception:
+
+            raw_from = r.get("Date From", "")
+            raw_to = r.get("Date To", "")
+            d_from = pd.to_datetime(raw_from, errors="coerce")
+            d_to = pd.to_datetime(raw_to, errors="coerce")
+            if pd.isna(d_from) or pd.isna(d_to):
+                print(
+                    f"⚠️ HR portal leave {leave_id} has invalid dates "
+                    f"(From={raw_from!r}, To={raw_to!r}); row preserved in Excel but skipped for display."
+                )
                 continue
+            d_from = d_from.date()
+            d_to = d_to.date()
+
             try:
                 days = float(r.get("Days", 0) or 0)
             except Exception:
@@ -1424,7 +1445,11 @@ def _hrp_save_leave_records():
             "Requested At": r.get("requested_at", ""), "Approved By": r.get("approved_by", ""),
             "Approved At": r.get("approved_at", ""), "Rejection Reason": r.get("rejection_reason", ""),
         })
-    pd.DataFrame(rows, columns=HR_PORTAL_LEAVE_COLUMNS).to_excel(HR_PORTAL_LEAVE_PATH, index=False, engine="openpyxl")
+    tmp = f"{HR_PORTAL_LEAVE_PATH}.tmp"
+    pd.DataFrame(rows, columns=HR_PORTAL_LEAVE_COLUMNS).to_excel(
+        tmp, index=False, engine="openpyxl"
+    )
+    os.replace(tmp, HR_PORTAL_LEAVE_PATH)  # atomic replace
     sync_saved_file_to_drive(HR_PORTAL_LEAVE_PATH)
 
 
@@ -3507,47 +3532,70 @@ def render_hr_portal(current_user_info=None):
                     elif calculated_days <= 0:
                         st.error("The selected dates do not contain any working days.")
                     else:
-                        # Always use the persistent workbook as the source of truth
-                        # immediately before creating a record. This prevents an old
-                        # Streamlit session from writing an older in-memory list back
-                        # over a newly recorded leave entry.
-                        persistent_leave_records = _hrp_load_leave_records()
-                        st.session_state.hrp_leave_records = persistent_leave_records
-                        employee_key = str(leave_employee["emp_id"]).strip().casefold()
-                        duplicate = next((r for r in persistent_leave_records
-                                          if str(r.get("employee_id", "")).strip().casefold() == employee_key
-                                          and r.get("date_from") == leave_start
-                                          and r.get("date_to") == leave_end
-                                          and r.get("type") == leave_type
-                                          and float(r.get("days", 0) or 0) == float(calculated_days)
-                                          and str(r.get("request_reference", "")).strip() == request_reference.strip()
-                                          and str(r.get("notes", "")).strip() == notes.strip()), None)
-                        if duplicate:
-                            st.warning(f"This leave has already been recorded as {duplicate['leave_id']}. The duplicate was not added.")
-                        else:
-                            new_record = {
-                                "leave_id": _hrp_create_leave_id(), "employee_id": leave_employee["emp_id"],
-                                "date_from": leave_start, "date_to": leave_end, "type": leave_type,
-                                "days": calculated_days, "status": "Approved", "request_source": request_source,
-                                "request_reference": request_reference.strip(), "notes": notes.strip(),
-                                "recorded_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR",
-                                "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "entry_source": "HR Direct",
-                                "requested_by": "", "requested_at": "",
-                                "approved_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR",
-                                "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "rejection_reason": "",
-                            }
-                            st.session_state.hrp_leave_records.append(new_record)
-                            _hrp_save_leave_records()
-                            # Re-read the workbook after saving so the session cache
-                            # and every downstream report use exactly what was
-                            # persisted to disk.
-                            st.session_state.hrp_leave_records = _hrp_load_leave_records()
-                            log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
-                            st.session_state.hrp_leave_form_version = form_version + 1
-                            st.success(f"Leave recorded successfully for {leave_employee['name']}. {calculated_days:.1f} day(s) — Approved. The form has been cleared for the next entry.")
-                            st.rerun()
+                        try:
+                            # Re-resolve the selected employee in case the session state is stale.
+                            leave_employee = _hrp_get_employee(selected_leave_employee_id)
+                            if not leave_employee:
+                                st.error("❌ Selected employee no longer exists. Refresh the page and try again.")
+                                st.stop()
+
+                            persistent_leave_records = _hrp_load_leave_records()
+                            st.session_state.hrp_leave_records = persistent_leave_records
+                            employee_key = str(leave_employee["emp_id"]).strip().casefold()
+                            duplicate = next((r for r in persistent_leave_records
+                                              if str(r.get("employee_id", "")).strip().casefold() == employee_key
+                                              and r.get("date_from") == leave_start
+                                              and r.get("date_to") == leave_end
+                                              and r.get("type") == leave_type
+                                              and float(r.get("days", 0) or 0) == float(calculated_days)
+                                              and str(r.get("request_reference", "")).strip() == request_reference.strip()
+                                              and str(r.get("notes", "")).strip() == notes.strip()), None)
+                            if duplicate:
+                                st.warning(f"This leave has already been recorded as {duplicate['leave_id']}. The duplicate was not added.")
+                            else:
+                                _recorder = (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR"
+                                new_record = {
+                                    "leave_id": _hrp_create_leave_id(),
+                                    "employee_id": leave_employee["emp_id"],
+                                    "date_from": leave_start, "date_to": leave_end,
+                                    "type": leave_type,
+                                    "days": calculated_days, "status": "Approved",
+                                    "request_source": request_source,
+                                    "request_reference": request_reference.strip(),
+                                    "notes": notes.strip(),
+                                    "recorded_by": _recorder,
+                                    "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "entry_source": "HR Direct",
+                                    "requested_by": "", "requested_at": "",
+                                    "approved_by": _recorder,
+                                    "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "rejection_reason": "",
+                                }
+                                st.session_state.hrp_leave_records.append(new_record)
+                                try:
+                                    _hrp_save_leave_records()
+                                except Exception as save_err:
+                                    st.error(f"❌ Save failed: {type(save_err).__name__}: {save_err}")
+                                    st.stop()
+
+                                # Re-read from disk to confirm the record is actually persisted.
+                                verify = _hrp_load_leave_records()
+                                if not any(r.get("leave_id") == new_record["leave_id"] for r in verify):
+                                    st.error("❌ Save verification failed — record not found after re-read. "
+                                             "Check permissions on Acoole_App_Uploads.")
+                                    st.stop()
+
+                                st.session_state.hrp_leave_records = verify
+                                log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
+                                st.session_state.hrp_leave_form_version = form_version + 1
+                                st.success(
+                                    f"Leave recorded for {leave_employee['name']}. "
+                                    f"{calculated_days:.1f} day(s) — Approved. "
+                                    f"The form has been cleared for the next entry."
+                                )
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Unexpected error: {type(e).__name__}: {e}")
         else:
             st.info("You are viewing your leave information. Leave is managed by HR.")
             employee_leave = _hrp_get_employee_leave(emp["emp_id"])
@@ -7420,6 +7468,25 @@ def display_company_header():
 def change_my_password_form():
     if not st.session_state.get("logged_in") or not st.session_state.get("user_info"): return
     render_google_drive_status()
+
+        # ── TEMPORARY DEBUG PANEL (remove once issue is confirmed fixed) ──
+    if str(st.session_state.get("user_info", {}).get("role", "")).strip() == "Super Admin":
+        with st.sidebar.expander("🐞 HR Leave Debug", expanded=False):
+            st.write(f"Path: `{HR_PORTAL_LEAVE_PATH}`")
+            st.write(f"Exists: `{os.path.exists(HR_PORTAL_LEAVE_PATH)}`")
+            if os.path.exists(HR_PORTAL_LEAVE_PATH):
+                st.write(f"Size: `{os.path.getsize(HR_PORTAL_LEAVE_PATH)}` bytes")
+                try:
+                    _dbg_df = pd.read_excel(HR_PORTAL_LEAVE_PATH, engine="openpyxl")
+                    st.write(f"Raw rows in file: `{len(_dbg_df)}`")
+                    if not _dbg_df.empty:
+                        st.dataframe(_dbg_df.tail(5), hide_index=True)
+                except Exception as e:
+                    st.error(f"Read failed: {e}")
+            st.write(f"Session cached records: `{len(st.session_state.get('hrp_leave_records', []))}`")
+            st.write(f"Pending syncs: `{list(DRIVE_PENDING_SYNC)}`")
+            st.write(f"Last sync: `{dict(DRIVE_LAST_SYNC)}`")
+            st.write(f"Last errors: `{dict(DRIVE_LAST_SYNC_ERROR)}`")
 
     with st.sidebar.expander("🔑 Change My Password", expanded=False):
         USERS = load_users()
