@@ -640,7 +640,10 @@ def initialise_drive_storage():
             print(f"Critical Drive initialisation failed for {os.path.basename(path)}: {e}")
 
     _DRIVE_STORAGE_PROCESS_READY = True
-    st.session_state["drive_storage_initialised"] = True
+    # Do not touch st.session_state here. This function is also called during
+    # module import, before Streamlit has a ScriptRunContext. Accessing
+    # st.session_state at import/startup can emit missing-context warnings and
+    # has contributed to unstable hot-reload behaviour.
     print("Critical Drive workbooks initialised once for this Streamlit server process.")
 
 def get_onedrive_token():
@@ -2240,7 +2243,7 @@ def _hrp_render_holiday_calendar():
         current = start
         while current <= end:
             if current.year == int(calendar_year) and current.weekday() < 5:
-                key = (employee_id, current)
+                key = (employee_id.casefold(), current)
                 if current in non_working_dates:
                     current += timedelta(days=1)
                     continue
@@ -2316,7 +2319,7 @@ def _hrp_render_holiday_calendar():
             elif employee_leaving and d > employee_leaving:
                 row[d.strftime("%d %b")] = "LEFT"
             else:
-                row[d.strftime("%d %b")] = leave_lookup.get((employee.get("emp_id", ""), d), "")
+                row[d.strftime("%d %b")] = leave_lookup.get((str(employee.get("emp_id", "")).strip().casefold(), d), "")
         rows.append(row)
 
     df = pd.DataFrame(rows, columns=columns)
@@ -3009,17 +3012,34 @@ def render_hr_portal(current_user_info=None):
                 # employee again in the leaving workflow. This prevents duplicate
                 # additions/deductions for the same employee. Rejected requests are
                 # allowed to be resubmitted.
+                # Normally only Active employees are selectable. After HR clicks
+                # "Record Employee as Left", keep that same employee selected for
+                # the remainder of the leaving workflow so Step 2 (final settlement)
+                # is immediately visible after rerun. The selected Left employee is
+                # removed once a pending/approved final settlement exists.
+                current_leaving_id = str(st.session_state.get("hrp_leaving_employee", "") or "").strip()
                 leaving_ids = [
                     e["emp_id"] for e in st.session_state.hrp_employees
-                    if str(e.get("status", "")).strip().casefold() == "active"
+                    if (
+                        str(e.get("status", "")).strip().casefold() == "active"
+                        or str(e.get("emp_id", "")).strip().casefold() == current_leaving_id.casefold()
+                    )
                     and not _hrp_has_active_final_settlement(e.get("emp_id", ""))
                 ]
                 if not leaving_ids:
                     st.success("✅ All employees currently recorded for leaving already have a pending or approved final settlement. No duplicate settlement can be raised.")
                 else:
+                    # If the current session points at an employee who has just
+                    # been recorded as Left, keep that employee selected. Otherwise
+                    # default to the first available employee.
+                    if current_leaving_id in leaving_ids:
+                        leaving_index = leaving_ids.index(current_leaving_id)
+                    else:
+                        leaving_index = 0
                     leaving_id = st.selectbox(
                         "Employee",
                         leaving_ids,
+                        index=leaving_index,
                         format_func=lambda eid: _hrp_employee_label(eid, include_status=True),
                         key="hrp_leaving_employee",
                     )
@@ -3085,6 +3105,10 @@ def render_hr_portal(current_user_info=None):
                                 leaving_emp["leaving_date"] = leaving_date
                                 leaving_emp["leaving_reason"] = leaving_reason.strip()
                                 _hrp_save_employees()
+                                # Preserve the selected employee across the rerun.
+                                # Without this, changing Active -> Left removes the
+                                # employee from the selector before Step 2 can render.
+                                st.session_state["hrp_leaving_employee"] = leaving_id
                                 log_action(
                                     "HR_EMPLOYEE_LEFT",
                                     leaving_id,
