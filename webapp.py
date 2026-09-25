@@ -1485,11 +1485,38 @@ def _hr_portal_init():
         st.session_state.hrp_leave_form_version = 0
 
 def _hrp_get_employee(employee_id):
+    """Return an employee from the current HR cache, refreshing once if a stale ID is found."""
     target = str(employee_id or "").strip().casefold()
-    for emp in st.session_state.get("hrp_employees", []):
+    employees = st.session_state.get("hrp_employees", []) or []
+    for emp in employees:
         if str(emp.get("emp_id", "")).strip().casefold() == target:
             return emp
+
+    # Super Admin can edit Employee IDs directly. If that happened in the same
+    # server session, the old in-memory employee list can contain stale IDs.
+    # Refresh from the persistent workbook before giving up.
+    try:
+        refreshed = _hrp_load_employees()
+        if refreshed:
+            st.session_state.hrp_employees = refreshed
+            for emp in refreshed:
+                if str(emp.get("emp_id", "")).strip().casefold() == target:
+                    return emp
+    except Exception as e:
+        print(f"HR employee refresh failed while resolving {employee_id}: {e}")
     return None
+
+
+def _hrp_employee_label(employee_id, include_status=False):
+    """Safe Streamlit selectbox label; never crashes if a stale ID is present."""
+    emp = _hrp_get_employee(employee_id)
+    if not emp:
+        return f"Employee not found — {employee_id}"
+    name = str(emp.get("name", "")).strip() or "Unnamed employee"
+    label = f"{name} — {employee_id}"
+    if include_status:
+        label += f" — {emp.get('status', 'Active')}"
+    return label
 
 def _hrp_validate_employee_id(employee_id):
     """Validate an HR-entered employee ID. The company chooses the format; it only has to be unique."""
@@ -2511,7 +2538,7 @@ def render_hr_portal(current_user_info=None):
                     edit_emp_id = st.selectbox(
                         "Select Employee",
                         options=edit_employee_ids,
-                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid)['status']}",
+                        format_func=lambda eid: _hrp_employee_label(eid, include_status=True),
                         key="hrp_edit_emp_selector",
                     )
                     edit_emp = _hrp_get_employee(edit_emp_id)
@@ -2633,7 +2660,7 @@ def render_hr_portal(current_user_info=None):
                     leaving_id = st.selectbox(
                         "Employee",
                         leaving_ids,
-                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid} — {_hrp_get_employee(eid).get('status', 'Active')}",
+                        format_func=lambda eid: _hrp_employee_label(eid, include_status=True),
                         key="hrp_leaving_employee",
                     )
                     leaving_emp = _hrp_get_employee(leaving_id)
@@ -2833,7 +2860,7 @@ def render_hr_portal(current_user_info=None):
                     settlement_employee_id = st.selectbox(
                         "Employee",
                         options=settlement_ids,
-                        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}" if _hrp_get_employee(eid) else "No employees registered",
+                        format_func=lambda eid: _hrp_employee_label(eid),
                         key="hrp_settlement_emp",
                     )
                     settlement_employee = _hrp_get_employee(settlement_employee_id)
@@ -2895,7 +2922,7 @@ def render_hr_portal(current_user_info=None):
                     "Current Employee",
                     options=selector_options,
                     index=current_index,
-                    format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}",
+                    format_func=lambda eid: _hrp_employee_label(eid),
                     key="hrp_current_employee_details_selector",
                 )
                 if selected_from_dropdown != st.session_state.hrp_current_emp_id:
@@ -3048,10 +3075,7 @@ def render_hr_portal(current_user_info=None):
                 "👤 Employee — Book Leave For",
                 options=leave_employee_ids,
                 index=leave_current_index,
-                format_func=lambda eid: (
-                    f"{_hrp_get_employee(eid)['name']} — {eid}"
-                    if _hrp_get_employee(eid) else eid
-                ),
+                format_func=lambda eid: _hrp_employee_label(eid),
                 key="hrp_leave_employee_selector",
             )
             st.session_state.hrp_leave_employee_id = selected_leave_employee_id
@@ -3341,7 +3365,7 @@ def render_department_manager_leave_request(current_user_info=None):
     selected_id = st.selectbox(
         "👤 Employee — Request Leave For",
         employee_ids,
-        format_func=lambda eid: f"{_hrp_get_employee(eid)['name']} — {eid}",
+        format_func=lambda eid: _hrp_employee_label(eid),
         key=selector_key,
     )
     selected_employee = next((e for e in employees if e.get("emp_id") == selected_id), None)
