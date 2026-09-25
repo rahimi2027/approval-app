@@ -2068,8 +2068,9 @@ def _hrp_create_leave_id():
 # ════════════════════════════════════════════════════════════
 # UK / ACoole non-working dates used by the holiday calendar and leave validation.
 # Bank holidays are for England & Wales. Acoole also closes on 29-31 December
-# (shown as H in the supplied company calendar). Bank holidays and company
-# closure days do NOT consume annual holiday allowance.
+# (shown as H in the supplied company calendar). Bank holidays are kept separate
+# from pure entitlement, but are deducted/reserved from the available balance.
+# The 29-31 December company closure is treated as pre-booked annual holiday.
 HRP_BANK_HOLIDAYS = {
     2026: {
         date(2026, 1, 1): "New Year’s Day",
@@ -2180,6 +2181,7 @@ def _hrp_render_holiday_calendar():
     st.subheader("📅 Holiday & Absence Calendar")
     st.caption(
         "Excel-style yearly calendar showing every employee, department, start date and approved leave. "
+        "Bank holidays are shown as BH and 29–31 December company closure is shown as H. "
         "Pending department-manager requests are marked with * and are not treated as approved leave."
     )
 
@@ -2239,7 +2241,7 @@ def _hrp_render_holiday_calendar():
         code = _hrp_calendar_leave_code(record.get("type", ""), status)
         if not code:
             continue
-        employee_id = str(record.get("employee_id", "")).strip()
+        employee_id = str(record.get("employee_id", "")).strip().casefold()
         current = start
         while current <= end:
             if current.year == int(calendar_year) and current.weekday() < 5:
@@ -2274,7 +2276,7 @@ def _hrp_render_holiday_calendar():
 
     non_working_dates = _hrp_non_working_dates(int(calendar_year))
     for employee in filtered_employees:
-        employee_id = str(employee.get("emp_id", "")).strip()
+        employee_id = str(employee.get("emp_id", "")).strip().casefold()
         for d in dates:
             code, _reason = _hrp_non_working_reason(d)
             if code:
@@ -2365,7 +2367,7 @@ def _hrp_render_holiday_calendar():
     if bank_days:
         st.info("**Bank holidays / blocked dates:** " + ", ".join(f"{d.strftime('%d %b')} — {name}" for d, name in sorted(bank_days.items())))
     closure_working_days = sum(1 for d in _hrp_company_closure_dates(int(calendar_year)) if d.weekday() < 5 and d not in HRP_BANK_HOLIDAYS.get(int(calendar_year), {}))
-    st.info(f"**Company closure:** 29, 30 and 31 December are company-closed days. They do **not** consume annual holiday allowance, and no separate leave entry is required.")
+    st.info(f"**Company closure:** 29, 30 and 31 December are company-closed days and are shown as **H**. They are treated as pre-booked annual holiday and reduce the available holiday balance; no separate leave entry is required.")
     st.caption(f"{len(filtered_employees)} employees · {len(dates)} calendar days · {calendar_year}")
 
     if df.empty:
@@ -3241,6 +3243,9 @@ def render_hr_portal(current_user_info=None):
 
             # ========== LIVE HOLIDAY CALCULATOR TAB ==========
             with hr_holiday_calc_tab:
+                # Refresh the persistent leave ledger before calculating holiday
+                # used/balance so newly recorded HR leave is included immediately.
+                st.session_state.hrp_leave_records = _hrp_load_leave_records()
                 st.subheader("📊 Holiday Calculator")
                 st.info("Calculate an employee's current holiday position. Employees recorded as Left are closed and show 0.0 days in the live holiday position. Final leaving settlements are handled separately in Employee Leaving and approved by the Director.")
                 settlement_ids = [e["emp_id"] for e in st.session_state.hrp_employees if str(e.get("status", "")).strip().casefold() == "active"]
@@ -3502,12 +3507,19 @@ def render_hr_portal(current_user_info=None):
                     elif calculated_days <= 0:
                         st.error("The selected dates do not contain any working days.")
                     else:
-                        duplicate = next((r for r in st.session_state.hrp_leave_records
-                                          if r.get("employee_id") == leave_employee["emp_id"]
+                        # Always use the persistent workbook as the source of truth
+                        # immediately before creating a record. This prevents an old
+                        # Streamlit session from writing an older in-memory list back
+                        # over a newly recorded leave entry.
+                        persistent_leave_records = _hrp_load_leave_records()
+                        st.session_state.hrp_leave_records = persistent_leave_records
+                        employee_key = str(leave_employee["emp_id"]).strip().casefold()
+                        duplicate = next((r for r in persistent_leave_records
+                                          if str(r.get("employee_id", "")).strip().casefold() == employee_key
                                           and r.get("date_from") == leave_start
                                           and r.get("date_to") == leave_end
                                           and r.get("type") == leave_type
-                                          and float(r.get("days", 0)) == float(calculated_days)
+                                          and float(r.get("days", 0) or 0) == float(calculated_days)
                                           and str(r.get("request_reference", "")).strip() == request_reference.strip()
                                           and str(r.get("notes", "")).strip() == notes.strip()), None)
                         if duplicate:
@@ -3528,6 +3540,10 @@ def render_hr_portal(current_user_info=None):
                             }
                             st.session_state.hrp_leave_records.append(new_record)
                             _hrp_save_leave_records()
+                            # Re-read the workbook after saving so the session cache
+                            # and every downstream report use exactly what was
+                            # persisted to disk.
+                            st.session_state.hrp_leave_records = _hrp_load_leave_records()
                             log_action("HR_LEAVE_RECORDED", new_record["leave_id"], new_data=new_record)
                             st.session_state.hrp_leave_form_version = form_version + 1
                             st.success(f"Leave recorded successfully for {leave_employee['name']}. {calculated_days:.1f} day(s) — Approved. The form has been cleared for the next entry.")
@@ -3546,6 +3562,10 @@ def render_hr_portal(current_user_info=None):
         st.subheader("Leave History")
 
         if is_hr:
+            # Leave History always reads the persistent HR Portal Leave Records
+            # workbook so a fresh submission is visible immediately, even if the
+            # current browser session previously held an older cache.
+            st.session_state.hrp_leave_records = _hrp_load_leave_records()
             # Leave History has its own employee selector. It is deliberately
             # independent from Employee Details so changing one tab does not
             # silently change the employee being viewed here.
