@@ -26,6 +26,7 @@ import re
 import requests
 import threading
 import queue
+import textwrap
 from datetime import datetime, date, timezone, timedelta
 
 from googleapiclient.discovery import build
@@ -227,14 +228,25 @@ def upload_to_google_drive(local_file_path, display_filename):
         print(f"Google Drive upload failed for {display_filename}: {e}")
         return None
 
+_DRIVE_FIND_CACHE = {}
+_DRIVE_FIND_CACHE_TTL = 60.0
+
 def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    if drive_service is None: return None
+    if drive_service is None:
+        return None
+    import time
+    cache_key = f"{parent_id}::{filename}"
+    cached = _DRIVE_FIND_CACHE.get(cache_key)
+    if cached and (time.monotonic() - cached[0]) < _DRIVE_FIND_CACHE_TTL:
+        return cached[1]
     try:
         safe_name = str(filename).replace("'", "\\'")
         q = (f"name = '{safe_name}' and '{parent_id}' in parents and trashed = false")
         result = drive_service.files().list(q=q, spaces="drive", fields="files(id,name,modifiedTime,parents)", orderBy="modifiedTime desc", pageSize=100, includeItemsFromAllDrives=True, supportsAllDrives=True).execute()
         files = result.get("files", [])
-        return files[0] if files else None
+        found = files[0] if files else None
+        _DRIVE_FIND_CACHE[cache_key] = (time.monotonic(), found)
+        return found
     except Exception as e:
         print(f"Drive lookup failed for {filename}: {e}")
         return None
@@ -465,6 +477,8 @@ def _drive_sync_worker():
             _DRIVE_SYNC_QUEUE.task_done()
 
 
+_DRIVE_STORAGE_PROCESS_READY = False
+
 # One daemon worker is started once per Streamlit server process. It does not
 # delay page/form rendering; local Excel saves complete first.
 try:
@@ -600,18 +614,14 @@ def render_google_drive_status():
         st.caption(f"Every successful software save is queued automatically. Pending Drive uploads: {pending}. Local saves do not wait for Google Drive.")
 
 def initialise_drive_storage():
-    """Initialise only the files required for the first screen synchronously.
+    """Prepare the small set of critical workbooks once per Streamlit server process.
 
-    The previous version downloaded/checked all 12 workbooks and then checked
-    every backup on every fresh Streamlit server start. That could require dozens
-    of Google Drive API calls before the login page was rendered.
-
-    We now synchronously prepare only the core files needed immediately:
-    requests, users, settings, and the two HR workbooks. The remaining workbooks
-    and backup verification run in a daemon thread, while every normal save still
-    queues its live + BACKUP_ upload through the existing background sync worker.
+    Google Drive remains the source of truth on a fresh server, but repeated
+    Streamlit sessions/reruns must not re-download the same Excel files.
+    Secondary workbooks are loaded only when their module is used.
     """
-    if drive_service is None or st.session_state.get("drive_storage_initialised"):
+    global _DRIVE_STORAGE_PROCESS_READY
+    if drive_service is None or _DRIVE_STORAGE_PROCESS_READY:
         return
     os.makedirs(APP_FOLDER, exist_ok=True)
 
@@ -622,15 +632,6 @@ def initialise_drive_storage():
         (HR_EMPLOYEES_PATH, HR_EMPLOYEE_COLUMNS),
         (HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS),
     ]
-    remaining = [
-        (AUDIT_LOG_PATH, AUDIT_COLUMNS),
-        (WORK_ORDERS_PATH, WORK_ORDER_COLUMNS),
-        (INSPECTOR_BONUS_PATH, INSPECTOR_BONUS_COLUMNS),
-        (HR_LEAVE_PATH, HR_LEAVE_COLUMNS),
-        (HR_DAILY_RATES_PATH, HR_DAILY_RATES_COLUMNS),
-        (STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS),
-        (STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS),
-    ]
 
     for path, columns in critical:
         try:
@@ -638,14 +639,9 @@ def initialise_drive_storage():
         except Exception as e:
             print(f"Critical Drive initialisation failed for {os.path.basename(path)}: {e}")
 
+    _DRIVE_STORAGE_PROCESS_READY = True
     st.session_state["drive_storage_initialised"] = True
-
-    # IMPORTANT: do not initialise secondary Excel workbooks in a background
-    # thread. Streamlit reruns and openpyxl/pandas file access can overlap with
-    # that thread and cause native crashes/segmentation faults. Secondary files
-    # are initialised lazily by the normal application code when they are used.
-    # Automatic Google Drive uploads remain handled by the dedicated upload queue.
-    print("Secondary Drive workbook initialisation deferred to normal app usage.")
+    print("Critical Drive workbooks initialised once for this Streamlit server process.")
 
 def get_onedrive_token():
     if not ONEDRIVE_CLIENT_ID or not ONEDRIVE_CLIENT_SECRET: return None
@@ -2423,7 +2419,7 @@ def _hrp_leaver_history(employee):
             holiday_taken += days
         leave_records.append(r)
     settlements = [
-        r for r in load_hr_leave(force=True)
+        r for r in load_hr_leave(force=False)
         if r.get("final_holiday_settlement", False)
         and str(r.get("employee_id", "")).strip().casefold() == emp_id.casefold()
     ]
@@ -2431,11 +2427,12 @@ def _hrp_leaver_history(employee):
 
 
 def _hrp_leaver_history_pdf(employee, history):
-    """Generate a downloadable complete leaver history PDF."""
+    """Generate a robust downloadable complete leaver history PDF."""
     if not PDF_AVAILABLE:
         return None
     try:
         pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=14)
         pdf.add_page()
         regular_font, bold_font = _pdf_font_paths()
         if regular_font and bold_font:
@@ -2444,15 +2441,36 @@ def _hrp_leaver_history_pdf(employee, history):
             family = "DejaVu"
         else:
             family = "Helvetica"
+
         def safe(v):
             txt = _pdf_text(v)
             return txt if family == "DejaVu" else txt.encode("latin-1", "replace").decode("latin-1")
+
+        def hard_wrap(v, width=80):
+            txt = safe(v)
+            # Prevent a single enormous/unbroken token from making fpdf2 report
+            # "Not enough horizontal space to render a single character".
+            return "\n".join(
+                "\n".join(textwrap.wrap(part, width=width, break_long_words=True, break_on_hyphens=False) or [""])
+                for part in txt.splitlines()
+            ) or "-"
+
+        def full_line(text, h=6, bold=False, size=9):
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font(family, "B" if bold else "", size)
+            pdf.multi_cell(pdf.epw, h, hard_wrap(text), new_x="LMARGIN", new_y="NEXT")
+
         if os.path.exists(LOGO_PATH):
-            try: pdf.image(LOGO_PATH, x=75, y=10, w=60); pdf.ln(28)
-            except Exception: pdf.ln(5)
-        pdf.set_font(family, "B", 16); pdf.cell(0, 10, safe("EMPLOYEE LEAVER COMPLETE HISTORY"), ln=True, align="C"); pdf.ln(3)
-        pdf.set_font(family, "B", 11); pdf.cell(0, 7, safe("EMPLOYEE DETAILS"), ln=True)
-        pdf.set_font(family, "", 10)
+            try:
+                pdf.image(LOGO_PATH, x=75, y=10, w=60)
+                pdf.ln(28)
+            except Exception:
+                pdf.ln(5)
+
+        full_line("EMPLOYEE LEAVER COMPLETE HISTORY", 10, True, 16)
+        pdf.ln(3)
+        full_line("EMPLOYEE DETAILS", 7, True, 11)
+
         details = [
             ("Employee ID", employee.get("emp_id")), ("Full Name", employee.get("name")),
             ("Department", employee.get("department")), ("Position", employee.get("job_title")),
@@ -2461,27 +2479,64 @@ def _hrp_leaver_history_pdf(employee, history):
             ("Agreement", employee.get("agreement_type")), ("Working Pattern", employee.get("working_pattern")),
             ("Days Per Week", employee.get("days_per_week")), ("Reason for Leaving", employee.get("leaving_reason")),
         ]
+        label_w = 48
+        value_w = max(20, pdf.epw - label_w)
         for label, value in details:
-            pdf.set_font(family, "B", 9); pdf.cell(48, 6, safe(f"{label}:")); pdf.set_font(family, "", 9); pdf.multi_cell(0, 6, safe(value if value not in (None, "") else "-"))
-        pdf.ln(3); pdf.set_font(family, "B", 11); pdf.cell(0, 7, safe("HOLIDAY / LEAVE HISTORY"), ln=True)
-        pdf.set_font(family, "", 9)
-        if history["types"]:
-            for typ, days in history["types"].items(): pdf.cell(0, 6, safe(f"{typ}: {days:.1f} day(s)"), ln=True)
-        else: pdf.cell(0, 6, safe("No approved leave records found."), ln=True)
-        pdf.ln(2); pdf.set_font(family, "B", 10); pdf.cell(0, 6, safe(f"Approved annual holiday taken: {history['holiday_taken']:.1f} days"), ln=True)
-        pdf.ln(3); pdf.set_font(family, "B", 11); pdf.cell(0, 7, safe("FINAL HOLIDAY SETTLEMENTS"), ln=True)
-        pdf.set_font(family, "", 9)
-        if history["settlements"]:
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font(family, "B", 9)
+            pdf.cell(label_w, 6, safe(f"{label}:"))
+            pdf.set_font(family, "", 9)
+            pdf.multi_cell(value_w, 6, hard_wrap(value if value not in (None, "") else "-"), new_x="LMARGIN", new_y="NEXT")
+
+        pdf.ln(3)
+        full_line("HOLIDAY / LEAVE HISTORY", 7, True, 11)
+        if history.get("types"):
+            for typ, days in history["types"].items():
+                full_line(f"{typ}: {days:.1f} day(s)", 6, False, 9)
+        else:
+            full_line("No approved leave records found.", 6, False, 9)
+
+        pdf.ln(2)
+        full_line(f"Approved annual holiday taken: {history.get('holiday_taken', 0.0):.1f} days", 6, True, 10)
+        pdf.ln(3)
+        full_line("FINAL HOLIDAY SETTLEMENTS", 7, True, 11)
+        if history.get("settlements"):
             for r in history["settlements"]:
-                typ = r.get("type", "")
-                status = str(r.get("status", "")).title()
-                pdf.multi_cell(0, 6, safe(f"Settlement #{r.get('id')} | {typ} | {float(r.get('days',0) or 0):.1f} days | £{float(r.get('amount',0) or 0):.2f} | {status} | {r.get('date','')}"))
-                if r.get("director_comments"): pdf.multi_cell(0, 5, safe(f"Director comments: {r.get('director_comments')}"))
-                if r.get("rejection_reason"): pdf.multi_cell(0, 5, safe(f"Rejection reason: {r.get('rejection_reason')}"))
-        else: pdf.cell(0, 6, safe("No final holiday settlement records found."), ln=True)
-        pdf.ln(3); pdf.set_font(family, "B", 10); pdf.cell(0, 6, safe("LEAVE RECORDS"), ln=True); pdf.set_font(family, "", 8)
-        for r in history["leave_records"]:
-            pdf.multi_cell(0, 5, safe(f"{r.get('date_from','')} → {r.get('date_to','')} | {r.get('type','')} | {float(r.get('days',0) or 0):.1f} days | {r.get('status','')} | {r.get('notes','')}"))
+                try:
+                    days = float(r.get("days", 0) or 0)
+                except Exception:
+                    days = 0.0
+                try:
+                    amount = float(r.get("amount", 0) or 0)
+                except Exception:
+                    amount = 0.0
+                full_line(
+                    f"Settlement #{r.get('id')} | {r.get('type','')} | {days:.1f} days | £{amount:.2f} | {str(r.get('status','')).title()} | {r.get('date','')}",
+                    6, False, 9
+                )
+                if r.get("director_comments"):
+                    full_line(f"Director comments: {r.get('director_comments')}", 5, False, 8)
+                if r.get("rejection_reason"):
+                    full_line(f"Rejection reason: {r.get('rejection_reason')}", 5, False, 8)
+        else:
+            full_line("No final holiday settlement records found.", 6, False, 9)
+
+        pdf.ln(3)
+        full_line("LEAVE RECORDS", 7, True, 11)
+        if history.get("leave_records"):
+            for r in history["leave_records"]:
+                try:
+                    days = float(r.get("days", 0) or 0)
+                except Exception:
+                    days = 0.0
+                line = (
+                    f"{r.get('date_from','')} → {r.get('date_to','')} | "
+                    f"{r.get('type','')} | {days:.1f} days | {r.get('status','')} | {r.get('notes','')}"
+                )
+                full_line(line, 5, False, 8)
+        else:
+            full_line("No leave records found.", 5, False, 8)
+
         os.makedirs(PDF_DIR, exist_ok=True)
         safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(employee.get("emp_id", "leaver")))
         path = os.path.join(PDF_DIR, f"Leaver_History_{safe_id}.pdf")
@@ -2489,7 +2544,7 @@ def _hrp_leaver_history_pdf(employee, history):
         _upload_to_drive_bg(path, os.path.basename(path))
         return path
     except Exception as e:
-        st.error(f"Leaver history PDF error: {e}")
+        st.error(f"Leaver history PDF error: {type(e).__name__}: {e}")
         return None
 
 
