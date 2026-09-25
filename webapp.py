@@ -1445,11 +1445,18 @@ def _hrp_save_leave_records():
             "Requested At": r.get("requested_at", ""), "Approved By": r.get("approved_by", ""),
             "Approved At": r.get("approved_at", ""), "Rejection Reason": r.get("rejection_reason", ""),
         })
-    tmp = f"{HR_PORTAL_LEAVE_PATH}.tmp"
-    pd.DataFrame(rows, columns=HR_PORTAL_LEAVE_COLUMNS).to_excel(
-        tmp, index=False, engine="openpyxl"
-    )
-    os.replace(tmp, HR_PORTAL_LEAVE_PATH)  # atomic replace
+    tmp = f"{HR_PORTAL_LEAVE_PATH}.tmp.xlsx"          # ← .xlsx so pandas accepts it
+    try:
+        pd.DataFrame(rows, columns=HR_PORTAL_LEAVE_COLUMNS).to_excel(
+            tmp, index=False, engine="openpyxl"
+        )
+        os.replace(tmp, HR_PORTAL_LEAVE_PATH)         # atomic replace
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
     sync_saved_file_to_drive(HR_PORTAL_LEAVE_PATH)
 
 
