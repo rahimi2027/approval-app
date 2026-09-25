@@ -4469,7 +4469,7 @@ def render_work_order_director_portal(director_name):
             req_id = r.get("id")
             submitter = r.get('submitted_by') or r.get('manager') or "Unknown"
             with st.expander(
-                f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"🟡 {get_work_order_number(r)} | {r.get('emp_name')} | 🔄 Work Order | "
                 f"£{r.get('amount',0):.2f} | Submitted by: {submitter}"
             ):
                 show_full_details(r)
@@ -4482,8 +4482,11 @@ def render_work_order_director_portal(director_name):
                         st.rerun()
                 with c2:
                     if st.button("❌ Reject", key=f"wo_dir_rej_{req_id}"):
-                        apply_status_change(req_id, "rejected_director", comments, "pending_director")
-                        st.rerun()
+                        if not comments.strip():
+                            st.error("❌ A rejection reason/comment is required.")
+                        else:
+                            apply_status_change(req_id, "rejected_director", comments, "pending_director")
+                            st.rerun()
     with t2:
         items = search_list(approved, "wo_dir_approved_search")
         if not items:
@@ -4492,10 +4495,12 @@ def render_work_order_director_portal(director_name):
         for r in reversed(items):
             req_id = r.get("id")
             with st.expander(
-                f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"🟢 {get_work_order_number(r)} | {r.get('emp_name')} | 🔄 Work Order | "
                 f"£{r.get('amount',0):.2f} | Approved by {r.get('director_decision_by','')}"
             ):
                 show_full_details(r)
+                if r.get("director_comments"):
+                    st.error(f"❌ **Rejection reason:** {r.get('director_comments')}")
                 st.markdown("### 🔄 Change Status")
                 new_comments = st.text_area(
                     "Add comment (optional)", key=f"wo_dir_chg_comm_app_{req_id}",
@@ -4508,8 +4513,11 @@ def render_work_order_director_portal(director_name):
                         st.rerun()
                 with c2:
                     if st.button("❌ Change to Rejected", key=f"wo_dir_app_to_rej_{req_id}"):
-                        apply_status_change(req_id, "rejected_director", new_comments, "approved_payment")
-                        st.rerun()
+                        if not new_comments.strip():
+                            st.error("❌ A rejection reason/comment is required.")
+                        else:
+                            apply_status_change(req_id, "rejected_director", new_comments, "approved_payment")
+                            st.rerun()
                 st.divider()
                 st.markdown("#### 📄 Work Order PDF")
                 display_work_order_pdf(r)
@@ -4524,7 +4532,7 @@ def render_work_order_director_portal(director_name):
         for r in reversed(items):
             req_id = r.get("id")
             with st.expander(
-                f"🔴 {get_work_order_number(r)} | {r.get('emp_name')} | "
+                f"🔴 {get_work_order_number(r)} | {r.get('emp_name')} | 🔄 Work Order | "
                 f"£{r.get('amount',0):.2f} | Rejected by {r.get('director_decision_by','')}"
             ):
                 show_full_details(r)
@@ -4906,7 +4914,7 @@ def render_inspector_bonus_director_portal(director_name):
         if not pending: st.success("✅ No pending Inspector Bonus submissions.")
         for r in reversed(pending):
             rec_id = r.get("id")
-            with st.expander(f"🟡 {rec_id} | {r.get('inspector_name')} | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
+            with st.expander(f"🟡 {rec_id} | {r.get('inspector_name')} | 🔄 Inspector Bonus | {r.get('month_year')} | £{r.get('bonus_amount',0):.2f}"):
                 show_details(r); st.divider()
                 comments = st.text_area("Director Comments", key=f"ib_dir_comm_{rec_id}")
                 c1, c2 = st.columns(2)
@@ -4915,7 +4923,10 @@ def render_inspector_bonus_director_portal(director_name):
                         apply_decision(rec_id, "approved", comments, "pending_director"); st.rerun()
                 with c2:
                     if st.button("❌ Reject", key=f"ib_dir_rej_{rec_id}"):
-                        apply_decision(rec_id, "rejected", comments, "pending_director"); st.rerun()
+                        if not comments.strip():
+                            st.error("❌ A rejection reason/comment is required.")
+                        else:
+                            apply_decision(rec_id, "rejected", comments, "pending_director"); st.rerun()
     with t2:
         if not approved: st.info("✅ No approved Inspector Bonus records yet.")
         if approved: st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Rejected")
@@ -4932,7 +4943,10 @@ def render_inspector_bonus_director_portal(director_name):
                         apply_decision(rec_id, "pending_director", new_comments, "approved"); st.rerun()
                 with c2:
                     if st.button("❌ Change to Rejected", key=f"ib_dir_app_to_rej_{rec_id}"):
-                        apply_decision(rec_id, "rejected", new_comments, "approved"); st.rerun()
+                        if not new_comments.strip():
+                            st.error("❌ A rejection reason/comment is required.")
+                        else:
+                            apply_decision(rec_id, "rejected", new_comments, "approved"); st.rerun()
     with t3:
         if not rejected: st.info("❌ No rejected Inspector Bonus records.")
         if rejected: st.info("🔄 **Change Status:** Move back to Pending ❘ Change to Approved")
@@ -5842,6 +5856,9 @@ def render_hr_leave_director_portal(director_name):
         st.info(f"📝 **Description:**\n{r.get('desc', '')}")
         if r.get("director_comments"):
             st.warning(f"💬 **Director Comments:** {r.get('director_comments')}")
+        if str(r.get("status", "")).strip().lower() == "rejected":
+            reason = r.get("rejection_reason") or r.get("director_comments") or "No rejection reason recorded."
+            st.error(f"❌ **Rejection reason:** {reason}")
         display_attachments(r)
 
     def change_status(rid, new_status, comments="", rejection_reason=""):
@@ -5878,7 +5895,7 @@ def render_hr_leave_director_portal(director_name):
 
     def render_record(r, current_status, key_prefix):
         rid = r.get("id")
-        with st.expander(f"{'🟡' if current_status == 'pending' else '🟢' if current_status == 'approved' else '🔴'} #{rid} | {r.get('emp_name', '')} | £{float(r.get('amount', 0) or 0):.2f} | {current_status.upper()}"):
+        with st.expander(f"{'🟡' if current_status == 'pending' else '🟢' if current_status == 'approved' else '🔴'} #{rid} | {r.get('emp_name', '')} | 🔄 {r.get('type', 'Not specified')} | £{float(r.get('amount', 0) or 0):.2f} | {current_status.upper()}"):
             show_details(r)
             st.markdown("### 🔄 Director Status Control")
             comments = st.text_area("Director Comments (optional)", key=f"{key_prefix}_comm_{rid}")
@@ -6311,6 +6328,9 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
         display_attachments(r)
         if r.get("director_comments"):
             st.warning(f"💬 **Director Comments:** {r.get('director_comments')}")
+        if str(r.get("status", "")).strip().lower() == "rejected":
+            reason = r.get("rejection_reason") or r.get("director_comments") or "No rejection reason recorded."
+            st.error(f"❌ **Rejection reason:** {reason}")
 
     def change_status(rid, new_status, comments="", rejection_reason=""):
         old_status = ""
@@ -6342,7 +6362,7 @@ def render_store_director_portal(director_name, type_filter="Deduction"):
 
     def render_record(r, current_status, prefix):
         rid = r.get("id")
-        with st.expander(f"{'🟡' if current_status == 'pending' else '🟢' if current_status == 'approved' else '🔴'} #{rid} | {r.get('emp_name', '')} | £{float(r.get('total_deduction', 0) or 0):.2f} | {current_status.upper()}"):
+        with st.expander(f"{'🟡' if current_status == 'pending' else '🟢' if current_status == 'approved' else '🔴'} #{rid} | {r.get('emp_name', '')} | 🔄 {r.get('type', type_filter)} | £{float(r.get('total_deduction', 0) or 0):.2f} | {current_status.upper()}"):
             show_details(r)
             st.markdown("### 🔄 Director Status Control")
             comments = st.text_area("Director Comments (optional)", key=f"{prefix}_comm_{rid}")
@@ -7777,7 +7797,7 @@ elif role == "Director":
                 st.metric("⏳ Pending Requests", len(pending)); st.divider()
                 for req in reversed(pending):
                     req_id = req.get("id")
-                    with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
+                    with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
                         col_left, col_right = st.columns([2, 1])
                         with col_left:
                             st.write(f"👤 **Employee:** {req.get('emp_name')}")
@@ -7807,13 +7827,20 @@ elif role == "Director":
                                 save_all_records(records); log_action("APPROVED", req_id)
                                 st.success(f"✅ Request #{req_id} APPROVED."); st.rerun()
                             if reject_btn:
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "rejected"; r["decision_by"] = full_name; r["director_comments"] = comments; r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        break
-                                save_all_records(records); log_action("REJECTED", req_id)
-                                st.error(f"❌ Request #{req_id} REJECTED."); st.rerun()
+                                if not comments.strip():
+                                    st.error("❌ A rejection reason/comment is required.")
+                                else:
+                                    records = load_records_from_excel()
+                                    for r in records:
+                                        if int(r.get("id",0)) == int(req_id):
+                                            r["status"] = "rejected"
+                                            r["decision_by"] = full_name
+                                            r["director_comments"] = comments.strip()
+                                            r["rejection_reason"] = comments.strip()
+                                            r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                            break
+                                    save_all_records(records); log_action("REJECTED", req_id)
+                                    st.error(f"❌ Request #{req_id} REJECTED."); st.rerun()
         with tab_approved:
             approved = [r for r in all_live_requests if r.get("status") == "approved"]
             if not approved: st.info("📋 No approved requests yet.")
@@ -7821,7 +7848,7 @@ elif role == "Director":
                 st.metric("✅ Approved Requests", len(approved)); st.divider()
                 for req in reversed(approved):
                     req_id = req.get("id")
-                    with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
+                    with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f}"):
                         st.write(f"👤 {req.get('emp_name')} | 💷 £{float(req.get('amount',0)):.2f}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
@@ -7839,13 +7866,20 @@ elif role == "Director":
                                 st.success(f"✅ Request #{req_id} moved to Pending."); st.rerun()
                         with col2:
                             if st.button("❌ Change to REJECTED", key=f"app_to_rej_{req_id}"):
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "rejected"; r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S"); r["decision_by"] = full_name
-                                        break
-                                save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
-                                st.success(f"✅ Request #{req_id} changed to Rejected."); st.rerun()
+                                if not new_comments.strip():
+                                    st.error("❌ A rejection reason/comment is required.")
+                                else:
+                                    records = load_records_from_excel()
+                                    for r in records:
+                                        if int(r.get("id",0)) == int(req_id):
+                                            r["status"] = "rejected"
+                                            r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                            r["decision_by"] = full_name
+                                            r["director_comments"] = new_comments.strip()
+                                            r["rejection_reason"] = new_comments.strip()
+                                            break
+                                    save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
+                                    st.success(f"✅ Request #{req_id} changed to Rejected."); st.rerun()
         with tab_rejected:
             rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
             if not rejected: st.success("✅ No rejected requests!")
@@ -7853,8 +7887,11 @@ elif role == "Director":
                 st.metric("❌ Rejected Requests", len(rejected)); st.divider()
                 for req in reversed(rejected):
                     req_id = req.get("id")
-                    with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
-                        st.write(f"👤 {req.get('emp_name')} | 💷 £{float(req.get('amount',0)):.2f}")
+                    with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f}"):
+                        st.write(f"👤 {req.get('emp_name')} | 🔄 **Type:** {req.get('type', 'Not specified')} | 💷 £{float(req.get('amount',0)):.2f}")
+                        st.error(f"❌ **Rejected by:** {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
+                        reason = req.get('rejection_reason') or req.get('director_comments') or 'No rejection reason recorded.'
+                        st.error(f"💬 **Rejection reason:** {reason}")
                         display_attachments(req)
                         st.markdown("### 🔄 Change Status")
                         new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_rej_{req_id}")
