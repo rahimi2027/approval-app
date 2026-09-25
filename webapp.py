@@ -371,12 +371,12 @@ def sync_persistent_file(local_path, columns=None):
 # The live workbook keeps its normal filename; the backup copy is updated in place so
 # there is always an obvious backup file in Drive as well.
 DRIVE_BACKUP_FILENAMES = {
-    EXCEL_PATH: "backup_requests.xlsx",
-    USER_DB_PATH: "backup_users.xlsx",
-    SETTINGS_PATH: "backup_settings.xlsx",
-    AUDIT_LOG_PATH: "backup_audit_log.xlsx",
-    WORK_ORDERS_PATH: "backup_work_orders.xlsx",
-    INSPECTOR_BONUS_PATH: "backup_inspector_bonus.xlsx",
+    EXCEL_PATH: "BACKUP_hr_leave_requests.xlsx",
+    USER_DB_PATH: "BACKUP_users.xlsx",
+    SETTINGS_PATH: "BACKUP_settings.xlsx",
+    AUDIT_LOG_PATH: "BACKUP_audit_log.xlsx",
+    WORK_ORDERS_PATH: "BACKUP_work_orders.xlsx",
+    INSPECTOR_BONUS_PATH: "BACKUP_inspector_bonus.xlsx",
     HR_LEAVE_PATH: "BACKUP_hr_leave_requests.xlsx",
     HR_DAILY_RATES_PATH: "BACKUP_hr_daily_rates.xlsx",
     STORE_DEDUCTION_PATH: "BACKUP_store_transactions.xlsx",
@@ -766,7 +766,7 @@ def _write_empty_excel(path, columns):
 def safe_init_excel(path, columns):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     if not os.path.exists(path):
-        tmp_path = f"{path}.init.tmp"
+        tmp_path = f"{path}.init.tmp.xlsx"
         try:
             pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
             os.replace(tmp_path, path)
@@ -785,7 +785,7 @@ def safe_init_excel(path, columns):
                 df[col] = ""
                 changed = True
         if changed:
-            tmp_path = f"{path}.repair.tmp"
+            tmp_path = f"{path}.repair.tmp.xlsx"
             try:
                 df.to_excel(tmp_path, index=False, engine="openpyxl")
                 os.replace(tmp_path, path)
@@ -800,7 +800,7 @@ def safe_init_excel(path, columns):
         print(f"Excel initialisation/recovery for {path} failed: {e}")
         if os.path.exists(path):
             return False
-        tmp_path = f"{path}.init.tmp"
+        tmp_path = f"{path}.init.tmp.xlsx"
         try:
             pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
             os.replace(tmp_path, path)
