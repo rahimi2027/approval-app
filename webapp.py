@@ -8039,15 +8039,32 @@ def render_employee_hr_reports(current_user_info):
                 elif code not in existing.split("/"):
                     lookup[cur] = f"{existing}/{code}"
             cur += timedelta(days=1)
-    try:
-        emp_start = employee.get("start_date") if isinstance(employee.get("start_date"), date) else pd.to_datetime(employee.get("start_date")).date()
-    except Exception:
-        emp_start = None
-    raw_leaving = employee.get("leaving_date", "")
-    try:
-        emp_leaving = raw_leaving if isinstance(raw_leaving, date) else (pd.to_datetime(raw_leaving).date() if str(raw_leaving).strip() else None)
-    except Exception:
-        emp_leaving = None
+    # Normalise pandas dates safely.  pd.NaT can pass an isinstance(..., date)
+    # check, but it cannot be compared with a normal datetime.date.
+    def _safe_python_date(value):
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+        if isinstance(value, pd.Timestamp):
+            return value.date()
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        try:
+            parsed = pd.to_datetime(value, errors="coerce")
+            if pd.isna(parsed):
+                return None
+            return parsed.date()
+        except Exception:
+            return None
+
+    emp_start = _safe_python_date(employee.get("start_date"))
+    emp_leaving = _safe_python_date(employee.get("leaving_date"))
     row = {}
     for d in dates:
         col = d.strftime("%d %b")
