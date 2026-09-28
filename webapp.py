@@ -1,8 +1,5 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.29
-#    • Robust pandas NaT/date normalisation for employee HR reports
-#    • Removed background Google Drive worker to prevent native Cloud segfaults
-
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.28
 # ============================================================
 # ✅ v4.27 (HR DEPARTMENT TAB):
 #    • New "🏢 HR Department" tab containing 2 sub-tabs:
@@ -170,17 +167,12 @@ drive_service = None
 DRIVE_CONNECTION_ERROR = ""
 DRIVE_LAST_SYNC = {}
 DRIVE_LAST_SYNC_ERROR = {}
-# Tracks the local workbook fingerprint after a successful Drive sync.
-# This is intentionally process-local and is reset safely on Streamlit startup.
-_DRIVE_SYNC_FINGERPRINTS = {}
-# Streamlit reruns the script for every widget interaction.
-# Google Drive sync is deliberately kept synchronous. A background thread that
-# touches Streamlit/pandas/pyarrow on Streamlit Community Cloud can trigger
-# native SIGSEGVs in some dependency combinations. Normal page refreshes do not
-# perform Drive uploads; only successful saves call sync_saved_file_to_drive().
-_DRIVE_SYNC_LOCK = threading.RLock()
 DRIVE_PENDING_SYNC = set()
-_DRIVE_SYNC_QUEUE = None
+_DRIVE_SYNC_QUEUE = queue.Queue()
+
+_DRIVE_ID_CACHE = {}
+_DRIVE_SYNC_FINGERPRINTS = {}
+_DRIVE_SYNC_LOCK = threading.RLock()
 
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
@@ -490,16 +482,44 @@ def _sync_saved_file_to_drive_now(local_path):
         return False
 
 
+def _drive_sync_worker():
+    """Upload saved workbooks without blocking the Streamlit button/form response.
+
+    Saves are queued and processed in order. If several UI actions happen quickly,
+    duplicate queued entries for the same workbook are coalesced so Drive receives
+    the latest local workbook instead of making the user wait for multiple uploads.
+    """
+    while True:
+        local_path = _DRIVE_SYNC_QUEUE.get()
+        try:
+            if local_path is None:
+                return
+            _sync_saved_file_to_drive_now(local_path)
+        except Exception as e:
+            print(f"Background Google Drive sync worker error: {e}")
+        finally:
+            with _DRIVE_SYNC_LOCK:
+                DRIVE_PENDING_SYNC.discard(local_path)
+            _DRIVE_SYNC_QUEUE.task_done()
+
+
 _DRIVE_STORAGE_PROCESS_READY = False
 
-def sync_saved_file_to_drive(local_path):
-    """Synchronise a successfully saved workbook to Google Drive.
+# One daemon worker is started once per Streamlit server process. It does not
+# delay page/form rendering; local Excel saves complete first.
+try:
+    _DRIVE_SYNC_WORKER = threading.Thread(target=_drive_sync_worker, name="google-drive-sync", daemon=True)
+    _DRIVE_SYNC_WORKER.start()
+except Exception as e:
+    print(f"Could not start Google Drive background sync worker: {e}")
 
-    This intentionally runs on Streamlit's main execution thread. It avoids
-    using a background thread for Google Drive/pandas work, which can interact
-    badly with native dependencies such as pyarrow on Streamlit Community Cloud
-    and produce a process-level segmentation fault. Page refreshes themselves do
-    not call this function; it is used only after a local save.
+
+def sync_saved_file_to_drive(local_path):
+    """Queue a Google Drive sync so software saves return immediately.
+
+    The local workbook is always saved first. The live workbook and the matching
+    BACKUP_ workbook are then uploaded by the background worker. This keeps the
+    software responsive while preserving automatic Drive synchronisation.
     """
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
@@ -507,7 +527,12 @@ def sync_saved_file_to_drive(local_path):
         DRIVE_LAST_SYNC_ERROR[filename] = msg
         return False
 
-    return _sync_saved_file_to_drive_now(local_path)
+    with _DRIVE_SYNC_LOCK:
+        # Coalesce repeated saves of the same workbook while one upload is pending.
+        if local_path not in DRIVE_PENDING_SYNC:
+            DRIVE_PENDING_SYNC.add(local_path)
+            _DRIVE_SYNC_QUEUE.put(local_path)
+    return True
 
 
 def ensure_all_drive_backups():
@@ -1309,46 +1334,6 @@ def _hrp_init_storage():
     safe_init_excel(HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS)
 
 
-def _hrp_normalize_employee_date(value, default=None):
-    """Return a real Python date or None; never return pandas NaT/Timestamp."""
-    if value is None:
-        return default
-    try:
-        missing = pd.isna(value)
-        if isinstance(missing, bool) and missing:
-            return default
-    except Exception:
-        pass
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date) and not isinstance(value, pd.Timestamp):
-        return value
-    try:
-        parsed = pd.to_datetime(value, errors="coerce")
-        if pd.isna(parsed):
-            return default
-        return parsed.date()
-    except Exception:
-        return default
-
-
-def _hrp_normalize_employee_record(employee):
-    """Normalise date fields in an employee record already held in session state."""
-    if not isinstance(employee, dict):
-        return employee
-    employee["start_date"] = _hrp_normalize_employee_date(employee.get("start_date"), date.today())
-    employee["leaving_date"] = _hrp_normalize_employee_date(employee.get("leaving_date"), None)
-    return employee
-
-
-def _hrp_normalize_employee_records(employees):
-    if not isinstance(employees, list):
-        return []
-    for employee in employees:
-        _hrp_normalize_employee_record(employee)
-    return employees
-
-
 def _hrp_load_employees():
     _hrp_init_storage()
     try:
@@ -1359,7 +1344,10 @@ def _hrp_load_employees():
             if not emp_id:
                 continue
             raw_start = r.get("Start Date", "")
-            start_date = _hrp_normalize_employee_date(raw_start, date.today())
+            try:
+                start_date = pd.to_datetime(raw_start).date()
+            except Exception:
+                start_date = date.today()
             override_raw = r.get("Holiday Entitlement Override", "")
             try:
                 override = float(override_raw) if str(override_raw).strip() else None
@@ -1377,7 +1365,7 @@ def _hrp_load_employees():
                 "days_per_week": float(r.get("Days Worked Per Week", 5) or 5),
                 "entitlement_override": override,
                 "adjustment_note": str(r.get("Entitlement Adjustment Note", "")).strip(),
-                "leaving_date": _hrp_normalize_employee_date(r.get("Leaving Date", ""), None),
+                "leaving_date": (pd.to_datetime(r.get("Leaving Date", "")).date() if str(r.get("Leaving Date", "")).strip() and pd.notna(pd.to_datetime(r.get("Leaving Date", ""), errors="coerce")) else None),
                 "leaving_reason": str(r.get("Leaving Reason", "")).strip(),
             })
         return records
@@ -7856,19 +7844,8 @@ def render_employee_hr_reports(current_user_info):
         st.error("❌ Your account is not linked to an Employee ID. Please contact Super Admin.")
         return
 
-    employees = st.session_state.get("hrp_employees")
-    if employees is None:
-        employees = _hrp_load_employees()
-        st.session_state.hrp_employees = employees
-    # A session may contain employee records loaded by an older app version.
-    # Normalise those records on every report render so stale pandas NaT values
-    # can never reach date comparisons.
-    employees = _hrp_normalize_employee_records(employees)
-    st.session_state.hrp_employees = employees
-    leave_records = st.session_state.get("hrp_leave_records")
-    if leave_records is None:
-        leave_records = _hrp_load_leave_records()
-        st.session_state.hrp_leave_records = leave_records
+    employees = _hrp_load_employees()
+    leave_records = _hrp_load_leave_records()
     employee = next((e for e in employees if str(e.get("emp_id", "")).strip().casefold() == linked_id.casefold()), None)
     if not employee:
         st.subheader("👤 My HR Reports")
@@ -8062,14 +8039,21 @@ def render_employee_hr_reports(current_user_info):
                 elif code not in existing.split("/"):
                     lookup[cur] = f"{existing}/{code}"
             cur += timedelta(days=1)
-    emp_start = _hrp_normalize_employee_date(employee.get("start_date"), None)
-    emp_leaving = _hrp_normalize_employee_date(employee.get("leaving_date"), None)
+    try:
+        emp_start = employee.get("start_date") if isinstance(employee.get("start_date"), date) else pd.to_datetime(employee.get("start_date")).date()
+    except Exception:
+        emp_start = None
+    raw_leaving = employee.get("leaving_date", "")
+    try:
+        emp_leaving = raw_leaving if isinstance(raw_leaving, date) else (pd.to_datetime(raw_leaving).date() if str(raw_leaving).strip() else None)
+    except Exception:
+        emp_leaving = None
     row = {}
     for d in dates:
         col = d.strftime("%d %b")
         if emp_start and d < emp_start:
             row[col] = "NA"
-        elif emp_leaving is not None and d > emp_leaving:
+        elif emp_leaving and d > emp_leaving:
             row[col] = "LEFT"
         else:
             nonwork_code, _ = _hrp_non_working_reason(d)
@@ -8494,7 +8478,15 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
         if has_work_orders:
             with tabs[tab_idx]:
-                render_work_order_employee_portal(full_name, dept_name)
+                # Managers with Work Order permission use the Manager workflow:
+                # their own work orders go directly to Director, while employee
+                # work orders remain routed to the Manager first. Staff/Team
+                # Members with Work Order permission continue to use the employee
+                # submission workflow.
+                if role == "Manager":
+                    render_work_order_manager_portal(full_name, dept_name, show_total=True)
+                else:
+                    render_work_order_employee_portal(full_name, dept_name)
             tab_idx += 1
         if has_inspector_bonus:
             with tabs[tab_idx]:
