@@ -5577,7 +5577,18 @@ def load_hr_daily_rates(force=False):
         return list(st.session_state["_hr_daily_rates_cache"])
     initialise_hr_leave()
     try:
+        # HR Daily Rates is a persistent Drive-backed workbook. A fresh Streamlit
+        # deployment can contain a locally-created empty workbook even though the
+        # BACKUP_hr_daily_rates.xlsx file in Google Drive contains the real rates.
+        # Restore the Drive copy before accepting an empty local workbook.
         df = _read_excel_records(HR_DAILY_RATES_PATH)
+        if df.empty and drive_service is not None:
+            try:
+                sync_persistent_file(HR_DAILY_RATES_PATH, HR_DAILY_RATES_COLUMNS)
+                df = _read_excel_records(HR_DAILY_RATES_PATH)
+            except Exception as recovery_error:
+                print(f"HR Daily Rates Drive recovery failed: {recovery_error}")
+
         records = []
         for r in df.to_dict(orient="records"):
             try: rate = float(r.get("Daily Rate (£)", 0) or 0)
