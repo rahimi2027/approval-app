@@ -1929,6 +1929,60 @@ def _hrp_get_leaving_entitlement(employee, leaving_date):
         "note": f"Pure holiday entitlement to leaving date: {pure_entitlement:.1f} days. {bank_days:.1f} bank holiday day(s) occurred in the employment period; none are deducted.",
     }
 
+def _hrp_get_holiday_used_and_booked(employee_id, as_of=None):
+    """Return approved annual leave split into used (up to today) and booked (future).
+
+    Company Christmas closure days (29-31 December) are treated as pre-booked
+    annual holiday, so past closure days are included in Used and future closure
+    days are included in Booked.
+    """
+    employee = _hrp_get_employee(employee_id)
+    if not employee:
+        return 0.0, 0.0
+    today = as_of or date.today()
+    records = st.session_state.get("hrp_leave_records")
+    if records is None:
+        records = _hrp_load_leave_records()
+        st.session_state.hrp_leave_records = records
+
+    used = 0.0
+    booked = 0.0
+    target = str(employee_id).strip().casefold()
+    for r in records:
+        if str(r.get("employee_id", "")).strip().casefold() != target:
+            continue
+        if str(r.get("status", "Approved")).strip().casefold() != "approved":
+            continue
+        if r.get("type") not in HR_PORTAL_HOLIDAY_LEAVE_TYPES:
+            continue
+        d_from, d_to = r.get("date_from"), r.get("date_to")
+        if not isinstance(d_from, date) or not isinstance(d_to, date) or d_to < d_from:
+            continue
+        if d_from <= today:
+            used_to = min(d_to, today)
+            if used_to >= d_from:
+                used += _hrp_calculate_leave_days(r.get("type"), d_from, used_to)
+        if d_to > today:
+            booked_from = max(d_from, today + timedelta(days=1))
+            if d_to >= booked_from:
+                booked += _hrp_calculate_leave_days(r.get("type"), booked_from, d_to)
+
+    # Acoole's 29-31 December closure is pre-booked annual holiday.
+    start_date = employee.get("start_date")
+    if not isinstance(start_date, date):
+        try:
+            start_date = pd.to_datetime(start_date).date()
+        except Exception:
+            start_date = today
+    year_end = date(today.year, 12, 31)
+    if start_date <= today:
+        used += _hrp_get_company_closure_holiday_days(employee, start_date, min(today, year_end))
+    if today < year_end:
+        booked += _hrp_get_company_closure_holiday_days(employee, max(today + timedelta(days=1), start_date), year_end)
+
+    return round(used, 1), round(booked, 1)
+
+
 def _hrp_get_approved_holiday_days_to_date(employee_id, end_date):
     """Approved annual leave used up to a leaving date."""
     employee = _hrp_get_employee(employee_id)
@@ -2795,12 +2849,11 @@ def render_hr_portal(current_user_info=None):
     # HR gets separate tabs for the live holiday calculator and the employee
     # leaving/final-settlement workflow. Employees remain view-only.
     if is_hr:
-        tab_directory, tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
-            "👤 Employee Directory",
+        tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
             "🧑‍💼 HR Management",
             "📅 Holiday Calendar",
             "👤 Employee Details",
-            "📝 Record Leave",
+            "✏️ Leave",
             "📋 Leave History",
         ])
     else:
@@ -2812,130 +2865,19 @@ def render_hr_portal(current_user_info=None):
         tab_hr = None
         tab_calendar = None
 
-    # ========== EMPLOYEE DIRECTORY ==========
-    with tab_directory:
-        employee_directory_tab = st.container()
-        with employee_directory_tab:
-            st.divider()
-            st.subheader("➕ Add New Employee")
-            st.info("HR enters the company Employee ID manually. Any unique letters/numbers format used by your company is accepted.")
-
-            # Versioned form keys guarantee that a successful submission
-            # renders a completely fresh form on the next rerun.
-            new_form_version = st.session_state.hrp_new_employee_form_version
-            with st.form(f"hrp_new_employee_form_{new_form_version}", clear_on_submit=False):
-                col1, col2 = st.columns(2)
-                with col1:
-                    new_emp_id = st.text_input(
-                        "Employee ID",
-                        placeholder="e.g. 001, EMP-001, A102 or your company batch number",
-                        key=f"hrp_new_emp_id_{new_form_version}",
-                    )
-                    new_name = st.text_input(
-                        "Full Name",
-                        placeholder="e.g. John Smith",
-                        key=f"hrp_new_name_{new_form_version}",
-                    )
-                    new_start_date = st.date_input(
-                        "Start Date",
-                        value=date.today(),
-                        key=f"hrp_new_start_{new_form_version}",
-                    )
-                    new_position = st.text_input(
-                        "Position / Job Title",
-                        placeholder="e.g. Electrician",
-                        key=f"hrp_new_pos_{new_form_version}",
-                    )
-                with col2:
-                    hr_software_departments = load_departments()
-                    new_department = st.selectbox(
-                        "Department",
-                        options=hr_software_departments,
-                        key=f"hrp_new_dept_{new_form_version}",
-                    )
-                    new_agreement = st.selectbox(
-                        "Agreement Type",
-                        options=HR_PORTAL_AGREEMENT_TYPES,
-                        key=f"hrp_new_agree_{new_form_version}",
-                    )
-                    new_pattern = st.selectbox(
-                        "Working Pattern",
-                        ["Regular hours", "Irregular / Part-Year"],
-                        key=f"hrp_new_pattern_{new_form_version}",
-                    )
-                    new_days_per_week = st.number_input(
-                        "Contracted Days Per Week",
-                        min_value=0.5,
-                        max_value=7.0,
-                        value=5.0,
-                        step=0.5,
-                        key=f"hrp_new_days_{new_form_version}",
-                    )
-
-                create_employee = st.form_submit_button("➕ Create Employee", type="primary", width="stretch")
-
-            if create_employee:
-                valid, result = _hrp_validate_employee_id(new_emp_id)
-                if not valid:
-                    st.error(result)
-                elif not new_name.strip():
-                    st.error("Please enter the employee's full name.")
-                elif not new_position.strip():
-                    st.error("Please enter the position / job title.")
-                else:
-                    new_employee = {
-                        "emp_id": result,
-                        "name": new_name.strip(),
-                        "start_date": new_start_date,
-                        "department": new_department,
-                        "job_title": new_position.strip(),
-                        "agreement_type": new_agreement,
-                        "status": "Active",
-                        "working_pattern": new_pattern,
-                        "days_per_week": new_days_per_week,
-                        "entitlement_override": None,
-                        "adjustment_note": "",
-                    }
-                    st.session_state.hrp_employees.append(new_employee)
-                    _hrp_save_employees()
-                    st.session_state.hrp_current_emp_id = result
-                    log_action("HR_EMPLOYEE_ADDED", result, new_data=new_employee)
-                    # Change every widget key used by the form. On rerun
-                    # Streamlit therefore creates a blank form for the next employee.
-                    st.session_state.hrp_new_employee_form_version = new_form_version + 1
-                    st.success(f"Employee {result} created successfully. The form is ready for the next employee.")
-                    st.rerun()
-
-            st.subheader("Employee Directory")
-            st.caption("Edit employee details or permanently delete an employee record. Use Employee Leaving for all employee departures and final holiday settlement.")
-
-            employee_table = [
-                {
-                    "Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"],
-                    "Position": e["job_title"], "Department": e["department"],
-                    "Agreement": e["agreement_type"], "Status": e["status"],
-                }
-                for e in st.session_state.hrp_employees
-            ]
-            if employee_table:
-                st.dataframe(pd.DataFrame(employee_table), width="stretch", hide_index=True)
-            else:
-                st.info("No employee records yet.")
-
-
     # ========== TAB 1: HR MANAGEMENT ==========
     if is_hr and tab_hr is not None:
         with tab_hr:
             st.subheader("🧑‍💼 HR Management")
             if is_hr_manager:
-                st.caption("Employee Overview, Leave Approvals, Holiday Calculator, Employee Leaving and Leavers")
-                employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab = st.tabs([
-                    "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee"
+                st.caption("Employee Overview, Leave Approvals, Holiday Calculator, Employee Leaving and Employee Directory")
+                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee"
                 ])
             else:
-                st.caption("Employee Overview, Holiday Calculator, Employee Leaving and Leavers")
-                employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab = st.tabs([
-                    "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee"
+                st.caption("Employee Overview, Holiday Calculator, Employee Leaving and Employee Directory")
+                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee"
                 ])
                 hr_approval_tab = None
 
@@ -2959,6 +2901,115 @@ def render_hr_portal(current_user_info=None):
                     st.dataframe(pd.DataFrame(overview_rows), width="stretch", hide_index=True)
                 else:
                     st.info("No employee records yet. Register your first employee below.")
+
+            with hr_employee_tab:
+                employee_directory_tab = st.container()
+                with employee_directory_tab:
+                    st.divider()
+                    st.subheader("➕ Add New Employee")
+                    st.info("HR enters the company Employee ID manually. Any unique letters/numbers format used by your company is accepted.")
+
+                    # Versioned form keys guarantee that a successful submission
+                    # renders a completely fresh form on the next rerun.
+                    new_form_version = st.session_state.hrp_new_employee_form_version
+                    with st.form(f"hrp_new_employee_form_{new_form_version}", clear_on_submit=False):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            new_emp_id = st.text_input(
+                                "Employee ID",
+                                placeholder="e.g. 001, EMP-001, A102 or your company batch number",
+                                key=f"hrp_new_emp_id_{new_form_version}",
+                            )
+                            new_name = st.text_input(
+                                "Full Name",
+                                placeholder="e.g. John Smith",
+                                key=f"hrp_new_name_{new_form_version}",
+                            )
+                            new_start_date = st.date_input(
+                                "Start Date",
+                                value=date.today(),
+                                key=f"hrp_new_start_{new_form_version}",
+                            )
+                            new_position = st.text_input(
+                                "Position / Job Title",
+                                placeholder="e.g. Electrician",
+                                key=f"hrp_new_pos_{new_form_version}",
+                            )
+                        with col2:
+                            hr_software_departments = load_departments()
+                            new_department = st.selectbox(
+                                "Department",
+                                options=hr_software_departments,
+                                key=f"hrp_new_dept_{new_form_version}",
+                            )
+                            new_agreement = st.selectbox(
+                                "Agreement Type",
+                                options=HR_PORTAL_AGREEMENT_TYPES,
+                                key=f"hrp_new_agree_{new_form_version}",
+                            )
+                            new_pattern = st.selectbox(
+                                "Working Pattern",
+                                ["Regular hours", "Irregular / Part-Year"],
+                                key=f"hrp_new_pattern_{new_form_version}",
+                            )
+                            new_days_per_week = st.number_input(
+                                "Contracted Days Per Week",
+                                min_value=0.5,
+                                max_value=7.0,
+                                value=5.0,
+                                step=0.5,
+                                key=f"hrp_new_days_{new_form_version}",
+                            )
+
+                        create_employee = st.form_submit_button("➕ Create Employee", type="primary", width="stretch")
+
+                    if create_employee:
+                        valid, result = _hrp_validate_employee_id(new_emp_id)
+                        if not valid:
+                            st.error(result)
+                        elif not new_name.strip():
+                            st.error("Please enter the employee's full name.")
+                        elif not new_position.strip():
+                            st.error("Please enter the position / job title.")
+                        else:
+                            new_employee = {
+                                "emp_id": result,
+                                "name": new_name.strip(),
+                                "start_date": new_start_date,
+                                "department": new_department,
+                                "job_title": new_position.strip(),
+                                "agreement_type": new_agreement,
+                                "status": "Active",
+                                "working_pattern": new_pattern,
+                                "days_per_week": new_days_per_week,
+                                "entitlement_override": None,
+                                "adjustment_note": "",
+                            }
+                            st.session_state.hrp_employees.append(new_employee)
+                            _hrp_save_employees()
+                            st.session_state.hrp_current_emp_id = result
+                            log_action("HR_EMPLOYEE_ADDED", result, new_data=new_employee)
+                            # Change every widget key used by the form. On rerun
+                            # Streamlit therefore creates a blank form for the next employee.
+                            st.session_state.hrp_new_employee_form_version = new_form_version + 1
+                            st.success(f"Employee {result} created successfully. The form is ready for the next employee.")
+                            st.rerun()
+
+                    st.subheader("Employee Directory")
+                    st.caption("Edit employee details or permanently delete an employee record. Use Employee Leaving for all employee departures and final holiday settlement.")
+
+                    employee_table = [
+                        {
+                            "Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"],
+                            "Position": e["job_title"], "Department": e["department"],
+                            "Agreement": e["agreement_type"], "Status": e["status"],
+                        }
+                        for e in st.session_state.hrp_employees
+                    ]
+                    if employee_table:
+                        st.dataframe(pd.DataFrame(employee_table), width="stretch", hide_index=True)
+                    else:
+                        st.info("No employee records yet.")
 
             with employee_edit_tab:
                 st.subheader("✏️ Edit / Deactivate Employee")
@@ -3489,15 +3540,31 @@ def render_hr_portal(current_user_info=None):
             st.divider()
             st.subheader("📅 Holiday Allowance")
             entitlement, entitlement_note, service_years, calculated_base = _hrp_get_employee_entitlement(emp)
-            holiday_used = _hrp_get_approved_holiday_days(emp["emp_id"])
-            remaining = entitlement - holiday_used
+            holiday_used, holiday_booked = _hrp_get_holiday_used_and_booked(emp["emp_id"])
+            today = date.today()
+            start_date = emp.get("start_date")
+            if not isinstance(start_date, date):
+                try:
+                    start_date = pd.to_datetime(start_date).date()
+                except Exception:
+                    start_date = today
+            bank_holiday_used = _hrp_get_bank_holiday_days(emp, start_date, today)
+            upcoming_bank_holiday = _hrp_get_upcoming_bank_holiday_days_for_employee(emp, today + timedelta(days=1))
+            remaining = round(entitlement - holiday_used - holiday_booked - bank_holiday_used - upcoming_bank_holiday, 1)
             holiday_position = _hrp_get_holiday_position(emp["emp_id"])
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
             with col2: st.metric("Holiday Used", f"{holiday_used:.1f} days")
-            with col3: st.metric("Remaining", f"{remaining:.1f} days")
-            with col4: st.metric("Service", f"{service_years:.1f} years")
-            st.info(entitlement_note)
+            with col3: st.metric("Holiday Booked", f"{holiday_booked:.1f} days")
+            with col4: st.metric("Bank Holiday Used", f"{bank_holiday_used:.1f} days")
+            with col5: st.metric("Remaining", f"{remaining:.1f} days")
+            with col6: st.metric("Service", f"{service_years:.1f} years")
+            st.info(
+                f"Holiday Entitlement {entitlement:.1f} − Holiday Used {holiday_used:.1f} − "
+                f"Holiday Booked {holiday_booked:.1f} − Bank Holiday Used {bank_holiday_used:.1f} − "
+                f"Upcoming Bank Holiday {upcoming_bank_holiday:.1f} = Remaining Balance {remaining:.1f} days. "
+                "Bank holidays are separate from the pure holiday entitlement but are reserved against the available balance."
+            )
             owed1, owed2 = st.columns(2)
             with owed1:
                 st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
@@ -3534,8 +3601,7 @@ def render_hr_portal(current_user_info=None):
 
     # ========== TAB 3: LEAVE ==========
     with tab_leave:
-        st.subheader("📝 HR Leave Request — Record Leave for Employee")
-        st.caption("Use this form when an employee requests leave by email, phone, in person, or another agreed method. HR records the leave on the employee's behalf and it is automatically Approved.")
+        st.subheader("Leave Management")
         if not emp:
             st.info("Select an employee in **Employee Details** first." if is_hr else "No employee record is available.")
         elif is_hr:
@@ -7865,6 +7931,7 @@ def render_employee_hr_reports(current_user_info):
     entitlement = float(entitlement_result[0]) if isinstance(entitlement_result, tuple) else float(entitlement_result)
     entitlement_note = str(entitlement_result[1]) if isinstance(entitlement_result, tuple) and len(entitlement_result) > 1 else ""
     approved_holiday = _hrp_get_approved_holiday_days(linked_id)
+    holiday_used, holiday_booked = _hrp_get_holiday_used_and_booked(linked_id)
 
     # Bank holidays are separate from the employee's pure annual entitlement.
     # Both passed and upcoming bank holidays for the employee's current leave
@@ -7911,7 +7978,7 @@ def render_employee_hr_reports(current_user_info):
     upcoming_bank_holidays = _hrp_get_upcoming_bank_holidays(today + timedelta(days=1), limit=5)
     upcoming_bank_holiday_days = _hrp_get_upcoming_bank_holiday_days_for_employee(employee, today + timedelta(days=1))
     bank_holidays_reserved = round(passed_bank_holiday_days + upcoming_bank_holiday_days, 1)
-    balance = round(pure_balance - bank_holidays_reserved, 1)
+    balance = round(entitlement - holiday_used - holiday_booked - passed_bank_holiday_days - upcoming_bank_holiday_days, 1)
 
     employee_is_left = (
         str(employee.get("status", "")).strip().casefold() == "left"
@@ -7923,6 +7990,8 @@ def render_employee_hr_reports(current_user_info):
         # active holiday entitlement/balance after the employee has left.
         entitlement = 0.0
         approved_holiday = 0.0
+        holiday_used = 0.0
+        holiday_booked = 0.0
         company_closure_reserved = 0.0
         approved_holiday_with_closure = 0.0
         passed_bank_holiday_days = 0.0
@@ -7933,16 +8002,18 @@ def render_employee_hr_reports(current_user_info):
 
     d1, d2, d3, d4, d5, d6 = st.columns(6)
     d1.metric("Holiday Entitlement", f"{entitlement:g} days")
-    d2.metric("Holiday Used / Pre-booked", f"{approved_holiday_with_closure:g} days")
-    d3.metric("Bank Holidays Passed", f"{passed_bank_holiday_days:g} days")
-    d4.metric("Holiday Balance", f"{balance:g} days")
-    if upcoming_bank_holidays:
-        next_bank_date, next_bank_name = upcoming_bank_holidays[0]
-        d5.metric("Upcoming Bank Holiday", next_bank_date.strftime("%d %b %Y"))
-        d5.caption(next_bank_name)
-    else:
-        d5.metric("Upcoming Bank Holiday", "None")
-    d6.metric("Department", employee.get("department", ""))
+    d2.metric("Holiday Used", f"{holiday_used:g} days")
+    d3.metric("Holiday Booked", f"{holiday_booked:g} days")
+    d4.metric("Bank Holiday Used", f"{passed_bank_holiday_days:g} days")
+    d5.metric("Remaining", f"{balance:g} days")
+    d6.metric("Service", f"{service_years:.1f} years")
+
+    st.info(
+        f"Holiday Entitlement {entitlement:g} − Holiday Used {holiday_used:g} − "
+        f"Holiday Booked {holiday_booked:g} − Bank Holiday Used {passed_bank_holiday_days:g} − "
+        f"Upcoming Bank Holiday {upcoming_bank_holiday_days:g} = Remaining Balance {balance:g} days. "
+        "Bank holidays are separate from the pure holiday entitlement but are reserved against the available balance."
+    )
 
     # A departed employee's live balance is intentionally zero, but the HR
     # report should still make the financial close-out visible. Show the latest
