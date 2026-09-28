@@ -170,6 +170,9 @@ drive_service = None
 DRIVE_CONNECTION_ERROR = ""
 DRIVE_LAST_SYNC = {}
 DRIVE_LAST_SYNC_ERROR = {}
+# Tracks the local workbook fingerprint after a successful Drive sync.
+# This is intentionally process-local and is reset safely on Streamlit startup.
+_DRIVE_SYNC_FINGERPRINTS = {}
 # Streamlit reruns the script for every widget interaction.
 # Google Drive sync is deliberately kept synchronous. A background thread that
 # touches Streamlit/pandas/pyarrow on Streamlit Community Cloud can trigger
