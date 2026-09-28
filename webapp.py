@@ -482,57 +482,19 @@ def _sync_saved_file_to_drive_now(local_path):
         return False
 
 
-def _drive_sync_worker():
-    """Upload saved workbooks without blocking the Streamlit button/form response.
-
-    Saves are queued and processed in order. If several UI actions happen quickly,
-    duplicate queued entries for the same workbook are coalesced so Drive receives
-    the latest local workbook instead of making the user wait for multiple uploads.
-    """
-    while True:
-        local_path = _DRIVE_SYNC_QUEUE.get()
-        try:
-            if local_path is None:
-                return
-            _sync_saved_file_to_drive_now(local_path)
-        except Exception as e:
-            print(f"Background Google Drive sync worker error: {e}")
-        finally:
-            with _DRIVE_SYNC_LOCK:
-                DRIVE_PENDING_SYNC.discard(local_path)
-            _DRIVE_SYNC_QUEUE.task_done()
-
-
-_DRIVE_STORAGE_PROCESS_READY = False
-
-# One daemon worker is started once per Streamlit server process. It does not
-# delay page/form rendering; local Excel saves complete first.
-try:
-    _DRIVE_SYNC_WORKER = threading.Thread(target=_drive_sync_worker, name="google-drive-sync", daemon=True)
-    _DRIVE_SYNC_WORKER.start()
-except Exception as e:
-    print(f"Could not start Google Drive background sync worker: {e}")
-
-
 def sync_saved_file_to_drive(local_path):
-    """Queue a Google Drive sync so software saves return immediately.
+    """Synchronise a successfully saved local file to Drive.
 
-    The local workbook is always saved first. The live workbook and the matching
-    BACKUP_ workbook are then uploaded by the background worker. This keeps the
-    software responsive while preserving automatic Drive synchronisation.
+    This runs in the Streamlit request after the local save has completed.
+    Avoiding a long-lived background thread prevents concurrent Google API and
+    workbook activity from surviving Streamlit reruns or app reloads.
     """
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
         msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
         DRIVE_LAST_SYNC_ERROR[filename] = msg
         return False
-
-    with _DRIVE_SYNC_LOCK:
-        # Coalesce repeated saves of the same workbook while one upload is pending.
-        if local_path not in DRIVE_PENDING_SYNC:
-            DRIVE_PENDING_SYNC.add(local_path)
-            _DRIVE_SYNC_QUEUE.put(local_path)
-    return True
+    return _sync_saved_file_to_drive_now(local_path)
 
 
 def ensure_all_drive_backups():
@@ -636,8 +598,7 @@ def render_google_drive_status():
 
         rows = _drive_status_rows()
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        pending = len(DRIVE_PENDING_SYNC)
-        st.caption(f"Every successful software save is queued automatically. Pending Drive uploads: {pending}. Local saves do not wait for Google Drive.")
+        st.caption("Saved workbooks are synchronised to Google Drive after the local save completes.")
 
 @st.cache_resource(show_spinner=False)
 def _initialise_drive_storage_once():
@@ -8068,9 +8029,19 @@ def render_employee_hr_reports(current_user_info):
     row = {}
     for d in dates:
         col = d.strftime("%d %b")
-        if emp_start and d < emp_start:
+        if emp_start is not None and d < emp_start:
             row[col] = "NA"
-        elif emp_leaving and d > emp_leaving:
+            continue
+
+        # Defensive guard: some older/cached employee rows can still carry
+        # pandas.NaT even after normalisation. Never compare NaT to date.
+        after_leaving_date = False
+        if emp_leaving is not None:
+            try:
+                after_leaving_date = (not pd.isna(emp_leaving)) and (d > emp_leaving)
+            except (TypeError, ValueError):
+                after_leaving_date = False
+        if after_leaving_date:
             row[col] = "LEFT"
         else:
             nonwork_code, _ = _hrp_non_working_reason(d)
