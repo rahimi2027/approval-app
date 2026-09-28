@@ -4721,9 +4721,19 @@ def render_hr_department(current_user_info=None, is_super_admin=False, is_direct
         _hrp_render_holiday_calendar()
 
     with tab_leaving:
-        _render_hr_employee_leaving(current_user_info)
-        st.divider()
-        _render_hr_leavers()
+        # Keep all departure-related work together. Leavers is a dedicated
+        # sub-tab so the complete historical employee record is available
+        # without making the Employee Leaving workflow excessively long.
+        leaving_workflow_tab, leavers_history_tab = st.tabs([
+            "🚪 Employee Leaving",
+            "📚 Leavers — Complete Employee History",
+        ])
+
+        with leaving_workflow_tab:
+            _render_hr_employee_leaving(current_user_info)
+
+        with leavers_history_tab:
+            _render_hr_leavers()
 
     with tab_settlement:
         if is_super_admin:
