@@ -167,12 +167,58 @@ drive_service = None
 DRIVE_CONNECTION_ERROR = ""
 DRIVE_LAST_SYNC = {}
 DRIVE_LAST_SYNC_ERROR = {}
-DRIVE_PENDING_SYNC = set()
-_DRIVE_SYNC_QUEUE = queue.Queue()
+# Streamlit reruns the script for every widget interaction.  Process-global
+# objects must therefore live in st.cache_resource rather than being recreated
+# at module level.  In particular, starting a new Google Drive worker thread on
+# every rerun can accumulate daemon threads and eventually crash the Python
+# process with a native segmentation fault.
+class _DriveSyncManager:
+    def __init__(self):
+        self.pending = set()
+        self.queue = queue.Queue()
+        self.lock = threading.RLock()
+        self.callback = None
+        self.thread = threading.Thread(target=self._worker, name="google-drive-sync", daemon=True)
+        self.thread.start()
+
+    def set_callback(self, callback):
+        self.callback = callback
+
+    def enqueue(self, local_path):
+        with self.lock:
+            if local_path not in self.pending:
+                self.pending.add(local_path)
+                self.queue.put(local_path)
+
+    def _worker(self):
+        while True:
+            local_path = self.queue.get()
+            try:
+                if local_path is None:
+                    return
+                callback = self.callback
+                if callback is not None:
+                    callback(local_path)
+            except Exception as e:
+                print(f"Background Google Drive sync worker error: {e}")
+            finally:
+                with self.lock:
+                    self.pending.discard(local_path)
+                self.queue.task_done()
+
+
+@st.cache_resource(show_spinner=False)
+def _get_drive_sync_manager():
+    return _DriveSyncManager()
+
+
+_DRIVE_SYNC_MANAGER = _get_drive_sync_manager()
+DRIVE_PENDING_SYNC = _DRIVE_SYNC_MANAGER.pending
+_DRIVE_SYNC_QUEUE = _DRIVE_SYNC_MANAGER.queue
 
 _DRIVE_ID_CACHE = {}
 _DRIVE_SYNC_FINGERPRINTS = {}
-_DRIVE_SYNC_LOCK = threading.RLock()
+_DRIVE_SYNC_LOCK = _DRIVE_SYNC_MANAGER.lock
 
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
@@ -482,37 +528,13 @@ def _sync_saved_file_to_drive_now(local_path):
         return False
 
 
-def _drive_sync_worker():
-    """Upload saved workbooks without blocking the Streamlit button/form response.
-
-    Saves are queued and processed in order. If several UI actions happen quickly,
-    duplicate queued entries for the same workbook are coalesced so Drive receives
-    the latest local workbook instead of making the user wait for multiple uploads.
-    """
-    while True:
-        local_path = _DRIVE_SYNC_QUEUE.get()
-        try:
-            if local_path is None:
-                return
-            _sync_saved_file_to_drive_now(local_path)
-        except Exception as e:
-            print(f"Background Google Drive sync worker error: {e}")
-        finally:
-            with _DRIVE_SYNC_LOCK:
-                DRIVE_PENDING_SYNC.discard(local_path)
-            _DRIVE_SYNC_QUEUE.task_done()
-
+_DRIVE_SYNC_MANAGER.set_callback(_sync_saved_file_to_drive_now)
 
 _DRIVE_STORAGE_PROCESS_READY = False
 
-# One daemon worker is started once per Streamlit server process. It does not
-# delay page/form rendering; local Excel saves complete first.
-try:
-    _DRIVE_SYNC_WORKER = threading.Thread(target=_drive_sync_worker, name="google-drive-sync", daemon=True)
-    _DRIVE_SYNC_WORKER.start()
-except Exception as e:
-    print(f"Could not start Google Drive background sync worker: {e}")
-
+# The manager above owns exactly one background worker for the Streamlit server
+# process. Update its callback on each rerun so the worker uses the current
+# script's Drive sync implementation without creating another thread.
 
 def sync_saved_file_to_drive(local_path):
     """Queue a Google Drive sync so software saves return immediately.
@@ -527,11 +549,8 @@ def sync_saved_file_to_drive(local_path):
         DRIVE_LAST_SYNC_ERROR[filename] = msg
         return False
 
-    with _DRIVE_SYNC_LOCK:
-        # Coalesce repeated saves of the same workbook while one upload is pending.
-        if local_path not in DRIVE_PENDING_SYNC:
-            DRIVE_PENDING_SYNC.add(local_path)
-            _DRIVE_SYNC_QUEUE.put(local_path)
+    _DRIVE_SYNC_MANAGER.set_callback(_sync_saved_file_to_drive_now)
+    _DRIVE_SYNC_MANAGER.enqueue(local_path)
     return True
 
 
@@ -1928,60 +1947,6 @@ def _hrp_get_leaving_entitlement(employee, leaving_date):
         "net": pure_entitlement,
         "note": f"Pure holiday entitlement to leaving date: {pure_entitlement:.1f} days. {bank_days:.1f} bank holiday day(s) occurred in the employment period; none are deducted.",
     }
-
-def _hrp_get_holiday_used_and_booked(employee_id, as_of=None):
-    """Return approved annual leave split into used (up to today) and booked (future).
-
-    Company Christmas closure days (29-31 December) are treated as pre-booked
-    annual holiday, so past closure days are included in Used and future closure
-    days are included in Booked.
-    """
-    employee = _hrp_get_employee(employee_id)
-    if not employee:
-        return 0.0, 0.0
-    today = as_of or date.today()
-    records = st.session_state.get("hrp_leave_records")
-    if records is None:
-        records = _hrp_load_leave_records()
-        st.session_state.hrp_leave_records = records
-
-    used = 0.0
-    booked = 0.0
-    target = str(employee_id).strip().casefold()
-    for r in records:
-        if str(r.get("employee_id", "")).strip().casefold() != target:
-            continue
-        if str(r.get("status", "Approved")).strip().casefold() != "approved":
-            continue
-        if r.get("type") not in HR_PORTAL_HOLIDAY_LEAVE_TYPES:
-            continue
-        d_from, d_to = r.get("date_from"), r.get("date_to")
-        if not isinstance(d_from, date) or not isinstance(d_to, date) or d_to < d_from:
-            continue
-        if d_from <= today:
-            used_to = min(d_to, today)
-            if used_to >= d_from:
-                used += _hrp_calculate_leave_days(r.get("type"), d_from, used_to)
-        if d_to > today:
-            booked_from = max(d_from, today + timedelta(days=1))
-            if d_to >= booked_from:
-                booked += _hrp_calculate_leave_days(r.get("type"), booked_from, d_to)
-
-    # Acoole's 29-31 December closure is pre-booked annual holiday.
-    start_date = employee.get("start_date")
-    if not isinstance(start_date, date):
-        try:
-            start_date = pd.to_datetime(start_date).date()
-        except Exception:
-            start_date = today
-    year_end = date(today.year, 12, 31)
-    if start_date <= today:
-        used += _hrp_get_company_closure_holiday_days(employee, start_date, min(today, year_end))
-    if today < year_end:
-        booked += _hrp_get_company_closure_holiday_days(employee, max(today + timedelta(days=1), start_date), year_end)
-
-    return round(used, 1), round(booked, 1)
-
 
 def _hrp_get_approved_holiday_days_to_date(employee_id, end_date):
     """Approved annual leave used up to a leaving date."""
@@ -3540,31 +3505,15 @@ def render_hr_portal(current_user_info=None):
             st.divider()
             st.subheader("📅 Holiday Allowance")
             entitlement, entitlement_note, service_years, calculated_base = _hrp_get_employee_entitlement(emp)
-            holiday_used, holiday_booked = _hrp_get_holiday_used_and_booked(emp["emp_id"])
-            today = date.today()
-            start_date = emp.get("start_date")
-            if not isinstance(start_date, date):
-                try:
-                    start_date = pd.to_datetime(start_date).date()
-                except Exception:
-                    start_date = today
-            bank_holiday_used = _hrp_get_bank_holiday_days(emp, start_date, today)
-            upcoming_bank_holiday = _hrp_get_upcoming_bank_holiday_days_for_employee(emp, today + timedelta(days=1))
-            remaining = round(entitlement - holiday_used - holiday_booked - bank_holiday_used - upcoming_bank_holiday, 1)
+            holiday_used = _hrp_get_approved_holiday_days(emp["emp_id"])
+            remaining = entitlement - holiday_used
             holiday_position = _hrp_get_holiday_position(emp["emp_id"])
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            col1, col2, col3, col4 = st.columns(4)
             with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
             with col2: st.metric("Holiday Used", f"{holiday_used:.1f} days")
-            with col3: st.metric("Holiday Booked", f"{holiday_booked:.1f} days")
-            with col4: st.metric("Bank Holiday Used", f"{bank_holiday_used:.1f} days")
-            with col5: st.metric("Remaining", f"{remaining:.1f} days")
-            with col6: st.metric("Service", f"{service_years:.1f} years")
-            st.info(
-                f"Holiday Entitlement {entitlement:.1f} − Holiday Used {holiday_used:.1f} − "
-                f"Holiday Booked {holiday_booked:.1f} − Bank Holiday Used {bank_holiday_used:.1f} − "
-                f"Upcoming Bank Holiday {upcoming_bank_holiday:.1f} = Remaining Balance {remaining:.1f} days. "
-                "Bank holidays are separate from the pure holiday entitlement but are reserved against the available balance."
-            )
+            with col3: st.metric("Remaining", f"{remaining:.1f} days")
+            with col4: st.metric("Service", f"{service_years:.1f} years")
+            st.info(entitlement_note)
             owed1, owed2 = st.columns(2)
             with owed1:
                 st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
@@ -7914,8 +7863,14 @@ def render_employee_hr_reports(current_user_info):
         st.error("❌ Your account is not linked to an Employee ID. Please contact Super Admin.")
         return
 
-    employees = _hrp_load_employees()
-    leave_records = _hrp_load_leave_records()
+    employees = st.session_state.get("hrp_employees")
+    if employees is None:
+        employees = _hrp_load_employees()
+        st.session_state.hrp_employees = employees
+    leave_records = st.session_state.get("hrp_leave_records")
+    if leave_records is None:
+        leave_records = _hrp_load_leave_records()
+        st.session_state.hrp_leave_records = leave_records
     employee = next((e for e in employees if str(e.get("emp_id", "")).strip().casefold() == linked_id.casefold()), None)
     if not employee:
         st.subheader("👤 My HR Reports")
@@ -7931,7 +7886,6 @@ def render_employee_hr_reports(current_user_info):
     entitlement = float(entitlement_result[0]) if isinstance(entitlement_result, tuple) else float(entitlement_result)
     entitlement_note = str(entitlement_result[1]) if isinstance(entitlement_result, tuple) and len(entitlement_result) > 1 else ""
     approved_holiday = _hrp_get_approved_holiday_days(linked_id)
-    holiday_used, holiday_booked = _hrp_get_holiday_used_and_booked(linked_id)
 
     # Bank holidays are separate from the employee's pure annual entitlement.
     # Both passed and upcoming bank holidays for the employee's current leave
@@ -7978,7 +7932,7 @@ def render_employee_hr_reports(current_user_info):
     upcoming_bank_holidays = _hrp_get_upcoming_bank_holidays(today + timedelta(days=1), limit=5)
     upcoming_bank_holiday_days = _hrp_get_upcoming_bank_holiday_days_for_employee(employee, today + timedelta(days=1))
     bank_holidays_reserved = round(passed_bank_holiday_days + upcoming_bank_holiday_days, 1)
-    balance = round(entitlement - holiday_used - holiday_booked - passed_bank_holiday_days - upcoming_bank_holiday_days, 1)
+    balance = round(pure_balance - bank_holidays_reserved, 1)
 
     employee_is_left = (
         str(employee.get("status", "")).strip().casefold() == "left"
@@ -7990,8 +7944,6 @@ def render_employee_hr_reports(current_user_info):
         # active holiday entitlement/balance after the employee has left.
         entitlement = 0.0
         approved_holiday = 0.0
-        holiday_used = 0.0
-        holiday_booked = 0.0
         company_closure_reserved = 0.0
         approved_holiday_with_closure = 0.0
         passed_bank_holiday_days = 0.0
@@ -8002,18 +7954,16 @@ def render_employee_hr_reports(current_user_info):
 
     d1, d2, d3, d4, d5, d6 = st.columns(6)
     d1.metric("Holiday Entitlement", f"{entitlement:g} days")
-    d2.metric("Holiday Used", f"{holiday_used:g} days")
-    d3.metric("Holiday Booked", f"{holiday_booked:g} days")
-    d4.metric("Bank Holiday Used", f"{passed_bank_holiday_days:g} days")
-    d5.metric("Remaining", f"{balance:g} days")
-    d6.metric("Service", f"{service_years:.1f} years")
-
-    st.info(
-        f"Holiday Entitlement {entitlement:g} − Holiday Used {holiday_used:g} − "
-        f"Holiday Booked {holiday_booked:g} − Bank Holiday Used {passed_bank_holiday_days:g} − "
-        f"Upcoming Bank Holiday {upcoming_bank_holiday_days:g} = Remaining Balance {balance:g} days. "
-        "Bank holidays are separate from the pure holiday entitlement but are reserved against the available balance."
-    )
+    d2.metric("Holiday Used / Pre-booked", f"{approved_holiday_with_closure:g} days")
+    d3.metric("Bank Holidays Passed", f"{passed_bank_holiday_days:g} days")
+    d4.metric("Holiday Balance", f"{balance:g} days")
+    if upcoming_bank_holidays:
+        next_bank_date, next_bank_name = upcoming_bank_holidays[0]
+        d5.metric("Upcoming Bank Holiday", next_bank_date.strftime("%d %b %Y"))
+        d5.caption(next_bank_name)
+    else:
+        d5.metric("Upcoming Bank Holiday", "None")
+    d6.metric("Department", employee.get("department", ""))
 
     # A departed employee's live balance is intentionally zero, but the HR
     # report should still make the financial close-out visible. Show the latest
