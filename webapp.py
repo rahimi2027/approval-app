@@ -8070,7 +8070,17 @@ def render_employee_hr_reports(current_user_info):
         emp_start = None
     raw_leaving = employee.get("leaving_date", "")
     try:
-        emp_leaving = raw_leaving if isinstance(raw_leaving, date) else (pd.to_datetime(raw_leaving).date() if str(raw_leaving).strip() else None)
+        # Pandas NaT is truthy and its .date() remains NaT. Comparing a
+        # datetime.date with NaT raises TypeError inside pandas' native
+        # timestamp comparison code. Normalise every missing/invalid leaving
+        # date to plain Python None before the calendar comparison below.
+        if raw_leaving is None or pd.isna(raw_leaving) or not str(raw_leaving).strip():
+            emp_leaving = None
+        elif isinstance(raw_leaving, date) and not isinstance(raw_leaving, pd.Timestamp):
+            emp_leaving = raw_leaving
+        else:
+            parsed_leaving = pd.to_datetime(raw_leaving, errors="coerce")
+            emp_leaving = None if pd.isna(parsed_leaving) else parsed_leaving.date()
     except Exception:
         emp_leaving = None
     row = {}
