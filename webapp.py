@@ -36,32 +36,183 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
 
-st.markdown("""
-    <style>
-    .block-container {
-        padding-top: 2rem !important;
-        padding-left: 0.3rem !important;
-        padding-right: 2rem !important;
-        max-width: 1400px !important;
-        width: 90% !important;
-    }
-    section[data-testid="stSidebar"] { width: 320px !important; }
-    section[data-testid="stSidebar"] > div:first-child > div {
-        padding-left: 0.2rem !important;
-        padding-right: 0.2rem !important;
-    }
-    section[data-testid="stSidebar"] > div:first-child { align-items: flex-start !important; }
-    .streamlit-expander { width: 100% !important; margin: 0 !important; padding-left: 0 !important; }
-    .streamlit-expanderHeader { justify-content: flex-start !important; padding-left: 0.5rem !important; }
-    .streamlit-expanderContent {
-        width: 100% !important; box-sizing: border-box !important;
-        padding: 0.5rem !important; padding-left: 0.3rem !important; text-align: left !important;
-    }
-    .streamlit-expanderContent form { width: 100% !important; box-sizing: border-box !important; padding: 0 !important; margin: 0 !important; }
-    .streamlit-expanderContent label { text-align: left !important; justify-content: flex-start !important; padding-left: 0.2rem !important; }
-    .streamlit-expanderContent input { width: 100% !important; box-sizing: border-box !important; }
-    .streamlit-expanderContent .stButton > button { width: 100% !important; box-sizing: border-box !important; margin-top: 0.5rem !important; }
-    </style>
+st.markdown(r"""
+<style>
+/* =========================================================
+   ACOOLE PORTAL — v4.30 PROFESSIONAL UI SYSTEM
+   Presentation layer only: no business/data/workflow changes.
+   ========================================================= */
+:root {
+  --acoole-navy:#0b1f3a;
+  --acoole-blue:#1769e0;
+  --acoole-blue-2:#2f80ed;
+  --acoole-ink:#172033;
+  --acoole-muted:#667085;
+  --acoole-line:#e5e7eb;
+  --acoole-bg:#f5f7fb;
+  --acoole-card:#ffffff;
+  --acoole-success:#15803d;
+  --acoole-warning:#b45309;
+  --acoole-danger:#b42318;
+  --acoole-radius:14px;
+  --acoole-shadow:0 4px 18px rgba(15,23,42,.06);
+}
+
+/* App canvas */
+.stApp { background:var(--acoole-bg); color:var(--acoole-ink); }
+.block-container {
+  max-width:1480px !important;
+  padding-top:1.35rem !important;
+  padding-bottom:3rem !important;
+  padding-left:2rem !important;
+  padding-right:2rem !important;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+  width:300px !important;
+  background:linear-gradient(180deg,#0b1f3a 0%,#102b4f 100%) !important;
+  border-right:0 !important;
+}
+section[data-testid="stSidebar"] > div:first-child {
+  padding:1.1rem .8rem 1.5rem !important;
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] span { color:#e8eef8; }
+section[data-testid="stSidebar"] .stButton > button {
+  background:rgba(255,255,255,.07) !important;
+  color:#f8fafc !important;
+  border:1px solid rgba(255,255,255,.09) !important;
+  box-shadow:none !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+  background:rgba(255,255,255,.14) !important;
+  border-color:rgba(255,255,255,.18) !important;
+}
+
+/* Typography */
+h1,h2,h3,h4 { color:var(--acoole-ink) !important; letter-spacing:-.025em; }
+h1 { font-size:2rem !important; font-weight:750 !important; }
+h2 { font-size:1.45rem !important; font-weight:720 !important; }
+h3 { font-size:1.15rem !important; font-weight:700 !important; }
+[data-testid="stCaptionContainer"] { color:var(--acoole-muted) !important; }
+
+/* Tabs */
+button[data-baseweb="tab"] {
+  color:#667085 !important;
+  font-weight:650 !important;
+  border-radius:10px 10px 0 0 !important;
+  padding:10px 16px !important;
+}
+button[data-baseweb="tab"][aria-selected="true"] {
+  color:var(--acoole-blue) !important;
+  background:#fff !important;
+}
+div[data-baseweb="tab-highlight"] { background:var(--acoole-blue) !important; height:3px !important; }
+div[data-baseweb="tab-list"] {
+  gap:4px !important;
+  border-bottom:1px solid var(--acoole-line) !important;
+  margin-bottom:1rem !important;
+}
+
+/* Cards / expanders */
+[data-testid="stExpander"] {
+  background:var(--acoole-card) !important;
+  border:1px solid var(--acoole-line) !important;
+  border-radius:var(--acoole-radius) !important;
+  box-shadow:var(--acoole-shadow) !important;
+  overflow:hidden !important;
+  margin-bottom:.8rem !important;
+}
+[data-testid="stExpander"] summary {
+  padding:.85rem 1rem !important;
+  font-weight:650 !important;
+}
+[data-testid="stExpander"] summary:hover { background:#f8fafc !important; }
+
+/* Forms and inputs */
+div[data-testid="stForm"] {
+  background:#fff !important;
+  border:1px solid var(--acoole-line) !important;
+  border-radius:var(--acoole-radius) !important;
+  padding:1.15rem !important;
+  box-shadow:var(--acoole-shadow) !important;
+}
+div[data-baseweb="input"], div[data-baseweb="select"], div[data-baseweb="textarea"] {
+  border-radius:10px !important;
+}
+input, textarea { border-radius:10px !important; }
+label[data-testid="stWidgetLabel"] p { font-weight:600 !important; color:#344054 !important; }
+
+/* Buttons */
+.stButton > button, .stDownloadButton > button {
+  min-height:40px !important;
+  border-radius:10px !important;
+  font-weight:650 !important;
+  border:1px solid #d0d5dd !important;
+  box-shadow:none !important;
+  transition:all .15s ease !important;
+}
+.stButton > button:hover, .stDownloadButton > button:hover {
+  transform:translateY(-1px) !important;
+  box-shadow:0 4px 10px rgba(15,23,42,.08) !important;
+}
+.stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"] {
+  background:var(--acoole-blue) !important;
+  border-color:var(--acoole-blue) !important;
+  color:#fff !important;
+}
+
+/* Metrics */
+div[data-testid="stMetric"] {
+  background:#fff !important;
+  border:1px solid var(--acoole-line) !important;
+  border-radius:var(--acoole-radius) !important;
+  padding:1rem 1.05rem !important;
+  box-shadow:var(--acoole-shadow) !important;
+}
+div[data-testid="stMetricLabel"] { color:var(--acoole-muted) !important; font-weight:650 !important; }
+div[data-testid="stMetricValue"] { color:var(--acoole-navy) !important; font-weight:760 !important; }
+
+/* Alerts */
+div[data-testid="stAlert"] { border-radius:12px !important; border-width:1px !important; }
+
+/* Tables / dataframe */
+div[data-testid="stDataFrame"] {
+  border:1px solid var(--acoole-line) !important;
+  border-radius:12px !important;
+  overflow:hidden !important;
+  box-shadow:var(--acoole-shadow) !important;
+}
+
+/* Uploaders */
+section[data-testid="stFileUploaderDropzone"] {
+  border:1px dashed #b8c2d1 !important;
+  border-radius:12px !important;
+  background:#f8fafc !important;
+}
+
+/* Dividers */
+hr { border-color:var(--acoole-line) !important; }
+
+/* Common two-column spacing */
+[data-testid="column"] { min-width:0 !important; }
+
+/* Login / centered content helpers already used by the app */
+div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stImage"]) img { border-radius:14px; }
+
+/* Mobile / laptop */
+@media (max-width: 900px) {
+  .block-container { padding-left:1rem !important; padding-right:1rem !important; }
+  section[data-testid="stSidebar"] { width:260px !important; }
+  h1 { font-size:1.6rem !important; }
+}
+@media (max-width: 640px) {
+  .block-container { padding-left:.7rem !important; padding-right:.7rem !important; }
+  button[data-baseweb="tab"] { padding:8px 10px !important; font-size:.85rem !important; }
+}
+</style>
 """, unsafe_allow_html=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
