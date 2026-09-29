@@ -170,6 +170,8 @@ drive_service = None
 DRIVE_CONNECTION_ERROR = ""
 DRIVE_LAST_SYNC = {}
 DRIVE_LAST_SYNC_ERROR = {}
+# Process-local fingerprints used to track successful Google Drive syncs.
+_DRIVE_SYNC_FINGERPRINTS = {}
 # Streamlit reruns the script for every widget interaction.
 # Google Drive sync is deliberately kept synchronous. A background thread that
 # touches Streamlit/pandas/pyarrow on Streamlit Community Cloud can trigger
@@ -6674,6 +6676,20 @@ def _super_admin_transaction_control():
                 new_agreement=c2.selectbox("Agreement Type", agreements, index=ag_idx)
                 statuses=["Active","Inactive","Left"]; st_idx=statuses.index(emp.get("status")) if emp.get("status") in statuses else 0
                 new_status=c1.selectbox("Status", statuses, index=st_idx)
+                if str(emp.get("status", "")).strip().casefold() == "left":
+                    st.info("↩️ This employee is currently marked as Left. To reactivate them, select Active above and save the employee record. Their historical leave and settlement records are retained.")
+                    if st.button("↩️ Reactivate Left Employee", key=f"sa_reactivate_left_{old_id}", type="secondary", width="stretch"):
+                        emp["status"] = "Active"
+                        emp["leaving_date"] = None
+                        emp["leaving_reason"] = ""
+                        pd.DataFrame([{
+                            "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
+                        sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
+                        st.session_state.hrp_employees = employees
+                        log_action("SUPER_ADMIN_EMPLOYEE_REACTIVATED", old_id, old_data={"employee_id":old_id,"status":"Left"}, new_data={"employee_id":old_id,"status":"Active"}, decision_by="Super Admin", decision_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                        st.success(f"✅ {emp.get('name', old_id)} has been reactivated. Historical records have been retained.")
+                        st.rerun()
                 patterns=["Regular hours","Irregular hours / Part-Year"]; wp_idx=patterns.index(emp.get("working_pattern")) if emp.get("working_pattern") in patterns else 0
                 new_pattern=c2.selectbox("Working Pattern", patterns, index=wp_idx)
                 new_days=c1.number_input("Days Worked Per Week", min_value=0.0, max_value=7.0, step=0.5, value=float(emp.get("days_per_week",5)))
