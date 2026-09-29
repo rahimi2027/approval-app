@@ -36,199 +36,32 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
 
-st.markdown(r"""
-<style>
-/* =========================================================
-   ACOOLE PORTAL — v4.30 PROFESSIONAL UI SYSTEM
-   Presentation layer only: no business/data/workflow changes.
-   ========================================================= */
-:root {
-  --acoole-navy:#0b1f3a;
-  --acoole-blue:#1769e0;
-  --acoole-blue-2:#2f80ed;
-  --acoole-ink:#172033;
-  --acoole-muted:#667085;
-  --acoole-line:#e5e7eb;
-  --acoole-bg:#f5f7fb;
-  --acoole-card:#ffffff;
-  --acoole-success:#15803d;
-  --acoole-warning:#b45309;
-  --acoole-danger:#b42318;
-  --acoole-radius:14px;
-  --acoole-shadow:0 4px 18px rgba(15,23,42,.06);
-}
-
-/* App canvas */
-.stApp { background:var(--acoole-bg); color:var(--acoole-ink); }
-.block-container {
-  max-width:1480px !important;
-  padding-top:1.35rem !important;
-  padding-bottom:3rem !important;
-  padding-left:2rem !important;
-  padding-right:2rem !important;
-}
-
-/* Sidebar */
-section[data-testid="stSidebar"] {
-  width:300px !important;
-  background:linear-gradient(180deg,#0b1f3a 0%,#102b4f 100%) !important;
-  border-right:0 !important;
-}
-section[data-testid="stSidebar"] > div:first-child {
-  padding:1.1rem .8rem 1.5rem !important;
-}
-section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] span { color:#e8eef8; }
-section[data-testid="stSidebar"] .stButton > button {
-  background:rgba(255,255,255,.07) !important;
-  color:#f8fafc !important;
-  border:1px solid rgba(255,255,255,.09) !important;
-  box-shadow:none !important;
-}
-section[data-testid="stSidebar"] .stButton > button:hover {
-  background:rgba(255,255,255,.14) !important;
-  border-color:rgba(255,255,255,.18) !important;
-}
-
-/* Typography */
-h1,h2,h3,h4 { color:var(--acoole-ink) !important; letter-spacing:-.025em; }
-h1 { font-size:2rem !important; font-weight:750 !important; }
-h2 { font-size:1.45rem !important; font-weight:720 !important; }
-h3 { font-size:1.15rem !important; font-weight:700 !important; }
-[data-testid="stCaptionContainer"] { color:var(--acoole-muted) !important; }
-
-/* Tabs */
-button[data-baseweb="tab"] {
-  color:#667085 !important;
-  font-weight:650 !important;
-  border-radius:10px 10px 0 0 !important;
-  padding:10px 16px !important;
-}
-button[data-baseweb="tab"][aria-selected="true"] {
-  color:var(--acoole-blue) !important;
-  background:#fff !important;
-}
-div[data-baseweb="tab-highlight"] { background:var(--acoole-blue) !important; height:3px !important; }
-div[data-baseweb="tab-list"] {
-  gap:4px !important;
-  border-bottom:1px solid var(--acoole-line) !important;
-  margin-bottom:1rem !important;
-}
-
-/* Cards / expanders */
-[data-testid="stExpander"] {
-  background:var(--acoole-card) !important;
-  border:1px solid var(--acoole-line) !important;
-  border-radius:var(--acoole-radius) !important;
-  box-shadow:var(--acoole-shadow) !important;
-  overflow:hidden !important;
-  margin-bottom:.8rem !important;
-}
-[data-testid="stExpander"] summary {
-  padding:.85rem 1rem !important;
-  font-weight:650 !important;
-}
-[data-testid="stExpander"] summary:hover { background:#f8fafc !important; }
-
-/* Forms and inputs */
-div[data-testid="stForm"] {
-  background:#fff !important;
-  border:1px solid var(--acoole-line) !important;
-  border-radius:var(--acoole-radius) !important;
-  padding:1.15rem !important;
-  box-shadow:var(--acoole-shadow) !important;
-}
-div[data-baseweb="input"], div[data-baseweb="select"], div[data-baseweb="textarea"] {
-  border-radius:10px !important;
-}
-input, textarea { border-radius:10px !important; }
-label[data-testid="stWidgetLabel"] p { font-weight:600 !important; color:#344054 !important; }
-
-/* Buttons */
-.stButton > button, .stDownloadButton > button {
-  min-height:40px !important;
-  border-radius:10px !important;
-  font-weight:650 !important;
-  border:1px solid #d0d5dd !important;
-  box-shadow:none !important;
-  transition:all .15s ease !important;
-}
-.stButton > button:hover, .stDownloadButton > button:hover {
-  transform:translateY(-1px) !important;
-  box-shadow:0 4px 10px rgba(15,23,42,.08) !important;
-}
-.stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"] {
-  background:var(--acoole-blue) !important;
-  border-color:var(--acoole-blue) !important;
-  color:#fff !important;
-}
-
-/* Metrics */
-div[data-testid="stMetric"] {
-  background:#fff !important;
-  border:1px solid var(--acoole-line) !important;
-  border-radius:var(--acoole-radius) !important;
-  padding:1rem 1.05rem !important;
-  box-shadow:var(--acoole-shadow) !important;
-}
-div[data-testid="stMetricLabel"] { color:var(--acoole-muted) !important; font-weight:650 !important; }
-div[data-testid="stMetricValue"] { color:var(--acoole-navy) !important; font-weight:760 !important; }
-
-/* Alerts */
-div[data-testid="stAlert"] { border-radius:12px !important; border-width:1px !important; }
-
-/* Tables / dataframe */
-div[data-testid="stDataFrame"] {
-  border:1px solid var(--acoole-line) !important;
-  border-radius:12px !important;
-  overflow:hidden !important;
-  box-shadow:var(--acoole-shadow) !important;
-}
-
-/* Uploaders */
-section[data-testid="stFileUploaderDropzone"] {
-  border:1px dashed #b8c2d1 !important;
-  border-radius:12px !important;
-  background:#f8fafc !important;
-}
-
-/* Dividers */
-hr { border-color:var(--acoole-line) !important; }
-
-/* Common two-column spacing */
-[data-testid="column"] { min-width:0 !important; }
-
-/* Login / centered content helpers already used by the app */
-div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stImage"]) img { border-radius:14px; }
-
-/* Professional navigation / account controls */
-.acoole-account {
-  padding:.65rem .75rem; margin:.35rem 0 .7rem; border:1px solid rgba(255,255,255,.12);
-  border-radius:10px; background:rgba(255,255,255,.06);
-}
-.acoole-account strong { display:block; color:#fff; font-size:.9rem; }
-.acoole-account span { display:block; color:#a9bad2; font-size:.75rem; margin-top:.15rem; }
-section[data-testid="stSidebar"] .stSelectbox label p { color:#cbd5e1 !important; font-size:.74rem !important; text-transform:uppercase; letter-spacing:.08em; font-weight:700 !important; }
-.nav-card {
-  background:#fff; border:1px solid var(--acoole-line); border-radius:14px; padding:.7rem .85rem;
-  margin:0 0 1.1rem; box-shadow:var(--acoole-shadow);
-}
-.nav-card-label { color:#667085; font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; font-weight:750; margin-bottom:.25rem; }
-/* Keep Streamlit tab controls visually secondary where legacy sub-tabs remain */
-[data-baseweb="tab-list"] { background:transparent !important; }
-
-/* Mobile / laptop */
-@media (max-width: 900px) {
-  .block-container { padding-left:1rem !important; padding-right:1rem !important; }
-  section[data-testid="stSidebar"] { width:260px !important; }
-  h1 { font-size:1.6rem !important; }
-}
-@media (max-width: 640px) {
-  .block-container { padding-left:.7rem !important; padding-right:.7rem !important; }
-  button[data-baseweb="tab"] { padding:8px 10px !important; font-size:.85rem !important; }
-}
-</style>
+st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 2rem !important;
+        padding-left: 0.3rem !important;
+        padding-right: 2rem !important;
+        max-width: 1400px !important;
+        width: 90% !important;
+    }
+    section[data-testid="stSidebar"] { width: 320px !important; }
+    section[data-testid="stSidebar"] > div:first-child > div {
+        padding-left: 0.2rem !important;
+        padding-right: 0.2rem !important;
+    }
+    section[data-testid="stSidebar"] > div:first-child { align-items: flex-start !important; }
+    .streamlit-expander { width: 100% !important; margin: 0 !important; padding-left: 0 !important; }
+    .streamlit-expanderHeader { justify-content: flex-start !important; padding-left: 0.5rem !important; }
+    .streamlit-expanderContent {
+        width: 100% !important; box-sizing: border-box !important;
+        padding: 0.5rem !important; padding-left: 0.3rem !important; text-align: left !important;
+    }
+    .streamlit-expanderContent form { width: 100% !important; box-sizing: border-box !important; padding: 0 !important; margin: 0 !important; }
+    .streamlit-expanderContent label { text-align: left !important; justify-content: flex-start !important; padding-left: 0.2rem !important; }
+    .streamlit-expanderContent input { width: 100% !important; box-sizing: border-box !important; }
+    .streamlit-expanderContent .stButton > button { width: 100% !important; box-sizing: border-box !important; margin-top: 0.5rem !important; }
+    </style>
 """, unsafe_allow_html=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -8546,21 +8379,12 @@ if not st.session_state.logged_in:
             else: st.error("❌ Invalid Username or Password. Please try again.")
     st.stop()
 
-# Compact account controls live in the sidebar so the workspace remains uncluttered.
-with st.sidebar:
-    st.markdown("---")
-    st.markdown("**ACCOUNT**")
-    account_name = st.session_state.get("user_info", {}).get("full_name", "User")
-    account_role = st.session_state.get("user_info", {}).get("role", "")
-    st.markdown(f"<div class=\"acoole-account\"><strong>{account_name}</strong><span>{account_role}</span></div>", unsafe_allow_html=True)
-    c_refresh, c_logout = st.columns(2)
-    with c_refresh:
-        if st.button("↻ Refresh", key="sidebar_refresh", use_container_width=True):
-            refresh_data_button()
-    with c_logout:
-        if st.button("⎋ Logout", key="sidebar_logout", use_container_width=True):
-            st.session_state.clear()
-            st.rerun()
+col_left, col_right = st.columns([4, 1])
+with col_left: refresh_data_button()
+with col_right:
+    if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
+        st.session_state.clear()
+        st.rerun()
 
 display_company_header()
 
@@ -8979,8 +8803,8 @@ elif role == "Payroll":
         "💰 National Grid Inspector Bonus"
     ])
     with tab_add_ded:
-        request_status = st.selectbox("Request status", ["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"], key="director_request_status")
-        if request_status == "⏳ Pending Requests":
+        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+        with tab_pending:
             pending = [r for r in all_live_requests if r.get("status") == "pending"]
             if not pending: st.success("✅ No pending requests!")
             else:
@@ -8997,7 +8821,7 @@ elif role == "Payroll":
                         st.info(f"📝 **Description:** {req.get('desc')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
-        if request_status == "✅ Approved Requests":
+        with tab_approved:
             approved = [r for r in all_live_requests if r.get("status") == "approved"]
             if not approved: st.info("📋 No approved requests.")
             else:
@@ -9012,7 +8836,7 @@ elif role == "Payroll":
                         st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
-        if request_status == "❌ Rejected Requests":
+        with tab_rejected:
             rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
             if not rejected: st.success("✅ No rejected requests!")
             else:
@@ -9181,10 +9005,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
         st.subheader("🔐 Access Restricted")
         st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
     else:
-        st.markdown('<div class="nav-card"><div class="nav-card-label">Workspace</div></div>', unsafe_allow_html=True)
-        selected_module = st.selectbox("Module", labels, key="manager_module_navigation", label_visibility="visible")
+        tabs = st.tabs(labels)
+        tab_idx = 0
         if has_addition_deduction:
-            if selected_module == "➕ Addition & Deduction":
+            with tabs[tab_idx]:
                 if st.session_state.get("editing_request_id"):
                     eid = st.session_state.editing_request_id
                     rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
@@ -9300,11 +9124,13 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 if status in ["pending", "rejected"]:
                                     if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
                                         st.session_state.editing_request_id = req.get("id"); st.rerun()
+            tab_idx += 1
         if has_hr_leave:
-            if selected_module == "🏢 HR Department":
+            with tabs[tab_idx]:
                 render_hr_department(current_user_info=user_info, has_hr_access=True, director_name=full_name)
+            tab_idx += 1
         if has_leave_request:
-            if selected_module == "📝 Leave Request By Departments":
+            with tabs[tab_idx]:
                 # HR Managers use this module as the approval inbox for requests
                 # submitted by department managers. They do not submit their own
                 # leave through this workflow; HR direct-entry remains in the HR
@@ -9315,24 +9141,31 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     render_hr_leave_approvals()
                 else:
                     render_department_manager_leave_request(current_user_info=user_info)
+            tab_idx += 1
         if has_employee_hr_reports:
-            if selected_module == "👤 My HR Report":
+            with tabs[tab_idx]:
                 render_employee_hr_reports(user_info)
+            tab_idx += 1
         if has_store_deduction:
-            if selected_module == "📦 Store Deduction":
+            with tabs[tab_idx]:
                 render_store_deduction_form(full_name, dept_name)
+            tab_idx += 1
         if has_store_deduction:
-            if selected_module == "📦 Store Return (Addition)":
+            with tabs[tab_idx]:
                 render_store_return_form(full_name, dept_name)
+            tab_idx += 1
         if has_store_deduction:
-            if selected_module == "📋 My Submitted Store Requests":
+            with tabs[tab_idx]:
                 render_store_my_submissions(full_name)
+            tab_idx += 1
         if has_work_orders:
-            if selected_module == "🛠️ Work Orders":
+            with tabs[tab_idx]:
                 render_work_order_employee_portal(full_name, dept_name)
+            tab_idx += 1
         if has_inspector_bonus:
-            if selected_module == "💰 National Grid Inspector Bonus":
+            with tabs[tab_idx]:
                 render_inspector_bonus_portal(full_name, dept_name)
+            tab_idx += 1
 
 elif role == "Director":
     # Director approval modules remain available as before. HR/report access is
@@ -9352,16 +9185,23 @@ elif role == "Director":
     ]
     if director_hr_access_enabled:
         director_tab_labels.insert(1, "📊 HR Reports & Calendar")
-    st.markdown('<div class="nav-card"><div class="nav-card-label">Director Workspace</div></div>', unsafe_allow_html=True)
-    director_module = st.selectbox("Module", director_tab_labels, key="director_module_navigation")
-    director_addition_tab = director_module == "➕ Addition & Deduction"
-    director_hr_access_tab = director_module == "📊 HR Reports & Calendar" if director_hr_access_enabled else False
-    director_hr_leave_tab = director_module == "👥 HR Leave Settlement"
-    director_store_ded_tab = director_module == "📦 Store Deductions"
-    director_store_ret_tab = director_module == "📦 Store Returns (Additions)"
-    director_work_order_tab = director_module == "🛠️ Work Orders"
-    director_inspector_tab = director_module == "💰 National Grid Inspector Bonus"
-    if director_addition_tab:
+    director_tabs = st.tabs(director_tab_labels)
+    director_addition_tab = director_tabs[0]
+    if director_hr_access_enabled:
+        director_hr_access_tab = director_tabs[1]
+        director_hr_leave_tab = director_tabs[2]
+        director_store_ded_tab = director_tabs[3]
+        director_store_ret_tab = director_tabs[4]
+        director_work_order_tab = director_tabs[5]
+        director_inspector_tab = director_tabs[6]
+    else:
+        director_hr_access_tab = None
+        director_hr_leave_tab = director_tabs[1]
+        director_store_ded_tab = director_tabs[2]
+        director_store_ret_tab = director_tabs[3]
+        director_work_order_tab = director_tabs[4]
+        director_inspector_tab = director_tabs[5]
+    with director_addition_tab:
         st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
         st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
@@ -9418,7 +9258,7 @@ elif role == "Director":
                                             break
                                     save_all_records(records); log_action("REJECTED", req_id)
                                     st.error(f"❌ Request #{req_id} REJECTED."); st.rerun()
-        if request_status == "✅ All Approved":
+        with tab_approved:
             approved = [r for r in all_live_requests if r.get("status") == "approved"]
             if not approved: st.info("📋 No approved requests yet.")
             else:
@@ -9457,7 +9297,7 @@ elif role == "Director":
                                             break
                                     save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
                                     st.success(f"✅ Request #{req_id} changed to Rejected."); st.rerun()
-        if request_status == "❌ All Rejected":
+        with tab_rejected:
             rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
             if not rejected: st.success("✅ No rejected requests!")
             else:
@@ -9491,44 +9331,40 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
-    if director_hr_access_enabled and director_hr_access_tab:
-        if director_hr_access_tab:
+    if director_hr_access_enabled and director_hr_access_tab is not None:
+        with director_hr_access_tab:
             render_director_hr_access_portal(user_info)
 
-    if director_hr_leave_tab:
+    with director_hr_leave_tab:
         # Final holiday settlements submitted by HR/managers are approved here.
         # Director approval updates the HR Leave Settlement record to approved;
         # approved final settlements are then included in the employee holiday
         # position calculation so the employee's final holiday balance closes at 0.0.
         render_hr_leave_director_portal(full_name)
 
-    if director_store_ded_tab:
+    with director_store_ded_tab:
         render_store_director_portal(full_name, type_filter="Deduction")
-    if director_store_ret_tab:
+    with director_store_ret_tab:
         render_store_director_portal(full_name, type_filter="Addition")
-    if director_work_order_tab: render_work_order_director_portal(full_name)
-    if director_inspector_tab: render_inspector_bonus_director_portal(full_name)
+    with director_work_order_tab: render_work_order_director_portal(full_name)
+    with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
 elif role == "Super Admin":
-    super_module_labels = [
-        "➕ Addition & Deduction", "📦 Store Deductions", "📦 Store Returns (Additions)",
-        "🛠️ Work Orders", "💰 National Grid Inspector Bonus", "🛡️ Data Control", "🔧 System Management"
-    ]
-    st.markdown('<div class="nav-card"><div class="nav-card-label">Administration Workspace</div></div>', unsafe_allow_html=True)
-    super_module = st.selectbox("Module", super_module_labels, key="super_admin_module_navigation")
-    super_add_ded_tab = super_module == "➕ Addition & Deduction"
-    super_store_ded_tab = super_module == "📦 Store Deductions"
-    super_store_ret_tab = super_module == "📦 Store Returns (Additions)"
-    super_work_orders_tab = super_module == "🛠️ Work Orders"
-    super_inspector_bonus_tab = super_module == "💰 National Grid Inspector Bonus"
-    super_data_control_tab = super_module == "🛡️ Data Control"
-    super_system_mgmt_tab = super_module == "🔧 System Management"
-    if super_add_ded_tab:
+    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab = st.tabs([
+        "➕ Addition & Deduction",
+        "📦 Store Deductions",
+        "📦 Store Returns (Additions)",
+        "🛠️ Work Orders",
+        "💰 National Grid Inspector Bonus",
+        "🛡️ Data Control",
+        "🔧 System Management"
+    ])
+    with super_add_ded_tab:
         st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
         st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
         st.divider()
-        request_status = st.selectbox("Request status", ["⏳ All Pending", "✅ All Approved", "❌ All Rejected"], key="super_admin_request_status")
-        if request_status == "⏳ All Pending":
+        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ All Pending", "✅ All Approved", "❌ All Rejected"])
+        with tab_pending:
             pending = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "pending"]
             if not pending: st.success("✅ No pending requests.")
             else:
@@ -9574,17 +9410,17 @@ elif role == "Super Admin":
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
-    if super_store_ded_tab:
+    with super_store_ded_tab:
         render_store_super_admin(type_filter="Deduction")
-    if super_store_ret_tab:
+    with super_store_ret_tab:
         render_store_super_admin(type_filter="Addition")
-    if super_work_orders_tab:
+    with super_work_orders_tab:
         render_work_orders_super_admin()
-    if super_inspector_bonus_tab:
+    with super_inspector_bonus_tab:
         render_inspector_bonus_super_admin()
-    if super_data_control_tab:
+    with super_data_control_tab:
         _super_admin_transaction_control()
-    if super_system_mgmt_tab:
+    with super_system_mgmt_tab:
         st.subheader("🔧 System Management — Super Admin")
         st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
         st.divider()
