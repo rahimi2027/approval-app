@@ -1851,9 +1851,14 @@ def _hrp_get_employee_entitlement(employee):
     if employee.get("entitlement_override") is not None:
         entitlement = float(employee["entitlement_override"])
         note = "HR-adjusted pure holiday entitlement; bank holidays are separate and are not deducted."
-    elif employee_id in st.session_state.hrp_entitlement_overrides:
-        entitlement = float(st.session_state.hrp_entitlement_overrides[employee_id])
-        note = "HR-adjusted pure holiday entitlement; bank holidays are separate and are not deducted."
+    else:
+        # Director HR/report pages can be opened before the main HR Portal
+        # initialises its session-state caches. Use a safe fallback so a fresh
+        # Streamlit session never raises KeyError here.
+        entitlement_overrides = st.session_state.get("hrp_entitlement_overrides", {}) or {}
+        if employee_id in entitlement_overrides:
+            entitlement = float(entitlement_overrides[employee_id])
+            note = "HR-adjusted pure holiday entitlement; bank holidays are separate and are not deducted."
     entitlement = max(0.0, round(entitlement, 1))
     note = f"{note} Bank holidays are not deducted from holiday entitlement."
     return entitlement, note, service_years, calculated
@@ -8677,6 +8682,14 @@ if user_info.get("can_access_employee_hr_reports", False) and role not in ["Mana
 # ============================================================
 def render_director_hr_access_portal(current_user_info):
     """Render only the read-only HR/report modules explicitly granted by Super Admin."""
+    # A Director can open this portal without first visiting the main HR Portal.
+    # Initialise the HR session cache before holiday position calculations.
+    try:
+        _hr_portal_init()
+    except Exception as exc:
+        # Individual HR helpers also have persistent-data fallbacks, so a
+        # non-critical cache initialisation issue should not crash the portal.
+        print(f"Director HR access initialisation warning: {exc}")
     permissions = {
         "holiday_calendar": bool(current_user_info.get("can_access_holiday_calendar", False)),
         "hr_reports": bool(current_user_info.get("can_access_hr_reports", False)),
