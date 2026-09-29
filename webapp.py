@@ -237,6 +237,8 @@ def upload_to_google_drive(local_file_path, display_filename):
 
 _DRIVE_FIND_CACHE = {}
 _DRIVE_FIND_CACHE_TTL = 60.0
+# Cache Google Drive file IDs so existing live/backup workbooks can be updated in place.
+_DRIVE_ID_CACHE = {}
 
 def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
     if drive_service is None:
@@ -2753,6 +2755,410 @@ def _hrp_render_leavers_tab():
         else:
             st.error("Could not generate the leaver history PDF.")
 
+
+
+def _hrp_report_date(value):
+    """Return a clean date for HR report output."""
+    if value in (None, ""):
+        return ""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        parsed = pd.to_datetime(value, errors="coerce")
+        return "" if pd.isna(parsed) else parsed.date()
+    except Exception:
+        return str(value)
+
+
+def _hrp_report_cell(value):
+    """Convert pandas/HR values into Excel-safe values."""
+    if value is None:
+        return ""
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        return _hrp_report_date(value)
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return value
+
+
+def _hrp_report_workbook_base(title, subtitle):
+    """Create a styled openpyxl workbook for HR reports."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Report"
+    ws.sheet_view.showGridLines = False
+
+    navy = "1F4E78"
+    blue = "D9EAF7"
+    light = "F3F6F9"
+    green = "E2F0D9"
+    gold = "FFF2CC"
+    white = "FFFFFF"
+    grey = "666666"
+    thin = Side(style="thin", color="D9E1F2")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    ws.merge_cells("A1:H1")
+    ws["A1"] = title
+    ws["A1"].font = Font(size=18, bold=True, color=white)
+    ws["A1"].fill = PatternFill("solid", fgColor=navy)
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 30
+
+    ws.merge_cells("A2:H2")
+    ws["A2"] = subtitle
+    ws["A2"].font = Font(size=11, italic=True, color=grey)
+    ws["A2"].alignment = Alignment(horizontal="center")
+
+    ws["A4"] = "Report Generated"
+    ws["B4"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws["A5"] = "Prepared By"
+    ws["B5"] = str(st.session_state.get("full_name", st.session_state.get("username", "HR Manager")))
+    for cell in (ws["A4"], ws["A5"]):
+        cell.font = Font(bold=True, color=navy)
+
+    return wb, ws, {
+        "navy": navy, "blue": blue, "light": light, "green": green,
+        "gold": gold, "white": white, "grey": grey, "border": border,
+        "thin": thin, "get_column_letter": get_column_letter,
+    }
+
+
+def _hrp_style_report_table(ws, start_row, start_col, headers, rows, styles, total_row=None):
+    """Write and style a compact Excel table."""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    for offset, header in enumerate(headers):
+        cell = ws.cell(start_row, start_col + offset, header)
+        cell.font = Font(bold=True, color=styles["white"])
+        cell.fill = PatternFill("solid", fgColor=styles["navy"])
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = styles["border"]
+
+    for r_idx, row in enumerate(rows, start_row + 1):
+        for c_idx, value in enumerate(row, start_col):
+            cell = ws.cell(r_idx, c_idx, _hrp_report_cell(value))
+            cell.border = styles["border"]
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+            if r_idx % 2 == 0:
+                cell.fill = PatternFill("solid", fgColor=styles["light"])
+
+    if total_row is not None:
+        r = start_row + 1 + len(rows)
+        for c_idx, value in enumerate(total_row, start_col):
+            cell = ws.cell(r, c_idx, _hrp_report_cell(value))
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill("solid", fgColor=styles["green"])
+            cell.border = styles["border"]
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    ws.freeze_panes = ws.cell(start_row + 1, start_col)
+    return start_row + 1 + len(rows) + (1 if total_row is not None else 0)
+
+
+def _hrp_autofit_report(ws, min_width=10, max_width=28):
+    from openpyxl.utils import get_column_letter
+    for col_idx in range(1, ws.max_column + 1):
+        max_len = 0
+        for cell in ws.iter_cols(min_col=col_idx, max_col=col_idx, min_row=1, max_row=min(ws.max_row, 200)):
+            for c in cell:
+                value = "" if c.value is None else str(c.value)
+                max_len = max(max_len, max((len(line) for line in value.split("\n")), default=0))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max(max_len + 2, min_width), max_width)
+
+
+def _hrp_build_employee_report_xlsx():
+    """Build the department-wise complete Employee Master report."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import io
+
+    _hr_portal_init()
+    employees = _hrp_normalize_employee_records(st.session_state.get("hrp_employees", []))
+    employees = sorted(employees, key=lambda e: (str(e.get("department", "")).casefold(), str(e.get("name", "")).casefold()))
+
+    wb, ws, styles = _hrp_report_workbook_base(
+        "COMPANY EMPLOYEE REPORT",
+        "Department-wise Employee Master Report",
+    )
+
+    # Summary
+    ws["A7"] = "EMPLOYEE SUMMARY"
+    ws["A7"].font = Font(size=13, bold=True, color=styles["navy"])
+    summary = [
+        ("Total Employees", len(employees)),
+        ("Active Employees", sum(str(e.get("status", "")).casefold() == "active" for e in employees)),
+        ("Left Employees", sum(str(e.get("status", "")).casefold() == "left" for e in employees)),
+        ("Departments", len({str(e.get("department", "")).strip() for e in employees if str(e.get("department", "")).strip()})),
+    ]
+    for i, (label, value) in enumerate(summary, 8):
+        ws.cell(i, 1, label).font = Font(bold=True)
+        ws.cell(i, 2, value)
+        ws.cell(i, 1).fill = PatternFill("solid", fgColor=styles["blue"])
+        ws.cell(i, 2).fill = PatternFill("solid", fgColor=styles["light"])
+        ws.cell(i, 1).border = styles["border"]
+        ws.cell(i, 2).border = styles["border"]
+
+    headers = list(HR_EMPLOYEE_COLUMNS) + [
+        "Calculated Holiday Entitlement", "Approved Holiday Used", "Holiday Balance"
+    ]
+    row = 14
+    departments = []
+    seen = set()
+    for e in employees:
+        dept = str(e.get("department", "")).strip() or "Unassigned"
+        if dept not in seen:
+            departments.append(dept); seen.add(dept)
+
+    for dept in departments:
+        dept_employees = [e for e in employees if (str(e.get("department", "")).strip() or "Unassigned") == dept]
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
+        ws.cell(row, 1, f"DEPARTMENT: {dept}")
+        ws.cell(row, 1).font = Font(size=13, bold=True, color=styles["white"])
+        ws.cell(row, 1).fill = PatternFill("solid", fgColor=styles["navy"])
+        ws.cell(row, 1).alignment = Alignment(vertical="center")
+        row += 1
+
+        rows = []
+        for e in dept_employees:
+            pos = _hrp_get_holiday_position(e["emp_id"])
+            values = []
+            source_map = {
+                "Employee ID": e.get("emp_id", ""), "Full Name": e.get("name", ""),
+                "Start Date": e.get("start_date", ""), "Position / Job Title": e.get("job_title", ""),
+                "Department": e.get("department", ""), "Agreement Type": e.get("agreement_type", ""),
+                "Status": e.get("status", ""), "Working Pattern": e.get("working_pattern", ""),
+                "Days Worked Per Week": e.get("days_per_week", 5),
+                "Holiday Entitlement Override": e.get("entitlement_override", ""),
+                "Entitlement Adjustment Note": e.get("adjustment_note", ""),
+                "Leaving Date": e.get("leaving_date", ""), "Leaving Reason": e.get("leaving_reason", ""),
+            }
+            for col in HR_EMPLOYEE_COLUMNS:
+                values.append(source_map.get(col, ""))
+            values.extend([pos.get("entitlement", 0), pos.get("used", 0), pos.get("balance", 0)])
+            rows.append(values)
+
+        total_used = round(sum(float(_hrp_get_holiday_position(e["emp_id"]).get("used", 0) or 0) for e in dept_employees), 1)
+        total_balance = round(sum(float(_hrp_get_holiday_position(e["emp_id"]).get("balance", 0) or 0) for e in dept_employees), 1)
+        total_row = ["Department Total", len(dept_employees)] + [""] * (len(headers) - 5) + ["", total_used, total_balance]
+        row = _hrp_style_report_table(ws, row, 1, headers, rows, styles, total_row=total_row)
+        row += 2
+
+    # Company total at the very end.
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
+    ws.cell(row, 1, "COMPANY TOTAL")
+    ws.cell(row, 1).font = Font(size=14, bold=True, color=styles["white"])
+    ws.cell(row, 1).fill = PatternFill("solid", fgColor=styles["navy"])
+    row += 1
+    total_used = round(sum(float(_hrp_get_holiday_position(e["emp_id"]).get("used", 0) or 0) for e in employees), 1)
+    total_balance = round(sum(float(_hrp_get_holiday_position(e["emp_id"]).get("balance", 0) or 0) for e in employees), 1)
+    company_total = ["TOTAL EMPLOYEES", len(employees)] + [""] * (len(headers) - 5) + ["", total_used, total_balance]
+    _hrp_style_report_table(ws, row, 1, ["Summary", "Total", "", "", "", "", ""], [["Total Employees", len(employees), "", "", "", "", ""]], styles)
+
+    ws.sheet_view.zoomScale = 85
+    _hrp_autofit_report(ws, min_width=10, max_width=32)
+    ws.freeze_panes = "A15"
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def _hrp_build_holiday_report_xlsx(report_year):
+    """Build the department-wise employee holiday report for one leave year."""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import io
+
+    _hr_portal_init()
+    employees = _hrp_normalize_employee_records(st.session_state.get("hrp_employees", []))
+    leave_records = _hrp_load_leave_records()
+    employees = sorted(employees, key=lambda e: (str(e.get("department", "")).casefold(), str(e.get("name", "")).casefold()))
+
+    wb, ws, styles = _hrp_report_workbook_base(
+        "EMPLOYEE HOLIDAY REPORT",
+        f"Department-wise Employee Holiday Report — {report_year}",
+    )
+    ws["A7"] = "HOLIDAY SUMMARY"
+    ws["A7"].font = Font(size=13, bold=True, color=styles["navy"])
+
+    holiday_types = set(HR_PORTAL_HOLIDAY_LEAVE_TYPES)
+    approved_holiday_records = [
+        r for r in leave_records
+        if str(r.get("type", "")).strip() in holiday_types
+        and str(r.get("status", "")).strip().casefold() == "approved"
+        and _hrp_report_date(r.get("date_from")) != ""
+        and _hrp_report_date(r.get("date_from")).year == int(report_year)
+    ]
+    total_holiday_days = round(sum(float(r.get("days", 0) or 0) for r in approved_holiday_records), 1)
+    summary = [
+        ("Total Employees", len(employees)),
+        ("Employees With Approved Holiday", len({str(r.get("employee_id", "")).strip().casefold() for r in approved_holiday_records})),
+        ("Approved Holiday Days", total_holiday_days),
+        ("Departments", len({str(e.get("department", "")).strip() for e in employees if str(e.get("department", "")).strip()})),
+    ]
+    for i, (label, value) in enumerate(summary, 8):
+        ws.cell(i, 1, label).font = Font(bold=True)
+        ws.cell(i, 2, value)
+        ws.cell(i, 1).fill = PatternFill("solid", fgColor=styles["blue"])
+        ws.cell(i, 2).fill = PatternFill("solid", fgColor=styles["light"])
+        ws.cell(i, 1).border = styles["border"]
+        ws.cell(i, 2).border = styles["border"]
+
+    row = 14
+    departments = []
+    seen = set()
+    for e in employees:
+        dept = str(e.get("department", "")).strip() or "Unassigned"
+        if dept not in seen:
+            departments.append(dept); seen.add(dept)
+
+    employee_headers = ["Employee ID", "Employee Name", "Job Title", "Status", "Annual Entitlement", "Approved Holiday Used", "Holiday Balance"]
+    detail_headers = ["Leave ID", "Date From", "Date To", "Holiday Type", "Days", "Status", "Notes"]
+
+    for dept in departments:
+        dept_employees = [e for e in employees if (str(e.get("department", "")).strip() or "Unassigned") == dept]
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+        ws.cell(row, 1, f"DEPARTMENT: {dept}")
+        ws.cell(row, 1).font = Font(size=13, bold=True, color=styles["white"])
+        ws.cell(row, 1).fill = PatternFill("solid", fgColor=styles["navy"])
+        row += 1
+
+        summary_rows = []
+        dept_days = 0.0
+        for e in dept_employees:
+            pos = _hrp_get_holiday_position(e["emp_id"])
+            # Position is live/current; the detail below is restricted to report year.
+            year_records = [
+                r for r in leave_records
+                if str(r.get("employee_id", "")).strip().casefold() == str(e.get("emp_id", "")).strip().casefold()
+                and str(r.get("type", "")).strip() in holiday_types
+                and str(r.get("status", "")).strip().casefold() == "approved"
+                and _hrp_report_date(r.get("date_from")) != ""
+                and _hrp_report_date(r.get("date_from")).year == int(report_year)
+            ]
+            used_year = round(sum(float(r.get("days", 0) or 0) for r in year_records), 1)
+            dept_days += used_year
+            summary_rows.append([
+                e.get("emp_id", ""), e.get("name", ""), e.get("job_title", ""), e.get("status", ""),
+                pos.get("entitlement", 0), used_year, pos.get("balance", 0),
+            ])
+
+        row = _hrp_style_report_table(
+            ws, row, 1, employee_headers, summary_rows, styles,
+            total_row=["Department Total", len(dept_employees), "", "", "", round(dept_days, 1), ""],
+        )
+        row += 1
+
+        # Individual employee holiday records under the department.
+        for e in dept_employees:
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+            ws.cell(row, 1, f"{e.get('name', '')} — {e.get('emp_id', '')}")
+            ws.cell(row, 1).font = Font(bold=True, color=styles["navy"])
+            ws.cell(row, 1).fill = PatternFill("solid", fgColor=styles["gold"])
+            row += 1
+            records = [
+                r for r in leave_records
+                if str(r.get("employee_id", "")).strip().casefold() == str(e.get("emp_id", "")).strip().casefold()
+                and str(r.get("type", "")).strip() in holiday_types
+                and _hrp_report_date(r.get("date_from")) != ""
+                and _hrp_report_date(r.get("date_from")).year == int(report_year)
+            ]
+            records.sort(key=lambda r: (_hrp_report_date(r.get("date_from")) or date.min))
+            detail_rows = [[
+                r.get("leave_id", ""), _hrp_report_date(r.get("date_from")), _hrp_report_date(r.get("date_to")),
+                r.get("type", ""), r.get("days", 0), r.get("status", ""), r.get("notes", ""),
+            ] for r in records]
+            if detail_rows:
+                row = _hrp_style_report_table(ws, row, 1, detail_headers, detail_rows, styles)
+            else:
+                ws.cell(row, 1, "No holiday records for this employee in the selected year.")
+                ws.cell(row, 1).font = Font(italic=True, color=styles["grey"])
+                row += 1
+            row += 1
+
+        row += 1
+
+    # Final company total.
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+    ws.cell(row, 1, "COMPANY TOTAL")
+    ws.cell(row, 1).font = Font(size=14, bold=True, color=styles["white"])
+    ws.cell(row, 1).fill = PatternFill("solid", fgColor=styles["navy"])
+    row += 1
+    _hrp_style_report_table(
+        ws, row, 1,
+        ["Summary", "Total", "", "", "", "", ""],
+        [["Total Employees", len(employees), "", "", "", "", ""], ["Approved Holiday Days", total_holiday_days, "", "", "", "", ""]],
+        styles,
+    )
+
+    ws.sheet_view.zoomScale = 90
+    _hrp_autofit_report(ws, min_width=11, max_width=32)
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
+def render_hr_download_reports():
+    """HR Manager download area for the two department-wise HR reports."""
+    st.subheader("📥 HR Reports")
+    st.caption("Download professional Excel reports grouped by department.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### 👥 Employee Master Report")
+        st.caption("All employees, grouped by department, with complete employee fields and company total.")
+        if st.button("🔄 Prepare Employee Report", key="hr_prepare_employee_report", type="secondary"):
+            try:
+                st.session_state.hrp_employee_report_bytes = _hrp_build_employee_report_xlsx()
+                st.success("Employee report prepared.")
+            except Exception as exc:
+                st.error(f"Could not create the employee report: {exc}")
+        if st.session_state.get("hrp_employee_report_bytes"):
+            st.download_button(
+                "📥 Download Employee Report",
+                st.session_state.hrp_employee_report_bytes,
+                file_name=f"Employee_Master_Report_{date.today().strftime('%Y-%m-%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="hr_download_employee_report",
+                type="primary",
+            )
+
+    with c2:
+        st.markdown("### 📅 Employee Holiday Report")
+        st.caption("Department-wise employees, holiday allowance, holiday used, balance and individual holiday records.")
+        report_year = st.number_input(
+            "Holiday Year", min_value=2020, max_value=2100, value=date.today().year,
+            step=1, key="hr_download_holiday_year"
+        )
+        if st.button("🔄 Prepare Holiday Report", key="hr_prepare_holiday_report", type="secondary"):
+            try:
+                st.session_state.hrp_holiday_report_bytes = _hrp_build_holiday_report_xlsx(int(report_year))
+                st.session_state.hrp_holiday_report_year = int(report_year)
+                st.success(f"Holiday report for {int(report_year)} prepared.")
+            except Exception as exc:
+                st.error(f"Could not create the holiday report: {exc}")
+        if st.session_state.get("hrp_holiday_report_bytes"):
+            prepared_year = st.session_state.get("hrp_holiday_report_year", int(report_year))
+            st.download_button(
+                "📥 Download Holiday Report",
+                st.session_state.hrp_holiday_report_bytes,
+                file_name=f"Employee_Holiday_Report_{prepared_year}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="hr_download_holiday_report",
+                type="primary",
+            )
+
 def render_hr_portal(current_user_info=None):
     """HR Portal — HR Management, Holiday Calendar, Employee Details, Leave and Leave History."""
     # Defensive initialization: Streamlit sessions may survive code/data changes.
@@ -2828,13 +3234,13 @@ def render_hr_portal(current_user_info=None):
             st.subheader("🧑‍💼 HR Management")
             if is_hr_manager:
                 st.caption("Employee Overview, Leave Approvals, Holiday Calculator, Employee Leaving and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee"
+                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab, hr_reports_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee", "📥 HR Reports"
                 ])
             else:
                 st.caption("Employee Overview, Holiday Calculator, Employee Leaving and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee"
+                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab, hr_reports_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee", "📥 HR Reports"
                 ])
                 hr_approval_tab = None
 
@@ -3825,6 +4231,11 @@ def render_hr_portal(current_user_info=None):
                 st.info("No leave history is currently recorded.")
         else:
             st.info("No employee record is available.")
+
+    # ========== HR REPORTS ==========
+    if is_hr and hr_reports_tab is not None:
+        with hr_reports_tab:
+            render_hr_download_reports()
 
     # ========== EMPLOYEE-ONLY VIEW ==========
     if not is_hr:
