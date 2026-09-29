@@ -1,13 +1,14 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.30
-#    • Modern Soft UI (sidebar navigation + rounded cards)
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.29
 #    • Robust pandas NaT/date normalisation for employee HR reports
 #    • Removed background Google Drive worker to prevent native Cloud segfaults
-#    • v4.30: Sidebar-based navigation shell (Modern Soft theme)
-#    • v4.29: Robust pandas NaT/date normalisation for employee HR reports
+
 # ============================================================
-# ✅ v4.30 (MODERN SOFT UI + SIDEBAR NAVIGATION)
-# ✅ v4.27 (HR DEPARTMENT TAB)
+# ✅ v4.27 (HR DEPARTMENT TAB):
+#    • New "🏢 HR Department" tab containing 2 sub-tabs:
+#        1. 🧑💼 HR Portal (Employee mgmt, Holiday allowance, Leave records, HR Settlement calc)
+#        2. 💷 HR Leave Settlement (existing Director approval module)
+#    • Added Director HR Leave Settlement approval tab for final holiday settlements
 # ✅ v4.26 (DUPLICATE KEY FIX)
 # ✅ v4.25 (STORE RETURN REDESIGN & KEYERROR FIX)
 # ✅ v4.24 (STORE RETURN / ADDITION + AUTO-FILL FIX)
@@ -35,194 +36,34 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
 
-# ============================================================
-# 🎨 MODERN SOFT THEME
-# ============================================================
 st.markdown("""
     <style>
-    /* ====================================================== */
-    /* MODERN SOFT THEME                                       */
-    /* ====================================================== */
-    .stApp {
-        background: #F5F7FA;
-    }
     .block-container {
-        padding-top: 1.25rem !important;
-        padding-left: 2rem !important;
+        padding-top: 2rem !important;
+        padding-left: 0.3rem !important;
         padding-right: 2rem !important;
-        max-width: 1500px !important;
-        width: 95% !important;
+        max-width: 1400px !important;
+        width: 90% !important;
     }
-
-    /* ---------- Sidebar ---------- */
-    section[data-testid="stSidebar"] {
-        background: #FFFFFF !important;
-        border-right: 1px solid #E5E9F0 !important;
-        width: 290px !important;
-    }
-    section[data-testid="stSidebar"] > div:first-child {
-        padding: 1rem 0.85rem !important;
-    }
+    section[data-testid="stSidebar"] { width: 320px !important; }
     section[data-testid="stSidebar"] > div:first-child > div {
-        padding: 0 !important;
+        padding-left: 0.2rem !important;
+        padding-right: 0.2rem !important;
     }
-
-    /* Nav radio → menu items */
-    section[data-testid="stSidebar"] div[role="radiogroup"] {
-        gap: 2px !important;
+    section[data-testid="stSidebar"] > div:first-child { align-items: flex-start !important; }
+    .streamlit-expander { width: 100% !important; margin: 0 !important; padding-left: 0 !important; }
+    .streamlit-expanderHeader { justify-content: flex-start !important; padding-left: 0.5rem !important; }
+    .streamlit-expanderContent {
+        width: 100% !important; box-sizing: border-box !important;
+        padding: 0.5rem !important; padding-left: 0.3rem !important; text-align: left !important;
     }
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label {
-        display: flex !important;
-        align-items: center !important;
-        padding: 0.55rem 0.75rem !important;
-        border-radius: 10px !important;
-        margin: 0 !important;
-        cursor: pointer;
-        transition: background 0.12s ease, color 0.12s ease;
-        font-weight: 500;
-        color: #374151;
-        font-size: 0.92rem;
-    }
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
-        background: #F0F4FA !important;
-    }
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label[data-checked="true"],
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
-        background: #E8F0FE !important;
-        color: #1F4E78 !important;
-        font-weight: 700;
-    }
-    /* Hide radio dot */
-    section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-child {
-        display: none !important;
-    }
-
-    /* Sidebar buttons (Refresh, Logout) */
-    section[data-testid="stSidebar"] .stButton > button {
-        width: 100% !important;
-        border-radius: 10px !important;
-        font-weight: 600 !important;
-        padding: 0.5rem 0.75rem !important;
-    }
-
-    /* Sidebar expanders (Password, Drive Status) */
-    section[data-testid="stSidebar"] details {
-        border-radius: 10px !important;
-        border: 1px solid #EEF1F6 !important;
-        background: #FBFCFE !important;
-    }
-
-    /* ---------- Cards / metrics ---------- */
-    div[data-testid="stMetric"] {
-        background: #FFFFFF;
-        border-radius: 12px;
-        padding: 0.9rem 1rem;
-        border: 1px solid #EEF1F6;
-        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
-    }
-    div[data-testid="stMetric"] label {
-        color: #64748B !important;
-        font-size: 0.8rem !important;
-        font-weight: 500 !important;
-    }
-    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-        color: #0F172A !important;
-        font-weight: 700 !important;
-    }
-
-    /* ---------- Expanders ---------- */
-    details[data-testid="stExpander"] {
-        border-radius: 12px !important;
-        border: 1px solid #EEF1F6 !important;
-        background: #FFFFFF !important;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
-        overflow: hidden;
-    }
-    details[data-testid="stExpander"] summary {
-        font-weight: 600 !important;
-        padding: 0.7rem 0.9rem !important;
-    }
-
-    /* ---------- Buttons ---------- */
-    .stButton > button,
-    .stDownloadButton > button,
-    .stFormSubmitButton > button {
-        border-radius: 10px !important;
-        font-weight: 600 !important;
-        transition: transform 0.08s ease;
-    }
-    .stButton > button[kind="primary"],
-    .stFormSubmitButton > button[kind="primary"] {
-        background: #1F4E78 !important;
-        border-color: #1F4E78 !important;
-        color: #FFFFFF !important;
-    }
-    .stButton > button[kind="primary"]:hover,
-    .stFormSubmitButton > button[kind="primary"]:hover {
-        background: #163A5C !important;
-        border-color: #163A5C !important;
-    }
-    .stButton > button:active { transform: scale(0.985); }
-
-    /* ---------- In-page tabs (still used inside each module) ---------- */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 4px;
-        background: #FFFFFF;
-        padding: 5px;
-        border-radius: 12px;
-        border: 1px solid #EEF1F6;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px !important;
-        padding: 6px 14px !important;
-        font-weight: 500;
-        color: #475569;
-    }
-    .stTabs [aria-selected="true"] {
-        background: #E8F0FE !important;
-        color: #1F4E78 !important;
-        font-weight: 700;
-    }
-    .stTabs [data-baseweb="tab-highlight"],
-    .stTabs [data-baseweb="tab-border"] {
-        display: none !important;
-    }
-
-    /* ---------- Inputs ---------- */
-    .stTextInput input,
-    .stNumberInput input,
-    .stTextArea textarea,
-    .stDateInput input,
-    div[data-baseweb="select"] > div {
-        border-radius: 10px !important;
-        border-color: #DDE3EC !important;
-        background: #FFFFFF !important;
-    }
-    .stTextInput input:focus,
-    .stNumberInput input:focus,
-    .stTextArea textarea:focus {
-        border-color: #1F4E78 !important;
-        box-shadow: 0 0 0 3px rgba(31, 78, 120, 0.1) !important;
-    }
-
-    /* ---------- Dataframes ---------- */
-    div[data-testid="stDataFrame"] {
-        border-radius: 12px;
-        overflow: hidden;
-        border: 1px solid #EEF1F6;
-        background: #FFFFFF;
-    }
-
-    /* ---------- Info / success / warning boxes ---------- */
-    div[data-testid="stAlert"] {
-        border-radius: 12px !important;
-    }
+    .streamlit-expanderContent form { width: 100% !important; box-sizing: border-box !important; padding: 0 !important; margin: 0 !important; }
+    .streamlit-expanderContent label { text-align: left !important; justify-content: flex-start !important; padding-left: 0.2rem !important; }
+    .streamlit-expanderContent input { width: 100% !important; box-sizing: border-box !important; }
+    .streamlit-expanderContent .stButton > button { width: 100% !important; box-sizing: border-box !important; margin-top: 0.5rem !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# ============================================================
-# PATHS & CONSTANTS
-# ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_FOLDER = os.path.join(BASE_DIR, "Acoole_App_Uploads")
 os.makedirs(APP_FOLDER, exist_ok=True)
@@ -332,7 +173,13 @@ drive_service = None
 DRIVE_CONNECTION_ERROR = ""
 DRIVE_LAST_SYNC = {}
 DRIVE_LAST_SYNC_ERROR = {}
+# Process-local fingerprints used to track successful Google Drive syncs.
 _DRIVE_SYNC_FINGERPRINTS = {}
+# Streamlit reruns the script for every widget interaction.
+# Google Drive sync is deliberately kept synchronous. A background thread that
+# touches Streamlit/pandas/pyarrow on Streamlit Community Cloud can trigger
+# native SIGSEGVs in some dependency combinations. Normal page refreshes do not
+# perform Drive uploads; only successful saves call sync_saved_file_to_drive().
 _DRIVE_SYNC_LOCK = threading.RLock()
 DRIVE_PENDING_SYNC = set()
 _DRIVE_SYNC_QUEUE = None
@@ -352,6 +199,7 @@ try:
         creds_dict, scopes=SCOPES
     )
     drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    # Validate access to the configured backup folder, including Shared Drives.
     folder_check = drive_service.files().get(
         fileId=GOOGLE_DRIVE_FOLDER_ID,
         fields="id,name,mimeType,parents",
@@ -392,6 +240,7 @@ def upload_to_google_drive(local_file_path, display_filename):
 
 _DRIVE_FIND_CACHE = {}
 _DRIVE_FIND_CACHE_TTL = 60.0
+# Cache Google Drive file IDs so existing live/backup workbooks can be updated in place.
 _DRIVE_ID_CACHE = {}
 
 def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
@@ -464,7 +313,11 @@ def _drive_download_file(file_id, local_path):
         return False
 
 def _drive_remote_workbook_has_rows(file_id):
-    """Return True when a remote Excel workbook contains at least one data row."""
+    """Return True when a remote Excel workbook contains at least one data row.
+
+    Used only during startup/recovery so a newly-created empty local workbook
+    can never replace an existing non-empty Drive workbook.
+    """
     if drive_service is None or not file_id:
         return False
     tmp_path = os.path.join(APP_FOLDER, f".__drive_check_{file_id}.xlsx")
@@ -485,7 +338,16 @@ def _drive_remote_workbook_has_rows(file_id):
 
 
 def sync_persistent_file(local_path, columns=None):
-    """Initialise a persistent workbook safely from Google Drive."""
+    """Initialise a persistent workbook safely from Google Drive.
+
+    Google Drive is the source of truth when a remote workbook already exists.
+    A fresh Streamlit deployment may have a newly-created/empty local workbook;
+    comparing timestamps can incorrectly treat that empty file as newer and upload
+    it over yesterday's real data. Never do that. Download the remote live workbook
+    first, and if the live workbook is empty but its BACKUP_ copy contains data,
+    recover the backup instead. Only create/upload a new workbook when neither
+    remote copy exists.
+    """
     if drive_service is None:
         if not os.path.exists(local_path) and columns is not None:
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
@@ -497,6 +359,9 @@ def sync_persistent_file(local_path, columns=None):
         remote = _drive_find_file(filename)
 
         if remote:
+            # If the live Drive workbook is empty but the explicit BACKUP_ copy
+            # contains data, restore the non-empty backup instead of propagating
+            # an empty deployment file.
             if backup_name:
                 backup_remote = _drive_find_file(backup_name)
                 if backup_remote and not _drive_remote_workbook_has_rows(remote["id"]):
@@ -505,12 +370,15 @@ def sync_persistent_file(local_path, columns=None):
                             print(f"Recovered {filename} from non-empty Drive backup {backup_name}")
                             return
 
+            # Remote live workbook exists: it is authoritative on startup.
+            # Do not compare timestamps with a fresh local deployment copy.
             if _drive_download_file(remote["id"], local_path):
                 return
             print(f"Using local copy of {filename} because Drive download failed")
             if os.path.exists(local_path):
                 return
 
+        # No live workbook exists. Recover from the explicit backup if available.
         if backup_name:
             backup_remote = _drive_find_file(backup_name)
             if backup_remote and _drive_remote_workbook_has_rows(backup_remote["id"]):
@@ -518,11 +386,14 @@ def sync_persistent_file(local_path, columns=None):
                     print(f"Recovered missing {filename} from Drive backup {backup_name}")
                     return
 
+        # Only create a brand-new empty workbook when Drive has no usable copy.
         if not os.path.exists(local_path) and columns is not None:
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
             _drive_upload_path(local_path, filename)
 
 # Keep a clearly named backup copy in Google Drive for important persistent workbooks.
+# The live workbook keeps its normal filename; the backup copy is updated in place so
+# there is always an obvious backup file in Drive as well.
 DRIVE_BACKUP_FILENAMES = {
     EXCEL_PATH: "BACKUP_requests.xlsx",
     USER_DB_PATH: "BACKUP_users.xlsx",
@@ -553,7 +424,13 @@ def sync_backup_file_to_drive(local_path):
 
 def _sync_saved_file_to_drive_now(local_path):
     """Upload a saved workbook to Drive without letting a missing live file
-    prevent the configured BACKUP_ copy from being updated."""
+    prevent the configured BACKUP_ copy from being updated.
+
+    This is important for this deployment because the service account may not
+    have quota to CREATE a brand-new live Drive file. Existing BACKUP_ files can
+    still be UPDATED. The backup is therefore attempted independently and is the
+    persistence copy we rely on when the live Drive workbook cannot be created.
+    """
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
         msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
@@ -566,6 +443,8 @@ def _sync_saved_file_to_drive_now(local_path):
         live_error = ""
         backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
 
+        # 1) Try the normal live workbook. This may fail with a service-account
+        # storage-quota error when the file does not already exist in Drive.
         try:
             live_id = _drive_upload_path(local_path, filename)
             if live_id:
@@ -580,6 +459,8 @@ def _sync_saved_file_to_drive_now(local_path):
             live_error = f"{type(e).__name__}: {e}"
             DRIVE_LAST_SYNC_ERROR[filename] = live_error
 
+        # 2) ALWAYS attempt the explicit backup independently. Do not return
+        # early just because the live file could not be created.
         if backup_name:
             try:
                 backup_id = _drive_upload_path(local_path, backup_name)
@@ -616,17 +497,29 @@ def _sync_saved_file_to_drive_now(local_path):
 _DRIVE_STORAGE_PROCESS_READY = False
 
 def sync_saved_file_to_drive(local_path):
-    """Synchronise a successfully saved workbook to Google Drive."""
+    """Synchronise a successfully saved workbook to Google Drive.
+
+    This intentionally runs on Streamlit's main execution thread. It avoids
+    using a background thread for Google Drive/pandas work, which can interact
+    badly with native dependencies such as pyarrow on Streamlit Community Cloud
+    and produce a process-level segmentation fault. Page refreshes themselves do
+    not call this function; it is used only after a local save.
+    """
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
         msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
         DRIVE_LAST_SYNC_ERROR[filename] = msg
         return False
+
     return _sync_saved_file_to_drive_now(local_path)
 
 
 def ensure_all_drive_backups():
-    """Ensure every configured backup workbook exists in Google Drive."""
+    """Ensure every configured backup workbook exists in Google Drive.
+
+    This is used during initial storage setup. It remains synchronous so missing
+    backups are established before the first normal session is fully initialised.
+    """
     if drive_service is None:
         return
     with _DRIVE_SYNC_LOCK:
@@ -727,7 +620,12 @@ def render_google_drive_status():
 
 @st.cache_resource(show_spinner=False)
 def _initialise_drive_storage_once():
-    """Initialise critical Drive workbooks once per Streamlit process."""
+    """Initialise critical Drive workbooks once per Streamlit process.
+
+    Streamlit reruns the script for every widget interaction. The old module
+    global flag was recreated on each rerun, causing repeated Google Drive
+    downloads of five workbooks. This cache survives normal reruns.
+    """
     if drive_service is None:
         return False
     os.makedirs(APP_FOLDER, exist_ok=True)
@@ -740,6 +638,8 @@ def _initialise_drive_storage_once():
     ]
     for path, columns in critical:
         try:
+            # Recover from Drive only when the local deployment has no usable
+            # workbook. Existing local files are the active working copies.
             if not os.path.exists(path) or os.path.getsize(path) == 0:
                 sync_persistent_file(path, columns)
         except Exception as e:
@@ -803,6 +703,10 @@ PERMISSION_DEFAULTS = {
     "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True}
 }
 
+# Fine-grained, read-only HR/report permissions. These are deliberately
+# independent from the full HR Department permission so a Super Admin can
+# give a Director selected HR information without exposing employee editing,
+# leave entry, or HR settlement controls.
 _HR_REPORT_PERMISSION_DEFAULTS = {
     "can_access_holiday_calendar": False,
     "can_access_hr_reports": False,
@@ -1174,6 +1078,9 @@ def refresh_data_button():
         with st.spinner("Refreshing from Google Drive..."):
             if drive_service is not None:
                 for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH):
+                    # Never refresh a workbook from Drive while a newer local save is
+                    # waiting to be uploaded. Otherwise Refresh can overwrite the
+                    # newly-entered local data with the older Drive copy.
                     with _DRIVE_SYNC_LOCK:
                         pending = path in DRIVE_PENDING_SYNC
                     if pending:
@@ -1380,6 +1287,9 @@ def load_users(force=False):
                     "can_access_store_deduction": True, "is_active": True
                 })
             elif user_role == "Director":
+                # Directors have full approval/status-change access to every
+                # approval module. This is role-based and cannot be accidentally
+                # removed by an old/stale permission value in the user workbook.
                 users[username].update({
                     "can_view_all_dept": True,
                     "can_generate_pdf": True,
@@ -1389,11 +1299,19 @@ def load_users(force=False):
                     "can_access_addition_deduction": True,
                     "can_access_work_orders": True,
                     "can_access_wo_total": True,
+                    # HR Department access and the read-only HR/report modules
+                    # remain user-specific and are controlled by Super Admin.
                     "can_access_hr_leave": users[username].get("can_access_hr_leave", False),
                     "can_access_store_deduction": True,
                     "is_active": users[username].get("is_active", True),
                 })
 
+        # Existing installations may still have the old HR permission stored
+        # for the built-in Director/Super Admin accounts. Migrate those records
+        # so the HR Department is not shown to them automatically.
+        # Migrate existing manager accounts: historically can_access_hr_leave also
+        # exposed the department-manager Leave Request module. Preserve that access
+        # while making the new Leave Request permission independently configurable.
         migrated_leave_request = False
         for username, u in users.items():
             if (not has_leave_request_column) and str(u.get("role", "")).strip().lower() == "manager" and str(u.get("dept", "")).strip().casefold() != "hr" and u.get("can_access_hr_leave"):
@@ -1412,7 +1330,6 @@ def load_users(force=False):
     except Exception as e:
         st.error(f"User DB Load Error: {e}")
         return {}
-
 
 # ════════════════════════════════════════════════════════════
 # 🏢 HR PORTAL MODULE (NEW) — Employee / Holiday / Leave Management
@@ -1528,7 +1445,13 @@ def _hrp_save_employees():
 
 
 def _hrp_load_leave_records():
-    """Load the HR portal leave ledger without silently losing rows."""
+    """Load the HR portal leave ledger without silently losing rows.
+
+    Leave records are persistent business records. A malformed date must never be
+    quietly discarded because that makes a genuine leave entry appear to vanish.
+    Instead, the loader raises a clear error identifying the affected Leave ID so
+    the workbook can be corrected rather than silently changing the ledger.
+    """
     _hrp_init_storage()
     try:
         df = _read_excel_records(HR_PORTAL_LEAVE_PATH)
@@ -1537,6 +1460,7 @@ def _hrp_load_leave_records():
         for row_no, r in enumerate(df.to_dict(orient="records"), start=2):
             leave_id = str(r.get("Leave ID", "")).strip()
             if not leave_id:
+                # Completely blank rows are harmless and can be ignored.
                 if all(str(v).strip() == "" for v in r.values()):
                     continue
                 raise ValueError(f"HR leave workbook row {row_no} has no Leave ID")
@@ -1592,7 +1516,11 @@ def _hrp_load_leave_records():
 
 
 def _hrp_save_leave_records(records=None, sync_drive=True):
-    """Persist the HR portal leave ledger safely and verify the write."""
+    """Persist the HR portal leave ledger safely and verify the write.
+
+    HR leave is a critical ledger: never let two Streamlit sessions overwrite one
+    another and never report success until the workbook can be read back.
+    """
     source_records = list(records if records is not None else st.session_state.get("hrp_leave_records", []))
     rows = []
     for r in source_records:
@@ -1614,6 +1542,7 @@ def _hrp_save_leave_records(records=None, sync_drive=True):
         try:
             df.to_excel(tmp_path, index=False, engine="openpyxl")
             os.replace(tmp_path, HR_PORTAL_LEAVE_PATH)
+            # Verify the exact Leave IDs that were requested to be persisted.
             verify = pd.read_excel(HR_PORTAL_LEAVE_PATH, engine="openpyxl").fillna("")
             saved_ids = {str(x).strip() for x in verify.get("Leave ID", pd.Series(dtype=str)).tolist() if str(x).strip()}
             expected_ids = {str(r.get("leave_id", "")).strip() for r in source_records if str(r.get("leave_id", "")).strip()}
@@ -1625,6 +1554,7 @@ def _hrp_save_leave_records(records=None, sync_drive=True):
                 try: os.remove(tmp_path)
                 except OSError: pass
     if sync_drive:
+        # Queue only after the local write has been verified.
         sync_saved_file_to_drive(HR_PORTAL_LEAVE_PATH)
     return True
 
@@ -1657,6 +1587,7 @@ def _hrp_enforce_ace_id_format(employees):
     if not changes:
         return employees
 
+    # Cascade legacy IDs through every HR-linked store before saving the employee master.
     users = load_users()
     for old, new in changes:
         for u in users.values():
@@ -1676,13 +1607,22 @@ def _hrp_enforce_ace_id_format(employees):
         for old, new in changes:
             if str(r.get("employee_id", "")).strip().casefold() == old.casefold():
                 r["employee_id"] = new
+    # Save through the normal portal writer.
     st.session_state.hrp_leave_records = portal_leave
     _hrp_save_leave_records()
     return employees
 
 
 def _hrp_reconcile_leaver_statuses():
-    """Repair employee status when a final holiday settlement already exists."""
+    """Repair employee status when a final holiday settlement already exists.
+
+    The leaving workflow is supposed to mark the employee as Left before the
+    final settlement is created. Older records can nevertheless contain a
+    pending/approved final settlement while the employee master still says
+    Active (for example after a session/cache mismatch). Treat the final
+    settlement as the authoritative close-out signal and repair the employee
+    master record so Leavers, Directory and Holiday Calculator agree.
+    """
     employees = st.session_state.get("hrp_employees", [])
     settlements = [
         r for r in load_hr_leave(force=False)
@@ -1716,6 +1656,11 @@ def _hrp_reconcile_leaver_statuses():
 
 
 def _hr_portal_init():
+    # Do not reread both HR workbooks on every widget interaction. Streamlit
+    # reruns the script when a selectbox/date/text input changes; keeping the
+    # current HR data in session state makes those interactions much faster.
+    # Explicit Refresh Data sets hrp_force_reload so cross-session changes can
+    # still be pulled from the persistent workbooks.
     if "hrp_role" not in st.session_state:
         st.session_state.hrp_role = "hr"
 
@@ -1754,6 +1699,9 @@ def _hrp_get_employee(employee_id):
         if str(emp.get("emp_id", "")).strip().casefold() == target:
             return emp
 
+    # Super Admin can edit Employee IDs directly. If that happened in the same
+    # server session, the old in-memory employee list can contain stale IDs.
+    # Refresh from the persistent workbook before giving up.
     try:
         refreshed = _hrp_load_employees()
         if refreshed:
@@ -1816,6 +1764,8 @@ def _hrp_get_working_days(start_date, end_date):
 
 def _hrp_calculate_leave_days(leave_type, start_date, end_date, half_day=False):
     if end_date < start_date: return 0.0
+    # Bank holidays, weekends and Acoole company-closure days are closed days
+    # and never consume annual holiday allowance, including a half-day request.
     if leave_type == "Half Day Holiday" or half_day:
         return 0.5 if _hrp_get_working_days(start_date, end_date) > 0 else 0.0
     return float(_hrp_get_working_days(start_date, end_date))
@@ -1826,7 +1776,19 @@ def _hrp_calculate_service_years(start_date):
     return days / 365.25
 
 def _hrp_calculate_holiday_entitlement(employee):
-    """UK statutory holiday calculation for regular-hours workers."""
+    """
+    UK statutory holiday calculation for regular-hours workers.
+
+    GOV.UK statutory minimum is 5.6 weeks, capped at 28 days. For a regular
+    5-day worker this is 28 days; for regular part-time workers it is
+    5.6 x contracted days per week. For a worker who starts part-way through
+    a leave year, this portal uses the calendar-day pro-rata method and rounds
+    the result up to the next half day, matching the GOV.UK calculator example.
+
+    The company's leave year is currently Jan 1-Dec 31 to match the leave-year
+    shown in the supplied GOV.UK calculator screenshot. Change the constants
+    below if the employment contract specifies another leave year.
+    """
     start_date = employee["start_date"]
     today = date.today()
     leave_year_start_month, leave_year_start_day = 1, 1
@@ -1853,15 +1815,20 @@ def _hrp_calculate_holiday_entitlement(employee):
             "so no 12.07% hours calculation has been assumed here."
         ), service_years
 
+    # Full leave year already in progress before this employee started.
     if start_date <= holiday_year_start:
         return round(full_year_entitlement, 1), (
             f"UK statutory minimum: {full_year_entitlement:.1f} days for {days_per_week:g} contracted days per week "
             f"(5.6 weeks, capped at 28 days). Leave year: {holiday_year_start:%d/%m/%Y} to {holiday_year_end:%d/%m/%Y}."
         ), service_years
 
+    # First/partial leave year: calculate the employee's pure annual holiday
+    # entitlement by calendar-day pro-rata. Bank holidays are non-working days
+    # shown separately in the calendar and are never deducted from this allowance.
     employed_days = (holiday_year_end - start_date).days + 1
     year_days = (holiday_year_end - holiday_year_start).days + 1
     raw = full_year_entitlement * max(0.0, min(employed_days / year_days, 1.0))
+    # GOV.UK calculator rounds a fractional day up to the next half day.
     entitlement = (int(raw * 2 + 0.999999) / 2.0)
     return entitlement, (
         f"Gross UK pro-rata: {full_year_entitlement:.1f} days full-year entitlement × "
@@ -1871,7 +1838,13 @@ def _hrp_calculate_holiday_entitlement(employee):
     ), service_years
 
 def _hrp_get_employee_entitlement(employee):
-    """Return the employee's pure annual holiday entitlement."""
+    """Return the employee's pure annual holiday entitlement.
+
+    Bank holidays are separate non-working days and are never deducted from
+    annual holiday entitlement. This keeps the entitlement as the employee's
+    actual holiday allowance (for example, 28 days), while bank holidays are
+    displayed separately in the calendar and HR reports.
+    """
     employee_id = employee["emp_id"]
     calculated, note, service_years = _hrp_calculate_holiday_entitlement(employee)
     entitlement = calculated
@@ -1879,6 +1852,9 @@ def _hrp_get_employee_entitlement(employee):
         entitlement = float(employee["entitlement_override"])
         note = "HR-adjusted pure holiday entitlement; bank holidays are separate and are not deducted."
     else:
+        # Director HR/report pages can be opened before the main HR Portal
+        # initialises its session-state caches. Use a safe fallback so a fresh
+        # Streamlit session never raises KeyError here.
         entitlement_overrides = st.session_state.get("hrp_entitlement_overrides", {}) or {}
         if employee_id in entitlement_overrides:
             entitlement = float(entitlement_overrides[employee_id])
@@ -1888,6 +1864,9 @@ def _hrp_get_employee_entitlement(employee):
     return entitlement, note, service_years, calculated
 
 def _hrp_get_employee_leave(employee_id):
+    # Employee HR Reports can be opened before the HR Portal page has
+    # initialised its session-state cache. Always fall back to the persistent
+    # workbook so a fresh/old Streamlit session cannot raise KeyError.
     records = st.session_state.get("hrp_leave_records")
     if records is None:
         records = _hrp_load_leave_records()
@@ -1910,7 +1889,12 @@ def _hrp_get_approved_holiday_days(employee_id):
     return round(recorded_days, 1)
 
 def _hrp_get_company_closure_holiday_days(employee, start_date, end_date):
-    """Count Acoole's pre-booked 29, 30 and 31 December closure days."""
+    """Count Acoole's pre-booked 29, 30 and 31 December closure days.
+
+    These days are company-closed days but are treated as annual holiday taken
+    for the employee's holiday balance, just like pre-booked annual leave.
+    Bank holidays are excluded because they are handled separately.
+    """
     if not employee or not start_date or not end_date or end_date < start_date:
         return 0.0
     try:
@@ -1926,7 +1910,10 @@ def _hrp_get_company_closure_holiday_days(employee, start_date, end_date):
     return round(total, 1)
 
 def _hrp_get_bank_holiday_days(employee, start_date, end_date):
-    """Count bank holidays that fall during employment and on a normal weekday."""
+    """Count bank holidays that fall during employment and on a normal weekday.
+    For regular 5-day workers each weekday bank holiday is one day. For part-time
+    workers the stored working-days-per-week figure is used as a proportional factor.
+    """
     if not employee or not start_date or not end_date or end_date < start_date:
         return 0.0
     try:
@@ -1942,7 +1929,11 @@ def _hrp_get_bank_holiday_days(employee, start_date, end_date):
     return round(total, 1)
 
 def _hrp_get_leaving_entitlement(employee, leaving_date):
-    """Calculate pure holiday entitlement accrued up to a leaving date."""
+    """Calculate pure holiday entitlement accrued up to a leaving date.
+
+    Bank holidays are kept separate from the pure entitlement, but they are
+    deducted from the available holiday balance for the final settlement.
+    """
     if not employee or not leaving_date:
         return {"gross": 0.0, "bank_holidays": 0.0, "net": 0.0, "note": ""}
     start_date = employee.get("start_date")
@@ -1981,6 +1972,8 @@ def _hrp_get_leaving_entitlement(employee, leaving_date):
         except Exception:
             pass
     bank_days = _hrp_get_bank_holiday_days(employee, employed_start, employed_end)
+    # Bank holidays are separate non-working days and are NOT deducted from
+    # annual holiday entitlement. Keep the count only as an informational value.
     pure_entitlement = max(0.0, round(gross, 1))
     return {
         "gross": pure_entitlement,
@@ -2027,7 +2020,13 @@ def _hrp_get_upcoming_bank_holidays(from_date=None, limit=5):
 
 
 def _hrp_get_upcoming_bank_holiday_days_for_employee(employee, from_date=None, end_date=None):
-    """Count future England & Wales bank holidays for this employee."""
+    """Count future England & Wales bank holidays for this employee.
+
+    This is deliberately separate from the employee's pure holiday entitlement.
+    The entitlement remains the contractual/statutory annual holiday allowance;
+    this value is only used to show how many future bank-holiday days are still
+    coming and to reserve those days against the *available holiday balance*.
+    """
     if not employee:
         return 0.0
     start = from_date or date.today()
@@ -2069,7 +2068,13 @@ def _hrp_get_upcoming_bank_holiday_days_for_employee(employee, from_date=None, e
 
 
 def _hrp_get_approved_final_settlement_offset(employee_id):
-    """Return the signed amount of an approved final holiday settlement."""
+    """Return the signed amount of an approved final holiday settlement.
+
+    Addition settlements are positive (company owes employee) and deduction
+    settlements are negative (employee owes company).  Applying this signed
+    offset to the live holiday balance makes an approved final settlement close
+    the employee's holiday account at zero.
+    """
     try:
         records = load_hr_leave(force=False)
     except Exception:
@@ -2130,6 +2135,11 @@ def _hrp_get_holiday_position(employee_id):
             "entitlement": 0.0, "used": 0.0, "bank_holidays": 0.0,
             "balance": 0.0, "employee_owes_company": 0.0, "company_owes_employee": 0.0,
         }
+    # Once an employee is recorded as Left, the live employee report/overview
+    # must show a closed holiday account. The final settlement is handled
+    # separately through HR Leave Settlement and does not leave a residual
+    # holiday balance on the employee report. Historical leave records remain
+    # available for audit/history.
     if str(employee.get("status", "")).strip().casefold() == "left" or employee.get("leaving_date"):
         return {
             "entitlement": 0.0, "used": 0.0, "recorded_used": 0.0,
@@ -2158,6 +2168,11 @@ def _hrp_get_holiday_position(employee_id):
         except Exception:
             pass
     bank_holidays_passed = _hrp_get_bank_holiday_days(employee, start_date, min(today, end_date))
+    # Reserve bank holidays still to come in the employee's current leave year
+    # as well as those that have already passed. This is separate from the
+    # pure contractual entitlement: the employee's available balance is what
+    # remains after booked/pre-booked annual leave and all applicable bank
+    # holidays are accounted for.
     upcoming_bank_holidays = _hrp_get_upcoming_bank_holiday_days_for_employee(
         employee, today + timedelta(days=1), end_date
     )
@@ -2203,9 +2218,14 @@ def _hrp_create_leave_id():
 # ════════════════════════════════════════════════════════════
 # 📅 HR HOLIDAY CALENDAR — Excel-style yearly employee calendar
 # ════════════════════════════════════════════════════════════
+# UK / ACoole non-working dates used by the holiday calendar and leave validation.
+# Bank holidays are for England & Wales. Acoole also closes on 29-31 December
+# (shown as H in the supplied company calendar). Bank holidays are kept separate
+# from pure entitlement, but are deducted/reserved from the available balance.
+# The 29-31 December company closure is treated as pre-booked annual holiday.
 HRP_BANK_HOLIDAYS = {
     2026: {
-        date(2026, 1, 1): "New Year's Day",
+        date(2026, 1, 1): "New Year’s Day",
         date(2026, 4, 3): "Good Friday",
         date(2026, 4, 6): "Easter Monday",
         date(2026, 5, 4): "Early May bank holiday",
@@ -2215,7 +2235,7 @@ HRP_BANK_HOLIDAYS = {
         date(2026, 12, 28): "Boxing Day (substitute day)",
     },
     2027: {
-        date(2027, 1, 1): "New Year's Day",
+        date(2027, 1, 1): "New Year’s Day",
         date(2027, 3, 26): "Good Friday",
         date(2027, 3, 29): "Easter Monday",
         date(2027, 5, 3): "Early May bank holiday",
@@ -2225,7 +2245,7 @@ HRP_BANK_HOLIDAYS = {
         date(2027, 12, 28): "Boxing Day (substitute day)",
     },
     2028: {
-        date(2028, 1, 3): "New Year's Day (substitute day)",
+        date(2028, 1, 3): "New Year’s Day (substitute day)",
         date(2028, 4, 14): "Good Friday",
         date(2028, 4, 17): "Easter Monday",
         date(2028, 5, 1): "Early May bank holiday",
@@ -2237,6 +2257,7 @@ HRP_BANK_HOLIDAYS = {
 }
 
 def _hrp_company_closure_dates(year):
+    # The supplied Acoole calendar shows 29, 30 and 31 December as H.
     return {date(year, 12, day) for day in (29, 30, 31)}
 
 def _hrp_non_working_dates(year):
@@ -2280,6 +2301,7 @@ HRP_CALENDAR_CODES = {
     "Training Course": "T",
 }
 
+# Exact colours requested for the Excel-style calendar.
 HRP_CALENDAR_COLOURS = {
     "H": "#92D050",
     "HD": "#FFC000",
@@ -2315,6 +2337,8 @@ def _hrp_render_holiday_calendar():
         "Pending department-manager requests are marked with * and are not treated as approved leave."
     )
 
+    # Always refresh from the persistent workbooks so the calendar reflects
+    # employees/leave added by another user's session.
     employees = _hrp_load_employees()
     leave_records = _hrp_load_leave_records()
     st.session_state.hrp_employees = employees
@@ -2345,6 +2369,8 @@ def _hrp_render_holiday_calendar():
     ]
     filtered_employees.sort(key=lambda e: (str(e.get("department", "")).casefold(), str(e.get("name", "")).casefold()))
 
+    # Build one lookup per employee/date. If more than one record falls on the
+    # same date, approved leave takes precedence; otherwise concatenate codes.
     leave_lookup = {}
     non_working_dates = _hrp_non_working_dates(int(calendar_year))
     for record in leave_records:
@@ -2376,6 +2402,8 @@ def _hrp_render_holiday_calendar():
                     current += timedelta(days=1)
                     continue
                 existing = leave_lookup.get(key, "")
+                # One calendar cell represents one leave status. Sick Leave
+                # always takes precedence so HR shows S (grey) rather than H/S.
                 if code.rstrip("*") == "S":
                     leave_lookup[key] = code
                 elif existing.rstrip("*") == "S":
@@ -2388,6 +2416,8 @@ def _hrp_render_holiday_calendar():
                     leave_lookup[key] = f"{existing}/{code}"
             current += timedelta(days=1)
 
+    # Generate the full year exactly as the spreadsheet does: employee details
+    # first, then one column for every calendar date.
     first_day = date(int(calendar_year), 1, 1)
     last_day = date(int(calendar_year), 12, 31)
     dates = []
@@ -2436,6 +2466,8 @@ def _hrp_render_holiday_calendar():
         except Exception:
             employee_leaving = None
         for d in dates:
+            # Before start = NA. After the recorded leaving date = LEFT.
+            # LEFT takes precedence over weekends, bank holidays and other leave.
             if employee_start and d < employee_start:
                 row[d.strftime("%d %b")] = "NA"
             elif employee_leaving and d > employee_leaving:
@@ -2448,6 +2480,8 @@ def _hrp_render_holiday_calendar():
     if not df.empty:
         df["Start Date"] = pd.to_datetime(df["Start Date"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
 
+    # Colour/format the date cells using the same idea as the supplied Excel
+    # workbook: weekends are shaded and booked leave is highlighted.
     date_columns = [d.strftime("%d %b") for d in dates]
 
     def _style_calendar(dataframe):
@@ -2500,6 +2534,8 @@ def _hrp_render_holiday_calendar():
                 {"selector": "td", "props": [("text-align", "center"), ("vertical-align", "middle")]},
             ])
         )
+        # Small date columns reproduce the compact Excel calendar and allow
+        # horizontal scrolling without hiding employee details.
         column_config = {
             "Employee Name": st.column_config.TextColumn("Employee Name", width="medium"),
             "Department": st.column_config.TextColumn("Department", width="medium"),
@@ -2515,6 +2551,9 @@ def _hrp_render_holiday_calendar():
             column_config=column_config,
         )
 
+        # Leave Records are intentionally not shown below the calendar.
+        # The detailed record list is available in the Leave History tab.
+
 
 def _hrp_work_duration(start_date, end_date):
     """Return a readable employment duration using calendar years/months/days."""
@@ -2523,6 +2562,7 @@ def _hrp_work_duration(start_date, end_date):
         end = pd.to_datetime(end_date).date() if not isinstance(end_date, date) else end_date
         if end < start:
             return "0 days"
+        # Calendar-based duration without requiring dateutil.
         years = end.year - start.year
         months = end.month - start.month
         days = end.day - start.day
@@ -2604,6 +2644,8 @@ def _hrp_leaver_history_pdf(employee, history):
 
         def hard_wrap(v, width=80):
             txt = safe(v)
+            # Prevent a single enormous/unbroken token from making fpdf2 report
+            # "Not enough horizontal space to render a single character".
             return "\n".join(
                 "\n".join(textwrap.wrap(part, width=width, break_long_words=True, break_on_hyphens=False) or [""])
                 for part in txt.splitlines()
@@ -2901,6 +2943,7 @@ def _hrp_build_employee_report_xlsx():
         "Department-wise Employee Master Report",
     )
 
+    # Summary
     ws["A7"] = "EMPLOYEE SUMMARY"
     ws["A7"].font = Font(size=13, bold=True, color=styles["navy"])
     summary = [
@@ -2962,6 +3005,7 @@ def _hrp_build_employee_report_xlsx():
         row = _hrp_style_report_table(ws, row, 1, headers, rows, styles, total_row=total_row)
         row += 2
 
+    # Company total at the very end.
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
     ws.cell(row, 1, "COMPANY TOTAL")
     ws.cell(row, 1).font = Font(size=14, bold=True, color=styles["white"])
@@ -3044,6 +3088,7 @@ def _hrp_build_holiday_report_xlsx(report_year):
         dept_days = 0.0
         for e in dept_employees:
             pos = _hrp_get_holiday_position(e["emp_id"])
+            # Position is live/current; the detail below is restricted to report year.
             year_records = [
                 r for r in leave_records
                 if str(r.get("employee_id", "")).strip().casefold() == str(e.get("emp_id", "")).strip().casefold()
@@ -3065,6 +3110,7 @@ def _hrp_build_holiday_report_xlsx(report_year):
         )
         row += 1
 
+        # Individual employee holiday records under the department.
         for e in dept_employees:
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
             ws.cell(row, 1, f"{e.get('name', '')} — {e.get('emp_id', '')}")
@@ -3093,6 +3139,7 @@ def _hrp_build_holiday_report_xlsx(report_year):
 
         row += 1
 
+    # Final company total.
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
     ws.cell(row, 1, "COMPANY TOTAL")
     ws.cell(row, 1).font = Font(size=14, bold=True, color=styles["white"])
@@ -3163,9 +3210,9 @@ def render_hr_download_reports():
                 type="primary",
             )
 
-
 def render_hr_portal(current_user_info=None):
     """HR Portal — HR Management, Holiday Calendar, Employee Details, Leave and Leave History."""
+    # Defensive initialization: Streamlit sessions may survive code/data changes.
     _hr_portal_init()
     if "hrp_role" not in st.session_state:
         st.session_state.hrp_role = "hr"
@@ -3198,6 +3245,9 @@ def render_hr_portal(current_user_info=None):
     current_dept_name = str((current_user_info or {}).get("dept", "")).strip().casefold() if isinstance(current_user_info, dict) else ""
     is_hr_manager = current_dept_name == "hr" or current_role_name == "hr manager"
 
+    # Keep the currently selected employee valid. The selector itself is now
+    # inside Employee Details so the profile below it always belongs to the
+    # employee selected there.
     active_employee_ids = [e["emp_id"] for e in st.session_state.hrp_employees if e.get("status") == "Active"]
     all_employee_ids = [e["emp_id"] for e in st.session_state.hrp_employees]
     if is_hr:
@@ -3210,6 +3260,8 @@ def render_hr_portal(current_user_info=None):
     selected_employee_id = st.session_state.hrp_current_emp_id
     emp = _hrp_get_employee(selected_employee_id) if selected_employee_id else None
 
+    # HR gets separate tabs for the live holiday calculator and the employee
+    # leaving/final-settlement workflow. Employees remain view-only.
     if is_hr:
         tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
             "🧑‍💼 HR Management",
@@ -3227,6 +3279,7 @@ def render_hr_portal(current_user_info=None):
         tab_hr = None
         tab_calendar = None
 
+    # ========== TAB 1: HR MANAGEMENT ==========
     if is_hr and tab_hr is not None:
         with tab_hr:
             st.subheader("🧑‍💼 HR Management")
@@ -3270,6 +3323,8 @@ def render_hr_portal(current_user_info=None):
                     st.subheader("➕ Add New Employee")
                     st.info("HR enters the company Employee ID manually. Any unique letters/numbers format used by your company is accepted.")
 
+                    # Versioned form keys guarantee that a successful submission
+                    # renders a completely fresh form on the next rerun.
                     new_form_version = st.session_state.hrp_new_employee_form_version
                     with st.form(f"hrp_new_employee_form_{new_form_version}", clear_on_submit=False):
                         col1, col2 = st.columns(2)
@@ -3348,6 +3403,8 @@ def render_hr_portal(current_user_info=None):
                             _hrp_save_employees()
                             st.session_state.hrp_current_emp_id = result
                             log_action("HR_EMPLOYEE_ADDED", result, new_data=new_employee)
+                            # Change every widget key used by the form. On rerun
+                            # Streamlit therefore creates a blank form for the next employee.
                             st.session_state.hrp_new_employee_form_version = new_form_version + 1
                             st.success(f"Employee {result} created successfully. The form is ready for the next employee.")
                             st.rerun()
@@ -3444,6 +3501,7 @@ def render_hr_portal(current_user_info=None):
                             edit_emp["agreement_type"] = edit_agreement
                             edit_emp["working_pattern"] = edit_pattern
                             edit_emp["days_per_week"] = edit_days
+                            # Active/Inactive is managed here. Final 'Left' status is managed by Employee Leaving.
                             if edit_emp.get("status") != "Left":
                                 edit_emp["status"] = edit_status
                             if validated_id != old_id:
@@ -3503,10 +3561,20 @@ def render_hr_portal(current_user_info=None):
                 with hr_approval_tab:
                     render_hr_leave_approvals()
 
+            # ========== EMPLOYEE LEAVING / FINAL SETTLEMENT TAB ==========
             with hr_leaving_tab:
                 st.subheader("🚪 Employee Leaving")
                 st.info("Select an employee to review their full employment details, enter the leaving date and reason, then record the employee as Left. After the employee is recorded as Left, the final holiday balance is calculated and you can submit an Addition or Deduction settlement for Director approval.")
 
+                # Once a final settlement is pending or approved, do not offer the
+                # employee again in the leaving workflow. This prevents duplicate
+                # additions/deductions for the same employee. Rejected requests are
+                # allowed to be resubmitted.
+                # Normally only Active employees are selectable. After HR clicks
+                # "Record Employee as Left", keep that same employee selected for
+                # the remainder of the leaving workflow so Step 2 (final settlement)
+                # is immediately visible after rerun. The selected Left employee is
+                # removed once a pending/approved final settlement exists.
                 current_leaving_id = str(st.session_state.get("hrp_leaving_employee", "") or "").strip()
                 leaving_ids = [
                     e["emp_id"] for e in st.session_state.hrp_employees
@@ -3519,6 +3587,9 @@ def render_hr_portal(current_user_info=None):
                 if not leaving_ids:
                     st.success("✅ All employees currently recorded for leaving already have a pending or approved final settlement. No duplicate settlement can be raised.")
                 else:
+                    # If the current session points at an employee who has just
+                    # been recorded as Left, keep that employee selected. Otherwise
+                    # default to the first available employee.
                     if current_leaving_id in leaving_ids:
                         leaving_index = leaving_ids.index(current_leaving_id)
                     else:
@@ -3592,6 +3663,16 @@ def render_hr_portal(current_user_info=None):
                                 leaving_emp["leaving_date"] = leaving_date
                                 leaving_emp["leaving_reason"] = leaving_reason.strip()
                                 _hrp_save_employees()
+                                # The selectbox above already owns the
+                                # "hrp_leaving_employee" session-state key. Do not
+                                # assign to that key after the widget has been
+                                # instantiated; Streamlit raises
+                                # StreamlitWidgetAlreadyInstantiatedError.
+                                # The current selection is preserved automatically
+                                # across st.rerun(), and the leaving_ids logic above
+                                # deliberately keeps the newly-Left employee in
+                                # the selector until any final settlement is
+                                # pending/approved.
                                 log_action(
                                     "HR_EMPLOYEE_LEFT",
                                     leaving_id,
@@ -3601,6 +3682,8 @@ def render_hr_portal(current_user_info=None):
                                 st.success(f"{leaving_emp['name']} has been recorded as Left on {leaving_date:%d/%m/%Y}. The final holiday settlement is now ready for the next step.")
                                 st.rerun()
 
+                        # The settlement step only appears after the employee has
+                        # actually been recorded as Left.
                         is_recorded_left = (
                             str(leaving_emp.get("status", "")).strip().casefold() == "left"
                             and bool(leaving_emp.get("leaving_date"))
@@ -3716,52 +3799,14 @@ def render_hr_portal(current_user_info=None):
                                     st.session_state["hr_leave_last_created_id"] = new_id
                                     st.rerun()
 
-            st.divider()
-            st.subheader("📋 Submitted Final Holiday Settlements")
-            final_records = [r for r in load_hr_leave(force=False) if _hrp_is_final_holiday_settlement_record(r)]
-            if final_records:
-                for r in final_records[:20]:
-                    status = str(r.get("status", "pending")).strip().casefold()
-                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):
-                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")
-                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")
-                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")
-                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")
-                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")
-                        if status == "pending":
-                            edit_key = f"hrp_edit_final_{r.get('id')}"
-                            if st.button("✏️ Edit Pending Settlement", key=edit_key):
-                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True
-                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):
-                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")
-                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")
-                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")
-                                ec1, ec2 = st.columns(2)
-                                with ec1:
-                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", width="stretch"):
-                                        records = load_hr_leave(force=True)
-                                        for rr in records:
-                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):
-                                                rr['manager'] = new_manager.strip()
-                                                rr['amount'] = float(new_amount)
-                                                rr['desc'] = new_desc.strip()
-                                                break
-                                        save_all_hr_leave(records)
-                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)
-                                        st.success(f"Settlement #{r.get('id')} updated.")
-                                        st.rerun()
-                                with ec2:
-                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", width="stretch"):
-                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)
-                                        st.rerun()
-            else:
-                st.info("No final holiday settlements have been submitted yet.")
-
+            # Submitted final settlements are shown directly below the leaving\n            # workflow. Once submitted, the employee is removed from the selector\n            # above, so the page is effectively cleared for the next employee.\n            st.divider()\n            st.subheader("📋 Submitted Final Holiday Settlements")\n            final_records = [r for r in load_hr_leave(force=False) if _hrp_is_final_holiday_settlement_record(r)]\n            if final_records:\n                for r in final_records[:20]:\n                    status = str(r.get("status", "pending")).strip().casefold()\n                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")\n                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):\n                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")\n                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")\n                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")\n                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")\n                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")\n                        # Pending final settlements can be edited before Director approval.\n                        if status == "pending":\n                            edit_key = f"hrp_edit_final_{r.get('id')}"\n                            if st.button("✏️ Edit Pending Settlement", key=edit_key):\n                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True\n                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):\n                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")\n                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")\n                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")\n                                ec1, ec2 = st.columns(2)\n                                with ec1:\n                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", width="stretch"):\n                                        records = load_hr_leave(force=True)\n                                        for rr in records:\n                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):\n                                                rr['manager'] = new_manager.strip()\n                                                rr['amount'] = float(new_amount)\n                                                rr['desc'] = new_desc.strip()\n                                                break\n                                        save_all_hr_leave(records)\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.success(f"Settlement #{r.get('id')} updated.")\n                                        st.rerun()\n                                with ec2:\n                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", width="stretch"):\n                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)\n                                        st.rerun()\n            else:\n                st.info("No final holiday settlements have been submitted yet.")\n\n            # ========== LEAVERS TAB ==========
             with hr_leavers_tab:
                 _hrp_render_leavers_tab()
 
+            # ========== LIVE HOLIDAY CALCULATOR TAB ==========
             with hr_holiday_calc_tab:
+                # Refresh the persistent leave ledger before calculating holiday
+                # used/balance so newly recorded HR leave is included immediately.
                 st.session_state.hrp_leave_records = _hrp_load_leave_records()
                 st.subheader("📊 Holiday Calculator")
                 st.info("Calculate an employee's current holiday position. Employees recorded as Left are closed and show 0.0 days in the live holiday position. Final leaving settlements are handled separately in Employee Leaving and approved by the Director.")
@@ -3815,10 +3860,12 @@ def render_hr_portal(current_user_info=None):
                 else:
                     st.info("No employees are registered yet.")
 
+    # ========== TAB 2: HOLIDAY CALENDAR ==========
     if is_hr and tab_calendar is not None:
         with tab_calendar:
             _hrp_render_holiday_calendar()
 
+    # ========== TAB 2: EMPLOYEE DETAILS ==========
     with tab_details:
         st.subheader("Employee Details")
 
@@ -3902,6 +3949,8 @@ def render_hr_portal(current_user_info=None):
                     st.success(f"Employee {emp['emp_id']} updated successfully.")
                     st.rerun()
 
+            # Holiday allowance is now part of Employee Details rather than a
+            # separate top-level tab, keeping the requested four-tab layout.
             st.divider()
             st.subheader("📅 Holiday Allowance")
             entitlement, entitlement_note, service_years, calculated_base = _hrp_get_employee_entitlement(emp)
@@ -3911,6 +3960,10 @@ def render_hr_portal(current_user_info=None):
             upcoming_bank_holidays = holiday_position.get("upcoming_bank_holidays", 0.0)
             remaining = holiday_position["balance"]
 
+            # The balance shown here is the employee's genuinely available
+            # holiday after booked/pre-booked annual leave, bank holidays that
+            # have passed, and bank holidays still to come. The entitlement
+            # itself is never reduced.
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
             with col2: st.metric("Holiday Used / Booked", f"{holiday_used:.1f} days")
@@ -3921,6 +3974,9 @@ def render_hr_portal(current_user_info=None):
 
             st.info(entitlement_note)
 
+            # Show the actual upcoming bank-holiday dates that are reserved
+            # from the remaining balance, so HR can see exactly why the balance
+            # is reduced.
             today = date.today()
             try:
                 emp_start = emp.get("start_date")
@@ -3994,6 +4050,7 @@ def render_hr_portal(current_user_info=None):
         elif not is_hr:
             st.info("Your employee record could not be found. Please contact HR.")
 
+    # ========== TAB 3: LEAVE ==========
     with tab_leave:
         st.subheader("Leave Management")
         if not emp:
@@ -4001,6 +4058,8 @@ def render_hr_portal(current_user_info=None):
         elif is_hr:
             st.info("HR records leave on behalf of the employee. All leave submitted by HR is automatically marked Approved.")
 
+            # Select the employee directly in the Leave tab. HR no longer
+            # needs to visit Employee Details before booking leave.
             leave_employee_ids = [
                 e["emp_id"] for e in st.session_state.hrp_employees
                 if e.get("status", "Active") == "Active"
@@ -4063,6 +4122,10 @@ def render_hr_portal(current_user_info=None):
                     elif calculated_days <= 0:
                         st.error("The selected dates do not contain any working days.")
                     else:
+                        # Always use the persistent workbook as the source of truth
+                        # immediately before creating a record. This prevents an old
+                        # Streamlit session from writing an older in-memory list back
+                        # over a newly recorded leave entry.
                         persistent_leave_records = _hrp_load_leave_records()
                         st.session_state.hrp_leave_records = persistent_leave_records
                         employee_key = str(leave_employee["emp_id"]).strip().casefold()
@@ -4090,6 +4153,8 @@ def render_hr_portal(current_user_info=None):
                                 "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "rejection_reason": "",
                             }
+                            # Merge into the persistent ledger under a process-wide lock.
+                            # Never save an old session-state list back over a newer workbook.
                             with _HR_PORTAL_LEAVE_LOCK:
                                 latest = _hrp_load_leave_records()
                                 latest_ids = {str(r.get("leave_id", "")).strip() for r in latest}
@@ -4098,6 +4163,8 @@ def render_hr_portal(current_user_info=None):
                                 else:
                                     latest.append(new_record)
                                     _hrp_save_leave_records(latest, sync_drive=True)
+                            # Reload after the verified write so every downstream report
+                            # uses exactly the persistent ledger.
                             st.session_state.hrp_leave_records = _hrp_load_leave_records()
                             if not any(str(r.get("leave_id", "")) == new_record["leave_id"] for r in st.session_state.hrp_leave_records):
                                 raise RuntimeError(f"Leave {new_record['leave_id']} was not present after save verification.")
@@ -4114,15 +4181,24 @@ def render_hr_portal(current_user_info=None):
             else:
                 st.write("No leave records found.")
 
+    # ========== TAB 4: LEAVE HISTORY ==========
     with tab_history:
         st.subheader("Leave History")
 
         if is_hr:
+            # Leave History always reads the persistent HR Portal Leave Records
+            # workbook so a fresh submission is visible immediately, even if the
+            # current browser session previously held an older cache.
             st.session_state.hrp_leave_records = _hrp_load_leave_records()
+            # Leave History has its own employee selector. It is deliberately
+            # independent from Employee Details so changing one tab does not
+            # silently change the employee being viewed here.
             history_employee_ids = [
                 e["emp_id"] for e in st.session_state.hrp_employees
                 if e.get("status", "Active") == "Active"
             ]
+            # Include inactive employees if they already have leave history,
+            # so HR can still review historical records after deactivation.
             for e in st.session_state.hrp_employees:
                 if e.get("emp_id") not in history_employee_ids:
                     if _hrp_get_employee_leave(e.get("emp_id")):
@@ -4260,15 +4336,23 @@ def render_hr_portal(current_user_info=None):
         else:
             st.info("No employee record is available.")
 
+    # ========== HR REPORTS ==========
     if is_hr and hr_reports_tab is not None:
         with hr_reports_tab:
             render_hr_download_reports()
 
+    # ========== EMPLOYEE-ONLY VIEW ==========
     if not is_hr:
+        # The employee sees only the requested personal information/leave tabs.
         pass
 
 def render_department_manager_leave_request(current_user_info=None):
-    """Department-manager leave request workflow."""
+    """Department-manager leave request workflow.
+
+    Employees are maintained by HR in the persistent HR employee workbook.  This
+    module always refreshes that workbook when opened so a manager sees employees
+    added by HR even when the manager's Streamlit session was already open.
+    """
     user = current_user_info or {}
     manager_name = str(user.get("full_name", "Department Manager")).strip()
     manager_department = str(user.get("dept", "")).strip()
@@ -4280,10 +4364,17 @@ def render_department_manager_leave_request(current_user_info=None):
         st.error("Your account is not assigned to a department. Please contact the Super Admin.")
         return
 
+    # IMPORTANT: Do not depend on render_hr_portal() having run first. Department
+    # managers may only have the separate Leave Request module, so their session
+    # may never have loaded hrp_employees. Always refresh the persistent employee
+    # list here so HR additions are immediately available to managers.
     try:
         _hrp_init_storage()
         refreshed_employees = _hrp_load_employees()
         st.session_state.hrp_employees = refreshed_employees
+        # Department managers can have the Leave Request module without ever
+        # opening the HR portal, so their session may not contain leave records.
+        # Always load the persistent leave workbook here as well.
         st.session_state.hrp_leave_records = _hrp_load_leave_records()
     except Exception as e:
         st.error(f"Unable to load HR employee or leave records: {e}")
@@ -4300,6 +4391,7 @@ def render_department_manager_leave_request(current_user_info=None):
         st.info(f"No active employees have been added to the **{manager_department}** department by HR yet.")
         return
 
+    # Keep the employee selector independent from Employee Details / HR Leave.
     employee_ids = [e["emp_id"] for e in employees]
     key_suffix = re.sub(r"[^A-Za-z0-9_]+", "_", manager_department) or "dept"
     selector_key = f"dept_leave_employee_{key_suffix}"
@@ -4318,6 +4410,8 @@ def render_department_manager_leave_request(current_user_info=None):
         st.error("Selected employee could not be found.")
         return
 
+    # Give the manager enough employee information to confirm they selected the
+    # correct person before submitting the request.
     st.markdown("### 👤 Employee Details")
     d1, d2, d3, d4 = st.columns(4)
     with d1:
@@ -4424,7 +4518,13 @@ def render_department_manager_leave_request(current_user_info=None):
 
 
 def render_hr_leave_approvals():
-    """HR approval inbox for department-manager leave requests."""
+    """HR approval inbox for department-manager leave requests.
+
+    Always reloads the persistent leave workbook so requests submitted by a
+    department manager in another Streamlit session appear immediately to HR.
+    Approved requests are removed from Pending and become part of official
+    Leave History. Rejected requests remain visible in the Rejected section.
+    """
     try:
         _hrp_init_storage()
         st.session_state.hrp_employees = _hrp_load_employees()
@@ -4532,6 +4632,9 @@ def render_hr_leave_approvals():
 
 def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
     """HR department area. Department managers get requests only; HR Manager keeps the full direct-entry portal."""
+    # If this function is reached, the user has explicit HR Department permission.
+    # Keep the full HR direct-entry portal regardless of whether the department is
+    # named "HR", "Human Resource", or another configured display name.
     sub_portal_tab, sub_settlement_tab = st.tabs([
         "🧑‍💼 HR Portal (Employee / Holiday / Leave)",
         "💷 HR Leave Settlement"
@@ -6029,6 +6132,10 @@ def save_all_hr_leave(records, sync=True):
     pd.DataFrame(rows, columns=HR_LEAVE_COLUMNS).to_excel(HR_LEAVE_PATH, index=False, engine="openpyxl")
     _set_data_cache("_hr_leave_cache", list(records))
     if sync:
+        # HR Leave Settlement is a financial transaction and must be backed up
+        # before the Streamlit rerun returns control to the user.  Do not queue
+        # this particular workbook on the background worker: a rerun/restart
+        # can otherwise happen before the queued upload completes.
         backup_ok = _sync_saved_file_to_drive_now(HR_LEAVE_PATH)
         if not backup_ok:
             print("WARNING: HR Leave Settlement local save succeeded, but Google Drive backup did not complete.")
@@ -6602,6 +6709,8 @@ def render_hr_leave_form(user_name):
 
     final_settlement = bool(selected_left)
     if selected_left:
+        # Calculate the exact final balance at the recorded leaving date.  This
+        # includes actual holiday, bank holidays and the 29-31 December closure.
         leaving_date = selected_left.get("leaving_date") or dt_val
         if not isinstance(leaving_date, date):
             try:
@@ -6709,6 +6818,9 @@ def render_hr_leave_form(user_name):
 
 
 def render_hr_leave_my_submissions(user_name):
+    # The leaving-settlement workflow stores the creator using the logged-in
+    # user's full name. Accept both full name and username so older records
+    # and records created from different entry points remain visible.
     logged_user = st.session_state.get("user_info", {}) or {}
     submitted_by_values = {
         str(user_name or "").strip().casefold(),
@@ -7027,6 +7139,7 @@ def _super_admin_transaction_control():
                             delete_btn=st.form_submit_button("🗑️ Delete Transaction", width="stretch")
                     if save_btn or delete_btn:
                         records=item["saver"].__name__
+                        # Reload fresh records so the Super Admin edit cannot overwrite a newer change with stale cache data.
                         fresh=next((x[2] for x in source_records() if x[0]==item["source"]), [])
                         target_rec=next((x for x in fresh if str(x.get("id"))==str(item["id"])), None)
                         if target_rec is None:
@@ -7113,6 +7226,7 @@ def _super_admin_transaction_control():
                     new_id = validated_id
                 if valid_id:
                     emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["job_title"]=new_position.strip(); emp["department"]=new_dept; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
+                    # Cascade an ACE-ID change through linked user and HR leave records.
                     if new_id != old_id:
                         users=load_users()
                         changed=False
@@ -7129,6 +7243,7 @@ def _super_admin_transaction_control():
                             if str(r.get("employee_id",""))==old_id: r["employee_id"]=new_id
                         st.session_state["hrp_leave_records"]=portal
                         _hrp_save_leave_records()
+                    # Save the complete employee workbook directly and refresh the portal cache.
                     pd.DataFrame([{
                         "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
@@ -8264,9 +8379,13 @@ if not st.session_state.logged_in:
             else: st.error("❌ Invalid Username or Password. Please try again.")
     st.stop()
 
-# ============================================================
-# 🧭 SIDEBAR NAVIGATION SHELL (Modern Soft)
-# ============================================================
+col_left, col_right = st.columns([4, 1])
+with col_left: refresh_data_button()
+with col_right:
+    if st.button("🔒 Secure Logout", type="secondary", key="top_right_logout"):
+        st.session_state.clear()
+        st.rerun()
+
 display_company_header()
 
 user_info = st.session_state.get("user_info", {})
@@ -8274,92 +8393,14 @@ full_name = user_info.get("full_name", user_info.get("username", "User"))
 dept = user_info.get("dept", "")
 role = user_info.get("role", "")
 
+st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
+
+change_my_password_form()
+
 all_live_requests = load_records_from_excel()
 CATEGORIES = load_categories()
 
-
-def _sidebar_refresh():
-    """Refresh every persistent workbook from Google Drive."""
-    with st.spinner("Refreshing from Google Drive..."):
-        if drive_service is not None:
-            for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH,
-                         INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH,
-                         HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH,
-                         HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH):
-                with _DRIVE_SYNC_LOCK:
-                    pending = path in DRIVE_PENDING_SYNC
-                if pending:
-                    continue
-                remote = _drive_find_file(os.path.basename(path))
-                if remote:
-                    _drive_download_file(remote["id"], path)
-        _invalidate_data_cache(
-            "_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache",
-            "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count",
-            "_hr_leave_cache", "_hr_daily_rates_cache", "_store_deduction_cache",
-            "_store_items_cache",
-        )
-        st.session_state["hrp_force_reload"] = True
-        st.session_state["hrp_data_loaded"] = False
-        st.session_state["_last_refresh"] = datetime.now().isoformat()
-    st.rerun()
-
-
-def _nav_brand():
-    st.sidebar.markdown(
-        "<div style='padding:0.25rem 0.5rem 0.9rem 0.5rem; border-bottom:1px solid #EEF1F6; margin-bottom:0.6rem;'>"
-        "<div style='font-size:1.25rem; font-weight:800; color:#1F4E78; letter-spacing:-0.5px;'>⚡ ACOOLE</div>"
-        f"<div style='font-size:0.76rem; color:#64748B; margin-top:2px;'>{role}</div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-
-def _nav_render(items, role_suffix=""):
-    """Render sidebar nav + page header, then run the selected page."""
-    if not items:
-        st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
-        return
-
-    keys = [k for k, _, _ in items]
-    labels = {k: l for k, l, _ in items}
-    callbacks = {k: c for k, _, c in items}
-
-    state_key = f"nav_selected_{role}{role_suffix}"
-    if st.session_state.get(state_key) not in keys:
-        st.session_state[state_key] = keys[0]
-
-    _nav_brand()
-
-    selected = st.sidebar.radio(
-        "Navigation",
-        options=keys,
-        index=keys.index(st.session_state[state_key]),
-        format_func=lambda k: labels[k],
-        label_visibility="collapsed",
-        key=f"nav_radio_{role}{role_suffix}",
-    )
-    st.session_state[state_key] = selected
-
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🔄 Refresh Data", key=f"nav_refresh_{role}{role_suffix}"):
-        _sidebar_refresh()
-    if st.sidebar.button("🔒 Secure Logout", key=f"nav_logout_{role}{role_suffix}"):
-        st.session_state.clear()
-        st.rerun()
-
-    change_my_password_form()
-
-    st.markdown(
-        f"<div style='margin-bottom:1.1rem;'>"
-        f"<div style='font-size:1.5rem; font-weight:700; color:#0F172A; letter-spacing:-0.4px;'>{labels[selected]}</div>"
-        f"<div style='font-size:0.83rem; color:#64748B; margin-top:3px;'>"
-        f"Signed in as <b style='color:#1F4E78;'>{full_name}</b> · {role} · {dept}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    callbacks[selected]()
+st.divider()
 
 
 # ============================================================
@@ -8367,6 +8408,9 @@ def _nav_render(items, role_suffix=""):
 # ============================================================
 def render_employee_hr_reports(current_user_info):
     """Read-only HR dashboard restricted to the Employee ID linked to the login."""
+    # Initialise the HR portal data cache before using shared HR helper
+    # functions. This is essential when an employee opens My HR Reports
+    # directly after login, without first visiting the HR Portal.
     _hr_portal_init()
     linked_id = str((current_user_info or {}).get("employee_id", "")).strip()
     if not linked_id:
@@ -8378,6 +8422,9 @@ def render_employee_hr_reports(current_user_info):
     if employees is None:
         employees = _hrp_load_employees()
         st.session_state.hrp_employees = employees
+    # A session may contain employee records loaded by an older app version.
+    # Normalise those records on every report render so stale pandas NaT values
+    # can never reach date comparisons.
     employees = _hrp_normalize_employee_records(employees)
     st.session_state.hrp_employees = employees
     leave_records = st.session_state.get("hrp_leave_records")
@@ -8394,10 +8441,16 @@ def render_employee_hr_reports(current_user_info):
     st.caption("View only — you can see your own employee details, holiday position, absence records and calendar.")
 
     entitlement_result = _hrp_get_employee_entitlement(employee)
+    # My HR Reports must use the HR-adjusted entitlement saved against the employee,
+    # not only the system-calculated entitlement.
     entitlement = float(entitlement_result[0]) if isinstance(entitlement_result, tuple) else float(entitlement_result)
     entitlement_note = str(entitlement_result[1]) if isinstance(entitlement_result, tuple) and len(entitlement_result) > 1 else ""
     approved_holiday = _hrp_get_approved_holiday_days(linked_id)
 
+    # Bank holidays are separate from the employee's pure annual entitlement.
+    # Both passed and upcoming bank holidays for the employee's current leave
+    # year are reserved against the *available holiday balance*. The entitlement
+    # figure itself is never changed.
     today = date.today()
     try:
         employee_start = employee.get("start_date")
@@ -8415,10 +8468,15 @@ def render_employee_hr_reports(current_user_info):
     except Exception:
         pass
 
-    passed_bank_holiday_days = _hrp_get_bank_holiday_days(employee, employee_start, passed_bank_holiday_end)
+    passed_bank_holiday_days = _hrp_get_bank_holiday_days(
+        employee, employee_start, passed_bank_holiday_end
+    )
     company_closure_days = _hrp_get_company_closure_holiday_days(
         employee, employee_start, passed_bank_holiday_end if passed_bank_holiday_end >= employee_start else employee_start
     )
+    # The 29/30/31 December closure is pre-booked annual holiday. Include it
+    # in Holiday Used so it consumes the pure holiday allowance once, even
+    # though there is no individual leave record for those closure dates.
     company_closure_future = _hrp_get_company_closure_holiday_days(
         employee,
         max(today + timedelta(days=1), employee_start),
@@ -8428,6 +8486,9 @@ def render_employee_hr_reports(current_user_info):
     approved_holiday_with_closure = round(approved_holiday + company_closure_reserved, 1)
     pure_balance = entitlement - approved_holiday_with_closure
 
+    # Future bank holidays in the employee's current leave year are also
+    # reserved now. This means the displayed available balance already
+    # accounts for both bank holidays that have passed and those still to come.
     upcoming_bank_holidays = _hrp_get_upcoming_bank_holidays(today + timedelta(days=1), limit=5)
     upcoming_bank_holiday_days = _hrp_get_upcoming_bank_holiday_days_for_employee(employee, today + timedelta(days=1))
     bank_holidays_reserved = round(passed_bank_holiday_days + upcoming_bank_holiday_days, 1)
@@ -8438,6 +8499,9 @@ def render_employee_hr_reports(current_user_info):
         or bool(employee.get("leaving_date"))
     )
     if employee_is_left:
+        # A departed employee's live HR report is closed. The approved final
+        # settlement is the financial close-out; do not continue displaying an
+        # active holiday entitlement/balance after the employee has left.
         entitlement = 0.0
         approved_holiday = 0.0
         company_closure_reserved = 0.0
@@ -8461,9 +8525,15 @@ def render_employee_hr_reports(current_user_info):
         d5.metric("Upcoming Bank Holiday", "None")
     d6.metric("Department", employee.get("department", ""))
 
+    # A departed employee's live balance is intentionally zero, but the HR
+    # report should still make the financial close-out visible. Show the latest
+    # final settlement separately without putting it back into the live balance.
     if employee_is_left:
         final_records = _hrp_get_final_settlement_records(linked_id)
-        active_final = [r for r in final_records if str(r.get("status", "")).strip().casefold() in {"pending", "approved"}]
+        active_final = [
+            r for r in final_records
+            if str(r.get("status", "")).strip().casefold() in {"pending", "approved"}
+        ]
         if active_final:
             latest_final = active_final[0]
             final_status = str(latest_final.get("status", "")).strip().title()
@@ -8471,9 +8541,15 @@ def render_employee_hr_reports(current_user_info):
             final_days = float(latest_final.get("days", 0) or 0)
             final_amount = float(latest_final.get("amount", 0) or 0)
             if final_status == "Approved":
-                st.success(f"💷 Final holiday settlement: **{final_type} — {final_days:g} days (£{final_amount:,.2f}) — Approved**. The employee's live holiday balance remains **0 days**.")
+                st.success(
+                    f"💷 Final holiday settlement: **{final_type} — {final_days:g} days (£{final_amount:,.2f}) — Approved**. "
+                    "The employee's live holiday balance remains **0 days**."
+                )
             else:
-                st.info(f"⏳ Final holiday settlement: **{final_type} — {final_days:g} days (£{final_amount:,.2f}) — Pending Director approval**. The employee's live holiday balance remains **0 days**.")
+                st.info(
+                    f"⏳ Final holiday settlement: **{final_type} — {final_days:g} days (£{final_amount:,.2f}) — Pending Director approval**. "
+                    "The employee's live holiday balance remains **0 days**."
+                )
 
     st.caption(
         f"🏦 Bank holidays passed since your start date: **{passed_bank_holiday_days:g} days** · "
@@ -8529,8 +8605,14 @@ def render_employee_hr_reports(current_user_info):
             continue
         cur = a
         while cur <= b:
+            # Only working days can carry employee-entered leave. Weekends and
+            # bank holidays remain NA/BH; company closure dates remain H because
+            # they are automatic company holidays that already count as used.
             if cur.weekday() < 5 and cur not in _hrp_non_working_dates(cur.year):
                 existing = lookup.get(cur, "")
+                # One calendar cell represents one absence/leave status.
+                # Sick leave must display as S (not H/S), with its own colour.
+                # If sick leave overlaps another record, S takes precedence.
                 if code.rstrip("*") == "S":
                     lookup[cur] = code
                 elif existing.rstrip("*") == "S":
@@ -8588,15 +8670,25 @@ def render_employee_hr_reports(current_user_info):
     else:
         st.info("No holiday or absence records have been recorded for you yet.")
 
+# Employee HR Reports is a standalone view for employee accounts.
+# For managers/staff/team members with the explicit permission, it is rendered
+# inside the same role-based tab set alongside Leave Request By Departments.
+if user_info.get("can_access_employee_hr_reports", False) and role not in ["Manager", "Staff", "Team Member"]:
+    render_employee_hr_reports(user_info)
+
 
 # ============================================================
 # 📊 DIRECTOR — GRANULAR HR / REPORT ACCESS
 # ============================================================
 def render_director_hr_access_portal(current_user_info):
     """Render only the read-only HR/report modules explicitly granted by Super Admin."""
+    # A Director can open this portal without first visiting the main HR Portal.
+    # Initialise the HR session cache before holiday position calculations.
     try:
         _hr_portal_init()
     except Exception as exc:
+        # Individual HR helpers also have persistent-data fallbacks, so a
+        # non-critical cache initialisation issue should not crash the portal.
         print(f"Director HR access initialisation warning: {exc}")
     permissions = {
         "holiday_calendar": bool(current_user_info.get("can_access_holiday_calendar", False)),
@@ -8617,6 +8709,7 @@ def render_director_hr_access_portal(current_user_info):
         st.info("No HR/report access has been granted to this Director. A Super Admin can enable individual modules in User Management → Edit User.")
         return
 
+    st.subheader("📊 HR & Reports")
     st.caption("Read-only access granted by Super Admin. Each module is controlled independently.")
     tabs = st.tabs([labels[key] for key in enabled])
     for key, tab in zip(enabled, tabs):
@@ -8634,9 +8727,12 @@ def render_director_hr_access_portal(current_user_info):
                     for e in employees:
                         pos = _hrp_get_holiday_position(e.get("emp_id", ""))
                         rows.append({
-                            "Employee ID": e.get("emp_id", ""), "Name": e.get("name", ""),
-                            "Department": e.get("department", ""), "Job Title": e.get("job_title", ""),
-                            "Status": e.get("status", "Active"), "Start Date": e.get("start_date", ""),
+                            "Employee ID": e.get("emp_id", ""),
+                            "Name": e.get("name", ""),
+                            "Department": e.get("department", ""),
+                            "Job Title": e.get("job_title", ""),
+                            "Status": e.get("status", "Active"),
+                            "Start Date": e.get("start_date", ""),
                             "Holiday Entitlement": pos.get("entitlement", 0.0),
                             "Holiday Used / Booked": pos.get("used", 0.0),
                             "Bank Holidays Passed": pos.get("bank_holidays_passed", 0.0),
@@ -8654,8 +8750,10 @@ def render_director_hr_access_portal(current_user_info):
                     for e in employees:
                         pos = _hrp_get_holiday_position(e.get("emp_id", ""))
                         rows.append({
-                            "Employee ID": e.get("emp_id", ""), "Employee": e.get("name", ""),
-                            "Department": e.get("department", ""), "Entitlement": pos.get("entitlement", 0.0),
+                            "Employee ID": e.get("emp_id", ""),
+                            "Employee": e.get("name", ""),
+                            "Department": e.get("department", ""),
+                            "Entitlement": pos.get("entitlement", 0.0),
                             "Booked / Used": pos.get("used", 0.0),
                             "Bank Holidays Passed": pos.get("bank_holidays_passed", 0.0),
                             "Upcoming Bank Holidays": pos.get("upcoming_bank_holidays", 0.0),
@@ -8669,449 +8767,746 @@ def render_director_hr_access_portal(current_user_info):
                     st.info("No employees are currently recorded.")
                 else:
                     rows = [{
-                        "Employee ID": e.get("emp_id", ""), "Full Name": e.get("name", ""),
-                        "Department": e.get("department", ""), "Position / Job Title": e.get("job_title", ""),
-                        "Agreement Type": e.get("agreement_type", ""), "Status": e.get("status", "Active"),
-                        "Start Date": e.get("start_date", ""), "Working Pattern": e.get("working_pattern", ""),
+                        "Employee ID": e.get("emp_id", ""),
+                        "Full Name": e.get("name", ""),
+                        "Department": e.get("department", ""),
+                        "Position / Job Title": e.get("job_title", ""),
+                        "Agreement Type": e.get("agreement_type", ""),
+                        "Status": e.get("status", "Active"),
+                        "Start Date": e.get("start_date", ""),
+                        "Working Pattern": e.get("working_pattern", ""),
                         "Days Worked / Week": e.get("days_per_week", 5),
                     } for e in employees]
                     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
                     st.caption(f"Total employees: {len(rows)}")
 
-
 # ============================================================
-# 📋 ROLE DISPATCH — SIDEBAR NAVIGATION
+# 📋 ROLE-BASED PORTALS
 # ============================================================
+if role == "Employee":
+    # Employee accounts are view-only HR report accounts.
+    pass
 
-def _render_payroll_add_ded():
-    tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-    with tab_pending:
-        pending = [r for r in all_live_requests if r.get("status") == "pending"]
-        if not pending:
-            st.success("✅ No pending requests!")
-        else:
-            st.metric("⏳ Pending", len(pending)); st.divider()
-            for req in reversed(pending):
-                with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                    st.write(f"👔 **Line Manager:** {req.get('manager')}")
-                    submitted_by = get_submitted_by(req)
-                    if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                    st.write(f"📅 **Date:** {req.get('date')}")
-                    st.info(f"📝 **Description:** {req.get('desc')}")
-                    display_attachments(req)
-                    st.divider(); display_pdf_button(req, can_generate=True)
-    with tab_approved:
-        approved = [r for r in all_live_requests if r.get("status") == "approved"]
-        if not approved:
-            st.info("📋 No approved requests.")
-        else:
-            st.metric("✅ Approved", len(approved)); st.divider()
-            for req in reversed(approved):
-                dec_by = req.get('decision_by', 'Director')
-                with st.expander(f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')}")
-                    submitted_by = get_submitted_by(req)
-                    if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                    st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                    st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
-                    display_attachments(req)
-                    st.divider(); display_pdf_button(req, can_generate=True)
-    with tab_rejected:
-        rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
-        if not rejected:
-            st.success("✅ No rejected requests!")
-        else:
-            st.metric("❌ Rejected", len(rejected)); st.divider()
-            for req in reversed(rejected):
-                with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')}")
-                    st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
-                    st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
-                    display_attachments(req)
-                    st.divider(); display_pdf_button(req, can_generate=True)
+elif role == "Work Order Employee":
+    render_work_order_employee_portal(full_name, dept)
 
-
-def _render_dept_add_ded(dept_name, current_user):
-    if st.session_state.get("editing_request_id"):
-        eid = st.session_state.editing_request_id
-        rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
-        if rec:
-            st.subheader(f"✏️ Edit Request #{eid}")
-            st.markdown("### 📎 Manage Attachments")
-            att_name_raw = rec.get("attachment_name", "None")
-            existing_files = []
-            if att_name_raw and str(att_name_raw).strip().lower() != "none":
-                existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
-            files_to_keep = []; files_to_remove = []
-            if existing_files:
-                st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
-                for fname in existing_files:
-                    file_path = os.path.join(UPLOAD_DIR, fname)
-                    safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
-                    col_check, col_name, col_dl = st.columns([1, 5, 2])
-                    keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
-                    col_name.markdown(f"📄 `{fname}`")
-                    if os.path.exists(file_path):
-                        with open(file_path, "rb") as f: col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
-                    else: col_dl.caption("⚠️ Missing")
-                    if keep: files_to_keep.append(fname)
-                    else: files_to_remove.append(fname)
-                if files_to_remove: st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
-            else: st.info("📋 No attachments currently attached.")
-            st.markdown("#### ➕ Attach New Files")
-            new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
-            with st.form("edit_form"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
-                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
-                    cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
-                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
-                    amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
-                with c2:
-                    from datetime import datetime as dt
-                    try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
-                    except: d = dt.today()
-                    dt_val = st.date_input("📅 Date", d)
-                    mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
-                    desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
-                if st.form_submit_button("✅ Submit Edit", type="primary"):
-                    final_attachments = list(files_to_keep)
-                    if new_files_upload:
-                        for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
-                            fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
-                            edit_path = os.path.join(UPLOAD_DIR, fn)
-                            with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
-                            _upload_to_drive_bg(edit_path, fn)
-                            final_attachments.append(fn)
-                    records = load_records_from_excel()
-                    old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
-                    new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
-                    for r in records:
-                        if int(r.get("id", 0)) == int(eid):
-                            r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
-                            break
-                    log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
-                    save_all_records(records)
-                    st.success(f"✅ Updated!"); st.session_state.editing_request_id = None; st.rerun()
-            if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
-                st.session_state.editing_request_id = None; st.rerun()
-    else:
-        st.subheader(f"➕ New Request — {dept_name}")
-        nid = get_next_id(all_live_requests)
-        form_version = st.session_state.get("new_req_form_version", 0)
-        with st.form(f"new_req_v{form_version}", clear_on_submit=False):
-            c1, c2 = st.columns(2)
-            with c1:
-                en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
-                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
-                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
-                amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
-            with c2:
-                from datetime import datetime as dt
-                dt_val = st.date_input("📅 Date", value=dt.today(), key=f"dt_v{form_version}")
-                mgr = st.text_input("👔 Line Manager", key=f"mgr_v{form_version}")
-                files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"files_v{form_version}")
-                desc = st.text_area("📝 Description / Justification", key=f"desc_v{form_version}")
-            if st.form_submit_button("📤 Send to Director", type="primary"):
-                if en.strip() and mgr.strip() and desc.strip():
-                    att_list = []
-                    if files:
-                        for i, f in enumerate(files, 1):
-                            fn = f"ID_{nid}_F{i}_{f.name}"
-                            file_path = os.path.join(UPLOAD_DIR, fn)
-                            with open(file_path, "wb") as out: out.write(f.getbuffer())
-                            att_list.append(fn)
-                            _upload_to_drive_bg(file_path, fn)
-                    payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": current_user, "pdf_path": "", "edited_from_id": "", "old_data": ""}
-                    save_record_to_excel(payload)
-                    log_action("CREATED", nid)
-                    st.session_state["new_req_form_version"] = form_version + 1
-                    st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
-                else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
-        st.divider()
-        st.subheader("📋 My Department Requests")
-        my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
-        if not my_reqs:
-            st.info("📋 No requests yet.")
-        else:
-            for req in reversed(my_reqs):
-                status = req.get("status", "pending").lower()
-                icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-                with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f}"):
-                    st.write(f"👤 {req.get('emp_name')} | 👔 {req.get('manager')}")
-                    st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')}")
-                    st.info(f"📝 {req.get('desc')}")
-                    display_attachments(req)
-                    if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                    if status == "approved": display_pdf_button(req, can_generate=True)
-                    if status in ["pending", "rejected"]:
-                        if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
-                            st.session_state.editing_request_id = req.get("id"); st.rerun()
-
-
-def _render_director_add_ded():
-    st.subheader(f"🎛️ Director Approval Portal — {full_name}")
-    st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
-    st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
+elif role == "Payroll":
+    st.subheader("🧾 Payroll Portal")
+    st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-    with tab_pending:
-        pending = [r for r in all_live_requests if r.get("status") == "pending"]
-        if not pending: st.success("✅ No pending requests!")
-        else:
-            st.metric("⏳ Pending Requests", len(pending)); st.divider()
-            for req in reversed(pending):
-                req_id = req.get("id")
-                with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
-                    col_left, col_right = st.columns([2, 1])
-                    with col_left:
-                        st.write(f"👤 **Employee:** {req.get('emp_name')}")
-                        st.write(f"🏢 **Department:** {req.get('dept')}")
-                        st.write(f"🔄 **Type:** {req.get('type')}")
-                        st.write(f"🏷️ **Category:** {req.get('category')}")
-                        st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
+    tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_work_orders, tab_inspector_bonus = st.tabs([
+        "➕ Addition & Deduction",
+        "👥 HR Leave Settlement",
+        "📦 Store Deductions",
+        "📦 Store Returns (Additions)",
+        "🛠️ Work Orders",
+        "💰 National Grid Inspector Bonus"
+    ])
+    with tab_add_ded:
+        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+        with tab_pending:
+            pending = [r for r in all_live_requests if r.get("status") == "pending"]
+            if not pending: st.success("✅ No pending requests!")
+            else:
+                st.metric("⏳ Pending", len(pending)); st.divider()
+                for req in reversed(pending):
+                    with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
                         st.write(f"👔 **Line Manager:** {req.get('manager')}")
                         submitted_by = get_submitted_by(req)
                         if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                        st.info(f"📝 **Description:**\n{req.get('desc','')}")
+                        st.write(f"📅 **Date:** {req.get('date')}")
+                        st.info(f"📝 **Description:** {req.get('desc')}")
                         display_attachments(req)
-                        old_data_raw = req.get("old_data", "")
-                        if old_data_raw and old_data_raw not in ["", "{}", "None"]:
-                            st.divider(); st.markdown("### 🔄 What Changed / Edits"); show_old_new_comparison(old_data_raw, req)
-                    with col_right:
-                        st.markdown("### ✍️ Decision")
-                        comments = st.text_area("Director Comments", key=f"comm_{req_id}")
-                        approve_btn = st.button("✅ APPROVE", type="primary", key=f"appr_{req_id}")
-                        reject_btn = st.button("❌ REJECT", type="secondary", key=f"rejt_{req_id}")
-                        if approve_btn:
-                            records = load_records_from_excel()
-                            for r in records:
-                                if int(r.get("id",0)) == int(req_id):
-                                    r["status"] = "approved"; r["approved_by"] = full_name; r["decision_by"] = full_name; r["director_comments"] = comments; r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S"); r["approved_date"] = r["decision_date"]
-                                    break
-                            save_all_records(records); log_action("APPROVED", req_id)
-                            st.success(f"✅ Request #{req_id} APPROVED."); st.rerun()
-                        if reject_btn:
-                            if not comments.strip():
-                                st.error("❌ A rejection reason/comment is required.")
-                            else:
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "rejected"; r["decision_by"] = full_name; r["director_comments"] = comments.strip(); r["rejection_reason"] = comments.strip(); r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        break
-                                save_all_records(records); log_action("REJECTED", req_id)
-                                st.error(f"❌ Request #{req_id} REJECTED."); st.rerun()
-    with tab_approved:
-        approved = [r for r in all_live_requests if r.get("status") == "approved"]
-        if not approved: st.info("📋 No approved requests yet.")
-        else:
-            st.metric("✅ Approved Requests", len(approved)); st.divider()
-            for req in reversed(approved):
-                req_id = req.get("id")
-                with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f}"):
-                    st.write(f"👤 {req.get('emp_name')} | 💷 £{float(req.get('amount',0)):.2f}")
-                    display_attachments(req)
-                    st.divider(); display_pdf_button(req, can_generate=True)
-                    st.markdown("### 🔄 Change Status")
-                    new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_app_{req_id}")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("⏳ Move to Pending", key=f"app_to_pend_{req_id}"):
-                            records = load_records_from_excel()
-                            for r in records:
-                                if int(r.get("id",0)) == int(req_id):
-                                    r["status"] = "pending"; r["decision_date"] = ""; r["decision_by"] = ""
-                                    break
-                            save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"pending"})
-                            st.success(f"✅ Request #{req_id} moved to Pending."); st.rerun()
-                    with col2:
-                        if st.button("❌ Change to REJECTED", key=f"app_to_rej_{req_id}"):
-                            if not new_comments.strip():
-                                st.error("❌ A rejection reason/comment is required.")
-                            else:
-                                records = load_records_from_excel()
-                                for r in records:
-                                    if int(r.get("id",0)) == int(req_id):
-                                        r["status"] = "rejected"; r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S"); r["decision_by"] = full_name; r["director_comments"] = new_comments.strip(); r["rejection_reason"] = new_comments.strip()
-                                        break
-                                save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
-                                st.success(f"✅ Request #{req_id} changed to Rejected."); st.rerun()
-    with tab_rejected:
-        rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
-        if not rejected: st.success("✅ No rejected requests!")
-        else:
-            st.metric("❌ Rejected Requests", len(rejected)); st.divider()
-            for req in reversed(rejected):
-                req_id = req.get("id")
-                with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f}"):
-                    st.write(f"👤 {req.get('emp_name')} | 🔄 **Type:** {req.get('type', 'Not specified')} | 💷 £{float(req.get('amount',0)):.2f}")
-                    st.error(f"❌ **Rejected by:** {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
-                    reason = req.get('rejection_reason') or req.get('director_comments') or 'No rejection reason recorded.'
-                    st.error(f"💬 **Rejection reason:** {reason}")
-                    display_attachments(req)
-                    st.markdown("### 🔄 Change Status")
-                    new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_rej_{req_id}")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("⏳ Move to Pending", key=f"rej_to_pend_{req_id}"):
-                            records = load_records_from_excel()
-                            for r in records:
-                                if int(r.get("id",0)) == int(req_id):
-                                    r["status"] = "pending"; r["decision_date"] = ""; r["decision_by"] = ""
-                                    break
-                            save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"pending"})
-                            st.success(f"✅ Request #{req_id} moved to Pending."); st.rerun()
-                    with col2:
-                        if st.button("✅ Change to APPROVED", key=f"rej_to_app_{req_id}"):
-                            records = load_records_from_excel()
-                            for r in records:
-                                if int(r.get("id",0)) == int(req_id):
-                                    r["status"] = "approved"; r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S"); r["decision_by"] = full_name
-                                    break
-                            save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
-                            st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
-
-
-def _render_super_add_ded():
-    st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
-    st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
-    st.divider()
-    tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ All Pending", "✅ All Approved", "❌ All Rejected"])
-    with tab_pending:
-        pending = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "pending"]
-        if not pending: st.success("✅ No pending requests.")
-        else:
-            st.metric("⏳ All Pending", len(pending)); st.divider()
-            for req in reversed(pending):
-                req_id = req.get("id"); amount = float(req.get("amount", 0))
-                with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                    st.write(f"💷 Amount: £{amount:.2f}")
-                    submitted_by = get_submitted_by(req)
-                    if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                    st.info(f"📝 Description: {req.get('desc')}")
-                    display_attachments(req)
-                    if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                    st.divider(); display_pdf_button(req, can_generate=True)
-    with tab_approved:
-        approved = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "approved"]
-        if not approved: st.info("📋 No approved requests.")
-        else:
-            st.metric("✅ All Approved", len(approved)); st.divider()
-            for req in reversed(approved):
-                req_id = req.get("id"); amount = float(req.get("amount", 0))
-                dec_by = req.get('decision_by', 'Director')
-                with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f} | ✅ {dec_by}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    st.write(f"💷 Amount: £{amount:.2f}")
-                    st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
-                    display_attachments(req)
-                    st.divider(); display_pdf_button(req, can_generate=True)
-    with tab_rejected:
-        rejected = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "rejected"]
-        if not rejected: st.info("📋 No rejected requests.")
-        else:
-            st.metric("❌ All Rejected", len(rejected)); st.divider()
-            for req in reversed(rejected):
-                req_id = req.get("id"); amount = float(req.get("amount", 0))
-                dec_by = req.get('decision_by', 'Director')
-                with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"):
-                    st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                    st.write(f"💷 Amount: £{amount:.2f}")
-                    st.error(f"❌ Rejected By: {dec_by}")
-                    st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
-                    display_attachments(req)
-                    st.divider(); display_pdf_button(req, can_generate=True)
-
-
-def _render_super_system_mgmt():
-    st.subheader("🔧 System Management — Super Admin")
-    st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
-    st.divider()
-    tab_settings, tab_hr_settings, tab_store_settings, tab_users, tab_audit = st.tabs([
-        "⚙️ System Settings", "👥 HR Leave Settings", "📦 Store Settings", "👤 User Management", "📖 Audit History"
-    ])
-    with tab_settings: settings_management_panel()
-    with tab_hr_settings: render_hr_leave_settings()
-    with tab_store_settings: render_store_items_settings()
-    with tab_users: user_management_panel()
-    with tab_audit:
-        if "display_audit_log_panel" in globals(): display_audit_log_panel()
-        else: st.info("📖 Audit log panel not defined — skipping")
-        st.divider()
-        st.subheader("⚠️ Super Admin — Data Reset / Live Launch")
-        st.warning("These controls are permanent. They are intended for preparing the portal for live use.")
-        danger_col1, danger_col2 = st.columns(2)
-        with danger_col1:
-            if not st.session_state.get("confirm_clear_requests", False):
-                if st.button("🧹 Clear All Submitted Requests", type="secondary", key="clear_all_requests_btn"):
-                    st.session_state["confirm_clear_requests"] = True; st.rerun()
+                        st.divider(); display_pdf_button(req, can_generate=True)
+        with tab_approved:
+            approved = [r for r in all_live_requests if r.get("status") == "approved"]
+            if not approved: st.info("📋 No approved requests.")
             else:
-                st.error("⚠️ This will permanently remove ALL request records.")
+                st.metric("✅ Approved", len(approved)); st.divider()
+                for req in reversed(approved):
+                    dec_by = req.get('decision_by', 'Director')
+                    with st.expander(f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                        st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider(); display_pdf_button(req, can_generate=True)
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
+            if not rejected: st.success("✅ No rejected requests!")
+            else:
+                st.metric("❌ Rejected", len(rejected)); st.divider()
+                for req in reversed(rejected):
+                    with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')}")
+                        st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
+                        st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider(); display_pdf_button(req, can_generate=True)
+    with tab_hr_leave: render_hr_leave_payroll_portal()
+    with tab_store_ded: render_store_payroll_portal(type_filter="Deduction")
+    with tab_store_ret: render_store_payroll_portal(type_filter="Addition")
+    with tab_work_orders: render_work_order_payroll_portal(full_name)
+    with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
+
+elif role == "Work Order Manager":
+    dept_name = dept
+    request_tab, work_order_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders"])
+    with request_tab:
+        dept_name = dept
+        if st.session_state.get("editing_request_id"):
+            eid = st.session_state.editing_request_id
+            rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
+            if rec:
+                st.subheader(f"✏️ Edit Request #{eid}")
+                show_old_new_comparison("{}", rec)
+                st.markdown("### 📎 Manage Attachments")
+                att_name_raw = rec.get("attachment_name", "None")
+                existing_files = []
+                if att_name_raw and str(att_name_raw).strip().lower() != "none":
+                    existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
+                files_to_keep = []; files_to_remove = []
+                if existing_files:
+                    st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
+                    for fname in existing_files:
+                        file_path = os.path.join(UPLOAD_DIR, fname)
+                        safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
+                        col_check, col_name, col_dl = st.columns([1, 5, 2])
+                        keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
+                        col_name.markdown(f"📄 `{fname}`")
+                        if os.path.exists(file_path):
+                            with open(file_path, "rb") as f: col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
+                        else: col_dl.caption("⚠️ Missing")
+                        if keep: files_to_keep.append(fname)
+                        else: files_to_remove.append(fname)
+                    if files_to_remove: st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
+                else: st.info("📋 No attachments currently attached.")
+                st.markdown("#### ➕ Attach New Files")
+                new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
+                with st.form("edit_form"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
+                        rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
+                        cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
+                        ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                        amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
+                    with c2:
+                        from datetime import datetime as dt
+                        try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
+                        except: d = dt.today()
+                        dt_val = st.date_input("📅 Date", d)
+                        mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
+                        desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
+                    if st.form_submit_button("✅ Submit Edit", type="primary"):
+                        final_attachments = list(files_to_keep)
+                        if new_files_upload:
+                            for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
+                                fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
+                                edit_path = os.path.join(UPLOAD_DIR, fn)
+                                with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
+                                _upload_to_drive_bg(edit_path, fn)
+                                final_attachments.append(fn)
+                        records = load_records_from_excel()
+                        old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
+                        new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
+                        for r in records:
+                            if int(r.get("id", 0)) == int(eid):
+                                r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
+                                break
+                        log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
+                        save_all_records(records)
+                        st.success(f"✅ Updated!"); st.session_state.editing_request_id = None; st.rerun()
+                if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
+                    st.session_state.editing_request_id = None; st.rerun()
+        else:
+            st.subheader(f"➕ New Request — {dept_name}")
+            nid = get_next_id(all_live_requests)
+            form_version = st.session_state.get("wo_mgr_new_req_form_version", 0)
+            with st.form(f"wo_mgr_new_req_v{form_version}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 with c1:
-                    if st.button("✅ Yes, Clear Requests", type="primary", key="confirm_clear_all_requests_btn"):
-                        clear_all_requests_file(); st.session_state["confirm_clear_requests"] = False
-                        st.success("✅ Cleared."); st.rerun()
+                    en = st.text_input("👤 Employee Name", key=f"wo_mgr_en_v{form_version}")
+                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"wo_mgr_rt_v{form_version}")
+                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"wo_mgr_ct_v{form_version}")
+                    amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"wo_mgr_req_amt_v{form_version}")
                 with c2:
-                    if st.button("↩️ Cancel", key="cancel_clear_all_requests_btn"):
-                        st.session_state["confirm_clear_requests"] = False; st.rerun()
-        with danger_col2:
-            reset_col1, reset_col2, reset_col3, reset_col4 = st.columns(4)
-            with reset_col1:
-                if not st.session_state.get("confirm_clear_inspector_bonus", False):
-                    if st.button("💰 Clear Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", width="stretch"):
-                        st.session_state["confirm_clear_inspector_bonus"] = True
+                    from datetime import datetime as dt
+                    dt_val = st.date_input("📅 Date", value=dt.today(), key=f"wo_mgr_dt_v{form_version}")
+                    mgr = st.text_input("👔 Line Manager", key=f"wo_mgr_mgr_v{form_version}")
+                    files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"wo_mgr_files_v{form_version}")
+                    desc = st.text_area("📝 Description / Justification", key=f"wo_mgr_desc_v{form_version}")
+                if st.form_submit_button("📤 Send to Director", type="primary"):
+                    if en.strip() and mgr.strip() and desc.strip():
+                        att_list = []
+                        if files:
+                            for i, f in enumerate(files, 1):
+                                fn = f"ID_{nid}_F{i}_{f.name}"
+                                file_path = os.path.join(UPLOAD_DIR, fn)
+                                with open(file_path, "wb") as out: out.write(f.getbuffer())
+                                att_list.append(fn)
+                                _upload_to_drive_bg(file_path, fn)
+                        payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                        save_record_to_excel(payload)
+                        log_action("CREATED", nid)
+                        st.session_state["wo_mgr_new_req_form_version"] = form_version + 1
+                        st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
+                    else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+            st.divider()
+            st.subheader("📋 My Department Requests")
+            my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+            if not my_reqs: st.info("📋 No requests yet.")
+            else:
+                for req in reversed(my_reqs):
+                    status = req.get("status", "pending").lower()
+                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+                    with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f}"):
+                        st.write(f"👤 {req.get('emp_name')} | 👔 {req.get('manager')}")
+                        st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')}")
+                        st.info(f"📝 {req.get('desc')}")
+                        display_attachments(req)
+                        if status == "approved": display_pdf_button(req, can_generate=True)
+                        if status in ["pending", "rejected"]:
+                            if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                                st.session_state.editing_request_id = req.get("id"); st.rerun()
+    with work_order_tab:
+        render_work_order_manager_portal(full_name, dept_name, show_total=True)
+
+elif role in ["Manager", "Staff", "Team Member"]:
+    dept_name = dept
+    has_inspector_bonus = user_info.get("can_access_inspector_bonus", False)
+    has_addition_deduction = user_info.get("can_access_addition_deduction", True)
+    has_work_orders = user_info.get("can_access_work_orders", False)
+    has_hr_leave = user_info.get("can_access_hr_leave", False)
+    has_leave_request = user_info.get("can_access_leave_request", False)
+    has_employee_hr_reports = user_info.get("can_access_employee_hr_reports", False)
+    has_store_deduction = user_info.get("can_access_store_deduction", False)
+    labels = []
+    if has_addition_deduction: labels.append("➕ Addition & Deduction")
+    # HR Department visibility is controlled by the explicit module permission.
+    # Do not depend on the literal department name (it may be "HR", "Human Resource", etc.).
+    if has_hr_leave:
+        labels.append("🏢 HR Department")
+    if has_leave_request:
+        labels.append("📝 Leave Request By Departments")
+    if has_employee_hr_reports:
+        labels.append("👤 My HR Report")
+    if has_store_deduction: labels.append("📦 Store Deduction")
+    if has_store_deduction: labels.append("📦 Store Return (Addition)")
+    if has_store_deduction: labels.append("📋 My Submitted Store Requests")
+    if has_work_orders: labels.append("🛠️ Work Orders")
+    if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
+    if not labels:
+        st.subheader("🔐 Access Restricted")
+        st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
+    else:
+        tabs = st.tabs(labels)
+        tab_idx = 0
+        if has_addition_deduction:
+            with tabs[tab_idx]:
+                if st.session_state.get("editing_request_id"):
+                    eid = st.session_state.editing_request_id
+                    rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
+                    if rec:
+                        st.subheader(f"✏️ Edit Request #{eid}")
+                        st.markdown("### 📎 Manage Attachments")
+                        att_name_raw = rec.get("attachment_name", "None")
+                        existing_files = []
+                        if att_name_raw and str(att_name_raw).strip().lower() != "none":
+                            existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
+                        files_to_keep = []; files_to_remove = []
+                        if existing_files:
+                            st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
+                            for fname in existing_files:
+                                file_path = os.path.join(UPLOAD_DIR, fname)
+                                safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
+                                col_check, col_name, col_dl = st.columns([1, 5, 2])
+                                keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
+                                col_name.markdown(f"📄 `{fname}`")
+                                if os.path.exists(file_path):
+                                    with open(file_path, "rb") as f: col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
+                                else: col_dl.caption("⚠️ Missing")
+                                if keep: files_to_keep.append(fname)
+                                else: files_to_remove.append(fname)
+                            if files_to_remove: st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
+                        else: st.info("📋 No attachments currently attached.")
+                        st.markdown("#### ➕ Attach New Files")
+                        new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
+                        with st.form("edit_form"):
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
+                                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
+                                cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
+                                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                                amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
+                            with c2:
+                                from datetime import datetime as dt
+                                try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
+                                except: d = dt.today()
+                                dt_val = st.date_input("📅 Date", d)
+                                mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
+                                desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
+                            if st.form_submit_button("✅ Submit Edit", type="primary"):
+                                final_attachments = list(files_to_keep)
+                                if new_files_upload:
+                                    for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
+                                        fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
+                                        edit_path = os.path.join(UPLOAD_DIR, fn)
+                                        with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
+                                        _upload_to_drive_bg(edit_path, fn)
+                                        final_attachments.append(fn)
+                                records = load_records_from_excel()
+                                old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
+                                new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
+                                for r in records:
+                                    if int(r.get("id", 0)) == int(eid):
+                                        r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
+                                        break
+                                log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
+                                save_all_records(records)
+                                st.success(f"✅ Updated!"); st.session_state.editing_request_id = None; st.rerun()
+                        if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
+                            st.session_state.editing_request_id = None; st.rerun()
                 else:
-                    if st.button("✅ Confirm", key="super_admin_confirm_clear_inspector_bonus", width="stretch"):
-                        clear_all_inspector_bonus()
-                        log_action("SUPER_ADMIN_CLEAR_INSPECTOR_BONUS", "ALL", decision_by=full_name)
-                        st.session_state["confirm_clear_inspector_bonus"] = False
-                        st.success("✅ Cleared."); st.rerun()
-            with reset_col2:
-                if not st.session_state.get("confirm_clear_all_work_orders", False):
-                    if st.button("🛠️ Clear Work Orders", key="super_admin_clear_all_work_orders", type="secondary", width="stretch"):
-                        st.session_state["confirm_clear_all_work_orders"] = True
+                    st.subheader(f"➕ New Request — {dept_name}")
+                    nid = get_next_id(all_live_requests)
+                    form_version = st.session_state.get("new_req_form_version", 0)
+                    with st.form(f"new_req_v{form_version}", clear_on_submit=False):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
+                            rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
+                            ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
+                            amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
+                        with c2:
+                            from datetime import datetime as dt
+                            dt_val = st.date_input("📅 Date", value=dt.today(), key=f"dt_v{form_version}")
+                            mgr = st.text_input("👔 Line Manager", key=f"mgr_v{form_version}")
+                            files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"files_v{form_version}")
+                            desc = st.text_area("📝 Description / Justification", key=f"desc_v{form_version}")
+                        if st.form_submit_button("📤 Send to Director", type="primary"):
+                            if en.strip() and mgr.strip() and desc.strip():
+                                att_list = []
+                                if files:
+                                    for i, f in enumerate(files, 1):
+                                        fn = f"ID_{nid}_F{i}_{f.name}"
+                                        file_path = os.path.join(UPLOAD_DIR, fn)
+                                        with open(file_path, "wb") as out: out.write(f.getbuffer())
+                                        att_list.append(fn)
+                                        _upload_to_drive_bg(file_path, fn)
+                                payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                                save_record_to_excel(payload)
+                                log_action("CREATED", nid)
+                                st.session_state["new_req_form_version"] = form_version + 1
+                                st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
+                            else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+                    st.divider()
+                    st.subheader("📋 My Department Requests")
+                    my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+                    if not my_reqs: st.info("📋 No requests yet.")
+                    else:
+                        for req in reversed(my_reqs):
+                            status = req.get("status", "pending").lower()
+                            icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+                            with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f}"):
+                                st.write(f"👤 {req.get('emp_name')} | 👔 {req.get('manager')}")
+                                st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')}")
+                                st.info(f"📝 {req.get('desc')}")
+                                display_attachments(req)
+                                if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                                if status == "approved": display_pdf_button(req, can_generate=True)
+                                if status in ["pending", "rejected"]:
+                                    if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                                        st.session_state.editing_request_id = req.get("id"); st.rerun()
+            tab_idx += 1
+        if has_hr_leave:
+            with tabs[tab_idx]:
+                render_hr_department(current_user_info=user_info, has_hr_access=True, director_name=full_name)
+            tab_idx += 1
+        if has_leave_request:
+            with tabs[tab_idx]:
+                # HR Managers use this module as the approval inbox for requests
+                # submitted by department managers. They do not submit their own
+                # leave through this workflow; HR direct-entry remains in the HR
+                # Department -> Employee Details / Leave tabs and is immediately Approved.
+                normalized_dept = re.sub(r"\s+", " ", str(dept_name or "")).strip().casefold()
+                is_hr_manager_account = normalized_dept in {"hr", "human resource", "human resources", "hr department", "human resource department"} and has_hr_leave
+                if is_hr_manager_account:
+                    render_hr_leave_approvals()
                 else:
-                    if st.button("✅ Confirm", key="super_admin_confirm_clear_all_work_orders", width="stretch"):
-                        save_all_work_orders([])
-                        st.session_state["confirm_clear_all_work_orders"] = False
-                        st.success("✅ Cleared."); st.rerun()
-            with reset_col3:
-                if not st.session_state.get("confirm_clear_hr_leave", False):
-                    if st.button("👥 Clear HR Leave", key="super_admin_clear_all_hr_leave", type="secondary", width="stretch"):
-                        st.session_state["confirm_clear_hr_leave"] = True
+                    render_department_manager_leave_request(current_user_info=user_info)
+            tab_idx += 1
+        if has_employee_hr_reports:
+            with tabs[tab_idx]:
+                render_employee_hr_reports(user_info)
+            tab_idx += 1
+        if has_store_deduction:
+            with tabs[tab_idx]:
+                render_store_deduction_form(full_name, dept_name)
+            tab_idx += 1
+        if has_store_deduction:
+            with tabs[tab_idx]:
+                render_store_return_form(full_name, dept_name)
+            tab_idx += 1
+        if has_store_deduction:
+            with tabs[tab_idx]:
+                render_store_my_submissions(full_name)
+            tab_idx += 1
+        if has_work_orders:
+            with tabs[tab_idx]:
+                render_work_order_employee_portal(full_name, dept_name)
+            tab_idx += 1
+        if has_inspector_bonus:
+            with tabs[tab_idx]:
+                render_inspector_bonus_portal(full_name, dept_name)
+            tab_idx += 1
+
+elif role == "Director":
+    # Director approval modules remain available as before. HR/report access is
+    # now separate and can be granted module-by-module by Super Admin.
+    director_hr_access_enabled = any(bool(user_info.get(k, False)) for k in (
+        "can_access_holiday_calendar", "can_access_hr_reports",
+        "can_access_employee_overview", "can_access_holiday_calculator",
+        "can_access_employee_directory"
+    ))
+    director_tab_labels = [
+        "➕ Addition & Deduction",
+        "👥 HR Leave Settlement",
+        "📦 Store Deductions",
+        "📦 Store Returns (Additions)",
+        "🛠️ Work Orders",
+        "💰 National Grid Inspector Bonus"
+    ]
+    if director_hr_access_enabled:
+        director_tab_labels.insert(1, "📊 HR Reports & Calendar")
+    director_tabs = st.tabs(director_tab_labels)
+    director_addition_tab = director_tabs[0]
+    if director_hr_access_enabled:
+        director_hr_access_tab = director_tabs[1]
+        director_hr_leave_tab = director_tabs[2]
+        director_store_ded_tab = director_tabs[3]
+        director_store_ret_tab = director_tabs[4]
+        director_work_order_tab = director_tabs[5]
+        director_inspector_tab = director_tabs[6]
+    else:
+        director_hr_access_tab = None
+        director_hr_leave_tab = director_tabs[1]
+        director_store_ded_tab = director_tabs[2]
+        director_store_ret_tab = director_tabs[3]
+        director_work_order_tab = director_tabs[4]
+        director_inspector_tab = director_tabs[5]
+    with director_addition_tab:
+        st.subheader(f"🎛️ Director Approval Portal — {full_name}")
+        st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
+        st.info("🔄 **Director can change ANY request to ANY status at ANY time.** All changes are logged.")
+        st.divider()
+        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+        with tab_pending:
+            pending = [r for r in all_live_requests if r.get("status") == "pending"]
+            if not pending: st.success("✅ No pending requests!")
+            else:
+                st.metric("⏳ Pending Requests", len(pending)); st.divider()
+                for req in reversed(pending):
+                    req_id = req.get("id")
+                    with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
+                        col_left, col_right = st.columns([2, 1])
+                        with col_left:
+                            st.write(f"👤 **Employee:** {req.get('emp_name')}")
+                            st.write(f"🏢 **Department:** {req.get('dept')}")
+                            st.write(f"🔄 **Type:** {req.get('type')}")
+                            st.write(f"🏷️ **Category:** {req.get('category')}")
+                            st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
+                            st.write(f"👔 **Line Manager:** {req.get('manager')}")
+                            submitted_by = get_submitted_by(req)
+                            if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                            st.info(f"📝 **Description:**\n{req.get('desc','')}")
+                            display_attachments(req)
+                            old_data_raw = req.get("old_data", "")
+                            if old_data_raw and old_data_raw not in ["", "{}", "None"]:
+                                st.divider(); st.markdown("### 🔄 What Changed / Edits"); show_old_new_comparison(old_data_raw, req)
+                        with col_right:
+                            st.markdown("### ✍️ Decision")
+                            comments = st.text_area("Director Comments", key=f"comm_{req_id}")
+                            approve_btn = st.button("✅ APPROVE", type="primary", key=f"appr_{req_id}")
+                            reject_btn = st.button("❌ REJECT", type="secondary", key=f"rejt_{req_id}")
+                            if approve_btn:
+                                records = load_records_from_excel()
+                                for r in records:
+                                    if int(r.get("id",0)) == int(req_id):
+                                        r["status"] = "approved"; r["approved_by"] = full_name; r["decision_by"] = full_name; r["director_comments"] = comments; r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S"); r["approved_date"] = r["decision_date"]
+                                        break
+                                save_all_records(records); log_action("APPROVED", req_id)
+                                st.success(f"✅ Request #{req_id} APPROVED."); st.rerun()
+                            if reject_btn:
+                                if not comments.strip():
+                                    st.error("❌ A rejection reason/comment is required.")
+                                else:
+                                    records = load_records_from_excel()
+                                    for r in records:
+                                        if int(r.get("id",0)) == int(req_id):
+                                            r["status"] = "rejected"
+                                            r["decision_by"] = full_name
+                                            r["director_comments"] = comments.strip()
+                                            r["rejection_reason"] = comments.strip()
+                                            r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                            break
+                                    save_all_records(records); log_action("REJECTED", req_id)
+                                    st.error(f"❌ Request #{req_id} REJECTED."); st.rerun()
+        with tab_approved:
+            approved = [r for r in all_live_requests if r.get("status") == "approved"]
+            if not approved: st.info("📋 No approved requests yet.")
+            else:
+                st.metric("✅ Approved Requests", len(approved)); st.divider()
+                for req in reversed(approved):
+                    req_id = req.get("id")
+                    with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f}"):
+                        st.write(f"👤 {req.get('emp_name')} | 💷 £{float(req.get('amount',0)):.2f}")
+                        display_attachments(req)
+                        st.divider(); display_pdf_button(req, can_generate=True)
+                        st.markdown("### 🔄 Change Status")
+                        new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_app_{req_id}")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("⏳ Move to Pending", key=f"app_to_pend_{req_id}"):
+                                records = load_records_from_excel()
+                                for r in records:
+                                    if int(r.get("id",0)) == int(req_id):
+                                        r["status"] = "pending"; r["decision_date"] = ""; r["decision_by"] = ""
+                                        break
+                                save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"pending"})
+                                st.success(f"✅ Request #{req_id} moved to Pending."); st.rerun()
+                        with col2:
+                            if st.button("❌ Change to REJECTED", key=f"app_to_rej_{req_id}"):
+                                if not new_comments.strip():
+                                    st.error("❌ A rejection reason/comment is required.")
+                                else:
+                                    records = load_records_from_excel()
+                                    for r in records:
+                                        if int(r.get("id",0)) == int(req_id):
+                                            r["status"] = "rejected"
+                                            r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                            r["decision_by"] = full_name
+                                            r["director_comments"] = new_comments.strip()
+                                            r["rejection_reason"] = new_comments.strip()
+                                            break
+                                    save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
+                                    st.success(f"✅ Request #{req_id} changed to Rejected."); st.rerun()
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
+            if not rejected: st.success("✅ No rejected requests!")
+            else:
+                st.metric("❌ Rejected Requests", len(rejected)); st.divider()
+                for req in reversed(rejected):
+                    req_id = req.get("id")
+                    with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | 🔄 {req.get('type', 'Not specified')} | £{float(req.get('amount',0)):.2f}"):
+                        st.write(f"👤 {req.get('emp_name')} | 🔄 **Type:** {req.get('type', 'Not specified')} | 💷 £{float(req.get('amount',0)):.2f}")
+                        st.error(f"❌ **Rejected by:** {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
+                        reason = req.get('rejection_reason') or req.get('director_comments') or 'No rejection reason recorded.'
+                        st.error(f"💬 **Rejection reason:** {reason}")
+                        display_attachments(req)
+                        st.markdown("### 🔄 Change Status")
+                        new_comments = st.text_area("Add comment (optional)", key=f"chg_comm_rej_{req_id}")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("⏳ Move to Pending", key=f"rej_to_pend_{req_id}"):
+                                records = load_records_from_excel()
+                                for r in records:
+                                    if int(r.get("id",0)) == int(req_id):
+                                        r["status"] = "pending"; r["decision_date"] = ""; r["decision_by"] = ""
+                                        break
+                                save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"pending"})
+                                st.success(f"✅ Request #{req_id} moved to Pending."); st.rerun()
+                        with col2:
+                            if st.button("✅ Change to APPROVED", key=f"rej_to_app_{req_id}"):
+                                records = load_records_from_excel()
+                                for r in records:
+                                    if int(r.get("id",0)) == int(req_id):
+                                        r["status"] = "approved"; r["decision_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S"); r["decision_by"] = full_name
+                                        break
+                                save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
+                                st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
+    if director_hr_access_enabled and director_hr_access_tab is not None:
+        with director_hr_access_tab:
+            render_director_hr_access_portal(user_info)
+
+    with director_hr_leave_tab:
+        # Final holiday settlements submitted by HR/managers are approved here.
+        # Director approval updates the HR Leave Settlement record to approved;
+        # approved final settlements are then included in the employee holiday
+        # position calculation so the employee's final holiday balance closes at 0.0.
+        render_hr_leave_director_portal(full_name)
+
+    with director_store_ded_tab:
+        render_store_director_portal(full_name, type_filter="Deduction")
+    with director_store_ret_tab:
+        render_store_director_portal(full_name, type_filter="Addition")
+    with director_work_order_tab: render_work_order_director_portal(full_name)
+    with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
+
+elif role == "Super Admin":
+    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab = st.tabs([
+        "➕ Addition & Deduction",
+        "📦 Store Deductions",
+        "📦 Store Returns (Additions)",
+        "🛠️ Work Orders",
+        "💰 National Grid Inspector Bonus",
+        "🛡️ Data Control",
+        "🔧 System Management"
+    ])
+    with super_add_ded_tab:
+        st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
+        st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
+        st.divider()
+        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ All Pending", "✅ All Approved", "❌ All Rejected"])
+        with tab_pending:
+            pending = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "pending"]
+            if not pending: st.success("✅ No pending requests.")
+            else:
+                st.metric("⏳ All Pending", len(pending)); st.divider()
+                for req in reversed(pending):
+                    req_id = req.get("id"); amount = float(req.get("amount", 0))
+                    with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                        st.write(f"💷 Amount: £{amount:.2f}")
+                        submitted_by = get_submitted_by(req)
+                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                        st.info(f"📝 Description: {req.get('desc')}")
+                        display_attachments(req)
+                        if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                        st.divider(); display_pdf_button(req, can_generate=True)
+        with tab_approved:
+            approved = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "approved"]
+            if not approved: st.info("📋 No approved requests.")
+            else:
+                st.metric("✅ All Approved", len(approved)); st.divider()
+                for req in reversed(approved):
+                    req_id = req.get("id"); amount = float(req.get("amount", 0))
+                    dec_by = req.get('decision_by', 'Director')
+                    with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f} | ✅ {dec_by}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                        st.write(f"💷 Amount: £{amount:.2f}")
+                        st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider(); display_pdf_button(req, can_generate=True)
+        with tab_rejected:
+            rejected = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "rejected"]
+            if not rejected: st.info("📋 No rejected requests.")
+            else:
+                st.metric("❌ All Rejected", len(rejected)); st.divider()
+                for req in reversed(rejected):
+                    req_id = req.get("id"); amount = float(req.get("amount", 0))
+                    dec_by = req.get('decision_by', 'Director')
+                    with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"):
+                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                        st.write(f"💷 Amount: £{amount:.2f}")
+                        st.error(f"❌ Rejected By: {dec_by}")
+                        st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
+                        display_attachments(req)
+                        st.divider(); display_pdf_button(req, can_generate=True)
+    with super_store_ded_tab:
+        render_store_super_admin(type_filter="Deduction")
+    with super_store_ret_tab:
+        render_store_super_admin(type_filter="Addition")
+    with super_work_orders_tab:
+        render_work_orders_super_admin()
+    with super_inspector_bonus_tab:
+        render_inspector_bonus_super_admin()
+    with super_data_control_tab:
+        _super_admin_transaction_control()
+    with super_system_mgmt_tab:
+        st.subheader("🔧 System Management — Super Admin")
+        st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
+        st.divider()
+        tab_settings, tab_hr_settings, tab_store_settings, tab_users, tab_audit = st.tabs([
+            "⚙️ System Settings",
+            "👥 HR Leave Settings",
+            "📦 Store Settings",
+            "👤 User Management",
+            "📖 Audit History"
+        ])
+        with tab_settings: settings_management_panel()
+        with tab_hr_settings: render_hr_leave_settings()
+        with tab_store_settings: render_store_items_settings()
+        with tab_users: user_management_panel()
+        with tab_audit:
+            if "display_audit_log_panel" in globals(): display_audit_log_panel()
+            else: st.info("📖 Audit log panel not defined — skipping")
+            st.divider()
+            st.subheader("⚠️ Super Admin — Data Reset / Live Launch")
+            st.warning("These controls are permanent. They are intended for preparing the portal for live use.")
+            danger_col1, danger_col2 = st.columns(2)
+            with danger_col1:
+                if not st.session_state.get("confirm_clear_requests", False):
+                    if st.button("🧹 Clear All Submitted Requests", type="secondary", key="clear_all_requests_btn"):
+                        st.session_state["confirm_clear_requests"] = True; st.rerun()
                 else:
-                    if st.button("✅ Confirm", key="super_admin_confirm_clear_all_hr_leave", width="stretch"):
-                        clear_all_hr_leave()
-                        st.session_state["confirm_clear_hr_leave"] = False
-                        st.success("✅ Cleared."); st.rerun()
-            with reset_col4:
-                if not st.session_state.get("confirm_clear_store_deduction", False):
-                    if st.button("📦 Clear Store Transactions", key="super_admin_clear_all_store_deduction", type="secondary", width="stretch"):
-                        st.session_state["confirm_clear_store_deduction"] = True
-                else:
-                    if st.button("✅ Confirm", key="super_admin_confirm_clear_all_store_deduction", width="stretch"):
-                        clear_all_store_deductions()
-                        st.session_state["confirm_clear_store_deduction"] = False
-                        st.success("✅ Cleared."); st.rerun()
-            with reset_col4:
-                if not st.session_state.get("confirm_clear_audit", False):
-                    if st.button("🗑️ Clear Audit", type="secondary", key="clear_audit_history_btn"):
-                        st.session_state["confirm_clear_audit"] = True; st.rerun()
-                else:
-                    if st.button("✅ Confirm", type="primary", key="confirm_clear_audit_btn"):
-                        clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
-                        st.success("✅ Cleared."); st.rerun()
+                    st.error("⚠️ This will permanently remove ALL request records.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("✅ Yes, Clear Requests", type="primary", key="confirm_clear_all_requests_btn"):
+                            clear_all_requests_file(); st.session_state["confirm_clear_requests"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                    with c2:
+                        if st.button("↩️ Cancel", key="cancel_clear_all_requests_btn"):
+                            st.session_state["confirm_clear_requests"] = False; st.rerun()
+            with danger_col2:
+                reset_col1, reset_col2, reset_col3, reset_col4 = st.columns(4)
+                with reset_col1:
+                    if not st.session_state.get("confirm_clear_inspector_bonus", False):
+                        if st.button("💰 Clear Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", width="stretch"):
+                            st.session_state["confirm_clear_inspector_bonus"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_inspector_bonus", width="stretch"):
+                            clear_all_inspector_bonus()
+                            log_action("SUPER_ADMIN_CLEAR_INSPECTOR_BONUS", "ALL", decision_by=full_name)
+                            st.session_state["confirm_clear_inspector_bonus"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col2:
+                    if not st.session_state.get("confirm_clear_all_work_orders", False):
+                        if st.button("🛠️ Clear Work Orders", key="super_admin_clear_all_work_orders", type="secondary", width="stretch"):
+                            st.session_state["confirm_clear_all_work_orders"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_work_orders", width="stretch"):
+                            save_all_work_orders([])
+                            st.session_state["confirm_clear_all_work_orders"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col3:
+                    if not st.session_state.get("confirm_clear_hr_leave", False):
+                        if st.button("👥 Clear HR Leave", key="super_admin_clear_all_hr_leave", type="secondary", width="stretch"):
+                            st.session_state["confirm_clear_hr_leave"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_hr_leave", width="stretch"):
+                            clear_all_hr_leave()
+                            st.session_state["confirm_clear_hr_leave"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col4:
+                    if not st.session_state.get("confirm_clear_store_deduction", False):
+                        if st.button("📦 Clear Store Transactions", key="super_admin_clear_all_store_deduction", type="secondary", width="stretch"):
+                            st.session_state["confirm_clear_store_deduction"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_store_deduction", width="stretch"):
+                            clear_all_store_deductions()
+                            st.session_state["confirm_clear_store_deduction"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col4:
+                    if not st.session_state.get("confirm_clear_audit", False):
+                        if st.button("🗑️ Clear Audit", type="secondary", key="clear_audit_history_btn"):
+                            st.session_state["confirm_clear_audit"] = True; st.rerun()
+                    else:
+                        if st.button("✅ Confirm", type="primary", key="confirm_clear_audit_btn"):
+                            clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
+                            st.success("✅ Cleared."); st.rerun()
         st.divider()
         st.subheader("📥 Download Data Backups")
         st.caption("Download a copy before using the live-launch reset. User accounts and system settings are kept separately.")
+
         backup_files = [
             ("📥 Requests", EXCEL_PATH, "requests", "backup_requests"),
             ("📥 Users", USER_DB_PATH, "users", "backup_users"),
@@ -9144,6 +9539,7 @@ def _render_super_system_mgmt():
                         st.warning(f"Unable to prepare {label}: {e}")
                 else:
                     st.button(f"{label} (not available)", disabled=True, key=f"{key}_missing")
+
         st.divider()
         st.subheader("🚀 Make Software Live")
         st.warning(
@@ -9158,31 +9554,57 @@ def _render_super_system_mgmt():
             _write_empty_excel(WORK_ORDERS_PATH, WORK_ORDER_COLUMNS)
             _write_empty_excel(HR_LEAVE_PATH, HR_LEAVE_COLUMNS)
             _write_empty_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
-            _invalidate_data_cache("_work_orders_cache", "_work_order_cache", "_inspector_bonus_cache", "_records_cache", "_hr_leave_cache", "_store_deduction_cache")
+            _invalidate_data_cache(
+                "_work_orders_cache",
+                "_work_order_cache",
+                "_inspector_bonus_cache",
+                "_records_cache",
+                "_hr_leave_cache",
+                "_store_deduction_cache",
+            )
             sync_saved_file_to_drive(WORK_ORDERS_PATH)
             sync_saved_file_to_drive(HR_LEAVE_PATH)
             sync_saved_file_to_drive(STORE_DEDUCTION_PATH)
             clear_audit_log_file()
+
             for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, STORE_DEDUCTION_PDF_DIR, UPLOAD_DIR):
                 if os.path.isdir(folder):
                     for root, dirs, files in os.walk(folder, topdown=False):
                         for filename in files:
-                            try: os.remove(os.path.join(root, filename))
-                            except OSError: pass
+                            try:
+                                os.remove(os.path.join(root, filename))
+                            except OSError:
+                                pass
                         for dirname in dirs:
-                            try: os.rmdir(os.path.join(root, dirname))
-                            except OSError: pass
+                            try:
+                                os.rmdir(os.path.join(root, dirname))
+                            except OSError:
+                                pass
             st.session_state["_live_data_reset"] = datetime.now().isoformat()
 
         if not st.session_state.get("confirm_live_launch", False):
-            if st.button("🚀 Make Software Live — Clear All Operational Data", type="primary", key="make_software_live_btn", width="stretch"):
+            if st.button(
+                "🚀 Make Software Live — Clear All Operational Data",
+                type="primary",
+                key="make_software_live_btn",
+                width="stretch",
+            ):
                 st.session_state["confirm_live_launch"] = True
                 st.rerun()
         else:
-            st.error("⚠️ FINAL CONFIRMATION: this will permanently remove all requests, work orders, inspector bonuses, HR leave requests, Store Deductions, audit history, generated PDFs and uploaded attachments. Users and system settings will remain.")
+            st.error(
+                "⚠️ FINAL CONFIRMATION: this will permanently remove all requests, "
+                "work orders, inspector bonuses, HR leave requests, Store Deductions, audit history, generated PDFs and uploaded attachments. "
+                "Users and system settings will remain."
+            )
             live_c1, live_c2 = st.columns(2)
             with live_c1:
-                if st.button("🚀 YES — Make Software Live", type="primary", key="confirm_make_software_live_btn", width="stretch"):
+                if st.button(
+                    "🚀 YES — Make Software Live",
+                    type="primary",
+                    key="confirm_make_software_live_btn",
+                    width="stretch",
+                ):
                     try:
                         _clear_live_launch_data()
                         st.session_state["confirm_live_launch"] = False
@@ -9196,121 +9618,8 @@ def _render_super_system_mgmt():
                     st.session_state["confirm_live_launch"] = False
                     st.rerun()
 
-
-# ============================================================
-# DISPATCH
-# ============================================================
-if user_info.get("can_access_employee_hr_reports", False) and role not in ["Manager", "Staff", "Team Member"]:
-    render_employee_hr_reports(user_info)
-
-
-if role == "Employee":
-    pass
-
-elif role == "Work Order Employee":
-    _nav_render([
-        ("work_orders", "🛠️ Work Orders",
-         lambda: render_work_order_employee_portal(full_name, dept)),
-    ])
-
-elif role == "Payroll":
-    _nav_render([
-        ("add_ded",    "➕ Addition & Deduction",          _render_payroll_add_ded),
-        ("hr_leave",   "👥 HR Leave Settlement",           render_hr_leave_payroll_portal),
-        ("store_ded",  "📦 Store Deductions",
-         lambda: render_store_payroll_portal(type_filter="Deduction")),
-        ("store_ret",  "📦 Store Returns (Additions)",
-         lambda: render_store_payroll_portal(type_filter="Addition")),
-        ("work_orders","🛠️ Work Orders",
-         lambda: render_work_order_payroll_portal(full_name)),
-        ("inspector",  "💰 National Grid Inspector Bonus",
-         lambda: render_inspector_bonus_payroll_portal(full_name)),
-    ])
-
-elif role == "Work Order Manager":
-    _nav_render([
-        ("add_ded",     "➕ Addition & Deduction",
-         lambda: _render_dept_add_ded(dept, full_name)),
-        ("work_orders", "🛠️ Work Orders",
-         lambda: render_work_order_manager_portal(full_name, dept, show_total=True)),
-    ])
-
-elif role in ["Manager", "Staff", "Team Member"]:
-    nav_items = []
-    if user_info.get("can_access_addition_deduction", True):
-        nav_items.append(("add_ded", "➕ Addition & Deduction",
-                          lambda: _render_dept_add_ded(dept, full_name)))
-    if user_info.get("can_access_hr_leave", False):
-        nav_items.append(("hr", "🏢 HR Department",
-                          lambda: render_hr_department(current_user_info=user_info,
-                                                       has_hr_access=True,
-                                                       director_name=full_name)))
-    if user_info.get("can_access_leave_request", False):
-        _norm_dept = re.sub(r"\s+", " ", str(dept or "")).strip().casefold()
-        _is_hr_mgr = (_norm_dept in {"hr", "human resource", "human resources",
-                                      "hr department", "human resource department"}
-                      and user_info.get("can_access_hr_leave", False))
-        if _is_hr_mgr:
-            nav_items.append(("leave_req", "✅ Leave Approvals", render_hr_leave_approvals))
-        else:
-            nav_items.append(("leave_req", "📝 Leave Request By Departments",
-                              lambda: render_department_manager_leave_request(current_user_info=user_info)))
-    if user_info.get("can_access_employee_hr_reports", False):
-        nav_items.append(("my_hr", "👤 My HR Report",
-                          lambda: render_employee_hr_reports(user_info)))
-    if user_info.get("can_access_store_deduction", False):
-        nav_items.append(("store_ded", "📦 Store Deduction",
-                          lambda: render_store_deduction_form(full_name, dept)))
-        nav_items.append(("store_ret", "📦 Store Return (Addition)",
-                          lambda: render_store_return_form(full_name, dept)))
-        nav_items.append(("store_mine", "📋 My Submitted Store Requests",
-                          lambda: render_store_my_submissions(full_name)))
-    if user_info.get("can_access_work_orders", False):
-        nav_items.append(("work_orders", "🛠️ Work Orders",
-                          lambda: render_work_order_employee_portal(full_name, dept)))
-    if user_info.get("can_access_inspector_bonus", False):
-        nav_items.append(("inspector", "💰 National Grid Inspector Bonus",
-                          lambda: render_inspector_bonus_portal(full_name, dept)))
-    _nav_render(nav_items)
-
-elif role == "Director":
-    director_hr_access_enabled = any(bool(user_info.get(k, False)) for k in (
-        "can_access_holiday_calendar", "can_access_hr_reports",
-        "can_access_employee_overview", "can_access_holiday_calculator",
-        "can_access_employee_directory"
-    ))
-    nav_items = [
-        ("add_ded",   "➕ Addition & Deduction",        _render_director_add_ded),
-        ("hr_leave",  "👥 HR Leave Settlement",
-         lambda: render_hr_leave_director_portal(full_name)),
-        ("store_ded", "📦 Store Deductions",
-         lambda: render_store_director_portal(full_name, type_filter="Deduction")),
-        ("store_ret", "📦 Store Returns (Additions)",
-         lambda: render_store_director_portal(full_name, type_filter="Addition")),
-        ("work_orders","🛠️ Work Orders",
-         lambda: render_work_order_director_portal(full_name)),
-        ("inspector", "💰 National Grid Inspector Bonus",
-         lambda: render_inspector_bonus_director_portal(full_name)),
-    ]
-    if director_hr_access_enabled:
-        nav_items.insert(1, ("hr_access", "📊 HR Reports & Calendar",
-                             lambda: render_director_hr_access_portal(user_info)))
-    _nav_render(nav_items)
-
-elif role == "Super Admin":
-    _nav_render([
-        ("add_ded",      "➕ Addition & Deduction",            _render_super_add_ded),
-        ("store_ded",    "📦 Store Deductions",
-         lambda: render_store_super_admin(type_filter="Deduction")),
-        ("store_ret",    "📦 Store Returns (Additions)",
-         lambda: render_store_super_admin(type_filter="Addition")),
-        ("work_orders",  "🛠️ Work Orders",                     render_work_orders_super_admin),
-        ("inspector",    "💰 National Grid Inspector Bonus",   render_inspector_bonus_super_admin),
-        ("data_control", "🛡️ Data Control",                    _super_admin_transaction_control),
-        ("system_mgmt",  "🔧 System Management",               _render_super_system_mgmt),
-    ])
-
 else:
+    st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
 # ========================================================
 # ✅ END OF ROLE-BASED PORTALS
