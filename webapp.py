@@ -149,7 +149,10 @@ USER_DB_COLUMNS = [
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
     "can_approve_requests", "can_access_inspector_bonus",
     "can_access_addition_deduction", "can_access_work_orders",
-    "can_access_wo_total", "can_access_hr_leave", "can_access_leave_request", "can_access_employee_hr_reports", "employee_id", "can_access_store_deduction",
+    "can_access_wo_total", "can_access_hr_leave", "can_access_leave_request", "can_access_employee_hr_reports",
+    "can_access_holiday_calendar", "can_access_hr_reports", "can_access_employee_overview",
+    "can_access_holiday_calculator", "can_access_employee_directory",
+    "employee_id", "can_access_store_deduction",
     "is_active"
 ]
 
@@ -699,6 +702,21 @@ PERMISSION_DEFAULTS = {
     "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True},
     "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True}
 }
+
+# Fine-grained, read-only HR/report permissions. These are deliberately
+# independent from the full HR Department permission so a Super Admin can
+# give a Director selected HR information without exposing employee editing,
+# leave entry, or HR settlement controls.
+_HR_REPORT_PERMISSION_DEFAULTS = {
+    "can_access_holiday_calendar": False,
+    "can_access_hr_reports": False,
+    "can_access_employee_overview": False,
+    "can_access_holiday_calculator": False,
+    "can_access_employee_directory": False,
+}
+for _role_name in PERMISSION_DEFAULTS:
+    PERMISSION_DEFAULTS[_role_name].update(_HR_REPORT_PERMISSION_DEFAULTS)
+
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
     "can_generate_pdf": "📄 Generate & Download PDFs",
@@ -711,6 +729,11 @@ PERMISSION_LABELS = {
     "can_access_hr_leave": "🏢 HR Department (Employee Management + Leave Settlement)",
     "can_access_leave_request": "📝 Leave Request By Departments (Department Manager)",
     "can_access_employee_hr_reports": "👤 Employee HR Reports (View Only)",
+    "can_access_holiday_calendar": "📅 Holiday Calendar (View Only)",
+    "can_access_hr_reports": "📥 HR Reports (Download)",
+    "can_access_employee_overview": "📊 Employee Overview (View Only)",
+    "can_access_holiday_calculator": "🧮 Holiday Calculator (View Only)",
+    "can_access_employee_directory": "👥 Employee Directory (View Only)",
     "can_access_store_deduction": "📦 Store Department Deduction"
 }
 
@@ -1193,6 +1216,11 @@ def save_users(users_dict):
             "can_access_hr_leave": u.get("can_access_hr_leave", False),
             "can_access_leave_request": u.get("can_access_leave_request", False),
             "can_access_employee_hr_reports": u.get("can_access_employee_hr_reports", False),
+            "can_access_holiday_calendar": u.get("can_access_holiday_calendar", False),
+            "can_access_hr_reports": u.get("can_access_hr_reports", False),
+            "can_access_employee_overview": u.get("can_access_employee_overview", False),
+            "can_access_holiday_calculator": u.get("can_access_holiday_calculator", False),
+            "can_access_employee_directory": u.get("can_access_employee_directory", False),
             "employee_id": u.get("employee_id", ""),
             "can_access_store_deduction": u.get("can_access_store_deduction", False),
             "is_active": u.get("is_active", True)
@@ -1241,6 +1269,11 @@ def load_users(force=False):
                 "can_access_hr_leave": _flag_or_default(r.get("can_access_hr_leave", ""), user_role, "can_access_hr_leave"),
                 "can_access_leave_request": _flag_or_default(r.get("can_access_leave_request", ""), user_role, "can_access_leave_request"),
                 "can_access_employee_hr_reports": _flag_or_default(r.get("can_access_employee_hr_reports", ""), user_role, "can_access_employee_hr_reports"),
+                "can_access_holiday_calendar": _flag_or_default(r.get("can_access_holiday_calendar", ""), user_role, "can_access_holiday_calendar"),
+                "can_access_hr_reports": _flag_or_default(r.get("can_access_hr_reports", ""), user_role, "can_access_hr_reports"),
+                "can_access_employee_overview": _flag_or_default(r.get("can_access_employee_overview", ""), user_role, "can_access_employee_overview"),
+                "can_access_holiday_calculator": _flag_or_default(r.get("can_access_holiday_calculator", ""), user_role, "can_access_holiday_calculator"),
+                "can_access_employee_directory": _flag_or_default(r.get("can_access_employee_directory", ""), user_role, "can_access_employee_directory"),
                 "employee_id": str(r.get("employee_id", "")).strip(),
                 "can_access_store_deduction": _flag_or_default(r.get("can_access_store_deduction", ""), user_role, "can_access_store_deduction"),
                 "is_active": _active_or_default(r.get("is_active", ""))
@@ -1266,7 +1299,9 @@ def load_users(force=False):
                     "can_access_addition_deduction": True,
                     "can_access_work_orders": True,
                     "can_access_wo_total": True,
-                    "can_access_hr_leave": True,
+                    # HR Department access and the read-only HR/report modules
+                    # remain user-specific and are controlled by Super Admin.
+                    "can_access_hr_leave": users[username].get("can_access_hr_leave", False),
                     "can_access_store_deduction": True,
                     "is_active": users[username].get("is_active", True),
                 })
@@ -8192,6 +8227,13 @@ def user_management_panel():
             perm_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=defaults.get("can_access_hr_leave", False))
             perm_leave_req = st.checkbox(PERMISSION_LABELS["can_access_leave_request"], value=defaults.get("can_access_leave_request", False))
             perm_employee_reports = st.checkbox(PERMISSION_LABELS["can_access_employee_hr_reports"], value=defaults.get("can_access_employee_hr_reports", False))
+            st.markdown("### 📊 HR / Report Access (View Only unless stated)")
+            rcol1, rcol2 = st.columns(2)
+            perm_holiday_calendar = rcol1.checkbox(PERMISSION_LABELS["can_access_holiday_calendar"], value=defaults.get("can_access_holiday_calendar", False))
+            perm_hr_reports = rcol2.checkbox(PERMISSION_LABELS["can_access_hr_reports"], value=defaults.get("can_access_hr_reports", False))
+            perm_employee_overview = rcol1.checkbox(PERMISSION_LABELS["can_access_employee_overview"], value=defaults.get("can_access_employee_overview", False))
+            perm_holiday_calculator = rcol2.checkbox(PERMISSION_LABELS["can_access_holiday_calculator"], value=defaults.get("can_access_holiday_calculator", False))
+            perm_employee_directory = rcol1.checkbox(PERMISSION_LABELS["can_access_employee_directory"], value=defaults.get("can_access_employee_directory", False))
             perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
@@ -8203,7 +8245,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "is_active": new_active}
                     save_users(USERS)
                     log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active})
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
@@ -8236,6 +8278,11 @@ def user_management_panel():
                 curr_perm_wo_total = bool(curr.get("can_access_wo_total", False))
                 curr_perm_hr = bool(curr.get("can_access_hr_leave", False))
                 curr_perm_leave_req = bool(curr.get("can_access_leave_request", False))
+                curr_perm_holiday_calendar = bool(curr.get("can_access_holiday_calendar", False))
+                curr_perm_hr_reports = bool(curr.get("can_access_hr_reports", False))
+                curr_perm_employee_overview = bool(curr.get("can_access_employee_overview", False))
+                curr_perm_holiday_calculator = bool(curr.get("can_access_holiday_calculator", False))
+                curr_perm_employee_directory = bool(curr.get("can_access_employee_directory", False))
                 curr_perm_store = bool(curr.get("can_access_store_deduction", False))
                 ecol1, ecol2 = st.columns(2)
                 edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
@@ -8250,6 +8297,13 @@ def user_management_panel():
                 edit_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=curr_perm_hr)
                 edit_leave_req = st.checkbox(PERMISSION_LABELS["can_access_leave_request"], value=curr_perm_leave_req)
                 edit_employee_reports = st.checkbox(PERMISSION_LABELS["can_access_employee_hr_reports"], value=bool(curr.get("can_access_employee_hr_reports", False)))
+                st.markdown("### 📊 HR / Report Access (View Only unless stated)")
+                ercol1, ercol2 = st.columns(2)
+                edit_holiday_calendar = ercol1.checkbox(PERMISSION_LABELS["can_access_holiday_calendar"], value=curr_perm_holiday_calendar)
+                edit_hr_reports = ercol2.checkbox(PERMISSION_LABELS["can_access_hr_reports"], value=curr_perm_hr_reports)
+                edit_employee_overview = ercol1.checkbox(PERMISSION_LABELS["can_access_employee_overview"], value=curr_perm_employee_overview)
+                edit_holiday_calculator = ercol2.checkbox(PERMISSION_LABELS["can_access_holiday_calculator"], value=curr_perm_holiday_calculator)
+                edit_employee_directory = ercol1.checkbox(PERMISSION_LABELS["can_access_employee_directory"], value=curr_perm_employee_directory)
                 edit_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=curr_perm_store)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
@@ -8257,7 +8311,7 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -8275,6 +8329,11 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_hr_leave"] = edit_hr
                         USERS[edit_user_sel]["can_access_leave_request"] = edit_leave_req
                         USERS[edit_user_sel]["can_access_employee_hr_reports"] = edit_employee_reports
+                        USERS[edit_user_sel]["can_access_holiday_calendar"] = edit_holiday_calendar
+                        USERS[edit_user_sel]["can_access_hr_reports"] = edit_hr_reports
+                        USERS[edit_user_sel]["can_access_employee_overview"] = edit_employee_overview
+                        USERS[edit_user_sel]["can_access_holiday_calculator"] = edit_holiday_calculator
+                        USERS[edit_user_sel]["can_access_employee_directory"] = edit_employee_directory
                         USERS[edit_user_sel]["employee_id"] = edit_employee_id
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["is_active"] = edit_active
@@ -8611,6 +8670,102 @@ def render_employee_hr_reports(current_user_info):
 # inside the same role-based tab set alongside Leave Request By Departments.
 if user_info.get("can_access_employee_hr_reports", False) and role not in ["Manager", "Staff", "Team Member"]:
     render_employee_hr_reports(user_info)
+
+
+# ============================================================
+# 📊 DIRECTOR — GRANULAR HR / REPORT ACCESS
+# ============================================================
+def render_director_hr_access_portal(current_user_info):
+    """Render only the read-only HR/report modules explicitly granted by Super Admin."""
+    permissions = {
+        "holiday_calendar": bool(current_user_info.get("can_access_holiday_calendar", False)),
+        "hr_reports": bool(current_user_info.get("can_access_hr_reports", False)),
+        "employee_overview": bool(current_user_info.get("can_access_employee_overview", False)),
+        "holiday_calculator": bool(current_user_info.get("can_access_holiday_calculator", False)),
+        "employee_directory": bool(current_user_info.get("can_access_employee_directory", False)),
+    }
+    labels = {
+        "holiday_calendar": "📅 Holiday Calendar",
+        "hr_reports": "📥 HR Reports",
+        "employee_overview": "📊 Employee Overview",
+        "holiday_calculator": "🧮 Holiday Calculator",
+        "employee_directory": "👥 Employee Directory",
+    }
+    enabled = [key for key, allowed in permissions.items() if allowed]
+    if not enabled:
+        st.info("No HR/report access has been granted to this Director. A Super Admin can enable individual modules in User Management → Edit User.")
+        return
+
+    st.subheader("📊 HR & Reports")
+    st.caption("Read-only access granted by Super Admin. Each module is controlled independently.")
+    tabs = st.tabs([labels[key] for key in enabled])
+    for key, tab in zip(enabled, tabs):
+        with tab:
+            if key == "holiday_calendar":
+                _hrp_render_holiday_calendar()
+            elif key == "hr_reports":
+                render_hr_download_reports()
+            elif key == "employee_overview":
+                employees = _hrp_load_employees()
+                if not employees:
+                    st.info("No employees are currently recorded.")
+                else:
+                    rows = []
+                    for e in employees:
+                        pos = _hrp_get_holiday_position(e.get("emp_id", ""))
+                        rows.append({
+                            "Employee ID": e.get("emp_id", ""),
+                            "Name": e.get("name", ""),
+                            "Department": e.get("department", ""),
+                            "Job Title": e.get("job_title", ""),
+                            "Status": e.get("status", "Active"),
+                            "Start Date": e.get("start_date", ""),
+                            "Holiday Entitlement": pos.get("entitlement", 0.0),
+                            "Holiday Used / Booked": pos.get("used", 0.0),
+                            "Bank Holidays Passed": pos.get("bank_holidays_passed", 0.0),
+                            "Upcoming Bank Holidays": pos.get("upcoming_bank_holidays", 0.0),
+                            "Holiday Balance": pos.get("balance", 0.0),
+                        })
+                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+                    st.caption(f"Total employees: {len(rows)}")
+            elif key == "holiday_calculator":
+                employees = _hrp_load_employees()
+                if not employees:
+                    st.info("No employees are currently recorded.")
+                else:
+                    rows = []
+                    for e in employees:
+                        pos = _hrp_get_holiday_position(e.get("emp_id", ""))
+                        rows.append({
+                            "Employee ID": e.get("emp_id", ""),
+                            "Employee": e.get("name", ""),
+                            "Department": e.get("department", ""),
+                            "Entitlement": pos.get("entitlement", 0.0),
+                            "Booked / Used": pos.get("used", 0.0),
+                            "Bank Holidays Passed": pos.get("bank_holidays_passed", 0.0),
+                            "Upcoming Bank Holidays": pos.get("upcoming_bank_holidays", 0.0),
+                            "Remaining": pos.get("balance", 0.0),
+                        })
+                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+                    st.info("Remaining is calculated from entitlement minus booked/used holiday, passed bank holidays and upcoming bank holidays, using the same live HR calculation as Employee Management.")
+            elif key == "employee_directory":
+                employees = _hrp_load_employees()
+                if not employees:
+                    st.info("No employees are currently recorded.")
+                else:
+                    rows = [{
+                        "Employee ID": e.get("emp_id", ""),
+                        "Full Name": e.get("name", ""),
+                        "Department": e.get("department", ""),
+                        "Position / Job Title": e.get("job_title", ""),
+                        "Agreement Type": e.get("agreement_type", ""),
+                        "Status": e.get("status", "Active"),
+                        "Start Date": e.get("start_date", ""),
+                        "Working Pattern": e.get("working_pattern", ""),
+                        "Days Worked / Week": e.get("days_per_week", 5),
+                    } for e in employees]
+                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+                    st.caption(f"Total employees: {len(rows)}")
 
 # ============================================================
 # 📋 ROLE-BASED PORTALS
@@ -9000,14 +9155,39 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
 
 elif role == "Director":
-    director_addition_tab, director_hr_leave_tab, director_store_ded_tab, director_store_ret_tab, director_work_order_tab, director_inspector_tab = st.tabs([
+    # Director approval modules remain available as before. HR/report access is
+    # now separate and can be granted module-by-module by Super Admin.
+    director_hr_access_enabled = any(bool(user_info.get(k, False)) for k in (
+        "can_access_holiday_calendar", "can_access_hr_reports",
+        "can_access_employee_overview", "can_access_holiday_calculator",
+        "can_access_employee_directory"
+    ))
+    director_tab_labels = [
         "➕ Addition & Deduction",
         "👥 HR Leave Settlement",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus"
-    ])
+    ]
+    if director_hr_access_enabled:
+        director_tab_labels.insert(1, "📊 HR Reports & Calendar")
+    director_tabs = st.tabs(director_tab_labels)
+    director_addition_tab = director_tabs[0]
+    if director_hr_access_enabled:
+        director_hr_access_tab = director_tabs[1]
+        director_hr_leave_tab = director_tabs[2]
+        director_store_ded_tab = director_tabs[3]
+        director_store_ret_tab = director_tabs[4]
+        director_work_order_tab = director_tabs[5]
+        director_inspector_tab = director_tabs[6]
+    else:
+        director_hr_access_tab = None
+        director_hr_leave_tab = director_tabs[1]
+        director_store_ded_tab = director_tabs[2]
+        director_store_ret_tab = director_tabs[3]
+        director_work_order_tab = director_tabs[4]
+        director_inspector_tab = director_tabs[5]
     with director_addition_tab:
         st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -9138,6 +9318,10 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
+    if director_hr_access_enabled and director_hr_access_tab is not None:
+        with director_hr_access_tab:
+            render_director_hr_access_portal(user_info)
+
     with director_hr_leave_tab:
         # Final holiday settlements submitted by HR/managers are approved here.
         # Director approval updates the HR Leave Settlement record to approved;
