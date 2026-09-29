@@ -2127,7 +2127,16 @@ def _hrp_get_holiday_position(employee_id):
             end_date = min(end_date, leaving_date)
         except Exception:
             pass
-    bank_holidays = _hrp_get_bank_holiday_days(employee, start_date, end_date)
+    bank_holidays_passed = _hrp_get_bank_holiday_days(employee, start_date, min(today, end_date))
+    # Reserve bank holidays still to come in the employee's current leave year
+    # as well as those that have already passed. This is separate from the
+    # pure contractual entitlement: the employee's available balance is what
+    # remains after booked/pre-booked annual leave and all applicable bank
+    # holidays are accounted for.
+    upcoming_bank_holidays = _hrp_get_upcoming_bank_holiday_days_for_employee(
+        employee, today + timedelta(days=1), end_date
+    )
+    bank_holidays = round(bank_holidays_passed + upcoming_bank_holidays, 1)
     company_closure = _hrp_get_company_closure_holiday_days(employee, start_date, end_date)
     used = round(recorded_used + company_closure, 1)
     raw_balance = round(entitlement - used - bank_holidays, 1)
@@ -2139,6 +2148,8 @@ def _hrp_get_holiday_position(employee_id):
         "recorded_used": recorded_used,
         "company_closure": company_closure,
         "bank_holidays": bank_holidays,
+        "bank_holidays_passed": round(bank_holidays_passed, 1),
+        "upcoming_bank_holidays": round(upcoming_bank_holidays, 1),
         "raw_balance": raw_balance,
         "final_settlement_offset": final_settlement_offset,
         "balance": balance,
@@ -3903,15 +3914,68 @@ def render_hr_portal(current_user_info=None):
             st.divider()
             st.subheader("📅 Holiday Allowance")
             entitlement, entitlement_note, service_years, calculated_base = _hrp_get_employee_entitlement(emp)
-            holiday_used = _hrp_get_approved_holiday_days(emp["emp_id"])
-            remaining = entitlement - holiday_used
             holiday_position = _hrp_get_holiday_position(emp["emp_id"])
-            col1, col2, col3, col4 = st.columns(4)
+            holiday_used = holiday_position["used"]
+            bank_holidays_passed = holiday_position.get("bank_holidays_passed", 0.0)
+            upcoming_bank_holidays = holiday_position.get("upcoming_bank_holidays", 0.0)
+            remaining = holiday_position["balance"]
+
+            # The balance shown here is the employee's genuinely available
+            # holiday after booked/pre-booked annual leave, bank holidays that
+            # have passed, and bank holidays still to come. The entitlement
+            # itself is never reduced.
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1: st.metric("Holiday Entitlement", f"{entitlement:.1f} days")
-            with col2: st.metric("Holiday Used", f"{holiday_used:.1f} days")
-            with col3: st.metric("Remaining", f"{remaining:.1f} days")
-            with col4: st.metric("Service", f"{service_years:.1f} years")
+            with col2: st.metric("Holiday Used / Booked", f"{holiday_used:.1f} days")
+            with col3: st.metric("Bank Holidays Passed", f"{bank_holidays_passed:.1f} days")
+            with col4: st.metric("Upcoming Bank Holidays", f"{upcoming_bank_holidays:.1f} days")
+            with col5: st.metric("Remaining", f"{remaining:.1f} days")
+            with col6: st.metric("Service", f"{service_years:.1f} years")
+
             st.info(entitlement_note)
+
+            # Show the actual upcoming bank-holiday dates that are reserved
+            # from the remaining balance, so HR can see exactly why the balance
+            # is reduced.
+            today = date.today()
+            try:
+                emp_start = emp.get("start_date")
+                if not isinstance(emp_start, date):
+                    emp_start = pd.to_datetime(emp_start).date()
+            except Exception:
+                emp_start = today
+            leave_year_end = date(today.year, 12, 31)
+            if emp.get("leaving_date"):
+                try:
+                    leaving = emp.get("leaving_date")
+                    if not isinstance(leaving, date):
+                        leaving = pd.to_datetime(leaving).date()
+                    leave_year_end = min(leave_year_end, leaving)
+                except Exception:
+                    pass
+            upcoming_bank_list = []
+            if leave_year_end >= today + timedelta(days=1):
+                for bank_date, bank_name in _hrp_get_upcoming_bank_holidays(today + timedelta(days=1), limit=20):
+                    if bank_date <= leave_year_end and bank_date >= max(today + timedelta(days=1), emp_start):
+                        upcoming_bank_list.append((bank_date, bank_name))
+
+            st.caption(
+                f"Holiday balance calculation: {holiday_used:.1f} booked/pre-booked holiday day(s) "
+                f"+ {bank_holidays_passed:.1f} bank holiday day(s) passed "
+                f"+ {upcoming_bank_holidays:.1f} upcoming bank holiday day(s) "
+                f"= {remaining:.1f} day(s) remaining from {entitlement:.1f} day(s) entitlement."
+            )
+            if upcoming_bank_list:
+                with st.expander("📅 Upcoming Bank Holidays included in Remaining balance", expanded=False):
+                    st.dataframe(
+                        pd.DataFrame([
+                            {"Date": bank_date.strftime("%d/%m/%Y"), "Bank Holiday": bank_name, "Days Reserved": 1.0}
+                            for bank_date, bank_name in upcoming_bank_list
+                        ]),
+                        width="stretch",
+                        hide_index=True,
+                    )
+
             owed1, owed2 = st.columns(2)
             with owed1:
                 st.metric("🏢 Company Owes Employee", f"{holiday_position['company_owes_employee']:.1f} days")
