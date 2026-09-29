@@ -1,5 +1,8 @@
 # ============================================================
-# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.28
+# 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.29
+#    • Robust pandas NaT/date normalisation for employee HR reports
+#    • Removed background Google Drive worker to prevent native Cloud segfaults
+
 # ============================================================
 # ✅ v4.27 (HR DEPARTMENT TAB):
 #    • New "🏢 HR Department" tab containing 2 sub-tabs:
@@ -167,12 +170,14 @@ drive_service = None
 DRIVE_CONNECTION_ERROR = ""
 DRIVE_LAST_SYNC = {}
 DRIVE_LAST_SYNC_ERROR = {}
-DRIVE_PENDING_SYNC = set()
-_DRIVE_SYNC_QUEUE = queue.Queue()
-
-_DRIVE_ID_CACHE = {}
-_DRIVE_SYNC_FINGERPRINTS = {}
+# Streamlit reruns the script for every widget interaction.
+# Google Drive sync is deliberately kept synchronous. A background thread that
+# touches Streamlit/pandas/pyarrow on Streamlit Community Cloud can trigger
+# native SIGSEGVs in some dependency combinations. Normal page refreshes do not
+# perform Drive uploads; only successful saves call sync_saved_file_to_drive().
 _DRIVE_SYNC_LOCK = threading.RLock()
+DRIVE_PENDING_SYNC = set()
+_DRIVE_SYNC_QUEUE = None
 
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
@@ -482,18 +487,23 @@ def _sync_saved_file_to_drive_now(local_path):
         return False
 
 
-def sync_saved_file_to_drive(local_path):
-    """Synchronise a successfully saved local file to Drive.
+_DRIVE_STORAGE_PROCESS_READY = False
 
-    This runs in the Streamlit request after the local save has completed.
-    Avoiding a long-lived background thread prevents concurrent Google API and
-    workbook activity from surviving Streamlit reruns or app reloads.
+def sync_saved_file_to_drive(local_path):
+    """Synchronise a successfully saved workbook to Google Drive.
+
+    This intentionally runs on Streamlit's main execution thread. It avoids
+    using a background thread for Google Drive/pandas work, which can interact
+    badly with native dependencies such as pyarrow on Streamlit Community Cloud
+    and produce a process-level segmentation fault. Page refreshes themselves do
+    not call this function; it is used only after a local save.
     """
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
         msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
         DRIVE_LAST_SYNC_ERROR[filename] = msg
         return False
+
     return _sync_saved_file_to_drive_now(local_path)
 
 
@@ -598,7 +608,8 @@ def render_google_drive_status():
 
         rows = _drive_status_rows()
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        st.caption("Saved workbooks are synchronised to Google Drive after the local save completes.")
+        pending = len(DRIVE_PENDING_SYNC)
+        st.caption(f"Every successful software save is queued automatically. Pending Drive uploads: {pending}. Local saves do not wait for Google Drive.")
 
 @st.cache_resource(show_spinner=False)
 def _initialise_drive_storage_once():
@@ -1295,6 +1306,46 @@ def _hrp_init_storage():
     safe_init_excel(HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS)
 
 
+def _hrp_normalize_employee_date(value, default=None):
+    """Return a real Python date or None; never return pandas NaT/Timestamp."""
+    if value is None:
+        return default
+    try:
+        missing = pd.isna(value)
+        if isinstance(missing, bool) and missing:
+            return default
+    except Exception:
+        pass
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date) and not isinstance(value, pd.Timestamp):
+        return value
+    try:
+        parsed = pd.to_datetime(value, errors="coerce")
+        if pd.isna(parsed):
+            return default
+        return parsed.date()
+    except Exception:
+        return default
+
+
+def _hrp_normalize_employee_record(employee):
+    """Normalise date fields in an employee record already held in session state."""
+    if not isinstance(employee, dict):
+        return employee
+    employee["start_date"] = _hrp_normalize_employee_date(employee.get("start_date"), date.today())
+    employee["leaving_date"] = _hrp_normalize_employee_date(employee.get("leaving_date"), None)
+    return employee
+
+
+def _hrp_normalize_employee_records(employees):
+    if not isinstance(employees, list):
+        return []
+    for employee in employees:
+        _hrp_normalize_employee_record(employee)
+    return employees
+
+
 def _hrp_load_employees():
     _hrp_init_storage()
     try:
@@ -1305,10 +1356,7 @@ def _hrp_load_employees():
             if not emp_id:
                 continue
             raw_start = r.get("Start Date", "")
-            try:
-                start_date = pd.to_datetime(raw_start).date()
-            except Exception:
-                start_date = date.today()
+            start_date = _hrp_normalize_employee_date(raw_start, date.today())
             override_raw = r.get("Holiday Entitlement Override", "")
             try:
                 override = float(override_raw) if str(override_raw).strip() else None
@@ -1326,7 +1374,7 @@ def _hrp_load_employees():
                 "days_per_week": float(r.get("Days Worked Per Week", 5) or 5),
                 "entitlement_override": override,
                 "adjustment_note": str(r.get("Entitlement Adjustment Note", "")).strip(),
-                "leaving_date": (pd.to_datetime(r.get("Leaving Date", "")).date() if str(r.get("Leaving Date", "")).strip() and pd.notna(pd.to_datetime(r.get("Leaving Date", ""), errors="coerce")) else None),
+                "leaving_date": _hrp_normalize_employee_date(r.get("Leaving Date", ""), None),
                 "leaving_reason": str(r.get("Leaving Reason", "")).strip(),
             })
         return records
@@ -5566,7 +5614,14 @@ def save_all_hr_leave(records, sync=True):
     } for r in records]
     pd.DataFrame(rows, columns=HR_LEAVE_COLUMNS).to_excel(HR_LEAVE_PATH, index=False, engine="openpyxl")
     _set_data_cache("_hr_leave_cache", list(records))
-    if sync: sync_saved_file_to_drive(HR_LEAVE_PATH)
+    if sync:
+        # HR Leave Settlement is a financial transaction and must be backed up
+        # before the Streamlit rerun returns control to the user.  Do not queue
+        # this particular workbook on the background worker: a rerun/restart
+        # can otherwise happen before the queued upload completes.
+        backup_ok = _sync_saved_file_to_drive_now(HR_LEAVE_PATH)
+        if not backup_ok:
+            print("WARNING: HR Leave Settlement local save succeeded, but Google Drive backup did not complete.")
 
 def get_next_hr_leave_id(records):
     if not records: return 1
@@ -5577,18 +5632,7 @@ def load_hr_daily_rates(force=False):
         return list(st.session_state["_hr_daily_rates_cache"])
     initialise_hr_leave()
     try:
-        # HR Daily Rates is a persistent Drive-backed workbook. A fresh Streamlit
-        # deployment can contain a locally-created empty workbook even though the
-        # BACKUP_hr_daily_rates.xlsx file in Google Drive contains the real rates.
-        # Restore the Drive copy before accepting an empty local workbook.
         df = _read_excel_records(HR_DAILY_RATES_PATH)
-        if df.empty and drive_service is not None:
-            try:
-                sync_persistent_file(HR_DAILY_RATES_PATH, HR_DAILY_RATES_COLUMNS)
-                df = _read_excel_records(HR_DAILY_RATES_PATH)
-            except Exception as recovery_error:
-                print(f"HR Daily Rates Drive recovery failed: {recovery_error}")
-
         records = []
         for r in df.to_dict(orient="records"):
             try: rate = float(r.get("Daily Rate (£)", 0) or 0)
@@ -7816,8 +7860,19 @@ def render_employee_hr_reports(current_user_info):
         st.error("❌ Your account is not linked to an Employee ID. Please contact Super Admin.")
         return
 
-    employees = _hrp_load_employees()
-    leave_records = _hrp_load_leave_records()
+    employees = st.session_state.get("hrp_employees")
+    if employees is None:
+        employees = _hrp_load_employees()
+        st.session_state.hrp_employees = employees
+    # A session may contain employee records loaded by an older app version.
+    # Normalise those records on every report render so stale pandas NaT values
+    # can never reach date comparisons.
+    employees = _hrp_normalize_employee_records(employees)
+    st.session_state.hrp_employees = employees
+    leave_records = st.session_state.get("hrp_leave_records")
+    if leave_records is None:
+        leave_records = _hrp_load_leave_records()
+        st.session_state.hrp_leave_records = leave_records
     employee = next((e for e in employees if str(e.get("emp_id", "")).strip().casefold() == linked_id.casefold()), None)
     if not employee:
         st.subheader("👤 My HR Reports")
@@ -8011,48 +8066,14 @@ def render_employee_hr_reports(current_user_info):
                 elif code not in existing.split("/"):
                     lookup[cur] = f"{existing}/{code}"
             cur += timedelta(days=1)
-    # Normalise pandas dates safely.  pd.NaT can pass an isinstance(..., date)
-    # check, but it cannot be compared with a normal datetime.date.
-    def _safe_python_date(value):
-        if value is None:
-            return None
-        try:
-            if pd.isna(value):
-                return None
-        except Exception:
-            pass
-        if isinstance(value, pd.Timestamp):
-            return value.date()
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        try:
-            parsed = pd.to_datetime(value, errors="coerce")
-            if pd.isna(parsed):
-                return None
-            return parsed.date()
-        except Exception:
-            return None
-
-    emp_start = _safe_python_date(employee.get("start_date"))
-    emp_leaving = _safe_python_date(employee.get("leaving_date"))
+    emp_start = _hrp_normalize_employee_date(employee.get("start_date"), None)
+    emp_leaving = _hrp_normalize_employee_date(employee.get("leaving_date"), None)
     row = {}
     for d in dates:
         col = d.strftime("%d %b")
-        if emp_start is not None and d < emp_start:
+        if emp_start and d < emp_start:
             row[col] = "NA"
-            continue
-
-        # Defensive guard: some older/cached employee rows can still carry
-        # pandas.NaT even after normalisation. Never compare NaT to date.
-        after_leaving_date = False
-        if emp_leaving is not None:
-            try:
-                after_leaving_date = (not pd.isna(emp_leaving)) and (d > emp_leaving)
-            except (TypeError, ValueError):
-                after_leaving_date = False
-        if after_leaving_date:
+        elif emp_leaving is not None and d > emp_leaving:
             row[col] = "LEFT"
         else:
             nonwork_code, _ = _hrp_non_working_reason(d)
@@ -8477,15 +8498,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
             tab_idx += 1
         if has_work_orders:
             with tabs[tab_idx]:
-                # Managers with Work Order permission use the Manager workflow:
-                # their own work orders go directly to Director, while employee
-                # work orders remain routed to the Manager first. Staff/Team
-                # Members with Work Order permission continue to use the employee
-                # submission workflow.
-                if role == "Manager":
-                    render_work_order_manager_portal(full_name, dept_name, show_total=True)
-                else:
-                    render_work_order_employee_portal(full_name, dept_name)
+                render_work_order_employee_portal(full_name, dept_name)
             tab_idx += 1
         if has_inspector_bonus:
             with tabs[tab_idx]:
