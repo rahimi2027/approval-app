@@ -7670,7 +7670,28 @@ def render_store_items_settings():
 # 🧰 EMPLOYEE ITEMS — PDF REPORT HELPERS
 # ============================================================
 def _item_pdf_text(value):
-    return str(value if value is not None else "").encode("latin-1", "replace").decode("latin-1")
+    """Return PDF-safe text and break very long unspaced tokens.
+
+    fpdf2 can raise ``FPDFException: Not enough horizontal space to render
+    a single character`` when a single token is wider than the available
+    cell width.  Item names, employee IDs, or imported values can contain
+    long unbroken strings, so add harmless break opportunities.
+    """
+    text = str(value if value is not None else "").encode("latin-1", "replace").decode("latin-1")
+    chunks = []
+    for word in text.split(" "):
+        if len(word) <= 45:
+            chunks.append(word)
+        else:
+            chunks.extend(word[i:i + 45] for i in range(0, len(word), 45))
+    return " ".join(chunks)
+
+
+def _pdf_multiline(pdf, text, line_height=5):
+    """Write a safe full-width PDF line, resetting x before each multi_cell."""
+    width = max(10, pdf.w - pdf.l_margin - pdf.r_margin)
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(width, line_height, _item_pdf_text(text))
 
 
 def _build_item_holdings_pdf(records, title="Employee Item Holdings"):
@@ -7680,16 +7701,16 @@ def _build_item_holdings_pdf(records, title="Employee Item Holdings"):
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
     pdf.set_font("Arial", "B", 15)
-    pdf.cell(0, 9, _item_pdf_text(title), ln=1)
+    _pdf_multiline(pdf, title, 9)
     pdf.set_font("Arial", "", 9)
-    pdf.cell(0, 6, _item_pdf_text(f"Generated: {datetime.now():%Y-%m-%d %H:%M:%S}"), ln=1)
+    _pdf_multiline(pdf, f"Generated: {datetime.now():%Y-%m-%d %H:%M:%S}", 6)
     pdf.ln(3)
     for r in records:
         outstanding = float(r.get("qty_outstanding", 0) or 0)
         if outstanding <= 0:
             continue
         pdf.set_font("Arial", "B", 10)
-        pdf.cell(0, 6, _item_pdf_text(f"{r.get('emp_name','')} ({r.get('employee_id','')}) - {r.get('emp_dept','')}"), ln=1)
+        _pdf_multiline(pdf, f"{r.get('emp_name','')} ({r.get('employee_id','')}) - {r.get('emp_dept','')}", 6)
         pdf.set_font("Arial", "", 9)
         lines = [
             f"Item: {r.get('item_name','')}",
@@ -7698,7 +7719,7 @@ def _build_item_holdings_pdf(records, title="Employee Item Holdings"):
             f"Issue date: {r.get('issue_date','')} | Issued by: {r.get('issued_by','')}",
         ]
         for line in lines:
-            pdf.multi_cell(0, 5, _item_pdf_text(line))
+            _pdf_multiline(pdf, line, 5)
         pdf.ln(2)
     out = pdf.output(dest="S")
     return out.encode("latin-1") if isinstance(out, str) else bytes(out)
@@ -7711,16 +7732,16 @@ def _build_item_checkin_pdf(c, title="Leaver Item Check-in"):
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
     pdf.set_font("Arial", "B", 15)
-    pdf.cell(0, 9, _item_pdf_text(title), ln=1)
+    _pdf_multiline(pdf, title, 9)
     pdf.set_font("Arial", "", 9)
-    pdf.cell(0, 6, _item_pdf_text(f"Check-in #{c.get('id','-')} | Generated: {datetime.now():%Y-%m-%d %H:%M:%S}"), ln=1)
+    _pdf_multiline(pdf, f"Check-in #{c.get('id','-')} | Generated: {datetime.now():%Y-%m-%d %H:%M:%S}", 6)
     for label in ("emp_name", "employee_id", "emp_dept", "leaving_date", "checkin_date", "checked_in_by"):
-        pdf.cell(0, 5, _item_pdf_text(f"{label.replace('_',' ').title()}: {c.get(label,'')}"), ln=1)
+        _pdf_multiline(pdf, f"{label.replace('_',' ').title()}: {c.get(label,'')}", 5)
     pdf.ln(2)
     pdf.set_font("Arial", "B", 10); pdf.cell(0, 6, "Returned Items", ln=1)
     pdf.set_font("Arial", "", 9)
     for it in c.get("returned_items", []):
-        pdf.cell(0, 5, _item_pdf_text(f"- {it.get('item_name','')} | Qty {it.get('quantity',0):g} | GBP {float(it.get('unit_price',0) or 0):.2f}"), ln=1)
+        _pdf_multiline(pdf, f"- {it.get('item_name','')} | Qty {it.get('quantity',0):g} | GBP {float(it.get('unit_price',0) or 0):.2f}", 5)
     pdf.ln(2); pdf.set_font("Arial", "B", 10); pdf.cell(0, 6, "Not Returned / Deducted", ln=1); pdf.set_font("Arial", "", 9)
     for it in c.get("not_returned_items", []):
         pdf.cell(0, 5, _item_pdf_text(f"- {it.get('item_name','')} | Qty {it.get('quantity',0):g} | Line total GBP {float(it.get('line_total',0) or 0):.2f}"), ln=1)
