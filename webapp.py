@@ -159,7 +159,7 @@ USER_DB_COLUMNS = [
     "can_access_wo_total", "can_access_hr_leave", "can_access_leave_request", "can_access_employee_hr_reports",
     "can_access_holiday_calendar", "can_access_hr_reports", "can_access_employee_overview",
     "can_access_holiday_calculator", "can_access_employee_directory",
-    "employee_id", "can_access_store_deduction",
+    "employee_id", "can_access_store_deduction", "can_access_employee_items",
     "is_active"
 ]
 
@@ -636,15 +636,15 @@ DEFAULT_USERS = [
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "can_access_store_deduction": True, "is_active": True}
 ]
 PERMISSION_DEFAULTS = {
-    "Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_employee_hr_reports": True, "can_access_store_deduction": False},
-    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False},
-    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False},
-    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
-    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True},
-    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True},
-    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True},
-    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True},
-    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True}
+    "Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_employee_hr_reports": True, "can_access_store_deduction": False, "can_access_employee_items": False},
+    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False, "can_access_employee_items": False},
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False, "can_access_employee_items": False},
+    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True},
+    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True},
+    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True, "can_access_employee_items": True},
+    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True, "can_access_employee_items": True},
+    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True}
 }
 
 _HR_REPORT_PERMISSION_DEFAULTS = {
@@ -674,7 +674,8 @@ PERMISSION_LABELS = {
     "can_access_employee_overview": "📊 Employee Overview (View Only)",
     "can_access_holiday_calculator": "🧮 Holiday Calculator (View Only)",
     "can_access_employee_directory": "👥 Employee Directory (View Only)",
-    "can_access_store_deduction": "📦 Store Department Deduction"
+    "can_access_store_deduction": "📦 Store Department Deduction",
+    "can_access_employee_items": "🧰 Employee Items / Holdings"
 }
 
 try:
@@ -1162,6 +1163,7 @@ def save_users(users_dict):
             "can_access_employee_directory": u.get("can_access_employee_directory", False),
             "employee_id": u.get("employee_id", ""),
             "can_access_store_deduction": u.get("can_access_store_deduction", False),
+            "can_access_employee_items": u.get("can_access_employee_items", False),
             "is_active": u.get("is_active", True)
         })
     pd.DataFrame(rows, columns=USER_DB_COLUMNS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
@@ -1215,6 +1217,7 @@ def load_users(force=False):
                 "can_access_employee_directory": _flag_or_default(r.get("can_access_employee_directory", ""), user_role, "can_access_employee_directory"),
                 "employee_id": str(r.get("employee_id", "")).strip(),
                 "can_access_store_deduction": _flag_or_default(r.get("can_access_store_deduction", ""), user_role, "can_access_store_deduction"),
+                "can_access_employee_items": _flag_or_default(r.get("can_access_employee_items", ""), user_role, "can_access_employee_items"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
             if user_role == "Super Admin":
@@ -1223,7 +1226,7 @@ def load_users(force=False):
                     "can_approve_requests": True, "can_access_inspector_bonus": True,
                     "can_access_addition_deduction": True, "can_access_work_orders": True,
                     "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False,
-                    "can_access_store_deduction": True, "is_active": True
+                    "can_access_store_deduction": True, "can_access_employee_items": True, "is_active": True
                 })
             elif user_role == "Director":
                 users[username].update({
@@ -1237,6 +1240,7 @@ def load_users(force=False):
                     "can_access_wo_total": True,
                     "can_access_hr_leave": users[username].get("can_access_hr_leave", False),
                     "can_access_store_deduction": True,
+                    "can_access_employee_items": True,
                     "is_active": users[username].get("is_active", True),
                 })
 
@@ -6942,14 +6946,18 @@ def _super_admin_transaction_control():
                 except Exception: amount=0.0
                 typ = str(r.get("type") or ("Addition" if label == "Store Transactions" and str(r.get("type","")) == "Addition" else "") or "")
                 if label == "Inspector Bonus": typ = "Bonus"
-                all_rows.append({"source":label,"code":code,"id":rid,"name":name,"dept":dept,"status":status,"amount":amount,"type":typ,"record":r,"saver":saver,"id_key":id_key})
+                actor = str(r.get("submitted_by") or r.get("issued_by") or r.get("checked_in_by") or r.get("decision_by") or "").strip()
+                all_rows.append({"source":label,"code":code,"id":rid,"name":name,"dept":dept,"status":status,"amount":amount,"type":typ,"actor":actor,"record":r,"saver":saver,"id_key":id_key})
 
-        q=st.text_input("🔎 Search all transactions", placeholder="ID, employee, department, status, addition, deduction, category, amount, description...", key="sa_master_tx_search")
+        q=st.text_input("🔎 Search all transactions", placeholder="ID, employee, department, user, status, addition, deduction, category, amount, description...", key="sa_master_tx_search")
         source_filter=st.selectbox("📂 Transaction type", ["All"]+[x[0] for x in sources], key="sa_master_tx_source")
         status_filter=st.selectbox("📌 Status", ["All","pending","approved","rejected","pending_manager","pending_director"], key="sa_master_tx_status")
+        user_options=sorted({x["actor"] for x in all_rows if x.get("actor")})
+        user_filter=st.selectbox("👤 Done / Submitted By", ["All Users"] + user_options, key="sa_master_tx_user")
         filtered=all_rows
         if source_filter != "All": filtered=[x for x in filtered if x["source"]==source_filter]
         if status_filter != "All": filtered=[x for x in filtered if x["status"].lower()==status_filter]
+        if user_filter != "All Users": filtered=[x for x in filtered if x.get("actor")==user_filter]
         if q.strip():
             qq=q.strip().casefold(); filtered=[x for x in filtered if qq in json.dumps(x["record"], default=str, ensure_ascii=False).casefold()]
         st.metric("Transactions found", len(filtered))
@@ -6961,7 +6969,7 @@ def _super_admin_transaction_control():
                 r=item["record"]; status=item["status"].lower(); icon="🟡" if "pending" in status else ("🟢" if status=="approved" else "🔴" if status=="rejected" else "⚪")
                 title=f"{icon} {item['source']} | ID #{item['id']} | {item['name'] or '—'} | {item['type'] or 'Transaction'} | £{item['amount']:.2f} | {status.upper()}"
                 with st.expander(title):
-                    st.caption(f"Source: {item['source']} • Department: {item['dept'] or '—'}")
+                    st.caption(f"Source: {item['source']} • Department: {item['dept'] or '—'} • Done by: {item.get('actor') or '—'}")
                     st.write("**All editable fields** — edit values below, then save. The transaction ID is kept fixed to prevent broken references.")
                     editable={}
                     with st.form(f"sa_edit_tx_{item['code']}_{item['id']}_{idx}"):
@@ -7173,15 +7181,29 @@ def render_hr_leave_settings():
 def render_store_deduction_form(user_name, user_dept):
     st.subheader("📦 New Request — Store Department Deduction")
     st.caption("Submit unreturned company items for Director approval and final settlement deduction.")
-    departments = load_departments()
-    all_deductions = load_store_deductions()
+    all_deductions = load_store_deductions(force=True)
+    employees = [e for e in _hrp_load_employees()
+                 if str(e.get("status", "Active")).strip().casefold() == "active"]
+    if not employees:
+        st.warning("No Active employees are registered by HR. Add the employee in HR Employee Directory first.")
+        return
+    employee_labels = [f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}"
+                       for e in sorted(employees, key=lambda x: str(x.get('name','')).casefold())]
+    employee_map = {label: e for label, e in zip(employee_labels, sorted(employees, key=lambda x: str(x.get('name','')).casefold()))}
+    selected_employee_label = st.selectbox("👤 Employee (HR Registered Employees Only)", employee_labels, key="store_emp_selector")
+    selected_employee = employee_map[selected_employee_label]
+    emp_name = selected_employee.get("name", "")
+    emp_dept = selected_employee.get("department", "")
+    leaving_default = selected_employee.get("leaving_date") or date.today()
+    if not isinstance(leaving_default, date):
+        try: leaving_default = pd.to_datetime(leaving_default).date()
+        except Exception: leaving_default = date.today()
     col1, col2 = st.columns(2)
     with col1:
-        emp_name = st.text_input("👤 Employee Name", key="store_emp_name")
-        emp_dept = st.selectbox("🏢 Employee Department", departments, key="store_emp_dept", index=departments.index(user_dept) if user_dept in departments else 0)
+        st.text_input("🏢 Employee Department", value=emp_dept, disabled=True, key="store_emp_dept_display")
         date_submit = st.date_input("📅 Date of Submit", value=date.today(), key="store_date_submit")
     with col2:
-        date_leaving = st.date_input("📅 Date of Leaving", value=date.today(), key="store_date_leaving")
+        date_leaving = st.date_input("📅 Date of Leaving", value=leaving_default, key="store_date_leaving")
         manager = st.text_input("👔 Line Manager", key="store_manager")
         st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("### 📦 Items to Deduct")
@@ -7351,7 +7373,7 @@ def render_store_my_submissions(user_name):
     st.subheader("📋 My Submitted Store Requests")
     st.caption("All Store Department transactions (Deductions and Returns) you have submitted.")
     st.divider()
-    records = load_store_deductions()
+    records = load_store_deductions(force=True)
     mine = [r for r in records if r.get("submitted_by") == user_name]
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -7645,9 +7667,77 @@ def render_store_items_settings():
 
 
 # ============================================================
+# 🧰 EMPLOYEE ITEMS — PDF REPORT HELPERS
+# ============================================================
+def _item_pdf_text(value):
+    return str(value if value is not None else "").encode("latin-1", "replace").decode("latin-1")
+
+
+def _build_item_holdings_pdf(records, title="Employee Item Holdings"):
+    if not PDF_AVAILABLE:
+        return None
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 15)
+    pdf.cell(0, 9, _item_pdf_text(title), ln=1)
+    pdf.set_font("Arial", "", 9)
+    pdf.cell(0, 6, _item_pdf_text(f"Generated: {datetime.now():%Y-%m-%d %H:%M:%S}"), ln=1)
+    pdf.ln(3)
+    for r in records:
+        outstanding = float(r.get("qty_outstanding", 0) or 0)
+        if outstanding <= 0:
+            continue
+        pdf.set_font("Arial", "B", 10)
+        pdf.cell(0, 6, _item_pdf_text(f"{r.get('emp_name','')} ({r.get('employee_id','')}) - {r.get('emp_dept','')}"), ln=1)
+        pdf.set_font("Arial", "", 9)
+        lines = [
+            f"Item: {r.get('item_name','')}",
+            f"Issued: {r.get('qty_issued',0):g} | Returned: {r.get('qty_returned',0):g} | Outstanding: {outstanding:g}",
+            f"Unit price: GBP {float(r.get('unit_price',0) or 0):.2f} | Outstanding value: GBP {outstanding * float(r.get('unit_price',0) or 0):.2f}",
+            f"Issue date: {r.get('issue_date','')} | Issued by: {r.get('issued_by','')}",
+        ]
+        for line in lines:
+            pdf.multi_cell(0, 5, _item_pdf_text(line))
+        pdf.ln(2)
+    out = pdf.output(dest="S")
+    return out.encode("latin-1") if isinstance(out, str) else bytes(out)
+
+
+def _build_item_checkin_pdf(c, title="Leaver Item Check-in"):
+    if not PDF_AVAILABLE:
+        return None
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 15)
+    pdf.cell(0, 9, _item_pdf_text(title), ln=1)
+    pdf.set_font("Arial", "", 9)
+    pdf.cell(0, 6, _item_pdf_text(f"Check-in #{c.get('id','-')} | Generated: {datetime.now():%Y-%m-%d %H:%M:%S}"), ln=1)
+    for label in ("emp_name", "employee_id", "emp_dept", "leaving_date", "checkin_date", "checked_in_by"):
+        pdf.cell(0, 5, _item_pdf_text(f"{label.replace('_',' ').title()}: {c.get(label,'')}"), ln=1)
+    pdf.ln(2)
+    pdf.set_font("Arial", "B", 10); pdf.cell(0, 6, "Returned Items", ln=1)
+    pdf.set_font("Arial", "", 9)
+    for it in c.get("returned_items", []):
+        pdf.cell(0, 5, _item_pdf_text(f"- {it.get('item_name','')} | Qty {it.get('quantity',0):g} | GBP {float(it.get('unit_price',0) or 0):.2f}"), ln=1)
+    pdf.ln(2); pdf.set_font("Arial", "B", 10); pdf.cell(0, 6, "Not Returned / Deducted", ln=1); pdf.set_font("Arial", "", 9)
+    for it in c.get("not_returned_items", []):
+        pdf.cell(0, 5, _item_pdf_text(f"- {it.get('item_name','')} | Qty {it.get('quantity',0):g} | Line total GBP {float(it.get('line_total',0) or 0):.2f}"), ln=1)
+    pdf.ln(2); pdf.set_font("Arial", "B", 10); pdf.cell(0, 6, _item_pdf_text(f"Total Deduction: GBP {float(c.get('total_deduction',0) or 0):.2f}"), ln=1)
+    if c.get("deduction_request_id"):
+        pdf.set_font("Arial", "", 9); pdf.cell(0, 5, _item_pdf_text(f"Store Deduction Request: #{c.get('deduction_request_id')}"), ln=1)
+    if c.get("notes"):
+        pdf.multi_cell(0, 5, _item_pdf_text(f"Notes: {c.get('notes')}"))
+    out = pdf.output(dest="S")
+    return out.encode("latin-1") if isinstance(out, str) else bytes(out)
+
+
+# ============================================================
 # 🧰 EMPLOYEE ITEMS — UI
 # ============================================================
 def render_item_issue_form(user_name, user_dept):
+    issue_form_version = int(st.session_state.get("item_issue_form_version", 0))
     st.subheader("🧰 Issue Items to Employee")
     st.caption(
         "Select the employee from the HR employee list, then record the tools, "
@@ -7722,25 +7812,6 @@ def render_item_issue_form(user_name, user_dept):
     s3.metric("Job Title", selected_emp.get("job_title", ""))
     s4.metric("Start Date", str(selected_emp.get("start_date", "")) or "-")
 
-    outstanding = get_employee_outstanding_items(selected_emp["emp_id"])
-    if outstanding:
-        total_value = sum(float(r["qty_outstanding"]) * float(r["unit_price"]) for r in outstanding)
-        with st.expander(
-            f"📦 Currently held items ({len(outstanding)} lines · £{total_value:,.2f})",
-            expanded=False,
-        ):
-            st.dataframe(pd.DataFrame([{
-                "Item": r["item_name"],
-                "Issued": r["qty_issued"],
-                "Returned": r["qty_returned"],
-                "Outstanding": r["qty_outstanding"],
-                "Unit £": f"£{r['unit_price']:.2f}",
-                "Issued By": r["issued_by"],
-                "Issue Date": r["issue_date"],
-            } for r in outstanding]), width="stretch", hide_index=True)
-    else:
-        st.caption("📦 This employee currently holds no outstanding items.")
-
     st.divider()
     st.markdown("### ➕ Add Items to Issue")
 
@@ -7759,7 +7830,7 @@ def render_item_issue_form(user_name, user_dept):
             sel_item = st.selectbox(
                 "Item", opts,
                 index=opts.index(row.get("item_name", "")) if row.get("item_name") in opts else 0,
-                key=f"issue_item_sel_{i}",
+                key=f"issue_item_sel_{issue_form_version}_{i}",
             )
             if sel_item != row.get("item_name", ""):
                 row["item_name"] = sel_item
@@ -7770,21 +7841,21 @@ def render_item_issue_form(user_name, user_dept):
         with c2:
             row["quantity"] = st.number_input("Qty", min_value=1, step=1,
                                               value=int(row.get("quantity", 1)),
-                                              key=f"issue_item_qty_{i}")
+                                              key=f"issue_item_qty_{issue_form_version}_{i}")
         with c3:
             row["unit_price"] = st.number_input("Unit £", min_value=0.0, step=1.0,
                                                 format="%.2f", value=float(row.get("unit_price", 0.0)),
-                                                key=f"issue_item_price_{i}")
+                                                key=f"issue_item_price_{issue_form_version}_{i}")
         with c4:
             row["notes"] = st.text_input("Notes", value=row.get("notes", ""),
-                                          key=f"issue_item_notes_{i}")
+                                          key=f"issue_item_notes_{issue_form_version}_{i}")
         with c5:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🗑️", key=f"issue_item_del_{i}"):
+            if st.button("🗑️", key=f"issue_item_del_{issue_form_version}_{i}"):
                 st.session_state.item_issue_rows.pop(i)
                 st.rerun()
 
-    if st.button("➕ Add Another Item", key="issue_add_row"):
+    if st.button("➕ Add Another Item", key=f"issue_add_row_{issue_form_version}"):
         st.session_state.item_issue_rows.append(
             {"item_name": "", "quantity": 1, "unit_price": 0.0, "notes": ""}
         )
@@ -7795,7 +7866,7 @@ def render_item_issue_form(user_name, user_dept):
     st.markdown(f"**Total Value:** £{total_value:.2f}")
     st.divider()
 
-    with st.form("issue_items_form"):
+    with st.form(f"issue_items_form_{issue_form_version}"):
         issue_date = st.date_input("📅 Issue Date", value=date.today())
         general_notes = st.text_area("📝 General Notes",
                                      placeholder="Optional notes about this issue…")
@@ -7848,63 +7919,69 @@ def render_item_issue_form(user_name, user_dept):
         st.session_state.item_issue_rows = [
             {"item_name": "", "quantity": 1, "unit_price": 0.0, "notes": ""}
         ]
+        st.session_state.item_issue_form_version = int(st.session_state.get("item_issue_form_version", 0)) + 1
         st.success(f"✅ {len(valid_rows)} item(s) recorded as issued to "
                    f"{selected_emp['name']} ({selected_emp['emp_id']}).")
         st.rerun()
 
 
-def render_employee_holdings_overview():
+def render_employee_holdings_overview(user_role=""):
     st.subheader("📊 Employee Item Holdings")
-    st.caption("All items currently held by employees. Use Leaver Check-in to process returns when someone leaves.")
-
-    items = load_employee_items()
-    if not items:
-        st.info("No items have been issued to any employee yet.")
-        return
-
+    st.caption("Current outstanding company items held by employees. Search by employee or department and download single/group PDF reports.")
+    items = load_employee_items(force=True)
     outstanding_items = [r for r in items if float(r.get("qty_outstanding", 0) or 0) > 0]
-    total_value = sum(float(r.get("qty_outstanding", 0)) * float(r.get("unit_price", 0)) for r in outstanding_items)
-
+    if not outstanding_items:
+        st.info("No items are currently outstanding with employees.")
+        return
+    total_value = sum(float(r.get("qty_outstanding", 0) or 0) * float(r.get("unit_price", 0) or 0) for r in outstanding_items)
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Records", len(items))
-    c2.metric("Employees Holding", len({r["employee_id"] for r in outstanding_items}))
-    c3.metric("Outstanding Lines", len(outstanding_items))
+    c1.metric("Employees Holding", len({str(r.get('employee_id','')) for r in outstanding_items}))
+    c2.metric("Outstanding Lines", len(outstanding_items))
+    c3.metric("Outstanding Qty", sum(float(r.get('qty_outstanding',0) or 0) for r in outstanding_items))
     c4.metric("Outstanding Value", f"£{total_value:,.2f}")
     st.divider()
-
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        search = st.text_input("🔎 Search", placeholder="Employee, item, department...", key="holdings_search")
-    with c2:
-        status_filter = st.selectbox("Status", ["All", "Issued", "Partially Returned", "Returned", "Deducted"],
-                                     key="holdings_status")
-
-    filtered = items
-    if status_filter != "All":
-        filtered = [r for r in filtered if r.get("status", "Issued") == status_filter]
+    departments = sorted({str(r.get("emp_dept", "")).strip() for r in outstanding_items if str(r.get("emp_dept", "")).strip()})
+    employees = sorted({f"{r.get('emp_name','')} — {r.get('employee_id','')}" for r in outstanding_items}, key=str.casefold)
+    f1, f2, f3 = st.columns([2, 2, 3])
+    with f1:
+        dept_filter = st.selectbox("🏢 Department", ["All Departments"] + departments, key="holdings_dept_filter")
+    with f2:
+        employee_filter = st.selectbox("👤 Employee", ["All Employees"] + employees, key="holdings_employee_filter")
+    with f3:
+        search = st.text_input("🔎 Search", placeholder="Employee, ACE-ID, item, department...", key="holdings_search")
+    filtered = list(outstanding_items)
+    if dept_filter != "All Departments": filtered = [r for r in filtered if str(r.get("emp_dept","")) == dept_filter]
+    if employee_filter != "All Employees":
+        eid = employee_filter.rsplit(" — ", 1)[-1].strip()
+        filtered = [r for r in filtered if str(r.get("employee_id","")) == eid]
     if search.strip():
-        q = search.lower().strip()
-        filtered = [r for r in filtered if q in " ".join(str(v) for v in r.values()).lower()]
-
+        q=search.casefold().strip(); filtered=[r for r in filtered if q in " ".join(str(v) for v in r.values()).casefold()]
     if not filtered:
-        st.info("No records match.")
+        st.info("No holdings match the selected filters.")
         return
-
     st.dataframe(pd.DataFrame([{
-        "ID": r["id"],
-        "Employee ID": r["employee_id"],
-        "Employee": r["emp_name"],
-        "Department": r["emp_dept"],
-        "Item": r["item_name"],
-        "Issued": r["qty_issued"],
-        "Returned": r["qty_returned"],
-        "Outstanding": r["qty_outstanding"],
-        "Unit £": f"£{r['unit_price']:.2f}",
-        "Outstanding Value": f"£{float(r['qty_outstanding'])*float(r['unit_price']):.2f}",
-        "Issue Date": r["issue_date"],
-        "Issued By": r["issued_by"],
-        "Status": r["status"],
+        "ID": r["id"], "Employee ID": r["employee_id"], "Employee": r["emp_name"], "Department": r["emp_dept"],
+        "Item": r["item_name"], "Issued": r["qty_issued"], "Returned": r["qty_returned"], "Outstanding": r["qty_outstanding"],
+        "Unit £": f"£{float(r['unit_price']):.2f}", "Outstanding Value": f"£{float(r['qty_outstanding'])*float(r['unit_price']):.2f}",
+        "Issue Date": r["issue_date"], "Issued By": r["issued_by"], "Status": r["status"]
     } for r in filtered]), width="stretch", hide_index=True)
+    st.divider()
+    p1,p2,p3 = st.columns(3)
+    with p1:
+        pdf = _build_item_holdings_pdf(filtered, "Employee Item Holdings - Selected Filters")
+        st.download_button("📄 Download Selected Holdings PDF", data=pdf or b"", file_name="Employee_Item_Holdings_Selected.pdf", mime="application/pdf", disabled=not bool(pdf), key="holdings_pdf_selected")
+    with p2:
+        if employee_filter != "All Employees":
+            emp_pdf = _build_item_holdings_pdf(filtered, f"Employee Item Holdings - {employee_filter}")
+            st.download_button("👤 Download Single Employee PDF", data=emp_pdf or b"", file_name="Employee_Item_Holdings_Employee.pdf", mime="application/pdf", disabled=not bool(emp_pdf), key="holdings_pdf_employee")
+        else:
+            st.caption("Select one employee for a single-employee PDF.")
+    with p3:
+        if dept_filter != "All Departments":
+            dept_pdf = _build_item_holdings_pdf(filtered, f"Employee Item Holdings - {dept_filter}")
+            st.download_button("🏢 Download Department PDF", data=dept_pdf or b"", file_name="Employee_Item_Holdings_Department.pdf", mime="application/pdf", disabled=not bool(dept_pdf), key="holdings_pdf_department")
+        else:
+            st.caption("Select a department for a department-wise PDF.")
 
 
 def render_item_checkin_form(user_name):
@@ -8053,6 +8130,13 @@ def render_item_checkin_form(user_name):
         checkin_date = st.date_input("📅 Check-in Date", value=date.today(),
                                      key="checkin_date")
     notes = st.text_area("📝 Check-in Notes", key="checkin_notes")
+    current_checkin_pdf = _build_item_checkin_pdf({
+        "id": "Draft", "employee_id": selected_emp.get("emp_id", ""), "emp_name": selected_emp.get("name", ""),
+        "emp_dept": selected_emp.get("department", ""), "leaving_date": str(leaving_date), "checkin_date": str(checkin_date),
+        "checked_in_by": user_name, "returned_items": returned_items, "not_returned_items": not_returned_items,
+        "total_deduction": total_deduction, "notes": notes, "deduction_request_id": ""
+    }, "Leaver Item Check-in - Draft")
+    st.download_button("📄 Download Check-in PDF", data=current_checkin_pdf or b"", file_name="Leaver_Item_Checkin_Draft.pdf", mime="application/pdf", disabled=not bool(current_checkin_pdf), key="checkin_draft_pdf")
 
     if not returned_items and not not_returned_items:
         st.warning("Nothing recorded yet — enter the returned quantities above.")
@@ -8211,6 +8295,8 @@ def render_item_checkin_history():
                 st.caption("None")
             if c.get("notes"):
                 st.info(f"📝 {c['notes']}")
+            history_pdf = _build_item_checkin_pdf(c, f"Leaver Item Check-in #{c.get('id','')}")
+            st.download_button("📄 Download Check-in PDF", data=history_pdf or b"", file_name=f"Leaver_Item_Checkin_{c.get('id','')}.pdf", mime="application/pdf", disabled=not bool(history_pdf), key=f"checkin_history_pdf_{c.get('id','')}")
 
 
 def initialise_excel():
@@ -8650,6 +8736,7 @@ def user_management_panel():
             perm_holiday_calculator = rcol2.checkbox(PERMISSION_LABELS["can_access_holiday_calculator"], value=defaults.get("can_access_holiday_calculator", False))
             perm_employee_directory = rcol1.checkbox(PERMISSION_LABELS["can_access_employee_directory"], value=defaults.get("can_access_employee_directory", False))
             perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
+            perm_employee_items = st.checkbox(PERMISSION_LABELS["can_access_employee_items"], value=defaults.get("can_access_employee_items", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
             employee_options = [""] + [f"{e.get('emp_id')} — {e.get('name')}" for e in _hrp_load_employees()]
@@ -8660,7 +8747,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_employee_items": perm_employee_items, "is_active": new_active}
                     save_users(USERS)
                     log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active})
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
@@ -8699,6 +8786,7 @@ def user_management_panel():
                 curr_perm_holiday_calculator = bool(curr.get("can_access_holiday_calculator", False))
                 curr_perm_employee_directory = bool(curr.get("can_access_employee_directory", False))
                 curr_perm_store = bool(curr.get("can_access_store_deduction", False))
+                curr_perm_employee_items = bool(curr.get("can_access_employee_items", False))
                 ecol1, ecol2 = st.columns(2)
                 edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
                 edit_pdf = ecol1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=curr_perm_pdf)
@@ -8720,13 +8808,14 @@ def user_management_panel():
                 edit_holiday_calculator = ercol2.checkbox(PERMISSION_LABELS["can_access_holiday_calculator"], value=curr_perm_holiday_calculator)
                 edit_employee_directory = ercol1.checkbox(PERMISSION_LABELS["can_access_employee_directory"], value=curr_perm_employee_directory)
                 edit_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=curr_perm_store)
+                edit_employee_items = st.checkbox(PERMISSION_LABELS["can_access_employee_items"], value=curr_perm_employee_items)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
                 if st.form_submit_button("🔄 Update User", type="primary"):
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_employee_items": edit_employee_items, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -8751,6 +8840,7 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_employee_directory"] = edit_employee_directory
                         USERS[edit_user_sel]["employee_id"] = edit_employee_id
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
+                        USERS[edit_user_sel]["can_access_employee_items"] = edit_employee_items
                         USERS[edit_user_sel]["is_active"] = edit_active
                     save_users(USERS)
                     log_action("USER_EDITED", old_data=curr, new_data={"full_name": upd_full_name.strip(), "username": upd_username_new, "role": upd_role, "department": upd_dept, "is_active": edit_active})
@@ -9158,7 +9248,27 @@ def render_director_hr_access_portal(current_user_info):
 # 📋 ROLE-BASED PORTALS
 # ============================================================
 if role == "Employee":
-    pass
+    if user_info.get("can_access_employee_items", False):
+        st.subheader(f"🧰 My Employee Items — {full_name}")
+        itab1, itab2 = st.tabs(["📊 My Holdings", "📚 My Check-in History"])
+        with itab1:
+            linked_id = str(user_info.get("employee_id", "")).strip()
+            all_holdings = load_employee_items(force=True)
+            own = [r for r in all_holdings if str(r.get("employee_id", "")).strip() == linked_id and float(r.get("qty_outstanding",0) or 0) > 0]
+            if own:
+                st.dataframe(pd.DataFrame([{"Employee":r.get("emp_name"),"Department":r.get("emp_dept"),"Item":r.get("item_name"),"Outstanding":r.get("qty_outstanding"),"Unit £":r.get("unit_price"),"Issue Date":r.get("issue_date")} for r in own]), width="stretch", hide_index=True)
+                pdf=_build_item_holdings_pdf(own, f"My Employee Item Holdings - {full_name}")
+                st.download_button("📄 Download My Holdings PDF", data=pdf or b"", file_name="My_Employee_Item_Holdings.pdf", mime="application/pdf", disabled=not bool(pdf), key="employee_my_holdings_pdf")
+            else:
+                st.info("No outstanding company items are currently recorded against your linked HR employee account.")
+        with itab2:
+            linked_id = str(user_info.get("employee_id", "")).strip()
+            mine=[c for c in load_item_checkins(force=True) if str(c.get("employee_id","")).strip()==linked_id]
+            if not mine: st.info("No check-in history found.")
+            for c in reversed(mine):
+                st.write(f"#{c.get('id')} | {c.get('checkin_date')} | Deduction £{float(c.get('total_deduction',0) or 0):.2f}")
+                pdf=_build_item_checkin_pdf(c, f"My Leaver Item Check-in #{c.get('id')}")
+                st.download_button("📄 PDF", data=pdf or b"", file_name=f"My_Checkin_{c.get('id')}.pdf", mime="application/pdf", disabled=not bool(pdf), key=f"employee_checkin_pdf_{c.get('id')}")
 
 elif role == "Work Order Employee":
     render_work_order_employee_portal(full_name, dept)
@@ -9359,6 +9469,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_leave_request = user_info.get("can_access_leave_request", False)
     has_employee_hr_reports = user_info.get("can_access_employee_hr_reports", False)
     has_store_deduction = user_info.get("can_access_store_deduction", False)
+    has_employee_items = user_info.get("can_access_employee_items", False)
     labels = []
     if has_addition_deduction: labels.append("➕ Addition & Deduction")
     if has_hr_leave:
@@ -9370,9 +9481,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
     if has_store_deduction: labels.append("📦 Store Deduction")
     if has_store_deduction: labels.append("📦 Store Return (Addition)")
     if has_store_deduction: labels.append("📋 My Submitted Store Requests")
-    if has_store_deduction: labels.append("🧰 Issue Items")
-    if has_store_deduction: labels.append("📋 Leaver Item Check-in")
-    if has_store_deduction: labels.append("📚 Check-in History")
+    if has_employee_items: labels.append("🧰 Issue Items")
+    if has_employee_items: labels.append("📊 Employee Holdings")
+    if has_employee_items: labels.append("📋 Leaver Item Check-in")
+    if has_employee_items: labels.append("📚 Check-in History")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
     if not labels:
@@ -9528,15 +9640,19 @@ elif role in ["Manager", "Staff", "Team Member"]:
             with tabs[tab_idx]:
                 render_store_my_submissions(full_name)
             tab_idx += 1
-        if has_store_deduction:
+        if has_employee_items:
             with tabs[tab_idx]:
                 render_item_issue_form(full_name, dept_name)
             tab_idx += 1
-        if has_store_deduction:
+        if has_employee_items:
+            with tabs[tab_idx]:
+                render_employee_holdings_overview(role)
+            tab_idx += 1
+        if has_employee_items:
             with tabs[tab_idx]:
                 render_item_checkin_form(full_name)
             tab_idx += 1
-        if has_store_deduction:
+        if has_employee_items:
             with tabs[tab_idx]:
                 render_item_checkin_history()
             tab_idx += 1
@@ -9729,7 +9845,7 @@ elif role == "Director":
     with director_employee_items_tab:
         sub_holdings, sub_checkins = st.tabs(["📊 Employee Holdings", "📚 Check-in History"])
         with sub_holdings:
-            render_employee_holdings_overview()
+            render_employee_holdings_overview("Director")
         with sub_checkins:
             render_item_checkin_history()
     with director_work_order_tab: render_work_order_director_portal(full_name)
@@ -9809,7 +9925,7 @@ elif role == "Super Admin":
         with inner_issue:
             render_item_issue_form(full_name, "Super Admin")
         with inner_holdings:
-            render_employee_holdings_overview()
+            render_employee_holdings_overview("Super Admin")
         with inner_checkin:
             render_item_checkin_form(full_name)
         with inner_history:
