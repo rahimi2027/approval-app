@@ -9349,7 +9349,7 @@ elif role == "Director":
                                             break
                                     save_all_records(records); log_action("REJECTED", req_id)
                                     st.error(f"❌ Request #{req_id} REJECTED."); st.rerun()
-        if request_status == "✅ All Approved":
+        with tab_approved:
             approved = [r for r in all_live_requests if r.get("status") == "approved"]
             if not approved: st.info("📋 No approved requests yet.")
             else:
@@ -9388,7 +9388,7 @@ elif role == "Director":
                                             break
                                     save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"approved"}, new_data={"status":"rejected"})
                                     st.success(f"✅ Request #{req_id} changed to Rejected."); st.rerun()
-        if request_status == "❌ All Rejected":
+        with tab_rejected:
             rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
             if not rejected: st.success("✅ No rejected requests!")
             else:
@@ -9422,89 +9422,89 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
-    if director_hr_access_enabled and director_hr_access_tab:
-        if director_hr_access_tab:
-            render_director_hr_access_portal(user_info)
+        if director_hr_access_enabled and director_hr_access_tab:
+            if director_hr_access_tab:
+                render_director_hr_access_portal(user_info)
 
-    if director_hr_leave_tab:
-        # Final holiday settlements submitted by HR/managers are approved here.
-        # Director approval updates the HR Leave Settlement record to approved;
-        # approved final settlements are then included in the employee holiday
-        # position calculation so the employee's final holiday balance closes at 0.0.
-        render_hr_leave_director_portal(full_name)
+        if director_hr_leave_tab:
+            # Final holiday settlements submitted by HR/managers are approved here.
+            # Director approval updates the HR Leave Settlement record to approved;
+            # approved final settlements are then included in the employee holiday
+            # position calculation so the employee's final holiday balance closes at 0.0.
+            render_hr_leave_director_portal(full_name)
 
-    if director_store_ded_tab:
-        render_store_director_portal(full_name, type_filter="Deduction")
-    if director_store_ret_tab:
-        render_store_director_portal(full_name, type_filter="Addition")
-    if director_work_order_tab: render_work_order_director_portal(full_name)
-    if director_inspector_tab: render_inspector_bonus_director_portal(full_name)
+        if director_store_ded_tab:
+            render_store_director_portal(full_name, type_filter="Deduction")
+        if director_store_ret_tab:
+            render_store_director_portal(full_name, type_filter="Addition")
+        if director_work_order_tab: render_work_order_director_portal(full_name)
+        if director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
-elif role == "Super Admin":
-    super_module_labels = [
-        "➕ Addition & Deduction", "📦 Store Deductions", "📦 Store Returns (Additions)",
-        "🛠️ Work Orders", "💰 National Grid Inspector Bonus", "🛡️ Data Control", "🔧 System Management"
-    ]
-    st.markdown('<div class="nav-card"><div class="nav-card-label">Administration Workspace</div></div>', unsafe_allow_html=True)
-    super_module = st.selectbox("Module", super_module_labels, key="super_admin_module_navigation")
-    super_add_ded_tab = super_module == "➕ Addition & Deduction"
-    super_store_ded_tab = super_module == "📦 Store Deductions"
-    super_store_ret_tab = super_module == "📦 Store Returns (Additions)"
-    super_work_orders_tab = super_module == "🛠️ Work Orders"
-    super_inspector_bonus_tab = super_module == "💰 National Grid Inspector Bonus"
-    super_data_control_tab = super_module == "🛡️ Data Control"
-    super_system_mgmt_tab = super_module == "🔧 System Management"
-    if super_add_ded_tab:
-        st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
-        st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
-        st.divider()
-        request_status = st.selectbox("Request status", ["⏳ All Pending", "✅ All Approved", "❌ All Rejected"], key="super_admin_request_status")
-        if request_status == "⏳ All Pending":
-            pending = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "pending"]
-            if not pending: st.success("✅ No pending requests.")
-            else:
-                st.metric("⏳ All Pending", len(pending)); st.divider()
-                for req in reversed(pending):
-                    req_id = req.get("id"); amount = float(req.get("amount", 0))
-                    with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                        st.write(f"💷 Amount: £{amount:.2f}")
-                        submitted_by = get_submitted_by(req)
-                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                        st.info(f"📝 Description: {req.get('desc')}")
-                        display_attachments(req)
-                        if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                        st.divider(); display_pdf_button(req, can_generate=True)
-        with tab_approved:
-            approved = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "approved"]
-            if not approved: st.info("📋 No approved requests.")
-            else:
-                st.metric("✅ All Approved", len(approved)); st.divider()
-                for req in reversed(approved):
-                    req_id = req.get("id"); amount = float(req.get("amount", 0))
-                    dec_by = req.get('decision_by', 'Director')
-                    with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f} | ✅ {dec_by}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                        st.write(f"💷 Amount: £{amount:.2f}")
-                        st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
-                        display_attachments(req)
-                        st.divider(); display_pdf_button(req, can_generate=True)
-        with tab_rejected:
-            rejected = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "rejected"]
-            if not rejected: st.info("📋 No rejected requests.")
-            else:
-                st.metric("❌ All Rejected", len(rejected)); st.divider()
-                for req in reversed(rejected):
-                    req_id = req.get("id"); amount = float(req.get("amount", 0))
-                    dec_by = req.get('decision_by', 'Director')
-                    with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                        st.write(f"💷 Amount: £{amount:.2f}")
-                        st.error(f"❌ Rejected By: {dec_by}")
-                        st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
-                        display_attachments(req)
-                        st.divider(); display_pdf_button(req, can_generate=True)
+    elif role == "Super Admin":
+        super_module_labels = [
+            "➕ Addition & Deduction", "📦 Store Deductions", "📦 Store Returns (Additions)",
+            "🛠️ Work Orders", "💰 National Grid Inspector Bonus", "🛡️ Data Control", "🔧 System Management"
+        ]
+        st.markdown('<div class="nav-card"><div class="nav-card-label">Administration Workspace</div></div>', unsafe_allow_html=True)
+        super_module = st.selectbox("Module", super_module_labels, key="super_admin_module_navigation")
+        super_add_ded_tab = super_module == "➕ Addition & Deduction"
+        super_store_ded_tab = super_module == "📦 Store Deductions"
+        super_store_ret_tab = super_module == "📦 Store Returns (Additions)"
+        super_work_orders_tab = super_module == "🛠️ Work Orders"
+        super_inspector_bonus_tab = super_module == "💰 National Grid Inspector Bonus"
+        super_data_control_tab = super_module == "🛡️ Data Control"
+        super_system_mgmt_tab = super_module == "🔧 System Management"
+        if super_add_ded_tab:
+            st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
+            st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
+            st.divider()
+            tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ All Pending", "✅ All Approved", "❌ All Rejected"])
+            with tab_pending:
+                pending = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "pending"]
+                if not pending: st.success("✅ No pending requests.")
+                else:
+                    st.metric("⏳ All Pending", len(pending)); st.divider()
+                    for req in reversed(pending):
+                        req_id = req.get("id"); amount = float(req.get("amount", 0))
+                        with st.expander(f"🟡 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"):
+                            st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                            st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                            st.write(f"💷 Amount: £{amount:.2f}")
+                            submitted_by = get_submitted_by(req)
+                            if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                            st.info(f"📝 Description: {req.get('desc')}")
+                            display_attachments(req)
+                            if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                            st.divider(); display_pdf_button(req, can_generate=True)
+            with tab_approved:
+                approved = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "approved"]
+                if not approved: st.info("📋 No approved requests.")
+                else:
+                    st.metric("✅ All Approved", len(approved)); st.divider()
+                    for req in reversed(approved):
+                        req_id = req.get("id"); amount = float(req.get("amount", 0))
+                        dec_by = req.get('decision_by', 'Director')
+                        with st.expander(f"🟢 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f} | ✅ {dec_by}"):
+                            st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                            st.write(f"💷 Amount: £{amount:.2f}")
+                            st.success(f"💬 Director Comments: {req.get('director_comments', 'None')}")
+                            display_attachments(req)
+                            st.divider(); display_pdf_button(req, can_generate=True)
+            with tab_rejected:
+                rejected = [r for r in all_live_requests if str(r.get("status", "")).strip().lower() == "rejected"]
+                if not rejected: st.info("📋 No rejected requests.")
+                else:
+                    st.metric("❌ All Rejected", len(rejected)); st.divider()
+                    for req in reversed(rejected):
+                        req_id = req.get("id"); amount = float(req.get("amount", 0))
+                        dec_by = req.get('decision_by', 'Director')
+                        with st.expander(f"🔴 ID #{req_id} | {req.get('emp_name')} | {req.get('dept')} | £{amount:.2f}"):
+                            st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                            st.write(f"💷 Amount: £{amount:.2f}")
+                            st.error(f"❌ Rejected By: {dec_by}")
+                            st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
+                            display_attachments(req)
+                            st.divider(); display_pdf_button(req, can_generate=True)
     if super_store_ded_tab:
         render_store_super_admin(type_filter="Deduction")
     if super_store_ret_tab:
