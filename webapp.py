@@ -9505,213 +9505,213 @@ elif role == "Super Admin":
                         st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
                         display_attachments(req)
                         st.divider(); display_pdf_button(req, can_generate=True)
-if super_store_ded_tab:
-    render_store_super_admin(type_filter="Deduction")
-if super_store_ret_tab:
-    render_store_super_admin(type_filter="Addition")
-if super_work_orders_tab:
-    render_work_orders_super_admin()
-if super_inspector_bonus_tab:
-    render_inspector_bonus_super_admin()
-if super_data_control_tab:
-    _super_admin_transaction_control()
-if super_system_mgmt_tab:
-    st.subheader("🔧 System Management — Super Admin")
-    st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
-    st.divider()
-    tab_settings, tab_hr_settings, tab_store_settings, tab_users, tab_audit = st.tabs([
-        "⚙️ System Settings",
-        "👥 HR Leave Settings",
-        "📦 Store Settings",
-        "👤 User Management",
-        "📖 Audit History"
-    ])
-    with tab_settings: settings_management_panel()
-    with tab_hr_settings: render_hr_leave_settings()
-    with tab_store_settings: render_store_items_settings()
-    with tab_users: user_management_panel()
-    with tab_audit:
-        if "display_audit_log_panel" in globals(): display_audit_log_panel()
-        else: st.info("📖 Audit log panel not defined — skipping")
+    if super_store_ded_tab:
+        render_store_super_admin(type_filter="Deduction")
+    if super_store_ret_tab:
+        render_store_super_admin(type_filter="Addition")
+    if super_work_orders_tab:
+        render_work_orders_super_admin()
+    if super_inspector_bonus_tab:
+        render_inspector_bonus_super_admin()
+    if super_data_control_tab:
+        _super_admin_transaction_control()
+    if super_system_mgmt_tab:
+        st.subheader("🔧 System Management — Super Admin")
+        st.info("🛡️ Manage system settings, users, audit history and data reset controls.")
         st.divider()
-        st.subheader("⚠️ Super Admin — Data Reset / Live Launch")
-        st.warning("These controls are permanent. They are intended for preparing the portal for live use.")
-        danger_col1, danger_col2 = st.columns(2)
-        with danger_col1:
-            if not st.session_state.get("confirm_clear_requests", False):
-                if st.button("🧹 Clear All Submitted Requests", type="secondary", key="clear_all_requests_btn"):
-                    st.session_state["confirm_clear_requests"] = True; st.rerun()
-            else:
-                st.error("⚠️ This will permanently remove ALL request records.")
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("✅ Yes, Clear Requests", type="primary", key="confirm_clear_all_requests_btn"):
-                        clear_all_requests_file(); st.session_state["confirm_clear_requests"] = False
-                        st.success("✅ Cleared."); st.rerun()
-                with c2:
-                    if st.button("↩️ Cancel", key="cancel_clear_all_requests_btn"):
-                        st.session_state["confirm_clear_requests"] = False; st.rerun()
-        with danger_col2:
-            reset_col1, reset_col2, reset_col3, reset_col4 = st.columns(4)
-            with reset_col1:
-                if not st.session_state.get("confirm_clear_inspector_bonus", False):
-                    if st.button("💰 Clear Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", width="stretch"):
-                        st.session_state["confirm_clear_inspector_bonus"] = True
+        tab_settings, tab_hr_settings, tab_store_settings, tab_users, tab_audit = st.tabs([
+            "⚙️ System Settings",
+            "👥 HR Leave Settings",
+            "📦 Store Settings",
+            "👤 User Management",
+            "📖 Audit History"
+        ])
+        with tab_settings: settings_management_panel()
+        with tab_hr_settings: render_hr_leave_settings()
+        with tab_store_settings: render_store_items_settings()
+        with tab_users: user_management_panel()
+        with tab_audit:
+            if "display_audit_log_panel" in globals(): display_audit_log_panel()
+            else: st.info("📖 Audit log panel not defined — skipping")
+            st.divider()
+            st.subheader("⚠️ Super Admin — Data Reset / Live Launch")
+            st.warning("These controls are permanent. They are intended for preparing the portal for live use.")
+            danger_col1, danger_col2 = st.columns(2)
+            with danger_col1:
+                if not st.session_state.get("confirm_clear_requests", False):
+                    if st.button("🧹 Clear All Submitted Requests", type="secondary", key="clear_all_requests_btn"):
+                        st.session_state["confirm_clear_requests"] = True; st.rerun()
                 else:
-                    if st.button("✅ Confirm", key="super_admin_confirm_clear_inspector_bonus", width="stretch"):
-                        clear_all_inspector_bonus()
-                        log_action("SUPER_ADMIN_CLEAR_INSPECTOR_BONUS", "ALL", decision_by=full_name)
-                        st.session_state["confirm_clear_inspector_bonus"] = False
-                        st.success("✅ Cleared."); st.rerun()
-            with reset_col2:
-                if not st.session_state.get("confirm_clear_all_work_orders", False):
-                    if st.button("🛠️ Clear Work Orders", key="super_admin_clear_all_work_orders", type="secondary", width="stretch"):
-                        st.session_state["confirm_clear_all_work_orders"] = True
-                else:
-                    if st.button("✅ Confirm", key="super_admin_confirm_clear_all_work_orders", width="stretch"):
-                        save_all_work_orders([])
-                        st.session_state["confirm_clear_all_work_orders"] = False
-                        st.success("✅ Cleared."); st.rerun()
-            with reset_col3:
-                if not st.session_state.get("confirm_clear_hr_leave", False):
-                    if st.button("👥 Clear HR Leave", key="super_admin_clear_all_hr_leave", type="secondary", width="stretch"):
-                        st.session_state["confirm_clear_hr_leave"] = True
-                else:
-                    if st.button("✅ Confirm", key="super_admin_confirm_clear_all_hr_leave", width="stretch"):
-                        clear_all_hr_leave()
-                        st.session_state["confirm_clear_hr_leave"] = False
-                        st.success("✅ Cleared."); st.rerun()
-            with reset_col4:
-                if not st.session_state.get("confirm_clear_store_deduction", False):
-                    if st.button("📦 Clear Store Transactions", key="super_admin_clear_all_store_deduction", type="secondary", width="stretch"):
-                        st.session_state["confirm_clear_store_deduction"] = True
-                else:
-                    if st.button("✅ Confirm", key="super_admin_confirm_clear_all_store_deduction", width="stretch"):
-                        clear_all_store_deductions()
-                        st.session_state["confirm_clear_store_deduction"] = False
-                        st.success("✅ Cleared."); st.rerun()
-            with reset_col4:
-                if not st.session_state.get("confirm_clear_audit", False):
-                    if st.button("🗑️ Clear Audit", type="secondary", key="clear_audit_history_btn"):
-                        st.session_state["confirm_clear_audit"] = True; st.rerun()
-                else:
-                    if st.button("✅ Confirm", type="primary", key="confirm_clear_audit_btn"):
-                        clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
-                        st.success("✅ Cleared."); st.rerun()
-    st.divider()
-    st.subheader("📥 Download Data Backups")
-    st.caption("Download a copy before using the live-launch reset. User accounts and system settings are kept separately.")
+                    st.error("⚠️ This will permanently remove ALL request records.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("✅ Yes, Clear Requests", type="primary", key="confirm_clear_all_requests_btn"):
+                            clear_all_requests_file(); st.session_state["confirm_clear_requests"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                    with c2:
+                        if st.button("↩️ Cancel", key="cancel_clear_all_requests_btn"):
+                            st.session_state["confirm_clear_requests"] = False; st.rerun()
+            with danger_col2:
+                reset_col1, reset_col2, reset_col3, reset_col4 = st.columns(4)
+                with reset_col1:
+                    if not st.session_state.get("confirm_clear_inspector_bonus", False):
+                        if st.button("💰 Clear Inspector Bonuses", key="super_admin_clear_all_inspector_bonus", type="secondary", width="stretch"):
+                            st.session_state["confirm_clear_inspector_bonus"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_inspector_bonus", width="stretch"):
+                            clear_all_inspector_bonus()
+                            log_action("SUPER_ADMIN_CLEAR_INSPECTOR_BONUS", "ALL", decision_by=full_name)
+                            st.session_state["confirm_clear_inspector_bonus"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col2:
+                    if not st.session_state.get("confirm_clear_all_work_orders", False):
+                        if st.button("🛠️ Clear Work Orders", key="super_admin_clear_all_work_orders", type="secondary", width="stretch"):
+                            st.session_state["confirm_clear_all_work_orders"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_work_orders", width="stretch"):
+                            save_all_work_orders([])
+                            st.session_state["confirm_clear_all_work_orders"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col3:
+                    if not st.session_state.get("confirm_clear_hr_leave", False):
+                        if st.button("👥 Clear HR Leave", key="super_admin_clear_all_hr_leave", type="secondary", width="stretch"):
+                            st.session_state["confirm_clear_hr_leave"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_hr_leave", width="stretch"):
+                            clear_all_hr_leave()
+                            st.session_state["confirm_clear_hr_leave"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col4:
+                    if not st.session_state.get("confirm_clear_store_deduction", False):
+                        if st.button("📦 Clear Store Transactions", key="super_admin_clear_all_store_deduction", type="secondary", width="stretch"):
+                            st.session_state["confirm_clear_store_deduction"] = True
+                    else:
+                        if st.button("✅ Confirm", key="super_admin_confirm_clear_all_store_deduction", width="stretch"):
+                            clear_all_store_deductions()
+                            st.session_state["confirm_clear_store_deduction"] = False
+                            st.success("✅ Cleared."); st.rerun()
+                with reset_col4:
+                    if not st.session_state.get("confirm_clear_audit", False):
+                        if st.button("🗑️ Clear Audit", type="secondary", key="clear_audit_history_btn"):
+                            st.session_state["confirm_clear_audit"] = True; st.rerun()
+                    else:
+                        if st.button("✅ Confirm", type="primary", key="confirm_clear_audit_btn"):
+                            clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
+                            st.success("✅ Cleared."); st.rerun()
+        st.divider()
+        st.subheader("📥 Download Data Backups")
+        st.caption("Download a copy before using the live-launch reset. User accounts and system settings are kept separately.")
 
-    backup_files = [
-        ("📥 Requests", EXCEL_PATH, "requests", "backup_requests"),
-        ("📥 Users", USER_DB_PATH, "users", "backup_users"),
-        ("📥 Settings", SETTINGS_PATH, "settings", "backup_settings"),
-        ("📥 Inspector Bonuses", INSPECTOR_BONUS_PATH, "inspector_bonus", "backup_inspector_bonus"),
-        ("📥 Work Orders", WORK_ORDERS_PATH, "work_orders", "backup_work_orders"),
-        ("📥 HR Leave Requests", HR_LEAVE_PATH, "hr_leave_requests", "backup_hr_leave"),
-        ("📥 HR Daily Rates", HR_DAILY_RATES_PATH, "hr_daily_rates", "backup_hr_rates"),
-        ("📥 Store Transactions", STORE_DEDUCTION_PATH, "store_transactions", "backup_store_transactions"),
-        ("📥 Store Items", STORE_ITEMS_PATH, "store_items", "backup_store_items"),
-        ("📥 HR Employee Records", HR_EMPLOYEES_PATH, "hr_employee_records", "backup_hr_employee_records"),
-        ("📥 HR Portal Leave Records", HR_PORTAL_LEAVE_PATH, "hr_portal_leave_records", "backup_hr_portal_leave_records"),
-        ("📥 Audit Log", AUDIT_LOG_PATH, "audit_log", "backup_audit_log"),
-    ]
-    backup_cols = st.columns(3)
-    for i, (label, path, stem, key) in enumerate(backup_files):
-        with backup_cols[i % 3]:
-            if os.path.exists(path):
-                try:
-                    with open(path, "rb") as f:
-                        st.download_button(
-                            label,
-                            f.read(),
-                            file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                            type="primary",
-                            key=key,
-                            width="stretch",
-                        )
-                except Exception as e:
-                    st.warning(f"Unable to prepare {label}: {e}")
-            else:
-                st.button(f"{label} (not available)", disabled=True, key=f"{key}_missing")
+        backup_files = [
+            ("📥 Requests", EXCEL_PATH, "requests", "backup_requests"),
+            ("📥 Users", USER_DB_PATH, "users", "backup_users"),
+            ("📥 Settings", SETTINGS_PATH, "settings", "backup_settings"),
+            ("📥 Inspector Bonuses", INSPECTOR_BONUS_PATH, "inspector_bonus", "backup_inspector_bonus"),
+            ("📥 Work Orders", WORK_ORDERS_PATH, "work_orders", "backup_work_orders"),
+            ("📥 HR Leave Requests", HR_LEAVE_PATH, "hr_leave_requests", "backup_hr_leave"),
+            ("📥 HR Daily Rates", HR_DAILY_RATES_PATH, "hr_daily_rates", "backup_hr_rates"),
+            ("📥 Store Transactions", STORE_DEDUCTION_PATH, "store_transactions", "backup_store_transactions"),
+            ("📥 Store Items", STORE_ITEMS_PATH, "store_items", "backup_store_items"),
+            ("📥 HR Employee Records", HR_EMPLOYEES_PATH, "hr_employee_records", "backup_hr_employee_records"),
+            ("📥 HR Portal Leave Records", HR_PORTAL_LEAVE_PATH, "hr_portal_leave_records", "backup_hr_portal_leave_records"),
+            ("📥 Audit Log", AUDIT_LOG_PATH, "audit_log", "backup_audit_log"),
+        ]
+        backup_cols = st.columns(3)
+        for i, (label, path, stem, key) in enumerate(backup_files):
+            with backup_cols[i % 3]:
+                if os.path.exists(path):
+                    try:
+                        with open(path, "rb") as f:
+                            st.download_button(
+                                label,
+                                f.read(),
+                                file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                                type="primary",
+                                key=key,
+                                width="stretch",
+                            )
+                    except Exception as e:
+                        st.warning(f"Unable to prepare {label}: {e}")
+                else:
+                    st.button(f"{label} (not available)", disabled=True, key=f"{key}_missing")
 
-    st.divider()
-    st.subheader("🚀 Make Software Live")
-    st.warning(
-        "Use this only after downloading the backups above. "
-        "It permanently clears all operational/test data: requests, work orders, "
-        "inspector bonuses, HR leave requests and audit history. User accounts and system settings are NOT deleted."
-    )
-
-    def _clear_live_launch_data():
-        clear_all_requests_file()
-        clear_all_inspector_bonus()
-        _write_empty_excel(WORK_ORDERS_PATH, WORK_ORDER_COLUMNS)
-        _write_empty_excel(HR_LEAVE_PATH, HR_LEAVE_COLUMNS)
-        _write_empty_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
-        _invalidate_data_cache(
-            "_work_orders_cache",
-            "_work_order_cache",
-            "_inspector_bonus_cache",
-            "_records_cache",
-            "_hr_leave_cache",
-            "_store_deduction_cache",
+        st.divider()
+        st.subheader("🚀 Make Software Live")
+        st.warning(
+            "Use this only after downloading the backups above. "
+            "It permanently clears all operational/test data: requests, work orders, "
+            "inspector bonuses, HR leave requests and audit history. User accounts and system settings are NOT deleted."
         )
-        sync_saved_file_to_drive(WORK_ORDERS_PATH)
-        sync_saved_file_to_drive(HR_LEAVE_PATH)
-        sync_saved_file_to_drive(STORE_DEDUCTION_PATH)
-        clear_audit_log_file()
 
-        for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, STORE_DEDUCTION_PDF_DIR, UPLOAD_DIR):
-            if os.path.isdir(folder):
-                for root, dirs, files in os.walk(folder, topdown=False):
-                    for filename in files:
-                        try:
-                            os.remove(os.path.join(root, filename))
-                        except OSError:
-                            pass
-                    for dirname in dirs:
-                        try:
-                            os.rmdir(os.path.join(root, dirname))
-                        except OSError:
-                            pass
-        st.session_state["_live_data_reset"] = datetime.now().isoformat()
+        def _clear_live_launch_data():
+            clear_all_requests_file()
+            clear_all_inspector_bonus()
+            _write_empty_excel(WORK_ORDERS_PATH, WORK_ORDER_COLUMNS)
+            _write_empty_excel(HR_LEAVE_PATH, HR_LEAVE_COLUMNS)
+            _write_empty_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
+            _invalidate_data_cache(
+                "_work_orders_cache",
+                "_work_order_cache",
+                "_inspector_bonus_cache",
+                "_records_cache",
+                "_hr_leave_cache",
+                "_store_deduction_cache",
+            )
+            sync_saved_file_to_drive(WORK_ORDERS_PATH)
+            sync_saved_file_to_drive(HR_LEAVE_PATH)
+            sync_saved_file_to_drive(STORE_DEDUCTION_PATH)
+            clear_audit_log_file()
 
-    if not st.session_state.get("confirm_live_launch", False):
-        if st.button(
-            "🚀 Make Software Live — Clear All Operational Data",
-            type="primary",
-            key="make_software_live_btn",
-            width="stretch",
-        ):
-            st.session_state["confirm_live_launch"] = True
-            st.rerun()
-    else:
-        st.error(
-            "⚠️ FINAL CONFIRMATION: this will permanently remove all requests, "
-            "work orders, inspector bonuses, HR leave requests, Store Deductions, audit history, generated PDFs and uploaded attachments. "
-            "Users and system settings will remain."
-        )
-        live_c1, live_c2 = st.columns(2)
-        with live_c1:
+            for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, STORE_DEDUCTION_PDF_DIR, UPLOAD_DIR):
+                if os.path.isdir(folder):
+                    for root, dirs, files in os.walk(folder, topdown=False):
+                        for filename in files:
+                            try:
+                                os.remove(os.path.join(root, filename))
+                            except OSError:
+                                pass
+                        for dirname in dirs:
+                            try:
+                                os.rmdir(os.path.join(root, dirname))
+                            except OSError:
+                                pass
+            st.session_state["_live_data_reset"] = datetime.now().isoformat()
+
+        if not st.session_state.get("confirm_live_launch", False):
             if st.button(
-                "🚀 YES — Make Software Live",
+                "🚀 Make Software Live — Clear All Operational Data",
                 type="primary",
-                key="confirm_make_software_live_btn",
+                key="make_software_live_btn",
                 width="stretch",
             ):
-                try:
-                    _clear_live_launch_data()
-                    st.session_state["confirm_live_launch"] = False
-                    st.success("✅ Software is ready for live use. All operational/test data has been cleared.")
-                    st.rerun()
-                except Exception as e:
-                    st.session_state["confirm_live_launch"] = False
-                    st.error(f"❌ Live launch reset failed: {e}")
-        with live_c2:
-            if st.button("↩️ Cancel", key="cancel_make_software_live_btn", width="stretch"):
-                st.session_state["confirm_live_launch"] = False
+                st.session_state["confirm_live_launch"] = True
                 st.rerun()
+        else:
+            st.error(
+                "⚠️ FINAL CONFIRMATION: this will permanently remove all requests, "
+                "work orders, inspector bonuses, HR leave requests, Store Deductions, audit history, generated PDFs and uploaded attachments. "
+                "Users and system settings will remain."
+            )
+            live_c1, live_c2 = st.columns(2)
+            with live_c1:
+                if st.button(
+                    "🚀 YES — Make Software Live",
+                    type="primary",
+                    key="confirm_make_software_live_btn",
+                    width="stretch",
+                ):
+                    try:
+                        _clear_live_launch_data()
+                        st.session_state["confirm_live_launch"] = False
+                        st.success("✅ Software is ready for live use. All operational/test data has been cleared.")
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state["confirm_live_launch"] = False
+                        st.error(f"❌ Live launch reset failed: {e}")
+            with live_c2:
+                if st.button("↩️ Cancel", key="cancel_make_software_live_btn", width="stretch"):
+                    st.session_state["confirm_live_launch"] = False
+                    st.rerun()
 else:
     st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
