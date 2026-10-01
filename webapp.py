@@ -148,7 +148,7 @@ ITEM_CHECKIN_COLUMNS = [
     "ID", "Employee ID", "Employee Name", "Department",
     "Leaving Date", "Check-in Date", "Checked In By",
     "Returned Items JSON", "Not Returned Items JSON",
-    "Total Deduction (£)", "Deduction Request ID", "Status", "Notes",
+    "Total Deduction (£)", "Deduction Request ID", "Return Request ID", "Status", "Notes",
 ]
 
 USER_DB_COLUMNS = [
@@ -6108,6 +6108,7 @@ def load_item_checkins(force=False):
                 "not_returned_items": not_returned,
                 "total_deduction": total,
                 "deduction_request_id": str(r.get("Deduction Request ID", "")).strip(),
+                "return_request_id": str(r.get("Return Request ID", "")).strip(),
                 "status": str(r.get("Status", "Completed")).strip(),
                 "notes": str(r.get("Notes", "")).strip(),
             })
@@ -6131,6 +6132,7 @@ def save_all_item_checkins(records, sync=True):
         "Not Returned Items JSON": json.dumps(r.get("not_returned_items", []), ensure_ascii=False),
         "Total Deduction (£)": float(r.get("total_deduction", 0)),
         "Deduction Request ID": str(r.get("deduction_request_id", "")),
+        "Return Request ID": str(r.get("return_request_id", "")),
         "Status": str(r.get("status", "Completed")),
         "Notes": str(r.get("notes", "")),
     } for r in records]
@@ -8237,14 +8239,17 @@ def render_item_checkin_form(user_name):
 def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
                        total_deduction, leaving_date, checkin_date, notes,
                        create_deduction=False):
-    """Persist the check-in, update holdings and optionally raise a Store Deduction."""
+    """Persist the leaver check-in and create linked Store transactions when needed."""
     checkins = load_item_checkins()
     new_id = get_next_item_checkin_id(checkins)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     deduction_req_id = ""
+    return_req_id = ""
 
+    store_records = load_store_deductions()
+
+    # Items not returned can create a Store Deduction for Director approval.
     if create_deduction and not_returned_items:
-        store_records = load_store_deductions()
         ded_id = get_next_store_deduction_id(store_records)
         ded_items = [{
             "item_name": it["item_name"],
@@ -8276,9 +8281,54 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
             "pdf_path": "",
         }
         store_records.append(ded_rec)
-        save_all_store_deductions(store_records)
         deduction_req_id = str(ded_id)
         log_action("STORE_DEDUCTION_CREATED", ded_id, new_data=ded_rec)
+
+    # Every physically returned item is also recorded as a Store Return (Addition)
+    # linked back to this exact leaver check-in. It follows the existing Director
+    # approval workflow used by Store Returns.
+    if returned_items:
+        return_id = get_next_store_deduction_id(store_records)
+        return_items = [{
+            "item_name": it["item_name"],
+            "quantity": int(it["quantity"]),
+            "price": float(it["unit_price"]),
+        } for it in returned_items]
+        total_return = sum(
+            float(it["quantity"]) * float(it["unit_price"])
+            for it in returned_items
+        )
+        return_desc = (f"Auto-generated from Leaver Item Check-in #{new_id}. "
+                       f"Items physically returned by {employee['name']} ({employee['emp_id']}). "
+                       f"{(notes or '').strip()}").strip()
+        return_rec = {
+            "id": return_id,
+            "emp_name": employee["name"],
+            "date_leaving": str(leaving_date),
+            "emp_dept": employee.get("department", ""),
+            "manager": user_name,
+            "date_submit": str(checkin_date),
+            "type": "Addition",
+            "items": return_items,
+            "total_deduction": float(total_return),
+            "desc": return_desc,
+            "attachment_name": "None",
+            "status": "pending",
+            "director_comments": "",
+            "rejection_reason": "",
+            "decision_date": "",
+            "decision_by": "",
+            "submitted_by": user_name,
+            "submitted_date": now,
+            "pdf_path": "",
+        }
+        store_records.append(return_rec)
+        return_req_id = str(return_id)
+        log_action("STORE_DEDUCTION_CREATED", return_id, new_data=return_rec)
+
+    # Save both linked Store transactions together, if any were created.
+    if deduction_req_id or return_req_id:
+        save_all_store_deductions(store_records)
 
     checkins.append({
         "id": new_id,
@@ -8292,6 +8342,7 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
         "not_returned_items": not_returned_items,
         "total_deduction": float(total_deduction),
         "deduction_request_id": deduction_req_id,
+        "return_request_id": return_req_id,
         "status": "Completed",
         "notes": (notes or "").strip(),
     })
@@ -8322,13 +8373,27 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
                          "returned": len(returned_items),
                          "not_returned": len(not_returned_items),
                          "deduction": total_deduction,
-                         "deduction_id": deduction_req_id})
+                         "deduction_id": deduction_req_id,
+                         "return_id": return_req_id})
 
     st.session_state.pop(f"checkin_qty_{employee['emp_id']}", None)
 
-    if deduction_req_id:
-        st.success(f"✅ Check-in #{new_id} saved. Store Deduction #{deduction_req_id} created for "
-                   f"£{total_deduction:.2f} — sent to Director for approval.")
+    if deduction_req_id and return_req_id:
+        st.success(
+            f"✅ Check-in #{new_id} saved. "
+            f"Store Deduction #{deduction_req_id} and Store Return #{return_req_id} "
+            f"created — both sent to Director for approval."
+        )
+    elif deduction_req_id:
+        st.success(
+            f"✅ Check-in #{new_id} saved. Store Deduction #{deduction_req_id} created for "
+            f"£{total_deduction:.2f} — sent to Director for approval."
+        )
+    elif return_req_id:
+        st.success(
+            f"✅ Check-in #{new_id} saved. Store Return #{return_req_id} created "
+            f"for returned items — sent to Director for approval."
+        )
     else:
         st.success(f"✅ Check-in #{new_id} saved. Holdings updated.")
     st.rerun()
@@ -8340,31 +8405,86 @@ def render_item_checkin_history():
     if not checkins:
         st.info("No check-in sessions recorded yet.")
         return
+
+    store_records = load_store_deductions(force=True)
+
+    def _linked_store_status(request_id):
+        if not request_id:
+            return None
+        record = next(
+            (r for r in store_records if str(r.get("id", "")) == str(request_id)),
+            None,
+        )
+        if not record:
+            return None
+        status = str(record.get("status", "pending")).strip().lower()
+        if status == "approved":
+            decision_by = str(record.get("decision_by", "Director")).strip() or "Director"
+            decision_date = str(record.get("decision_date", "")).strip()
+            suffix = f" on {decision_date}" if decision_date else ""
+            return f"🟢 Approved by {decision_by}{suffix}", "success"
+        if status == "rejected":
+            decision_by = str(record.get("decision_by", "Director")).strip() or "Director"
+            decision_date = str(record.get("decision_date", "")).strip()
+            suffix = f" on {decision_date}" if decision_date else ""
+            return f"🔴 Rejected by {decision_by}{suffix}", "error"
+        return "🟡 Pending Director approval", "warning"
+
     for c in reversed(checkins):
+        returned_count = len(c.get("returned_items", []))
+        not_returned_count = len(c.get("not_returned_items", []))
         with st.expander(
             f"#{c['id']} | {c['emp_name']} | {c['emp_dept']} | "
-            f"£{c['total_deduction']:.2f} | {c['checkin_date']}"
+            f"↩️ {returned_count} returned | ❌ {not_returned_count} not returned | {c['checkin_date']}"
         ):
             st.write(f"👤 {c['emp_name']} ({c['employee_id']}) · 🏢 {c['emp_dept']}")
             st.write(f"📅 Leaving: {c['leaving_date']} | Check-in: {c['checkin_date']} | By: {c['checked_in_by']}")
+
+            if c.get("return_request_id"):
+                linked = _linked_store_status(c["return_request_id"])
+                if linked:
+                    message, kind = linked
+                    text = f"🔗 Linked Store Return (Addition) #{c['return_request_id']} — {message}"
+                    if kind == "success":
+                        st.success(text)
+                    elif kind == "error":
+                        st.error(text)
+                    else:
+                        st.warning(text)
+                else:
+                    st.info(f"🔗 Linked Store Return (Addition) #{c['return_request_id']} — record not found")
+
             if c.get("deduction_request_id"):
-                st.success(f"🔗 Linked Store Deduction #{c['deduction_request_id']} "
-                           f"(pending Director approval — see Store Deductions tab)")
-            st.markdown(f"**Returned Items ({len(c['returned_items'])}):**")
-            if c["returned_items"]:
+                linked = _linked_store_status(c["deduction_request_id"])
+                if linked:
+                    message, kind = linked
+                    text = f"🔗 Linked Store Deduction #{c['deduction_request_id']} — {message}"
+                    if kind == "success":
+                        st.success(text)
+                    elif kind == "error":
+                        st.error(text)
+                    else:
+                        st.warning(text)
+                else:
+                    st.info(f"🔗 Linked Store Deduction #{c['deduction_request_id']} — record not found")
+
+            st.markdown(f"**Returned Items ({returned_count}):**")
+            if c.get("returned_items"):
                 st.dataframe(pd.DataFrame([{
                     "Item": it["item_name"], "Qty": it["quantity"], "Unit £": it["unit_price"]
                 } for it in c["returned_items"]]), width="stretch", hide_index=True)
             else:
                 st.caption("None")
-            st.markdown(f"**Not Returned — Deducted ({len(c['not_returned_items'])}):**")
-            if c["not_returned_items"]:
+
+            st.markdown(f"**Not Returned — Deducted ({not_returned_count}):**")
+            if c.get("not_returned_items"):
                 st.dataframe(pd.DataFrame([{
                     "Item": it["item_name"], "Qty": it["quantity"],
                     "Unit £": it["unit_price"], "Line Total £": it.get("line_total", 0)
                 } for it in c["not_returned_items"]]), width="stretch", hide_index=True)
             else:
                 st.caption("None")
+
             if c.get("notes"):
                 st.info(f"📝 {c['notes']}")
             history_pdf = _build_item_checkin_pdf(c, f"Leaver Item Check-in #{c.get('id','')}")
