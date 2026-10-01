@@ -7187,20 +7187,37 @@ def render_store_deduction_form(user_name, user_dept):
     if not employees:
         st.warning("No Active employees are registered by HR. Add the employee in HR Employee Directory first.")
         return
-    employee_labels = [f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}"
-                       for e in sorted(employees, key=lambda x: str(x.get('name','')).casefold())]
-    employee_map = {label: e for label, e in zip(employee_labels, sorted(employees, key=lambda x: str(x.get('name','')).casefold()))}
-    selected_employee_label = st.selectbox("👤 Employee (HR Registered Employees Only)", employee_labels, key="store_emp_selector")
+    employees = sorted(employees, key=lambda x: (str(x.get("name", "")).casefold(), str(x.get("emp_id", "")).casefold()))
+    employee_labels = [
+        f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}"
+        for e in employees
+    ]
+    employee_map = {label: e for label, e in zip(employee_labels, employees)}
+
+    selected_employee_label = st.selectbox(
+        "👤 Employee (HR Registered Employees Only)",
+        employee_labels,
+        key="store_emp_selector",
+    )
     selected_employee = employee_map[selected_employee_label]
     emp_name = selected_employee.get("name", "")
-    emp_dept = selected_employee.get("department", "")
+    emp_dept = str(selected_employee.get("department", "")).strip()
+
+    # Use the employee ID in the widget key so Streamlit cannot retain the
+    # previous employee's department/date when the employee selection changes.
+    employee_key = re.sub(r"[^A-Za-z0-9_]+", "_", str(selected_employee.get("emp_id", emp_name)))
     leaving_default = selected_employee.get("leaving_date") or date.today()
     if not isinstance(leaving_default, date):
         try: leaving_default = pd.to_datetime(leaving_default).date()
         except Exception: leaving_default = date.today()
     col1, col2 = st.columns(2)
     with col1:
-        st.text_input("🏢 Employee Department", value=emp_dept, disabled=True, key="store_emp_dept_display")
+        st.text_input(
+            "🏢 Employee Department",
+            value=emp_dept,
+            disabled=True,
+            key=f"store_emp_dept_display_{employee_key}",
+        )
         date_submit = st.date_input("📅 Date of Submit", value=date.today(), key="store_date_submit")
     with col2:
         date_leaving = st.date_input("📅 Date of Leaving", value=leaving_default, key="store_date_leaving")
@@ -7271,16 +7288,50 @@ def render_store_return_form(user_name, user_dept):
     st.subheader("📦 New Request — Store Department Return (Addition)")
     st.caption("Process returned items to reverse a previous deduction, or add items not previously deducted.")
     all_transactions = load_store_deductions()
-    approved_deds = [d for d in all_transactions if d["status"] == "approved" and d.get("type", "Deduction") == "Deduction"]
-    emp_options = sorted({d["emp_name"] for d in approved_deds})
-    if not emp_options:
-        st.info("No approved store deductions found in the system to return against.")
-        st.markdown("### 📦 Manual Return (Items not previously deducted in this software)")
-        selected_emp = st.text_input("👤 Employee Name", key="store_ret_manual_emp")
-    else:
-        selected_emp = st.selectbox("👤 Select Employee (from previous deductions)", ["-- Manual Entry --"] + emp_options, key="store_ret_emp")
-        if selected_emp == "-- Manual Entry --":
-            selected_emp = st.text_input("👤 Employee Name (Manual Entry)", key="store_ret_manual_emp_2")
+    approved_deds = [
+        d for d in all_transactions
+        if d["status"] == "approved" and d.get("type", "Deduction") == "Deduction"
+    ]
+
+    # Store Returns must use the HR employee register as the source of truth.
+    # Do not allow free-text/manual employee names.
+    employees = [
+        e for e in _hrp_load_employees()
+        if str(e.get("name", "")).strip()
+    ]
+    employees = sorted(
+        employees,
+        key=lambda x: (str(x.get("name", "")).casefold(), str(x.get("emp_id", "")).casefold()),
+    )
+    if not employees:
+        st.warning("No employees are registered by HR. Add the employee in HR Employee Directory first.")
+        return
+
+    employee_labels = [
+        f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}"
+        for e in employees
+    ]
+    employee_map = {label: e for label, e in zip(employee_labels, employees)}
+    selected_employee_label = st.selectbox(
+        "👤 Employee (HR Registered Employees Only)",
+        employee_labels,
+        key="store_ret_emp",
+    )
+    selected_employee = employee_map[selected_employee_label]
+    selected_emp = str(selected_employee.get("name", "")).strip()
+    emp_dept = str(selected_employee.get("department", "")).strip()
+
+    employee_key = re.sub(
+        r"[^A-Za-z0-9_]+",
+        "_",
+        str(selected_employee.get("emp_id", selected_emp)),
+    )
+    st.text_input(
+        "🏢 Employee Department",
+        value=emp_dept,
+        disabled=True,
+        key=f"store_ret_emp_dept_display_{employee_key}",
+    )
     st.markdown("### 📦 Items to Return")
     st.caption("If the item was deducted in this software, click the button below to load them. You can then adjust the quantities for partial returns or add new items manually.")
     if "store_return_items" not in st.session_state:
@@ -7346,7 +7397,7 @@ def render_store_return_form(user_name, user_dept):
         submitted = st.form_submit_button("📤 Send to Director for Approval", type="primary", width="stretch")
         if submitted:
             valid_items = [it for it in st.session_state.store_return_items if it.get("item_name") and it.get("quantity", 0) > 0 and it.get("price", 0) > 0]
-            if not selected_emp or selected_emp == "-- Manual Entry --" or not manager.strip() or not desc.strip():
+            if not selected_emp or not manager.strip() or not desc.strip():
                 st.error("⚠️ Employee Name, Line Manager and Description are required.")
             elif not valid_items:
                 st.error("⚠️ Please select at least one item to return.")
@@ -7361,7 +7412,7 @@ def render_store_return_form(user_name, user_dept):
                     _upload_to_drive_bg(fp, fn)
                     attachments.append(fn)
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                rec = {"id": new_id, "emp_name": selected_emp, "date_leaving": str(date_return), "emp_dept": user_dept, "manager": manager.strip(), "date_submit": str(date_submit), "type": "Addition", "items": valid_items, "total_deduction": total_addition, "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending", "director_comments": "", "rejection_reason": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "submitted_date": now, "pdf_path": ""}
+                rec = {"id": new_id, "emp_name": selected_emp, "date_leaving": str(date_return), "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit), "type": "Addition", "items": valid_items, "total_deduction": total_addition, "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending", "director_comments": "", "rejection_reason": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "submitted_date": now, "pdf_path": ""}
                 all_transactions.append(rec)
                 save_all_store_deductions(all_transactions)
                 log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
