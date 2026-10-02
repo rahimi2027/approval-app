@@ -9750,15 +9750,18 @@ elif role == "Work Order Manager":
             st.subheader(f"➕ New Request — {dept_name}")
             nid = get_next_id(all_live_requests)
             form_version = st.session_state.get("wo_mgr_new_req_form_version", 0)
+            # Keep Employee Source outside the form so switching between
+            # Registered Employee and Manual Employee immediately reruns the
+            # app and reveals the appropriate employee input.
+            employee_source = st.radio(
+                "👤 Employee Source",
+                ["Registered Employee", "Manual Employee"],
+                horizontal=True,
+                key=f"wo_mgr_employee_source_v{form_version}",
+            )
             with st.form(f"wo_mgr_new_req_v{form_version}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 with c1:
-                    employee_source = st.radio(
-                        "👤 Employee Source",
-                        ["Registered Employee", "Manual Employee"],
-                        horizontal=True,
-                        key=f"wo_mgr_employee_source_v{form_version}",
-                    )
                     registered_employee = None
                     if employee_source == "Registered Employee":
                         registered = [
@@ -9936,15 +9939,18 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     st.subheader(f"➕ New Request — {dept_name}")
                     nid = get_next_id(all_live_requests)
                     form_version = st.session_state.get("new_req_form_version", 0)
+                    # Keep Employee Source outside the form so switching between
+                    # Registered Employee and Manual Employee immediately reruns the
+                    # app and reveals the appropriate employee input.
+                    employee_source = st.radio(
+                        "👤 Employee Source",
+                        ["Registered Employee", "Manual Employee"],
+                        horizontal=True,
+                        key=f"employee_source_v{form_version}",
+                    )
                     with st.form(f"new_req_v{form_version}", clear_on_submit=False):
                         c1, c2 = st.columns(2)
                         with c1:
-                            employee_source = st.radio(
-                                "👤 Employee Source",
-                                ["Registered Employee", "Manual Employee"],
-                                horizontal=True,
-                                key=f"employee_source_v{form_version}",
-                            )
                             registered_employee = None
                             if employee_source == "Registered Employee":
                                 registered = [
