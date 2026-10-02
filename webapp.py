@@ -9039,10 +9039,39 @@ def settings_management_panel():
                     with col2:
                         if st.form_submit_button("❌ Cancel"): st.session_state[f"editing_role_{i}"] = False; st.rerun()
 
+def refresh_authenticated_user_session():
+    """Refresh the logged-in user's permissions from the persistent user database.
+
+    User permissions are stored in USER_DB_PATH, but Streamlit session state normally
+    keeps the login snapshot. Refreshing it on each rerun makes permission changes
+    take effect without requiring the user to log out and back in.
+    """
+    if not st.session_state.get("logged_in"):
+        return
+    current_username = str(st.session_state.get("user_info", {}).get("username", "")).strip().lower()
+    if not current_username:
+        return
+    try:
+        users = load_users(force=True)
+        current = users.get(current_username)
+        if not current:
+            st.session_state.clear()
+            st.rerun()
+            return
+        if not current.get("is_active", True):
+            st.session_state.clear()
+            st.rerun()
+            return
+        st.session_state.user_info = {**current, "username": current_username}
+    except Exception as e:
+        print(f"Authenticated user permission refresh failed: {e}")
+
+
 def user_management_panel():
     st.subheader("👤 User Management — Create & Manage System Users")
     st.info("🛡️ Super Admin Only — Create, edit, or delete user accounts."); st.divider()
-    USERS = load_users(); ROLES = load_roles()
+    # Read the latest user record so permission edits are never based on a stale cache.
+    USERS = load_users(force=True); ROLES = load_roles()
     tab1, tab2, tab3 = st.tabs(["➕ Create New User", "✏️ Edit User", "🗑️ Delete User"])
     with tab1:
         st.markdown("### ➕ Create New System User")
@@ -9217,6 +9246,11 @@ if not st.session_state.logged_in:
                     st.rerun()
             else: st.error("❌ Invalid Username or Password. Please try again.")
     st.stop()
+
+# Always refresh the authenticated user's role/permissions from USER_DB_PATH before
+# rendering the role-specific portal. This makes admin permission changes effective
+# on the next app rerun instead of only after a fresh login.
+refresh_authenticated_user_session()
 
 col_left, col_right = st.columns([4, 1])
 with col_left: refresh_data_button()
