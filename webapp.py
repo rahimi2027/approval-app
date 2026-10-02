@@ -17,6 +17,7 @@ import re
 import requests
 import threading
 import queue
+import time
 import textwrap
 from datetime import datetime, date, timezone, timedelta
 
@@ -184,6 +185,16 @@ _DRIVE_SYNC_FINGERPRINTS = {}
 _DRIVE_SYNC_LOCK = threading.RLock()
 DRIVE_PENDING_SYNC = set()
 _DRIVE_SYNC_QUEUE = None
+
+# Local persistence / recovery. Google Drive is a backup layer; these local files
+# are the durable working copy and RAM is never treated as the only copy.
+LOCAL_RECOVERY_DIR = os.path.join(APP_FOLDER, "local_recovery")
+DRIVE_SYNC_STATE_PATH = os.path.join(APP_FOLDER, "drive_sync_state.json")
+DRIVE_AUTO_SYNC_INTERVAL_SECONDS = 3600
+_DRIVE_WORKER_STARTED = False
+_DRIVE_WORKER_WAKE = threading.Event()
+_DRIVE_STATE_LOCK = threading.RLock()
+os.makedirs(LOCAL_RECOVERY_DIR, exist_ok=True)
 
 # ============================================================
 # GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
@@ -385,7 +396,88 @@ DRIVE_BACKUP_FILENAMES = {
     ITEM_CHECKIN_PATH:   "BACKUP_item_checkins.xlsx",
 }
 
+def _load_drive_sync_state():
+    try:
+        if os.path.exists(DRIVE_SYNC_STATE_PATH):
+            with open(DRIVE_SYNC_STATE_PATH, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+                return data if isinstance(data, dict) else {}
+    except Exception as e:
+        print(f"Drive sync state could not be loaded: {e}")
+    return {}
+
+
+def _save_drive_sync_state():
+    try:
+        tmp = DRIVE_SYNC_STATE_PATH + ".tmp"
+        state = {
+            "last_sync": DRIVE_LAST_SYNC,
+            "last_error": DRIVE_LAST_SYNC_ERROR,
+            "pending": sorted(os.path.basename(p) for p in DRIVE_PENDING_SYNC),
+            "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2, default=str)
+        os.replace(tmp, DRIVE_SYNC_STATE_PATH)
+    except Exception as e:
+        print(f"Drive sync state could not be saved: {e}")
+
+
+def _restore_drive_sync_state():
+    state = _load_drive_sync_state()
+    for key, value in (state.get("last_sync") or {}).items():
+        DRIVE_LAST_SYNC[key] = value
+    for key, value in (state.get("last_error") or {}).items():
+        DRIVE_LAST_SYNC_ERROR[key] = value
+
+
+def _create_local_recovery_snapshot(local_path):
+    """Keep a rolling set of local snapshots so a bad write can be recovered."""
+    if not local_path or not os.path.exists(local_path):
+        return None
+    try:
+        os.makedirs(LOCAL_RECOVERY_DIR, exist_ok=True)
+        filename = os.path.basename(local_path)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        snapshot = os.path.join(LOCAL_RECOVERY_DIR, f"{filename}.{stamp}.bak")
+        shutil.copy2(local_path, snapshot)
+
+        # Keep the latest 5 snapshots per workbook.
+        matches = sorted(
+            [
+                os.path.join(LOCAL_RECOVERY_DIR, n)
+                for n in os.listdir(LOCAL_RECOVERY_DIR)
+                if n.startswith(filename + ".") and n.endswith(".bak")
+            ],
+            key=lambda x: os.path.getmtime(x),
+            reverse=True,
+        )
+        for old in matches[5:]:
+            try:
+                os.remove(old)
+            except Exception:
+                pass
+        return snapshot
+    except Exception as e:
+        print(f"Local recovery snapshot failed for {local_path}: {e}")
+        return None
+
+
+def _mark_drive_file_dirty(local_path, make_recovery_snapshot=True):
+    """Queue a local save for the next hourly Drive upload without blocking the user."""
+    if not local_path or not os.path.exists(local_path):
+        return False
+    with _DRIVE_SYNC_LOCK:
+        if make_recovery_snapshot:
+            _create_local_recovery_snapshot(local_path)
+        DRIVE_PENDING_SYNC.add(os.path.abspath(local_path))
+        _save_drive_sync_state()
+    _DRIVE_WORKER_WAKE.set()
+    return True
+
+
 def sync_backup_file_to_drive(local_path):
+    """Immediate backup helper used only by the explicit/manual backup path."""
     if drive_service is None or not os.path.exists(local_path):
         return None
     backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
@@ -397,11 +489,15 @@ def sync_backup_file_to_drive(local_path):
         print(f"Drive backup sync failed for {backup_name}: {e}")
         return None
 
+
 def _sync_saved_file_to_drive_now(local_path):
+    """Actually upload one file. This is deliberately called only by the background worker or manual force-sync."""
+    local_path = os.path.abspath(local_path)
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
         msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
         DRIVE_LAST_SYNC_ERROR[filename] = msg
+        _save_drive_sync_state()
         return False
 
     with _DRIVE_SYNC_LOCK:
@@ -441,7 +537,6 @@ def _sync_saved_file_to_drive_now(local_path):
 
         if live_error and not live_ok:
             print(f"Google Drive live workbook sync unavailable for {filename}: {live_error}")
-
         if backup_name and not backup_ok:
             print(f"Google Drive backup sync failed for {backup_name}: {DRIVE_LAST_SYNC_ERROR.get(backup_name, '')}")
 
@@ -451,42 +546,108 @@ def _sync_saved_file_to_drive_now(local_path):
                 _DRIVE_SYNC_FINGERPRINTS[local_path] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
             except Exception:
                 pass
+            # Only remove the pending flag after at least one Drive copy succeeded.
+            DRIVE_PENDING_SYNC.discard(local_path)
+            _save_drive_sync_state()
             return True
 
+        DRIVE_PENDING_SYNC.add(local_path)
         _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
+        _save_drive_sync_state()
         return False
 
 
 _DRIVE_STORAGE_PROCESS_READY = False
 
+
 def sync_saved_file_to_drive(local_path):
+    """Backward-compatible save hook: local save has already happened; queue Drive backup."""
     filename = os.path.basename(local_path)
-    if drive_service is None or not os.path.exists(local_path):
-        msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
-        DRIVE_LAST_SYNC_ERROR[filename] = msg
+    if not os.path.exists(local_path):
+        DRIVE_LAST_SYNC_ERROR[filename] = "Local file does not exist."
         return False
-    return _sync_saved_file_to_drive_now(local_path)
+    # IMPORTANT: no Google Drive API call here. This keeps normal user actions fast.
+    return _mark_drive_file_dirty(local_path)
 
 
 def ensure_all_drive_backups():
-    if drive_service is None:
-        return
-    with _DRIVE_SYNC_LOCK:
-        for local_path, backup_name in DRIVE_BACKUP_FILENAMES.items():
-            if os.path.exists(local_path):
-                try:
-                    sync_backup_file_to_drive(local_path)
-                except Exception as e:
-                    print(f"Drive backup check failed for {backup_name}: {e}")
+    """Queue all local workbooks; actual uploads are performed by the hourly worker."""
+    for local_path in DRIVE_BACKUP_FILENAMES:
+        if os.path.exists(local_path):
+            _mark_drive_file_dirty(local_path, make_recovery_snapshot=False)
+
 
 def _upload_to_drive_bg(local_path, filename):
-    if drive_service is None or not os.path.exists(local_path):
-        return
-    with _DRIVE_SYNC_LOCK:
+    # Kept for compatibility with existing code. It now means queue for background sync.
+    _mark_drive_file_dirty(local_path, make_recovery_snapshot=False)
+
+
+def _drive_background_worker():
+    """Process-local daemon. It never touches Streamlit session state/UI."""
+    while True:
         try:
-            upload_to_google_drive(local_path, filename)
+            # Wake on a new save, but do not upload immediately. The hourly interval is the
+            # normal schedule; a wake simply lets the worker notice pending work.
+            _DRIVE_WORKER_WAKE.wait(timeout=60)
+            _DRIVE_WORKER_WAKE.clear()
+            if drive_service is None:
+                continue
+            last_run = getattr(_drive_background_worker, "last_run", 0.0)
+            now = time.time()
+            if now - last_run < DRIVE_AUTO_SYNC_INTERVAL_SECONDS:
+                continue
+            if not DRIVE_PENDING_SYNC:
+                _drive_background_worker.last_run = now
+                continue
+
+            _drive_background_worker.last_run = now
+            pending = list(DRIVE_PENDING_SYNC)
+            print(f"Automatic Drive backup starting for {len(pending)} changed file(s).")
+            for local_path in pending:
+                try:
+                    if os.path.exists(local_path):
+                        _sync_saved_file_to_drive_now(local_path)
+                    else:
+                        DRIVE_PENDING_SYNC.discard(local_path)
+                except Exception as e:
+                    DRIVE_LAST_SYNC_ERROR[os.path.basename(local_path)] = f"{type(e).__name__}: {e}"
+                    print(f"Automatic Drive backup failed for {local_path}: {e}")
+            _save_drive_sync_state()
         except Exception as e:
-            print(f"Drive upload failed for {filename}: {e}")
+            print(f"Drive background worker error: {type(e).__name__}: {e}")
+            time.sleep(10)
+
+
+def _start_drive_background_worker():
+    global _DRIVE_WORKER_STARTED
+    if _DRIVE_WORKER_STARTED:
+        return
+    if drive_service is None:
+        return
+    _restore_drive_sync_state()
+    _DRIVE_WORKER_STARTED = True
+    # Existing unsynced work from a previous process should be backed up promptly.
+    # If there is no pending work, start the normal one-hour clock now.
+    _drive_background_worker.last_run = 0.0 if DRIVE_PENDING_SYNC else time.time()
+    worker = threading.Thread(
+        target=_drive_background_worker,
+        name="acoole-drive-backup-worker",
+        daemon=True,
+    )
+    worker.start()
+    print("Automatic Google Drive backup worker started (hourly).")
+
+
+def _force_sync_all_drive_files():
+    """Explicit Super Admin/Director action: upload every existing workbook immediately."""
+    results = []
+    for local_path in DRIVE_BACKUP_FILENAMES:
+        if not os.path.exists(local_path):
+            continue
+        ok = _sync_saved_file_to_drive_now(local_path)
+        results.append((os.path.basename(local_path), ok))
+    return results
+
 
 def _drive_status_rows():
     files = [
@@ -504,14 +665,12 @@ def _drive_status_rows():
         live = os.path.basename(path)
         backup = DRIVE_BACKUP_FILENAMES.get(path, "")
         local_exists = os.path.exists(path)
-        live_remote = _drive_find_file(live) if drive_service is not None else None
-        backup_remote = _drive_find_file(backup) if (drive_service is not None and backup) else None
+        pending = os.path.abspath(path) in DRIVE_PENDING_SYNC
         err = DRIVE_LAST_SYNC_ERROR.get(live) or DRIVE_LAST_SYNC_ERROR.get(backup, "")
         rows.append({
             "File": label,
             "Local": "OK" if local_exists else "Missing",
-            "Live in Drive": "YES" if live_remote else "NO",
-            "Backup in Drive": "YES" if backup_remote else "NO",
+            "Drive Status": "Pending" if pending else ("Synced" if DRIVE_LAST_SYNC.get(live) else "Not yet synced"),
             "Last Sync": DRIVE_LAST_SYNC.get(live, "-"),
             "Error": err or "",
         })
@@ -527,40 +686,20 @@ def render_google_drive_status():
 
     with st.sidebar.expander("☁️ Google Drive Backup Status", expanded=False):
         if drive_service is None:
-            st.error("Google Drive is NOT connected.")
+            st.error("Google Drive is NOT connected. Local data is still being saved.")
             st.code(DRIVE_CONNECTION_ERROR or "No connection error was captured.")
             st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
         else:
-            st.success("Google Drive is connected.")
-            try:
-                folder = drive_service.files().get(
-                    fileId=GOOGLE_DRIVE_FOLDER_ID,
-                    fields="id,name,mimeType,parents",
-                    supportsAllDrives=True,
-                ).execute()
-                st.write(f"**Folder:** {folder.get('name', '-')}")
-                st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
-            except Exception as e:
-                st.error(f"Folder access failed: {type(e).__name__}: {e}")
+            st.success("Google Drive backup is connected.")
+            st.caption("Normal user actions use local persistent files. Google Drive is updated automatically every hour.")
 
-        if st.button("🔄 Test / Force Sync All Files", key="force_drive_sync_all"):
+        if st.button("🔄 Save All Data to Google Drive Now", key="force_drive_sync_all"):
             if drive_service is None:
-                st.error("Cannot sync because Google Drive is not connected.")
+                st.error("Cannot sync because Google Drive is not connected. Local data remains safe on disk.")
             else:
                 results = []
-                with st.spinner("Uploading workbooks to Google Drive..."):
-                    for label, path in [
-                        ("HR Leave Requests", HR_LEAVE_PATH),
-                        ("HR Daily Rates", HR_DAILY_RATES_PATH),
-                        ("Store Transactions", STORE_DEDUCTION_PATH),
-                        ("Store Items", STORE_ITEMS_PATH),
-                        ("HR Employee Records", HR_EMPLOYEES_PATH),
-                        ("HR Portal Leave Records", HR_PORTAL_LEAVE_PATH),
-                        ("Employee Items", EMPLOYEE_ITEMS_PATH),
-                        ("Item Check-ins", ITEM_CHECKIN_PATH),
-                    ]:
-                        ok = _sync_saved_file_to_drive_now(path)
-                        results.append((label, ok))
+                with st.spinner("Saving all local data to Google Drive..."):
+                    results = _force_sync_all_drive_files()
                 for label, ok in results:
                     st.write(("✅ " if ok else "❌ ") + label)
                 st.rerun()
@@ -568,7 +707,10 @@ def render_google_drive_status():
         rows = _drive_status_rows()
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         pending = len(DRIVE_PENDING_SYNC)
-        st.caption(f"Every successful software save is queued automatically. Pending Drive uploads: {pending}. Local saves do not wait for Google Drive.")
+        st.caption(
+            f"Pending Drive uploads: {pending}. Local saves never wait for Google Drive. "
+            f"Automatic backup interval: {DRIVE_AUTO_SYNC_INTERVAL_SECONDS // 60} minutes."
+        )
 
 @st.cache_resource(show_spinner=False)
 def _initialise_drive_storage_once():
@@ -589,6 +731,11 @@ def _initialise_drive_storage_once():
         except Exception as e:
             print(f"Critical Drive initialisation failed for {os.path.basename(path)}: {e}")
     print("Critical Drive workbooks initialised once for this Streamlit server process.")
+    _restore_drive_sync_state()
+    # Existing local files are authoritative during the current working session.
+    # Only missing/empty files are restored from Drive here, preventing an older Drive
+    # copy from overwriting local work that has not yet been backed up.
+    _start_drive_background_worker()
     return True
 
 def initialise_drive_storage():
@@ -5840,7 +5987,7 @@ def save_all_hr_leave(records, sync=True):
     pd.DataFrame(rows, columns=HR_LEAVE_COLUMNS).to_excel(HR_LEAVE_PATH, index=False, engine="openpyxl")
     _set_data_cache("_hr_leave_cache", list(records))
     if sync:
-        backup_ok = _sync_saved_file_to_drive_now(HR_LEAVE_PATH)
+        backup_ok = sync_saved_file_to_drive(HR_LEAVE_PATH)
         if not backup_ok:
             print("WARNING: HR Leave Settlement local save succeeded, but Google Drive backup did not complete.")
 
