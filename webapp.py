@@ -9753,7 +9753,41 @@ elif role == "Work Order Manager":
             with st.form(f"wo_mgr_new_req_v{form_version}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 with c1:
-                    en = st.text_input("👤 Employee Name", key=f"wo_mgr_en_v{form_version}")
+                    employee_source = st.radio(
+                        "👤 Employee Source",
+                        ["Registered Employee", "Manual Employee"],
+                        horizontal=True,
+                        key=f"wo_mgr_employee_source_v{form_version}",
+                    )
+                    registered_employee = None
+                    if employee_source == "Registered Employee":
+                        registered = [
+                            e for e in _hrp_load_employees()
+                            if str(e.get("status", "Active")).strip().casefold() == "active"
+                            and str(e.get("name", "")).strip()
+                        ]
+                        dept_filtered = [
+                            e for e in registered
+                            if str(e.get("department", "")).strip().casefold() == str(dept_name).strip().casefold()
+                        ]
+                        if dept_filtered:
+                            registered = dept_filtered
+                        registered = sorted(registered, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
+                        if registered:
+                            labels = [f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}" for e in registered]
+                            selected_label = st.selectbox("Registered Employee", labels, key=f"wo_mgr_registered_emp_v{form_version}")
+                            registered_employee = {label: emp for label, emp in zip(labels, registered)}.get(selected_label)
+                            en = str((registered_employee or {}).get("name", "")).strip()
+                            request_dept = str((registered_employee or {}).get("department", dept_name)).strip() or dept_name
+                            if registered_employee:
+                                st.caption(f"Employee ID: {registered_employee.get('emp_id', '-')} · Department: {request_dept}")
+                        else:
+                            st.warning("No active registered employees found for this department. You can use Manual Employee instead.")
+                            en = ""
+                            request_dept = dept_name
+                    else:
+                        en = st.text_input("👤 Employee Name", key=f"wo_mgr_en_v{form_version}")
+                        request_dept = dept_name
                     rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"wo_mgr_rt_v{form_version}")
                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"wo_mgr_ct_v{form_version}")
                     amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"wo_mgr_req_amt_v{form_version}")
@@ -9773,7 +9807,7 @@ elif role == "Work Order Manager":
                                 with open(file_path, "wb") as out: out.write(f.getbuffer())
                                 att_list.append(fn)
                                 _upload_to_drive_bg(file_path, fn)
-                        payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                        payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
                         st.session_state["wo_mgr_new_req_form_version"] = form_version + 1
@@ -9905,7 +9939,41 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     with st.form(f"new_req_v{form_version}", clear_on_submit=False):
                         c1, c2 = st.columns(2)
                         with c1:
-                            en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
+                            employee_source = st.radio(
+                                "👤 Employee Source",
+                                ["Registered Employee", "Manual Employee"],
+                                horizontal=True,
+                                key=f"employee_source_v{form_version}",
+                            )
+                            registered_employee = None
+                            if employee_source == "Registered Employee":
+                                registered = [
+                                    e for e in _hrp_load_employees()
+                                    if str(e.get("status", "Active")).strip().casefold() == "active"
+                                    and str(e.get("name", "")).strip()
+                                ]
+                                dept_filtered = [
+                                    e for e in registered
+                                    if str(e.get("department", "")).strip().casefold() == str(dept_name).strip().casefold()
+                                ]
+                                if dept_filtered:
+                                    registered = dept_filtered
+                                registered = sorted(registered, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
+                                if registered:
+                                    labels = [f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}" for e in registered]
+                                    selected_label = st.selectbox("Registered Employee", labels, key=f"registered_emp_v{form_version}")
+                                    registered_employee = {label: emp for label, emp in zip(labels, registered)}.get(selected_label)
+                                    en = str((registered_employee or {}).get("name", "")).strip()
+                                    request_dept = str((registered_employee or {}).get("department", dept_name)).strip() or dept_name
+                                    if registered_employee:
+                                        st.caption(f"Employee ID: {registered_employee.get('emp_id', '-')} · Department: {request_dept}")
+                                else:
+                                    st.warning("No active registered employees found for this department. You can use Manual Employee instead.")
+                                    en = ""
+                                    request_dept = dept_name
+                            else:
+                                en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
+                                request_dept = dept_name
                             rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
                             ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
                             amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
@@ -9925,7 +9993,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                         with open(file_path, "wb") as out: out.write(f.getbuffer())
                                         att_list.append(fn)
                                         _upload_to_drive_bg(file_path, fn)
-                                payload = {"id": nid, "emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                                payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                                 save_record_to_excel(payload)
                                 log_action("CREATED", nid)
                                 st.session_state["new_req_form_version"] = form_version + 1
