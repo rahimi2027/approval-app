@@ -6821,6 +6821,126 @@ def render_leaver_clearance_payroll(user_name):
 
     save_all_leaver_clearances(records)
 
+def render_director_leaver_payroll_portal(director_name):
+    """Dedicated Director approval screen for Payroll leaver Additions/Deductions.
+    These requests are deliberately kept separate from the normal Addition/Deduction
+    queue so approval always updates the linked leaver-clearance record.
+    """
+    st.subheader("🧾 Director Approval — Leaver Payroll")
+    st.caption("Approve or reject Payroll Additions/Deductions raised during employee leaver clearance. Every decision updates both the request and the linked leaver clearance.")
+
+    requests = load_records_from_excel(force=True)
+    leaver_requests = [
+        r for r in requests
+        if str(r.get("category", "")).strip().casefold() == "leaver payroll adjustment"
+    ]
+
+    def linked_clearance_ids(req):
+        desc = str(req.get("desc", ""))
+        m = re.search(r"Leaver Clearance\s+(LC-\d+)", desc, flags=re.I)
+        return [m.group(1)] if m else []
+
+    def set_request_status(req_id, new_status, comments=""):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        records_now = load_records_from_excel(force=True)
+        target = None
+        for r in records_now:
+            if str(r.get("id", "")) == str(req_id):
+                target = r
+                break
+        if target is None:
+            st.error(f"Request #{req_id} could not be found in the live request register.")
+            return
+
+        old_status = str(target.get("status", "pending")).strip().lower()
+        target["status"] = new_status
+        target["decision_by"] = director_name
+        target["decision_date"] = now
+        target["director_comments"] = str(comments or "").strip()
+        if new_status == "approved":
+            target["approved_by"] = director_name
+            target["approved_date"] = now
+            target["rejection_reason"] = ""
+        elif new_status == "rejected":
+            target["rejection_reason"] = str(comments or "").strip()
+        save_all_records(records_now)
+
+        # IMPORTANT: immediately synchronize the linked permanent leaver-clearance record.
+        clearance_ids = linked_clearance_ids(target)
+        clearance_records = load_leaver_clearances(force=True)
+        for clearance in clearance_records:
+            if str(clearance.get("clearance_id", "")) in clearance_ids:
+                _sync_clearance_payroll_status(clearance)
+                save_all_leaver_clearances(clearance_records)
+                break
+
+        log_action(
+            "LEAVER_PAYROLL_DIRECTOR_DECISION",
+            req_id,
+            old_data={"status": old_status},
+            new_data={"status": new_status, "decision_by": director_name},
+            decision_by=director_name,
+            decision_date=now,
+        )
+        st.success(f"Payroll request #{req_id} has been {new_status.title()} and the linked leaver clearance has been updated.")
+        st.rerun()
+
+    pending = [r for r in leaver_requests if str(r.get("status", "")).casefold() == "pending"]
+    approved = [r for r in leaver_requests if str(r.get("status", "")).casefold() == "approved"]
+    rejected = [r for r in leaver_requests if str(r.get("status", "")).casefold() == "rejected"]
+
+    t_pending, t_approved, t_rejected = st.tabs(["⏳ Pending", "✅ Approved", "❌ Rejected"])
+
+    def show_request(req, current_status):
+        rid = req.get("id")
+        amount = float(req.get("amount", 0) or 0)
+        clearance_id = linked_clearance_ids(req)
+        with st.expander(f"{'🟡' if current_status == 'pending' else '🟢' if current_status == 'approved' else '🔴'} #{rid} | {req.get('emp_name')} | {req.get('type')} | £{amount:.2f} | {clearance_id[0] if clearance_id else '—'}", expanded=current_status == "pending"):
+            st.write(f"**Employee:** {req.get('emp_name')}  ")
+            st.write(f"**Clearance:** {clearance_id[0] if clearance_id else 'Not linked'}  ")
+            st.write(f"**Type:** {req.get('type')}  ")
+            st.write(f"**Amount:** £{amount:,.2f}  ")
+            st.write(f"**Submitted by:** {get_submitted_by(req) or req.get('submitted_by', '—')}  ")
+            st.info(f"**Reason:** {req.get('desc', '')}")
+            if req.get("director_comments"):
+                st.write(f"**Director comments:** {req.get('director_comments')}")
+            if current_status == "pending":
+                comments = st.text_area("Director comments / decision note", key=f"lc_pay_dir_comm_{rid}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ APPROVE PAYROLL", key=f"lc_pay_dir_approve_{rid}", type="primary", width="stretch"):
+                        set_request_status(rid, "approved", comments)
+                with c2:
+                    if st.button("❌ REJECT PAYROLL", key=f"lc_pay_dir_reject_{rid}", width="stretch"):
+                        if not comments.strip():
+                            st.error("A rejection reason is required.")
+                        else:
+                            set_request_status(rid, "rejected", comments)
+            elif current_status == "approved":
+                st.success(f"Approved by {req.get('decision_by', 'Director')} on {req.get('decision_date', '—')}")
+            else:
+                st.error(f"Rejected by {req.get('decision_by', 'Director')} on {req.get('decision_date', '—')}")
+
+    with t_pending:
+        st.metric("Pending Payroll Adjustments", len(pending))
+        if not pending:
+            st.success("✅ No pending Leaver Payroll adjustments.")
+        for req in reversed(pending):
+            show_request(req, "pending")
+    with t_approved:
+        st.metric("Approved Payroll Adjustments", len(approved))
+        if not approved:
+            st.info("No approved Leaver Payroll adjustments yet.")
+        for req in reversed(approved):
+            show_request(req, "approved")
+    with t_rejected:
+        st.metric("Rejected Payroll Adjustments", len(rejected))
+        if not rejected:
+            st.info("No rejected Leaver Payroll adjustments yet.")
+        for req in reversed(rejected):
+            show_request(req, "rejected")
+
+
 def render_leaver_clearance_final():
     st.subheader("📋 Final Leaver Clearance Register")
     st.caption("Permanent, searchable record of HR, Director, Store and Payroll clearance. Reports can be downloaded at any time.")
@@ -9934,7 +10054,7 @@ st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 
 change_my_password_form()
 
-all_live_requests = load_records_from_excel()
+all_live_requests = load_records_from_excel(force=True)
 CATEGORIES = load_categories()
 
 st.divider()
@@ -10793,6 +10913,7 @@ elif role == "Director":
     ))
     director_tab_labels = [
         "➕ Addition & Deduction",
+        "🧾 Leaver Payroll",
         "👥 HR Leave Settlement",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
@@ -10806,20 +10927,22 @@ elif role == "Director":
     director_addition_tab = director_tabs[0]
     if director_hr_access_enabled:
         director_hr_access_tab = director_tabs[1]
+        director_leaver_payroll_tab = director_tabs[2]
+        director_hr_leave_tab = director_tabs[3]
+        director_store_ded_tab = director_tabs[4]
+        director_store_ret_tab = director_tabs[5]
+        director_employee_items_tab = director_tabs[6]
+        director_work_order_tab = director_tabs[7]
+        director_inspector_tab = director_tabs[8]
+    else:
+        director_hr_access_tab = None
+        director_leaver_payroll_tab = director_tabs[1]
         director_hr_leave_tab = director_tabs[2]
         director_store_ded_tab = director_tabs[3]
         director_store_ret_tab = director_tabs[4]
         director_employee_items_tab = director_tabs[5]
         director_work_order_tab = director_tabs[6]
         director_inspector_tab = director_tabs[7]
-    else:
-        director_hr_access_tab = None
-        director_hr_leave_tab = director_tabs[1]
-        director_store_ded_tab = director_tabs[2]
-        director_store_ret_tab = director_tabs[3]
-        director_employee_items_tab = director_tabs[4]
-        director_work_order_tab = director_tabs[5]
-        director_inspector_tab = director_tabs[6]
     with director_addition_tab:
         st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -10950,6 +11073,9 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
+    with director_leaver_payroll_tab:
+        render_director_leaver_payroll_portal(full_name)
+
     if director_hr_access_enabled and director_hr_access_tab is not None:
         with director_hr_access_tab:
             render_director_hr_access_portal(user_info)
