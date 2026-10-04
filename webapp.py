@@ -6424,21 +6424,69 @@ def _build_final_leaver_clearance_pdf(rec):
     except Exception: return b""
 
 
+def _save_leaver_clearance_pdf(rec):
+    """Create a persistent PDF copy so the completed clearance can be downloaded again later."""
+    pdf = _build_final_leaver_clearance_pdf(rec)
+    if not pdf:
+        return ""
+    try:
+        os.makedirs(PDF_DIR, exist_ok=True)
+        path = os.path.join(PDF_DIR, f"Leaver_Clearance_{rec.get('clearance_id')}.pdf")
+        with open(path, "wb") as f:
+            f.write(pdf)
+        return path
+    except Exception:
+        return ""
+
+
 def render_leaver_clearance_hr():
     st.subheader("🔗 Employee Leaver Clearance — HR")
-    st.caption("HR starts the company-wide clearance. Director approval is required for any HR holiday settlement before Store is released.")
-    employees = st.session_state.get("hrp_employees", [])
-    for emp in [e for e in employees if str(e.get("status", "")).casefold() == "left" and e.get("leaving_date")]: _ensure_leaver_clearance(emp, st.session_state.get("user_info", {}).get("full_name", "HR"))
+    st.caption("HR starts the company-wide clearance. The clearance record is permanent and remains searchable after the employee has left and been fully cleared.")
+
+    # IMPORTANT: use the persisted HR register, not session state. This ensures a
+    # leaver already declared in HR is recreated/loaded after a fresh login or restart.
+    employees = _hrp_load_employees()
+    user_name = st.session_state.get("user_info", {}).get("full_name", "HR")
+    for emp in [e for e in employees if str(e.get("status", "")).casefold() == "left" and e.get("leaving_date")]:
+        _ensure_leaver_clearance(emp, user_name)
+
     records = load_leaver_clearances(force=True)
-    if not records: st.info("No employee leaver clearances have been created yet. Record an employee as Left in Employee Leaving to start one."); return
-    m1,m2,m3,m4=st.columns(4); m1.metric("Open",sum(str(r.get("final_status","Open")).casefold()!="cleared" for r in records)); m2.metric("HR",sum(_clearance_hr_ready(r) for r in records)); m3.metric("Store",sum(_clearance_store_ready(r) for r in records)); m4.metric("Fully Cleared",sum(str(r.get("final_status","")).casefold()=="cleared" for r in records))
-    for rec in reversed(records):
-        _sync_clearance_payroll_status(rec); status=str(rec.get("final_status","Open")).casefold()
+    if not records:
+        st.info("No employee leaver clearances have been created yet. Record an employee as Left in Employee Leaving to start one.")
+        return
+
+    # Search the permanent register at any time, including fully-cleared leavers.
+    q = st.text_input("🔎 Search clearance", placeholder="Name, Employee ID or Clearance ID (e.g. LC-000125)", key="leaver_clearance_search")
+    status_filter = st.selectbox("Status", ["All", "Open", "Fully Cleared"], key="leaver_clearance_status_filter")
+    qn = str(q or "").strip().casefold()
+    filtered = []
+    for r in records:
+        hay = " ".join([str(r.get("clearance_id", "")), str(r.get("emp_name", "")), str(r.get("employee_id", "")), str(r.get("emp_dept", ""))]).casefold()
+        is_cleared = str(r.get("final_status", "")).casefold() == "cleared"
+        if qn and qn not in hay:
+            continue
+        if status_filter == "Open" and is_cleared:
+            continue
+        if status_filter == "Fully Cleared" and not is_cleared:
+            continue
+        filtered.append(r)
+
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Open",sum(str(r.get("final_status","Open")).casefold()!="cleared" for r in records))
+    m2.metric("HR",sum(_clearance_hr_ready(r) for r in records))
+    m3.metric("Store",sum(_clearance_store_ready(r) for r in records))
+    m4.metric("Fully Cleared",sum(str(r.get("final_status","")).casefold()=="cleared" for r in records))
+    st.caption(f"Showing {len(filtered)} of {len(records)} permanent clearance record(s).")
+
+    for rec in reversed(filtered):
+        _sync_clearance_payroll_status(rec)
+        status=str(rec.get("final_status","Open")).casefold()
         with st.expander(f"{'🟢' if status=='cleared' else '🟡'} {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}", expanded=status!="cleared"):
-            a,b,c,d,e=st.columns(5); a.metric("HR",rec.get("hr_status")); b.metric("Director",rec.get("holiday_settlement_status")); c.metric("Store",rec.get("store_status")); d.metric("Payroll",rec.get("payroll_status")); e.metric("Final",rec.get("final_status"))
+            a,b,c,d,e=st.columns(5)
+            a.metric("HR",rec.get("hr_status")); b.metric("Director",rec.get("holiday_settlement_status")); c.metric("Store",rec.get("store_status")); d.metric("Payroll",rec.get("payroll_status")); e.metric("Final",rec.get("final_status"))
             st.write(f"**Leaving:** {rec.get('leaving_date')} · **Reason:** {rec.get('leaving_reason','')}")
             st.write(f"**Holiday:** {float(rec.get('holiday_balance',0) or 0):.1f} days · Settlement #{rec.get('holiday_settlement_id') or '—'} · £{float(rec.get('holiday_settlement_amount',0) or 0):,.2f}")
-            st.write(f"**Store:** Outstanding £{float(rec.get('outstanding_item_value',0) or 0):,.2f} · Check-in #{rec.get('store_checkin_id') or '—'}")
+            st.write(f"**Store:** Outstanding £{float(rec.get('outstanding_item_value',0) or 0):,.2f} · Check-in #{rec.get('store_checkin_id') or '—'} · Deduction #{rec.get('store_deduction_id') or '—'}")
             st.write(f"**Payroll:** Requests {rec.get('payroll_request_ids') or 'None'} · Approved additions £{float(rec.get('payroll_total_addition',0) or 0):,.2f} · deductions £{float(rec.get('payroll_total_deduction',0) or 0):,.2f}")
             if status == "cleared":
                 st.success(f"Fully cleared by {rec.get('final_cleared_by')} on {rec.get('final_cleared_at')}")
@@ -6447,6 +6495,8 @@ def render_leaver_clearance_hr():
                 if not _clearance_store_ready(rec): st.info("📦 Store clearance is still outstanding.")
                 if not _clearance_payroll_ready(rec): st.info("🧾 Payroll clearance is still outstanding.")
             pdf = _build_final_leaver_clearance_pdf(rec)
+            if status == "cleared":
+                _save_leaver_clearance_pdf(rec)
             st.download_button("📄 Download Leaver Clearance Form", data=pdf, file_name=f"Leaver_Clearance_{rec.get('clearance_id')}.pdf", mime="application/pdf", disabled=not bool(pdf), key=f"lc_hr_pdf_{rec.get('clearance_id')}")
 
 
@@ -6459,7 +6509,8 @@ def render_leaver_clearance_store(user_name):
     visible=False
     for rec in reversed(records):
         if str(rec.get("final_status","")).casefold()=="cleared": continue
-        if not _clearance_director_hr_ready(rec): continue
+        # Store sees the leaver immediately after HR declares them. Director approval
+        # only controls final Store sign-off; it does not hide the employee from Store.
         visible=True; emp_id=rec.get("employee_id",""); outstanding=get_employee_outstanding_items(emp_id,all_items); value=sum(float(r.get("qty_outstanding",0) or 0)*float(r.get("unit_price",0) or 0) for r in outstanding); emp_checkins=[c for c in checkins if str(c.get("employee_id","")).casefold()==str(emp_id).casefold()]; latest=emp_checkins[-1] if emp_checkins else None
         rec["outstanding_item_value"]=value
         if latest: rec["store_checkin_id"]=str(latest.get("id","")); rec["store_deduction_id"]=str(latest.get("deduction_request_id","")); rec["store_return_id"]=str(latest.get("return_request_id",""))
@@ -6469,16 +6520,19 @@ def render_leaver_clearance_store(user_name):
             a,b,c=st.columns(3); a.metric("Property", "Outstanding" if outstanding else "None"); b.metric("Value",f"£{value:,.2f}"); c.metric("Status",rec.get("store_status"))
             if outstanding: st.dataframe(pd.DataFrame([{"Item":r.get("item_name",""),"Qty Outstanding":float(r.get("qty_outstanding",0) or 0),"Unit Price":f"£{float(r.get('unit_price',0) or 0):,.2f}","Value":f"£{float(r.get('qty_outstanding',0) or 0)*float(r.get('unit_price',0) or 0):,.2f}"} for r in outstanding]),width="stretch",hide_index=True); st.info("Use Leaver Item Check-in to record returned quantities. Any unreturned items continue through Store's Director approval process.")
             else: st.success("✅ No company property remains outstanding.")
+            if not _clearance_director_hr_ready(rec):
+                st.warning("⏳ HR has declared this employee as a leaver. Store can review/record returned property and raise any required Store Deduction now; final Store clearance will be available after the HR holiday stage is approved or marked Not Required.")
             if not outstanding and str(rec.get("store_status","")).casefold() not in {"completed","cleared"}:
-                if st.button("✅ Clear Store",key=f"store_clear_{rec.get('clearance_id')}",type="primary",width="stretch"):
-                    now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"); rec["store_status"]="Completed"; rec["store_completed_by"]=user_name; rec["store_completed_at"]=now; save_all_leaver_clearances(records); log_action("LEAVER_STORE_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec); st.success("Store clearance completed."); st.rerun()
+                if _clearance_director_hr_ready(rec):
+                    if st.button("✅ Clear Store",key=f"store_clear_{rec.get('clearance_id')}",type="primary",width="stretch"):
+                        now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"); rec["store_status"]="Completed"; rec["store_completed_by"]=user_name; rec["store_completed_at"]=now; save_all_leaver_clearances(records); log_action("LEAVER_STORE_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec); st.success("Store clearance completed."); st.rerun()
             elif str(rec.get("store_status","")).casefold() in {"completed","cleared"}: st.success(f"Store cleared by {rec.get('store_completed_by')} on {rec.get('store_completed_at')}")
     if not visible: st.info("No leavers are currently waiting for Store clearance.")
 
 
 def render_leaver_clearance_payroll(user_name):
     st.subheader("🧾 Leaver Clearance — Payroll")
-    st.caption("Payroll receives every Store-cleared leaver and can raise final-pay additions or deductions linked to the clearance. These use the existing Director approval workflow.")
+    st.caption("Payroll receives every HR-declared leaver immediately and can raise final-pay additions or deductions when needed. These use the existing Director approval workflow; final Payroll sign-off is still subject to the overall clearance workflow.")
 
     # Make sure Payroll can see the same master clearance records even if HR/Store
     # has not opened the clearance screen during this session.
@@ -6491,7 +6545,9 @@ def render_leaver_clearance_payroll(user_name):
     requests=load_records_from_excel(force=True)
     for rec in reversed(records):
         _sync_clearance_payroll_status(rec)
-        if not _clearance_store_ready(rec) or str(rec.get("final_status","")).casefold()=="cleared": continue
+        # Payroll can review and raise an Addition/Deduction as soon as HR declares
+        # the leaver. Store completion is required before the overall clearance can finish.
+        if str(rec.get("final_status","")).casefold()=="cleared": continue
         with st.expander(f"🧾 {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",expanded=True):
             a,b,c=st.columns(3); a.metric("Store",rec.get("store_status")); b.metric("Payroll",rec.get("payroll_status")); c.metric("Final",rec.get("final_status"))
             st.write(f"**HR holiday settlement:** {rec.get('holiday_settlement_status')} · £{float(rec.get('holiday_settlement_amount',0) or 0):,.2f}")
@@ -6509,25 +6565,46 @@ def render_leaver_clearance_payroll(user_name):
                 else:
                     _create_payroll_clearance_request(rec,user_name,typ,amount,reason.strip()); save_all_leaver_clearances(records); st.success("Payroll adjustment sent to Director for approval."); st.rerun()
             _sync_clearance_payroll_status(rec)
-            if not linked and st.button("✅ Clear Payroll — No Further Adjustment",key=f"plc_clear_{rec.get('clearance_id')}",type="primary"):
+            store_ready = _clearance_store_ready(rec)
+            if not store_ready:
+                st.info("📦 Payroll adjustment work can be raised now. Final Payroll clearance will complete once Store has also cleared the employee.")
+            if not linked and store_ready and st.button("✅ Clear Payroll — No Further Adjustment",key=f"plc_clear_{rec.get('clearance_id')}",type="primary"):
                 rec["payroll_status"]="Not Required"; rec["payroll_completed_by"]=user_name; rec["payroll_completed_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S"); save_all_leaver_clearances(records); _maybe_finalize_clearance(rec, records); log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec); st.success("Payroll clearance completed."); st.rerun()
-            elif linked and _clearance_payroll_ready(rec) and st.button("✅ Complete Payroll Clearance",key=f"plc_complete_{rec.get('clearance_id')}",type="primary"):
+            elif linked and store_ready and _clearance_payroll_ready(rec) and st.button("✅ Complete Payroll Clearance",key=f"plc_complete_{rec.get('clearance_id')}",type="primary"):
                 rec["payroll_completed_by"]=user_name; rec["payroll_completed_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S"); rec["payroll_status"]="Approved"; save_all_leaver_clearances(records); _maybe_finalize_clearance(rec, records); log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec); st.success("Payroll clearance completed."); st.rerun()
     save_all_leaver_clearances(records)
 
 
 def render_leaver_clearance_final():
     st.subheader("📋 Final Leaver Clearance Register")
-    st.caption("Permanent record of HR, Director, Store and Payroll clearance.")
+    st.caption("Permanent, searchable record of HR, Director, Store and Payroll clearance. Reports can be downloaded at any time.")
     records=load_leaver_clearances(force=True)
-    for rec in records: _sync_clearance_payroll_status(rec)
-    for rec in reversed(records):
+    if not records:
+        st.info("No leaver clearance records exist yet.")
+        return
+    q=st.text_input("🔎 Search permanent clearance register", placeholder="Name, Employee ID or Clearance ID", key="final_leaver_clearance_search")
+    status_filter=st.selectbox("Status", ["All", "Open", "Fully Cleared"], key="final_leaver_clearance_status")
+    qn=str(q or "").strip().casefold()
+    filtered=[]
+    for rec in records:
+        hay=" ".join([str(rec.get("clearance_id","")),str(rec.get("emp_name","")),str(rec.get("employee_id","")),str(rec.get("emp_dept",""))]).casefold()
+        cleared=str(rec.get("final_status","")).casefold()=="cleared"
+        if qn and qn not in hay: continue
+        if status_filter=="Open" and cleared: continue
+        if status_filter=="Fully Cleared" and not cleared: continue
+        filtered.append(rec)
+    st.caption(f"Showing {len(filtered)} of {len(records)} clearance record(s).")
+    for rec in reversed(filtered):
+        _sync_clearance_payroll_status(rec)
         if _clearance_all_ready(rec) and str(rec.get("final_status","")).casefold()!="cleared":
             rec["final_status"]="Cleared"; rec["final_cleared_by"]="System"; rec["final_cleared_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_all_leaver_clearances(records); log_action("LEAVER_FINAL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
-        with st.expander(f"{'🟢' if str(rec.get('final_status')).casefold()=='cleared' else '🟡'} {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('leaving_date')}",expanded=False):
+        if str(rec.get("final_status","")).casefold()=="cleared":
+            _save_leaver_clearance_pdf(rec)
+        with st.expander(f"{'🟢' if str(rec.get('final_status')).casefold()=='cleared' else '🟡'} {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",expanded=False):
             st.write(f"HR: **{rec.get('hr_status')}** · Director: **{rec.get('holiday_settlement_status')}** · Store: **{rec.get('store_status')}** · Payroll: **{rec.get('payroll_status')}** · Final: **{rec.get('final_status')}**")
-            pdf=_build_final_leaver_clearance_pdf(rec); st.download_button("📄 Download Final Clearance Form",data=pdf,file_name=f"Leaver_Clearance_{rec.get('clearance_id')}.pdf",mime="application/pdf",disabled=not bool(pdf),key=f"final_lc_pdf_{rec.get('clearance_id')}")
+            pdf=_build_final_leaver_clearance_pdf(rec)
+            st.download_button("📄 Download Final Clearance Form",data=pdf,file_name=f"Leaver_Clearance_{rec.get('clearance_id')}.pdf",mime="application/pdf",disabled=not bool(pdf),key=f"final_lc_pdf_{rec.get('clearance_id')}")
     save_all_leaver_clearances(records)
 
 
