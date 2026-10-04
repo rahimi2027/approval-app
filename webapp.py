@@ -6316,10 +6316,22 @@ def _sync_clearance_payroll_status(rec, records=None):
     rec["payroll_total_addition"] = additions
     rec["payroll_total_deduction"] = deductions
     statuses = {str(r.get("status", "pending")).casefold() for r in reqs}
-    if "pending" in statuses: rec["payroll_status"] = "Pending Director Approval"
-    elif "approved" in statuses: rec["payroll_status"] = "Approved"
-    elif statuses and statuses.issubset({"rejected"}): rec["payroll_status"] = "Rejected"
-    else: rec["payroll_status"] = "Pending"
+
+    # Once Payroll has explicitly completed the clearance, do not downgrade the
+    # master clearance back to Approved/Rejected on the next page refresh. If a
+    # brand-new pending adjustment is later raised, that pending request correctly
+    # moves Payroll back to Pending Director Approval.
+    if str(rec.get("payroll_status", "")).casefold() == "cleared" and "pending" not in statuses:
+        return rec
+
+    if "pending" in statuses:
+        rec["payroll_status"] = "Pending Director Approval"
+    elif "approved" in statuses:
+        rec["payroll_status"] = "Approved"
+    elif statuses and statuses.issubset({"rejected"}):
+        rec["payroll_status"] = "Rejected"
+    else:
+        rec["payroll_status"] = "Pending"
     return rec
 
 
@@ -6595,7 +6607,10 @@ def render_leaver_clearance_store(user_name):
 
 def render_leaver_clearance_payroll(user_name):
     st.subheader("🧾 Leaver Clearance — Payroll")
-    st.caption("Payroll receives every HR-declared leaver immediately and can raise final-pay additions or deductions when needed. These use the existing Director approval workflow; final Payroll sign-off is still subject to the overall clearance workflow.")
+    st.caption(
+        "Check the leaver's final pay. Choose Addition or Deduction if an adjustment is needed. "
+        "If nothing is required, choose Everything Clear and complete Payroll clearance."
+    )
 
     # Make sure Payroll can see the same master clearance records even if HR/Store
     # has not opened the clearance screen during this session.
@@ -6603,81 +6618,195 @@ def render_leaver_clearance_payroll(user_name):
         if str(emp.get("status", "")).casefold() == "left" and emp.get("leaving_date"):
             _ensure_leaver_clearance(emp, user_name)
 
-    records=load_leaver_clearances(force=True)
-    if not records: st.info("No leaver clearances exist yet."); return
-    requests=load_records_from_excel(force=True)
+    records = load_leaver_clearances(force=True)
+    if not records:
+        st.info("No leaver clearances exist yet.")
+        return
+
     for rec in reversed(records):
         _sync_clearance_payroll_status(rec)
-        # Payroll can review and raise an Addition/Deduction as soon as HR declares
-        # the leaver. Store completion is required before the overall clearance can finish.
-        if str(rec.get("final_status","")).casefold()=="cleared": continue
-        with st.expander(f"🧾 {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",expanded=True):
-            a,b,c=st.columns(3); a.metric("Store",rec.get("store_status")); b.metric("Payroll",rec.get("payroll_status")); c.metric("Final",rec.get("final_status"))
-            st.write(f"**HR holiday settlement:** {rec.get('holiday_settlement_status')} · £{float(rec.get('holiday_settlement_amount',0) or 0):,.2f}")
-            linked=_get_payroll_requests_for_clearance(rec)
-            if linked: st.dataframe(pd.DataFrame([{"Request":r.get("id"),"Type":r.get("type"),"Amount":f"£{float(r.get('amount',0) or 0):,.2f}","Status":r.get("status"),"Description":r.get("desc")} for r in linked]),width="stretch",hide_index=True)
-            else: st.info("No Payroll adjustment has been raised. If the final pay is already correct, use Clear Payroll below.")
+
+        if str(rec.get("final_status", "")).casefold() == "cleared":
+            continue
+
+        with st.expander(
+            f"🧾 {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",
+            expanded=True
+        ):
+            a, b, c = st.columns(3)
+            a.metric("Store", rec.get("store_status"))
+            b.metric("Payroll", rec.get("payroll_status"))
+            c.metric("Final", rec.get("final_status"))
+
+            st.write(
+                f"**HR holiday settlement:** {rec.get('holiday_settlement_status')} · "
+                f"£{float(rec.get('holiday_settlement_amount', 0) or 0):,.2f}"
+            )
+
+            linked = _get_payroll_requests_for_clearance(rec)
+            if linked:
+                st.dataframe(
+                    pd.DataFrame([
+                        {
+                            "Request": r.get("id"),
+                            "Type": r.get("type"),
+                            "Amount": f"£{float(r.get('amount', 0) or 0):,.2f}",
+                            "Status": r.get("status"),
+                            "Description": r.get("desc"),
+                        }
+                        for r in linked
+                    ]),
+                    width="stretch",
+                    hide_index=True,
+                )
+            else:
+                st.info(
+                    "No Payroll adjustment has been raised. If the final pay is already correct, "
+                    "select **Everything Clear — No Addition/Deduction** below."
+                )
+
+            linked_statuses = {
+                str(r.get("status", "pending")).casefold()
+                for r in linked
+            }
+            has_open_adjustment = bool(linked_statuses.intersection({"pending", "approved"}))
+
             with st.form(f"payroll_lc_form_{rec.get('clearance_id')}"):
-                typ=st.selectbox(
+                typ = st.selectbox(
                     "Payroll outcome",
-                    ["Everything Clear — No Addition/Deduction", "Addition", "Deduction"],
-                    key=f"plc_type_{rec.get('clearance_id')}"
+                    [
+                        "Everything Clear — No Addition/Deduction",
+                        "Addition",
+                        "Deduction",
+                    ],
+                    key=f"plc_type_{rec.get('clearance_id')}",
                 )
-                amount=st.number_input("Amount (£)",min_value=0.0,step=1.0,key=f"plc_amount_{rec.get('clearance_id')}")
-                reason=st.text_area(
-                    "Reason / confirmation",
-                    value="Final pay checked — no Payroll Addition or Deduction is required." if typ == "Everything Clear — No Addition/Deduction" else "",
-                    key=f"plc_reason_{rec.get('clearance_id')}"
+
+                # Amount and reason are only relevant when an adjustment is being raised.
+                if typ in {"Addition", "Deduction"}:
+                    amount = st.number_input(
+                        f"{typ} Amount (£)",
+                        min_value=0.0,
+                        step=1.0,
+                        format="%.2f",
+                        key=f"plc_amount_{rec.get('clearance_id')}",
+                    )
+                    reason = st.text_area(
+                        f"Reason for {typ}",
+                        key=f"plc_reason_{rec.get('clearance_id')}",
+                        placeholder=(
+                            f"Enter the reason for the Payroll {typ.lower()}, "
+                            "for example overtime, missing pay, or an authorised deduction."
+                        ),
+                    )
+                    submit_label = f"📤 Raise Payroll {typ} — Send to Director"
+                else:
+                    amount = 0.0
+                    reason = "Final pay checked — no Payroll Addition or Deduction is required."
+                    submit_label = "✅ Clear Payroll — No Addition/Deduction Required"
+
+                    if has_open_adjustment:
+                        st.warning(
+                            "An existing Payroll Addition/Deduction is still Pending or Approved. "
+                            "You must complete or resolve that adjustment before Payroll can be "
+                            "marked as having no adjustment."
+                        )
+
+                submitted = st.form_submit_button(
+                    submit_label,
+                    type="primary",
+                    disabled=(typ == "Everything Clear — No Addition/Deduction" and has_open_adjustment),
                 )
-                submitted=st.form_submit_button(
-                    "✅ Confirm Payroll Clear — Submit for Final Clearance" if typ == "Everything Clear — No Addition/Deduction" else "📤 Raise Payroll Adjustment",
-                    type="primary"
-                )
+
             if submitted:
                 if typ == "Everything Clear — No Addition/Deduction":
-                    # This is a valid Payroll outcome: no generic request is created.
+                    # Never delete an existing Payroll request just because the user
+                    # selected the no-adjustment option. Rejected requests remain in
+                    # the audit trail; pending/approved requests are blocked above.
                     rec["payroll_status"] = "Cleared"
-                    rec["payroll_request_ids"] = ""
                     rec["payroll_total_addition"] = 0.0
                     rec["payroll_total_deduction"] = 0.0
                     rec["payroll_completed_by"] = user_name
                     rec["payroll_completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
                     save_all_leaver_clearances(records)
                     _maybe_finalize_clearance(rec, records)
+
                     if str(rec.get("final_status", "")).casefold() == "cleared":
                         _save_leaver_clearance_pdf(rec)
-                    log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED", rec.get("clearance_id"), new_data=rec)
-                    st.success("Payroll cleared: no Addition or Deduction is required. The leaver has been submitted for the remaining/final clearance.")
+
+                    log_action(
+                        "LEAVER_PAYROLL_CLEARANCE_COMPLETED",
+                        rec.get("clearance_id"),
+                        new_data=rec,
+                    )
+                    st.success(
+                        "✅ Payroll cleared — no Addition or Deduction is required. "
+                        "The leaver can now proceed to final clearance."
+                    )
                     st.rerun()
+
                 else:
-                    # Addition/Deduction ALWAYS becomes a normal pending request for Director approval.
+                    # Addition/Deduction becomes a normal pending request for Director approval.
                     try:
-                        created = _create_payroll_clearance_request(rec, user_name, typ, amount, reason.strip())
+                        created = _create_payroll_clearance_request(
+                            rec,
+                            user_name,
+                            typ,
+                            amount,
+                            str(reason).strip(),
+                        )
                         save_all_leaver_clearances(records)
-                        st.success(f"{typ} Request #{created.get('id')} has been sent to the Director for approval.")
-                        st.info("Payroll remains pending until the Director approves or rejects this request.")
+                        st.success(
+                            f"✅ Payroll {typ} Request #{created.get('id')} has been sent "
+                            "to the Director for approval."
+                        )
+                        st.info(
+                            "Payroll remains pending until the Director approves or rejects "
+                            "this request."
+                        )
                         st.rerun()
                     except ValueError as exc:
                         st.error(str(exc))
                     except Exception as exc:
                         st.error(f"Unable to create the Payroll {typ} request: {exc}")
-            _sync_clearance_payroll_status(rec)
-            store_ready = _clearance_store_ready(rec)
-            if not store_ready:
-                st.info("📦 Payroll can be cleared independently. Store completion is only required before the overall Final Clearance can become Fully Cleared.")
-            if linked and _clearance_payroll_ready(rec) and str(rec.get("payroll_status","")).casefold() not in {"cleared"} and st.button("✅ Complete Payroll Clearance — Approved Adjustment",key=f"plc_complete_{rec.get('clearance_id')}",type="primary"):
-                rec["payroll_completed_by"]=user_name
-                rec["payroll_completed_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                rec["payroll_status"]="Cleared"
-                save_all_leaver_clearances(records)
-                _maybe_finalize_clearance(rec, records)
-                log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
-                st.success("Payroll clearance completed and recorded as Cleared.")
-                st.rerun()
-            elif str(rec.get("payroll_status","")).casefold()=="cleared":
-                st.success(f"✅ Payroll Cleared by {rec.get('payroll_completed_by')} on {rec.get('payroll_completed_at')}")
-    save_all_leaver_clearances(records)
 
+            # Refresh the status after any Director-approved/rejected request.
+            _sync_clearance_payroll_status(rec)
+
+            if not _clearance_store_ready(rec):
+                st.info(
+                    "📦 Payroll can be cleared independently. Store completion is only "
+                    "required before the overall Final Clearance can become Fully Cleared."
+                )
+
+            if linked and _clearance_payroll_ready(rec) and str(
+                rec.get("payroll_status", "")
+            ).casefold() not in {"cleared"}:
+                if st.button(
+                    "✅ Complete Payroll Clearance — Approved Adjustment",
+                    key=f"plc_complete_{rec.get('clearance_id')}",
+                    type="primary",
+                ):
+                    rec["payroll_completed_by"] = user_name
+                    rec["payroll_completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    rec["payroll_status"] = "Cleared"
+                    save_all_leaver_clearances(records)
+                    _maybe_finalize_clearance(rec, records)
+                    log_action(
+                        "LEAVER_PAYROLL_CLEARANCE_COMPLETED",
+                        rec.get("clearance_id"),
+                        new_data=rec,
+                    )
+                    st.success("✅ Payroll clearance completed and recorded as Cleared.")
+                    st.rerun()
+            elif str(rec.get("payroll_status", "")).casefold() == "cleared":
+                st.success(
+                    f"✅ Payroll Cleared by {rec.get('payroll_completed_by')} "
+                    f"on {rec.get('payroll_completed_at')}"
+                )
+
+    save_all_leaver_clearances(records)
 
 def render_leaver_clearance_final():
     st.subheader("📋 Final Leaver Clearance Register")
