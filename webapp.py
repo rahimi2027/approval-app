@@ -6410,16 +6410,58 @@ def _clearance_all_ready(rec):
 
 
 def _create_payroll_clearance_request(rec, user_name, trans_type, amount, reason):
+    """Create a normal generic Addition/Deduction request for Director approval."""
+    trans_type = str(trans_type or "").strip().title()
+    if trans_type not in {"Addition", "Deduction"}:
+        raise ValueError("Payroll adjustment must be Addition or Deduction.")
+    amount = float(amount or 0)
+    if amount <= 0:
+        raise ValueError("Payroll adjustment amount must be greater than £0.")
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValueError("A reason is required for a Payroll Addition/Deduction.")
+
     requests = load_records_from_excel(force=True)
+    # Do not accidentally create the same leaver adjustment twice from a rerun.
+    clearance_id = str(rec.get("clearance_id", "")).strip()
+    for existing in requests:
+        if (str(existing.get("category", "")).casefold() == "leaver payroll adjustment"
+                and clearance_id
+                and clearance_id in str(existing.get("desc", ""))
+                and str(existing.get("type", "")).casefold() == trans_type.casefold()
+                and str(existing.get("status", "")).casefold() in {"pending", "approved"}):
+            raise ValueError(f"A {trans_type} for {clearance_id} is already pending/approved (Request #{existing.get('id')}).")
+
     new_id = get_next_id(requests)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    request = {"id": new_id, "emp_name": rec.get("emp_name", ""), "dept": "Payroll Department", "type": trans_type, "category": "Leaver Payroll Adjustment", "date": str(rec.get("leaving_date", date.today())), "amount": float(amount), "manager": "Payroll", "desc": f"Leaver Clearance {rec.get('clearance_id')}: {reason}", "attachment_name": "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+    request = {
+        "id": new_id,
+        "emp_name": rec.get("emp_name", ""),
+        "dept": "Payroll Department",
+        "type": trans_type,
+        "category": "Leaver Payroll Adjustment",
+        "date": str(rec.get("leaving_date", date.today())),
+        "amount": amount,
+        "manager": "Payroll",
+        "desc": f"Leaver Clearance {clearance_id}: {reason}",
+        "attachment_name": "None",
+        "status": "pending",
+        "director_comments": "",
+        "decision_date": "",
+        "decision_by": "",
+        "submitted_by": user_name,
+        "pdf_path": "",
+        "edited_from_id": "",
+        "old_data": "",
+    }
     requests.append(request)
     save_all_records(requests)
-    ids = [x for x in [str(rec.get("payroll_request_ids", "")), str(new_id)] if x]
-    rec["payroll_request_ids"] = ",".join([x for part in ids for x in part.split(",") if x])
+
+    current_ids = [x.strip() for x in str(rec.get("payroll_request_ids", "")).split(",") if x.strip()]
+    if str(new_id) not in current_ids:
+        current_ids.append(str(new_id))
+    rec["payroll_request_ids"] = ",".join(current_ids)
     rec["payroll_status"] = "Pending Director Approval"
-    log_action("LEAVER_PAYROLL_ADJUSTMENT_CREATED", new_id, new_data={"clearance_id": rec.get("clearance_id"), **request})
+    log_action("LEAVER_PAYROLL_ADJUSTMENT_CREATED", new_id, new_data={"clearance_id": clearance_id, **request})
     return request
 
 
@@ -6592,22 +6634,33 @@ def render_leaver_clearance_payroll(user_name):
                     type="primary"
                 )
             if submitted:
-                if typ=="Everything Clear — No Addition/Deduction":
-                    rec["payroll_status"]="Cleared"
-                    rec["payroll_total_addition"]=0.0
-                    rec["payroll_total_deduction"]=0.0
-                    rec["payroll_completed_by"]=user_name
-                    rec["payroll_completed_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                if typ == "Everything Clear — No Addition/Deduction":
+                    # This is a valid Payroll outcome: no generic request is created.
+                    rec["payroll_status"] = "Cleared"
+                    rec["payroll_request_ids"] = ""
+                    rec["payroll_total_addition"] = 0.0
+                    rec["payroll_total_deduction"] = 0.0
+                    rec["payroll_completed_by"] = user_name
+                    rec["payroll_completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     save_all_leaver_clearances(records)
                     _maybe_finalize_clearance(rec, records)
-                    _save_leaver_clearance_pdf(rec) if str(rec.get("final_status","")).casefold()=="cleared" else None
-                    log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
-                    st.success("Payroll has confirmed that no Addition or Deduction is required. The clearance has been submitted for the remaining departments/final clearance.")
+                    if str(rec.get("final_status", "")).casefold() == "cleared":
+                        _save_leaver_clearance_pdf(rec)
+                    log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED", rec.get("clearance_id"), new_data=rec)
+                    st.success("Payroll cleared: no Addition or Deduction is required. The leaver has been submitted for the remaining/final clearance.")
                     st.rerun()
-                elif amount<=0 or not reason.strip():
-                    st.error("Enter an amount and reason for the Addition/Deduction.")
                 else:
-                    _create_payroll_clearance_request(rec,user_name,typ,amount,reason.strip()); save_all_leaver_clearances(records); st.success("Payroll adjustment sent to Director for approval."); st.rerun()
+                    # Addition/Deduction ALWAYS becomes a normal pending request for Director approval.
+                    try:
+                        created = _create_payroll_clearance_request(rec, user_name, typ, amount, reason.strip())
+                        save_all_leaver_clearances(records)
+                        st.success(f"{typ} Request #{created.get('id')} has been sent to the Director for approval.")
+                        st.info("Payroll remains pending until the Director approves or rejects this request.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"Unable to create the Payroll {typ} request: {exc}")
             _sync_clearance_payroll_status(rec)
             store_ready = _clearance_store_ready(rec)
             if not store_ready:
