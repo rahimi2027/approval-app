@@ -6361,7 +6361,9 @@ def _clearance_director_hr_ready(rec):
 def _clearance_store_ready(rec):
     if str(rec.get("store_status", "")).casefold() not in {"not required", "check-in complete", "completed", "cleared"}: return False
     if float(rec.get("outstanding_item_value", 0) or 0) > 0: return False
-    linked_ids = {x.strip() for x in (str(rec.get("store_deduction_id", "")) + "," + str(rec.get("store_return_id", ""))).split(",") if x.strip()}
+    # Only Store Deductions require Director approval. Returned items are cleared
+    # directly from employee holdings and never create an Addition.
+    linked_ids = {x.strip() for x in str(rec.get("store_deduction_id", "")).split(",") if x.strip()}
     if not linked_ids: return True
     try:
         store_reqs = load_store_deductions(force=True)
@@ -6477,6 +6479,13 @@ def render_leaver_clearance_store(user_name):
 def render_leaver_clearance_payroll(user_name):
     st.subheader("🧾 Leaver Clearance — Payroll")
     st.caption("Payroll receives every Store-cleared leaver and can raise final-pay additions or deductions linked to the clearance. These use the existing Director approval workflow.")
+
+    # Make sure Payroll can see the same master clearance records even if HR/Store
+    # has not opened the clearance screen during this session.
+    for emp in _hrp_load_employees():
+        if str(emp.get("status", "")).casefold() == "left" and emp.get("leaving_date"):
+            _ensure_leaver_clearance(emp, user_name)
+
     records=load_leaver_clearances(force=True)
     if not records: st.info("No leaver clearances exist yet."); return
     requests=load_records_from_excel(force=True)
@@ -8767,7 +8776,7 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
     new_id = get_next_item_checkin_id(checkins)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     deduction_req_id = ""
-    return_req_id = ""
+    return_req_id = ""  # kept for compatibility with older check-in records; no new returns are created
 
     store_records = load_store_deductions()
 
@@ -8807,50 +8816,11 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
         deduction_req_id = str(ded_id)
         log_action("STORE_DEDUCTION_CREATED", ded_id, new_data=ded_rec)
 
-    # Every physically returned item is also recorded as a Store Return (Addition)
-    # linked back to this exact leaver check-in. It follows the existing Director
-    # approval workflow used by Store Returns.
-    if returned_items:
-        return_id = get_next_store_deduction_id(store_records)
-        return_items = [{
-            "item_name": it["item_name"],
-            "quantity": int(it["quantity"]),
-            "price": float(it["unit_price"]),
-        } for it in returned_items]
-        total_return = sum(
-            float(it["quantity"]) * float(it["unit_price"])
-            for it in returned_items
-        )
-        return_desc = (f"Auto-generated from Leaver Item Check-in #{new_id}. "
-                       f"Items physically returned by {employee['name']} ({employee['emp_id']}). "
-                       f"{(notes or '').strip()}").strip()
-        return_rec = {
-            "id": return_id,
-            "emp_name": employee["name"],
-            "date_leaving": str(leaving_date),
-            "emp_dept": employee.get("department", ""),
-            "manager": user_name,
-            "date_submit": str(checkin_date),
-            "type": "Addition",
-            "items": return_items,
-            "total_deduction": float(total_return),
-            "desc": return_desc,
-            "attachment_name": "None",
-            "status": "pending",
-            "director_comments": "",
-            "rejection_reason": "",
-            "decision_date": "",
-            "decision_by": "",
-            "submitted_by": user_name,
-            "submitted_date": now,
-            "pdf_path": "",
-        }
-        store_records.append(return_rec)
-        return_req_id = str(return_id)
-        log_action("STORE_DEDUCTION_CREATED", return_id, new_data=return_rec)
-
-    # Save both linked Store transactions together, if any were created.
-    if deduction_req_id or return_req_id:
+    # Returned company property is simply cleared from the employee's holdings.
+    # IMPORTANT: a returned item does NOT create a Store Addition transaction.
+    # Only items that remain unreturned can create a Store Deduction for Director approval.
+    # Save Store data only when a non-returned item created a deduction.
+    if deduction_req_id:
         save_all_store_deductions(store_records)
 
     checkins.append({
@@ -8911,11 +8881,6 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
         st.success(
             f"✅ Check-in #{new_id} saved. Store Deduction #{deduction_req_id} created for "
             f"£{total_deduction:.2f} — sent to Director for approval."
-        )
-    elif return_req_id:
-        st.success(
-            f"✅ Check-in #{new_id} saved. Store Return #{return_req_id} created "
-            f"for returned items — sent to Director for approval."
         )
     else:
         st.success(f"✅ Check-in #{new_id} saved. Holdings updated.")
