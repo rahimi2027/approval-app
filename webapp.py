@@ -6609,7 +6609,7 @@ def render_leaver_clearance_payroll(user_name):
     st.subheader("🧾 Leaver Clearance — Payroll")
     st.caption(
         "Check the leaver's final pay. Choose Addition or Deduction if an adjustment is needed. "
-        "If nothing is required, choose Everything Clear and complete Payroll clearance."
+        "If nothing is required, choose Everything Clear and then click the clear button."
     )
 
     # Make sure Payroll can see the same master clearance records even if HR/Store
@@ -6629,9 +6629,11 @@ def render_leaver_clearance_payroll(user_name):
         if str(rec.get("final_status", "")).casefold() == "cleared":
             continue
 
+        clearance_key = str(rec.get("clearance_id", ""))
+
         with st.expander(
             f"🧾 {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",
-            expanded=True
+            expanded=True,
         ):
             a, b, c = st.columns(3)
             a.metric("Store", rec.get("store_status"))
@@ -6661,69 +6663,55 @@ def render_leaver_clearance_payroll(user_name):
                 )
             else:
                 st.info(
-                    "No Payroll adjustment has been raised. If the final pay is already correct, "
-                    "select **Everything Clear — No Addition/Deduction** below."
+                    "No Payroll adjustment has been raised. Select the Payroll outcome below."
                 )
 
             linked_statuses = {
-                str(r.get("status", "pending")).casefold()
-                for r in linked
+                str(r.get("status", "pending")).casefold() for r in linked
             }
-            has_open_adjustment = bool(linked_statuses.intersection({"pending", "approved"}))
+            has_open_adjustment = bool(
+                linked_statuses.intersection({"pending", "approved"})
+            )
 
-            with st.form(f"payroll_lc_form_{rec.get('clearance_id')}"):
-                typ = st.selectbox(
-                    "Payroll outcome",
-                    [
-                        "Everything Clear — No Addition/Deduction",
-                        "Addition",
-                        "Deduction",
-                    ],
-                    key=f"plc_type_{rec.get('clearance_id')}",
+            # IMPORTANT: Keep the outcome selector OUTSIDE a st.form.
+            # Streamlit reruns immediately when this selectbox changes, so the
+            # Addition/Deduction fields disappear immediately when Everything Clear
+            # is selected and the correct Clear button is rendered.
+            typ = st.selectbox(
+                "Payroll outcome",
+                [
+                    "Everything Clear — No Addition/Deduction",
+                    "Addition",
+                    "Deduction",
+                ],
+                key=f"plc_type_{clearance_key}",
+            )
+
+            if typ == "Everything Clear — No Addition/Deduction":
+                st.success(
+                    "✅ No Payroll Addition or Deduction is required. "
+                    "Click the button below to complete Payroll clearance."
                 )
 
-                # Amount and reason are only relevant when an adjustment is being raised.
-                if typ in {"Addition", "Deduction"}:
-                    amount = st.number_input(
-                        f"{typ} Amount (£)",
-                        min_value=0.0,
-                        step=1.0,
-                        format="%.2f",
-                        key=f"plc_amount_{rec.get('clearance_id')}",
+                if has_open_adjustment:
+                    st.warning(
+                        "⚠️ An existing Payroll Addition/Deduction is still Pending or Approved. "
+                        "You must complete or resolve that adjustment before selecting no adjustment."
                     )
-                    reason = st.text_area(
-                        f"Reason for {typ}",
-                        key=f"plc_reason_{rec.get('clearance_id')}",
-                        placeholder=(
-                            f"Enter the reason for the Payroll {typ.lower()}, "
-                            "for example overtime, missing pay, or an authorised deduction."
-                        ),
-                    )
-                    submit_label = f"📤 Raise Payroll {typ} — Send to Director"
+                    clear_disabled = True
                 else:
-                    amount = 0.0
-                    reason = "Final pay checked — no Payroll Addition or Deduction is required."
-                    submit_label = "✅ Clear Payroll — No Addition/Deduction Required"
+                    clear_disabled = False
 
-                    if has_open_adjustment:
-                        st.warning(
-                            "An existing Payroll Addition/Deduction is still Pending or Approved. "
-                            "You must complete or resolve that adjustment before Payroll can be "
-                            "marked as having no adjustment."
-                        )
-
-                submitted = st.form_submit_button(
-                    submit_label,
+                if st.button(
+                    "✅ Clear Payroll — No Addition/Deduction Required",
+                    key=f"plc_clear_{clearance_key}",
                     type="primary",
-                    disabled=(typ == "Everything Clear — No Addition/Deduction" and has_open_adjustment),
-                )
-
-            if submitted:
-                if typ == "Everything Clear — No Addition/Deduction":
-                    # Never delete an existing Payroll request just because the user
-                    # selected the no-adjustment option. Rejected requests remain in
-                    # the audit trail; pending/approved requests are blocked above.
+                    width="stretch",
+                    disabled=clear_disabled,
+                ):
                     rec["payroll_status"] = "Cleared"
+                    # Do not remove historical request IDs. Rejected requests should
+                    # remain available for the audit trail.
                     rec["payroll_total_addition"] = 0.0
                     rec["payroll_total_deduction"] = 0.0
                     rec["payroll_completed_by"] = user_name
@@ -6746,8 +6734,32 @@ def render_leaver_clearance_payroll(user_name):
                     )
                     st.rerun()
 
-                else:
-                    # Addition/Deduction becomes a normal pending request for Director approval.
+            else:
+                # Addition/Deduction gets its own form. Because the selector is
+                # outside this form, changing the outcome immediately switches the UI.
+                with st.form(f"payroll_adjustment_form_{clearance_key}"):
+                    amount = st.number_input(
+                        f"{typ} Amount (£)",
+                        min_value=0.01,
+                        step=1.0,
+                        format="%.2f",
+                        key=f"plc_amount_{clearance_key}_{typ.casefold()}",
+                    )
+                    reason = st.text_area(
+                        f"Reason for {typ}",
+                        key=f"plc_reason_{clearance_key}_{typ.casefold()}",
+                        placeholder=(
+                            f"Enter the reason for the Payroll {typ.lower()}, "
+                            "for example overtime, missing pay, or an authorised deduction."
+                        ),
+                    )
+                    submitted = st.form_submit_button(
+                        f"📤 Raise Payroll {typ} — Send to Director",
+                        type="primary",
+                        width="stretch",
+                    )
+
+                if submitted:
                     try:
                         created = _create_payroll_clearance_request(
                             rec,
@@ -6771,21 +6783,22 @@ def render_leaver_clearance_payroll(user_name):
                     except Exception as exc:
                         st.error(f"Unable to create the Payroll {typ} request: {exc}")
 
-            # Refresh the status after any Director-approved/rejected request.
+            # Approved Payroll adjustments can be completed after Director approval.
             _sync_clearance_payroll_status(rec)
-
             if not _clearance_store_ready(rec):
                 st.info(
                     "📦 Payroll can be cleared independently. Store completion is only "
                     "required before the overall Final Clearance can become Fully Cleared."
                 )
 
-            if linked and _clearance_payroll_ready(rec) and str(
-                rec.get("payroll_status", "")
-            ).casefold() not in {"cleared"}:
+            if (
+                linked
+                and _clearance_payroll_ready(rec)
+                and str(rec.get("payroll_status", "")).casefold() != "cleared"
+            ):
                 if st.button(
                     "✅ Complete Payroll Clearance — Approved Adjustment",
-                    key=f"plc_complete_{rec.get('clearance_id')}",
+                    key=f"plc_complete_{clearance_key}",
                     type="primary",
                 ):
                     rec["payroll_completed_by"] = user_name
