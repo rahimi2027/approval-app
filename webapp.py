@@ -1,7 +1,7 @@
 # ============================================================
 # 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.30
 #    • Robust pandas NaT/date normalisation for employee HR reports
-#    • Removed background Google Drive worker to prevent native Cloud segfaults
+#    • Google Drive backup: automatic hourly sync + immediate Super Admin sync
 #    • NEW: Employee Items (Issue / Holdings / Leaver Check-in → auto Store Deduction)
 # ============================================================
 import streamlit as st
@@ -578,12 +578,18 @@ _DRIVE_STORAGE_PROCESS_READY = False
 
 
 def sync_saved_file_to_drive(local_path):
-    """Backward-compatible save hook: local save has already happened; queue Drive backup."""
+    """Save hook for persistent data. Super Admin writes sync immediately; other users queue for hourly backup."""
     filename = os.path.basename(local_path)
     if not os.path.exists(local_path):
         DRIVE_LAST_SYNC_ERROR[filename] = "Local file does not exist."
         return False
-    # IMPORTANT: no Google Drive API call here. This keeps normal user actions fast.
+
+    role = str(st.session_state.get("user_info", {}).get("role", "")).strip() if hasattr(st, "session_state") else ""
+    if role == "Super Admin" and drive_service is not None:
+        # Super Admin changes are business-critical: upload the live workbook and its
+        # rolling backup immediately, rather than waiting for the hourly worker.
+        return _sync_saved_file_to_drive_now(local_path)
+
     return _mark_drive_file_dirty(local_path)
 
 
@@ -613,14 +619,18 @@ def _drive_background_worker():
             now = time.time()
             if now - last_run < DRIVE_AUTO_SYNC_INTERVAL_SECONDS:
                 continue
-            if not DRIVE_PENDING_SYNC:
-                _drive_background_worker.last_run = now
+            _drive_background_worker.last_run = now
+            # Every hour back up ALL existing persistent workbooks, not only files
+            # that happened to be changed. This keeps the Drive copy current even
+            # after a quiet hour. Pending files are naturally included in this pass.
+            targets = [path for path in DRIVE_BACKUP_FILENAMES if os.path.exists(path)]
+            targets = sorted(set(targets) | set(DRIVE_PENDING_SYNC))
+            if not targets:
+                _save_drive_sync_state()
                 continue
 
-            _drive_background_worker.last_run = now
-            pending = list(DRIVE_PENDING_SYNC)
-            print(f"Automatic Drive backup starting for {len(pending)} changed file(s).")
-            for local_path in pending:
+            print(f"Automatic Drive backup starting for {len(targets)} file(s).")
+            for local_path in targets:
                 try:
                     if os.path.exists(local_path):
                         _sync_saved_file_to_drive_now(local_path)
@@ -6521,12 +6531,19 @@ def render_leaver_clearance_store(user_name):
             if outstanding: st.dataframe(pd.DataFrame([{"Item":r.get("item_name",""),"Qty Outstanding":float(r.get("qty_outstanding",0) or 0),"Unit Price":f"£{float(r.get('unit_price',0) or 0):,.2f}","Value":f"£{float(r.get('qty_outstanding',0) or 0)*float(r.get('unit_price',0) or 0):,.2f}"} for r in outstanding]),width="stretch",hide_index=True); st.info("Use Leaver Item Check-in to record returned quantities. Any unreturned items continue through Store's Director approval process.")
             else: st.success("✅ No company property remains outstanding.")
             if not _clearance_director_hr_ready(rec):
-                st.warning("⏳ HR has declared this employee as a leaver. Store can review/record returned property and raise any required Store Deduction now; final Store clearance will be available after the HR holiday stage is approved or marked Not Required.")
+                st.info("ℹ️ HR/Director holiday approval is separate from Store. Store can clear its own section now; any Store Deduction still requires Director approval.")
             if not outstanding and str(rec.get("store_status","")).casefold() not in {"completed","cleared"}:
-                if _clearance_director_hr_ready(rec):
-                    if st.button("✅ Clear Store",key=f"store_clear_{rec.get('clearance_id')}",type="primary",width="stretch"):
-                        now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"); rec["store_status"]="Completed"; rec["store_completed_by"]=user_name; rec["store_completed_at"]=now; save_all_leaver_clearances(records); log_action("LEAVER_STORE_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec); st.success("Store clearance completed."); st.rerun()
-            elif str(rec.get("store_status","")).casefold() in {"completed","cleared"}: st.success(f"Store cleared by {rec.get('store_completed_by')} on {rec.get('store_completed_at')}")
+                if st.button("✅ Approve / Clear Store — Nothing Outstanding",key=f"store_clear_{rec.get('clearance_id')}",type="primary",width="stretch"):
+                    now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    rec["store_status"]="Cleared"
+                    rec["store_completed_by"]=user_name
+                    rec["store_completed_at"]=now
+                    save_all_leaver_clearances(records)
+                    log_action("LEAVER_STORE_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
+                    st.success("Store clearance completed and recorded as Cleared.")
+                    st.rerun()
+            elif str(rec.get("store_status","")).casefold() in {"completed","cleared"}:
+                st.success(f"✅ Store Cleared by {rec.get('store_completed_by')} on {rec.get('store_completed_at')}")
     if not visible: st.info("No leavers are currently waiting for Store clearance.")
 
 
@@ -6567,11 +6584,27 @@ def render_leaver_clearance_payroll(user_name):
             _sync_clearance_payroll_status(rec)
             store_ready = _clearance_store_ready(rec)
             if not store_ready:
-                st.info("📦 Payroll adjustment work can be raised now. Final Payroll clearance will complete once Store has also cleared the employee.")
-            if not linked and store_ready and st.button("✅ Clear Payroll — No Further Adjustment",key=f"plc_clear_{rec.get('clearance_id')}",type="primary"):
-                rec["payroll_status"]="Not Required"; rec["payroll_completed_by"]=user_name; rec["payroll_completed_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S"); save_all_leaver_clearances(records); _maybe_finalize_clearance(rec, records); log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec); st.success("Payroll clearance completed."); st.rerun()
-            elif linked and store_ready and _clearance_payroll_ready(rec) and st.button("✅ Complete Payroll Clearance",key=f"plc_complete_{rec.get('clearance_id')}",type="primary"):
-                rec["payroll_completed_by"]=user_name; rec["payroll_completed_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S"); rec["payroll_status"]="Approved"; save_all_leaver_clearances(records); _maybe_finalize_clearance(rec, records); log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec); st.success("Payroll clearance completed."); st.rerun()
+                st.info("📦 Payroll can be cleared independently. Store completion is only required before the overall Final Clearance can become Fully Cleared.")
+            if not linked and str(rec.get("payroll_status","")).casefold() not in {"cleared","approved","not required"} and st.button("✅ Clear Payroll — No Further Adjustment",key=f"plc_clear_{rec.get('clearance_id')}",type="primary"):
+                rec["payroll_status"]="Cleared"
+                rec["payroll_completed_by"]=user_name
+                rec["payroll_completed_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                save_all_leaver_clearances(records)
+                _maybe_finalize_clearance(rec, records)
+                log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
+                st.success("Payroll clearance completed and recorded as Cleared.")
+                st.rerun()
+            elif linked and _clearance_payroll_ready(rec) and str(rec.get("payroll_status","")).casefold() not in {"cleared"} and st.button("✅ Complete Payroll Clearance",key=f"plc_complete_{rec.get('clearance_id')}",type="primary"):
+                rec["payroll_completed_by"]=user_name
+                rec["payroll_completed_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                rec["payroll_status"]="Cleared"
+                save_all_leaver_clearances(records)
+                _maybe_finalize_clearance(rec, records)
+                log_action("LEAVER_PAYROLL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
+                st.success("Payroll clearance completed and recorded as Cleared.")
+                st.rerun()
+            elif str(rec.get("payroll_status","")).casefold()=="cleared":
+                st.success(f"✅ Payroll Cleared by {rec.get('payroll_completed_by')} on {rec.get('payroll_completed_at')}")
     save_all_leaver_clearances(records)
 
 
