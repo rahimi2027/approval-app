@@ -213,31 +213,45 @@ _DRIVE_STATE_LOCK = threading.RLock()
 os.makedirs(LOCAL_RECOVERY_DIR, exist_ok=True)
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
+# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (LAZY / NON-BLOCKING)
 # ============================================================
+# IMPORTANT: Never build the Google Drive client or call the Drive API while this
+# module is importing. A slow/unreachable network used to prevent the Streamlit
+# page from rendering at all. Credentials are decoded locally; the API client is
+# created only when an actual Drive operation is requested.
+_DRIVE_CREDS_DICT = None
 try:
     gdrive = st.secrets["gdrive"]
     b64_string = str(gdrive["key_b64"]).replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
     padding_needed = (4 - len(b64_string) % 4) % 4
     if padding_needed:
         b64_string += "=" * padding_needed
-    decoded_json = base64.b64decode(b64_string).decode("utf-8")
-    creds_dict = json.loads(decoded_json)
-    credentials = service_account.Credentials.from_service_account_info(
-        creds_dict, scopes=SCOPES
-    )
-    drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
-    folder_check = drive_service.files().get(
-        fileId=GOOGLE_DRIVE_FOLDER_ID,
-        fields="id,name,mimeType,parents",
-        supportsAllDrives=True,
-    ).execute()
+    _DRIVE_CREDS_DICT = json.loads(base64.b64decode(b64_string).decode("utf-8"))
     DRIVE_CONNECTION_ERROR = ""
-    print(f"Google Drive connected: {folder_check.get('name', GOOGLE_DRIVE_FOLDER_ID)}")
 except Exception as e:
-    drive_service = None
+    _DRIVE_CREDS_DICT = None
     DRIVE_CONNECTION_ERROR = f"{type(e).__name__}: {e}"
-    print(f"Google Drive initialisation failed; local storage will be used: {DRIVE_CONNECTION_ERROR}")
+    print(f"Google Drive credentials unavailable; local storage will be used: {DRIVE_CONNECTION_ERROR}")
+
+def _ensure_drive_service():
+    """Create the Google Drive client only when backup I/O actually needs it."""
+    global drive_service, DRIVE_CONNECTION_ERROR
+    if drive_service is not None:
+        return True
+    if not _DRIVE_CREDS_DICT:
+        return False
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            _DRIVE_CREDS_DICT, scopes=SCOPES
+        )
+        drive_service = build("drive", "v3", credentials=credentials, cache_discovery=True)
+        DRIVE_CONNECTION_ERROR = ""
+        return True
+    except Exception as e:
+        drive_service = None
+        DRIVE_CONNECTION_ERROR = f"{type(e).__name__}: {e}"
+        print(f"Google Drive connection deferred/failed; local storage remains active: {DRIVE_CONNECTION_ERROR}")
+        return False
 
 def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None or not os.path.exists(local_file_path): return None
@@ -495,6 +509,7 @@ def _mark_drive_file_dirty(local_path, make_recovery_snapshot=True):
 
 def sync_backup_file_to_drive(local_path):
     """Immediate backup helper used only by the explicit/manual backup path."""
+    _ensure_drive_service()
     if drive_service is None or not os.path.exists(local_path):
         return None
     backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
@@ -509,6 +524,7 @@ def sync_backup_file_to_drive(local_path):
 
 def _sync_saved_file_to_drive_now(local_path):
     """Actually upload one file. This is deliberately called only by the background worker or manual force-sync."""
+    _ensure_drive_service()
     local_path = os.path.abspath(local_path)
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
@@ -613,7 +629,7 @@ def _drive_background_worker():
             # normal schedule; a wake simply lets the worker notice pending work.
             _DRIVE_WORKER_WAKE.wait(timeout=60)
             _DRIVE_WORKER_WAKE.clear()
-            if drive_service is None:
+            if not _ensure_drive_service():
                 continue
             last_run = getattr(_drive_background_worker, "last_run", 0.0)
             now = time.time()
@@ -741,7 +757,7 @@ def render_google_drive_status():
 
 @st.cache_resource(show_spinner=False)
 def _initialise_drive_storage_once():
-    if drive_service is None:
+    if not _ensure_drive_service():
         return False
     os.makedirs(APP_FOLDER, exist_ok=True)
     critical = [
@@ -1323,10 +1339,8 @@ def save_hr_categories(cats):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
-try:
-    initialise_drive_storage()
-except Exception as e:
-    print(f"Drive storage initialisation skipped: {e}")
+# Google Drive storage is intentionally NOT initialised during module import.
+# Local Excel files are initialised below; Drive is connected lazily by backup operations.
 
 def init_user_db():
     safe_init_excel(USER_DB_PATH, USER_DB_COLUMNS)
