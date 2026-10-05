@@ -21,6 +21,8 @@ import time
 import textwrap
 from datetime import datetime, date, timezone, timedelta
 
+st.set_page_config(page_title="ACoole Portal", layout="wide", initial_sidebar_state="expanded")
+
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
@@ -910,53 +912,31 @@ def _write_empty_excel(path, columns):
                 pass
 
 def safe_init_excel(path, columns):
+    """Fast startup initializer. Never opens an existing workbook during app import.
+
+    Existing workbooks are treated as the source of truth and are validated/repaired
+    lazily by the specific data-loading function that actually needs them. This is
+    important for Streamlit because reading several large XLSX files here blocks the
+    first page from rendering.
+    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if not os.path.exists(path):
-        tmp_path = f"{path}.init.tmp.xlsx"
-        try:
-            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
-            os.replace(tmp_path, path)
-            return True
-        finally:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return True
+
+    tmp_path = f"{path}.init.tmp.xlsx"
     try:
-        df = pd.read_excel(path, engine="openpyxl").fillna("")
-        changed = False
-        for col in columns:
-            if col not in df.columns:
-                df[col] = ""
-                changed = True
-        if changed:
-            tmp_path = f"{path}.repair.tmp.xlsx"
-            try:
-                df.to_excel(tmp_path, index=False, engine="openpyxl")
-                os.replace(tmp_path, path)
-            finally:
-                try:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    pass
+        pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
+        os.replace(tmp_path, path)
         return True
     except Exception as e:
-        print(f"Excel initialisation/recovery for {path} failed: {e}")
-        if os.path.exists(path):
-            return False
-        tmp_path = f"{path}.init.tmp.xlsx"
+        print(f"Excel initialisation for {path} failed: {e}")
+        return False
+    finally:
         try:
-            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
-            os.replace(tmp_path, path)
-            return True
-        finally:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 def _invalidate_data_cache(*names):
     for name in names: st.session_state.pop(name, None)
@@ -6162,14 +6142,12 @@ def get_hr_daily_rate(dept, transaction_type):
 # ============================================================
 def initialise_store_deduction():
     safe_init_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
-    safe_init_excel(STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS)
-    try:
-        df_items = _read_excel_records(STORE_ITEMS_PATH)
-        if df_items.empty:
+    if not os.path.exists(STORE_ITEMS_PATH) or os.path.getsize(STORE_ITEMS_PATH) == 0:
+        try:
             pd.DataFrame(DEFAULT_STORE_ITEMS).to_excel(STORE_ITEMS_PATH, index=False, engine="openpyxl")
             sync_saved_file_to_drive(STORE_ITEMS_PATH)
-    except Exception:
-        pass
+        except Exception as e:
+            print(f"Store items initialisation failed: {e}")
 
 def load_store_deductions(force=False):
     if not force and "_store_deduction_cache" in st.session_state:
@@ -9931,7 +9909,7 @@ def refresh_authenticated_user_session():
     if not current_username:
         return
     try:
-        users = load_users(force=True)
+        users = load_users(force=False)
         current = users.get(current_username)
         if not current:
             st.session_state.clear()
@@ -10149,7 +10127,7 @@ st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 
 change_my_password_form()
 
-all_live_requests = load_records_from_excel(force=True)
+all_live_requests = load_records_from_excel(force=False)
 CATEGORIES = load_categories()
 
 st.divider()
