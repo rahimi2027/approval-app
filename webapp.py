@@ -795,7 +795,21 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
 
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
 DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Employee", "Work Order Employee", "Work Order Manager", "Director", "Payroll", "Super Admin"]
-DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd", "Store", "HR"]
+# Canonical departments used by employee HR registration and downstream workflows.
+# Keep legacy "Project" for existing users/data, while exposing "Projects" for new
+# employee registrations as requested. Store and Payroll are workflow departments,
+# not employee job roles.
+DEFAULT_DEPARTMENTS = [
+    "National Grid",
+    "Isolator",
+    "Projects",
+    "Project",  # legacy department name retained for existing records/accounts
+    "Accounts",
+    "Payroll Department",
+    "ACoole Electrical Ltd",
+    "Store",
+    "HR",
+]
 EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Category Reason", "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name", "Status", "Director Comments", "Decision Date", "Decision By", "Submitted By", "PDF File Path", "Edited From ID", "Old Data"]
 WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours", "Amount (£)", "Manager", "Description", "Attachment Name", "Status", "Site Address", "Customer Job No.", "Manager Comments", "Manager Decision Date", "Manager Decision By", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date", "Payroll By", "PDF File Path"]
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
@@ -1230,7 +1244,20 @@ def _load_setting_value(setting_name, default_values):
     vals = [v.strip() for v in str(raw).split("|") if v.strip()]
     return vals if vals else list(default_values)
 
-def load_departments(): return _load_setting_value("departments", DEFAULT_DEPARTMENTS)
+def load_departments():
+    """Return configured departments while preserving required HR employee options.
+
+    Existing settings are retained so we do not overwrite an administrator's
+    custom department list. The standard departments needed by HR registration
+    are appended if they are missing. This also keeps the legacy "Project"
+    department valid for existing employees and user accounts.
+    """
+    departments = _load_setting_value("departments", DEFAULT_DEPARTMENTS)
+    departments = [str(d).strip() for d in departments if str(d).strip()]
+    for required in DEFAULT_DEPARTMENTS:
+        if required not in departments:
+            departments.append(required)
+    return departments
 
 def save_departments(dept_list):
     init_settings()
@@ -3283,6 +3310,13 @@ def render_hr_portal(current_user_info=None):
                             new_department = st.selectbox(
                                 "Department",
                                 options=hr_software_departments,
+                                help=(
+                                    "Select the department this employee works under. "
+                                    "For example: Isolator for Isolator Installers, or "
+                                    "Projects for Site Electricians. This department is stored "
+                                    "on the employee master record and is carried into the "
+                                    "leaver clearance shown to Store and Payroll."
+                                ),
                                 key=f"hrp_new_dept_{new_form_version}",
                             )
                             new_agreement = st.selectbox(
@@ -3337,6 +3371,12 @@ def render_hr_portal(current_user_info=None):
                             st.rerun()
 
                     st.subheader("Employee Directory")
+                    st.caption(
+                        "Employees are registered against a department here. For example, "
+                        "Isolator Installers can be assigned to Isolator and Site Electricians "
+                        "to Projects. The selected department remains attached to the employee "
+                        "through the leaver process for Store and Payroll."
+                    )
                     st.caption("Edit employee details or permanently delete an employee record. Use Employee Leaving for all employee departures and final holiday settlement.")
 
                     employee_table = [
