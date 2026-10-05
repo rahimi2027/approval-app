@@ -1,7 +1,7 @@
 # ============================================================
 # 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.30
 #    • Robust pandas NaT/date normalisation for employee HR reports
-#    • Removed background Google Drive worker to prevent native Cloud segfaults
+#    • Google Drive backup: automatic hourly sync + immediate Super Admin sync
 #    • NEW: Employee Items (Issue / Holdings / Leaver Check-in → auto Store Deduction)
 # ============================================================
 import streamlit as st
@@ -20,6 +20,8 @@ import queue
 import time
 import textwrap
 from datetime import datetime, date, timezone, timedelta
+
+st.set_page_config(page_title="ACoole Portal", layout="wide", initial_sidebar_state="expanded")
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
@@ -86,7 +88,7 @@ HR_PORTAL_LEAVE_PATH = os.path.join(APP_FOLDER, "hr_portal_leave_records.xlsx")
 os.makedirs(HR_LEAVE_PDF_DIR, exist_ok=True)
 
 HR_EMPLOYEE_COLUMNS = [
-    "Employee ID", "Full Name", "Start Date", "Position / Job Title", "Department",
+    "Employee ID", "Full Name", "Start Date", "Position / Job Title", "Department", "Work Type / Sub-department",
     "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Holiday Entitlement Override", "Entitlement Adjustment Note", "Leaving Date", "Leaving Reason"
 ]
 HR_PORTAL_LEAVE_COLUMNS = [
@@ -152,6 +154,22 @@ ITEM_CHECKIN_COLUMNS = [
     "Total Deduction (£)", "Deduction Request ID", "Return Request ID", "Status", "Notes",
 ]
 
+# ============================================================
+# 🔗 EMPLOYEE LEAVER CLEARANCE — HR + STORE WORKFLOW
+# ============================================================
+LEAVER_CLEARANCE_PATH = os.path.join(APP_FOLDER, "employee_leaver_clearance.xlsx")
+LEAVER_CLEARANCE_COLUMNS = [
+    "Clearance ID", "Employee ID", "Employee Name", "Department", "Leaving Date",
+    "Leaving Reason", "Created By", "Created At",
+    "HR Status", "Holiday Balance (Days)", "Holiday Settlement ID", "Holiday Settlement Status",
+    "Holiday Settlement Amount (£)", "Holiday Settlement Type",
+    "Store Status", "Store Check-in ID", "Store Deduction ID", "Store Return ID",
+    "Outstanding Item Value (£)", "Store Completed By", "Store Completed At",
+    "Payroll Status", "Payroll Request IDs", "Payroll Total Addition (£)", "Payroll Total Deduction (£)",
+    "Payroll Completed By", "Payroll Completed At",
+    "Final Status", "Final Cleared By", "Final Cleared At", "Notes",
+]
+
 USER_DB_COLUMNS = [
     "full_name", "username", "password", "role", "dept",
     "can_view_all_dept", "can_generate_pdf", "can_download_data",
@@ -197,31 +215,45 @@ _DRIVE_STATE_LOCK = threading.RLock()
 os.makedirs(LOCAL_RECOVERY_DIR, exist_ok=True)
 
 # ============================================================
-# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (BASE64 METHOD)
+# GOOGLE DRIVE CONNECTION — SERVICE ACCOUNT (LAZY / NON-BLOCKING)
 # ============================================================
+# IMPORTANT: Never build the Google Drive client or call the Drive API while this
+# module is importing. A slow/unreachable network used to prevent the Streamlit
+# page from rendering at all. Credentials are decoded locally; the API client is
+# created only when an actual Drive operation is requested.
+_DRIVE_CREDS_DICT = None
 try:
     gdrive = st.secrets["gdrive"]
     b64_string = str(gdrive["key_b64"]).replace("\n", "").replace("\r", "").replace(" ", "").replace("\t", "")
     padding_needed = (4 - len(b64_string) % 4) % 4
     if padding_needed:
         b64_string += "=" * padding_needed
-    decoded_json = base64.b64decode(b64_string).decode("utf-8")
-    creds_dict = json.loads(decoded_json)
-    credentials = service_account.Credentials.from_service_account_info(
-        creds_dict, scopes=SCOPES
-    )
-    drive_service = build("drive", "v3", credentials=credentials, cache_discovery=False)
-    folder_check = drive_service.files().get(
-        fileId=GOOGLE_DRIVE_FOLDER_ID,
-        fields="id,name,mimeType,parents",
-        supportsAllDrives=True,
-    ).execute()
+    _DRIVE_CREDS_DICT = json.loads(base64.b64decode(b64_string).decode("utf-8"))
     DRIVE_CONNECTION_ERROR = ""
-    print(f"Google Drive connected: {folder_check.get('name', GOOGLE_DRIVE_FOLDER_ID)}")
 except Exception as e:
-    drive_service = None
+    _DRIVE_CREDS_DICT = None
     DRIVE_CONNECTION_ERROR = f"{type(e).__name__}: {e}"
-    print(f"Google Drive initialisation failed; local storage will be used: {DRIVE_CONNECTION_ERROR}")
+    print(f"Google Drive credentials unavailable; local storage will be used: {DRIVE_CONNECTION_ERROR}")
+
+def _ensure_drive_service():
+    """Create the Google Drive client only when backup I/O actually needs it."""
+    global drive_service, DRIVE_CONNECTION_ERROR
+    if drive_service is not None:
+        return True
+    if not _DRIVE_CREDS_DICT:
+        return False
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            _DRIVE_CREDS_DICT, scopes=SCOPES
+        )
+        drive_service = build("drive", "v3", credentials=credentials, cache_discovery=True)
+        DRIVE_CONNECTION_ERROR = ""
+        return True
+    except Exception as e:
+        drive_service = None
+        DRIVE_CONNECTION_ERROR = f"{type(e).__name__}: {e}"
+        print(f"Google Drive connection deferred/failed; local storage remains active: {DRIVE_CONNECTION_ERROR}")
+        return False
 
 def upload_to_google_drive(local_file_path, display_filename):
     if drive_service is None or not os.path.exists(local_file_path): return None
@@ -394,6 +426,7 @@ DRIVE_BACKUP_FILENAMES = {
     HR_PORTAL_LEAVE_PATH: "BACKUP_hr_portal_leave_records.xlsx",
     EMPLOYEE_ITEMS_PATH: "BACKUP_employee_items.xlsx",
     ITEM_CHECKIN_PATH:   "BACKUP_item_checkins.xlsx",
+    LEAVER_CLEARANCE_PATH: "BACKUP_employee_leaver_clearance.xlsx",
 }
 
 def _load_drive_sync_state():
@@ -478,6 +511,7 @@ def _mark_drive_file_dirty(local_path, make_recovery_snapshot=True):
 
 def sync_backup_file_to_drive(local_path):
     """Immediate backup helper used only by the explicit/manual backup path."""
+    _ensure_drive_service()
     if drive_service is None or not os.path.exists(local_path):
         return None
     backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
@@ -492,6 +526,7 @@ def sync_backup_file_to_drive(local_path):
 
 def _sync_saved_file_to_drive_now(local_path):
     """Actually upload one file. This is deliberately called only by the background worker or manual force-sync."""
+    _ensure_drive_service()
     local_path = os.path.abspath(local_path)
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
@@ -561,12 +596,18 @@ _DRIVE_STORAGE_PROCESS_READY = False
 
 
 def sync_saved_file_to_drive(local_path):
-    """Backward-compatible save hook: local save has already happened; queue Drive backup."""
+    """Save hook for persistent data. Super Admin writes sync immediately; other users queue for hourly backup."""
     filename = os.path.basename(local_path)
     if not os.path.exists(local_path):
         DRIVE_LAST_SYNC_ERROR[filename] = "Local file does not exist."
         return False
-    # IMPORTANT: no Google Drive API call here. This keeps normal user actions fast.
+
+    role = str(st.session_state.get("user_info", {}).get("role", "")).strip() if hasattr(st, "session_state") else ""
+    if role == "Super Admin" and drive_service is not None:
+        # Super Admin changes are business-critical: upload the live workbook and its
+        # rolling backup immediately, rather than waiting for the hourly worker.
+        return _sync_saved_file_to_drive_now(local_path)
+
     return _mark_drive_file_dirty(local_path)
 
 
@@ -590,20 +631,24 @@ def _drive_background_worker():
             # normal schedule; a wake simply lets the worker notice pending work.
             _DRIVE_WORKER_WAKE.wait(timeout=60)
             _DRIVE_WORKER_WAKE.clear()
-            if drive_service is None:
+            if not _ensure_drive_service():
                 continue
             last_run = getattr(_drive_background_worker, "last_run", 0.0)
             now = time.time()
             if now - last_run < DRIVE_AUTO_SYNC_INTERVAL_SECONDS:
                 continue
-            if not DRIVE_PENDING_SYNC:
-                _drive_background_worker.last_run = now
+            _drive_background_worker.last_run = now
+            # Every hour back up ALL existing persistent workbooks, not only files
+            # that happened to be changed. This keeps the Drive copy current even
+            # after a quiet hour. Pending files are naturally included in this pass.
+            targets = [path for path in DRIVE_BACKUP_FILENAMES if os.path.exists(path)]
+            targets = sorted(set(targets) | set(DRIVE_PENDING_SYNC))
+            if not targets:
+                _save_drive_sync_state()
                 continue
 
-            _drive_background_worker.last_run = now
-            pending = list(DRIVE_PENDING_SYNC)
-            print(f"Automatic Drive backup starting for {len(pending)} changed file(s).")
-            for local_path in pending:
+            print(f"Automatic Drive backup starting for {len(targets)} file(s).")
+            for local_path in targets:
                 try:
                     if os.path.exists(local_path):
                         _sync_saved_file_to_drive_now(local_path)
@@ -714,7 +759,7 @@ def render_google_drive_status():
 
 @st.cache_resource(show_spinner=False)
 def _initialise_drive_storage_once():
-    if drive_service is None:
+    if not _ensure_drive_service():
         return False
     os.makedirs(APP_FOLDER, exist_ok=True)
     critical = [
@@ -768,7 +813,21 @@ def upload_to_onedrive(local_file_path, remote_filename=None):
 
 DEFAULT_CATEGORIES = ["Food Allowance", "Others", "Parking", "Parking Fine", "GYM Membership", "Item Not Returned", "Item Missing"]
 DEFAULT_ROLES = ["Manager", "Staff", "Team Member", "Employee", "Work Order Employee", "Work Order Manager", "Director", "Payroll", "Super Admin"]
-DEFAULT_DEPARTMENTS = ["National Grid", "Isolator", "Project", "Accounts", "Payroll Department", "ACoole Electrical Ltd", "Store", "HR"]
+# Canonical departments used by employee HR registration and downstream workflows.
+# Keep legacy "Project" for existing users/data, while exposing "Projects" for new
+# employee registrations as requested. Store and Payroll are workflow departments,
+# not employee job roles.
+DEFAULT_DEPARTMENTS = [
+    "National Grid",
+    "Isolator",
+    "Projects",
+    "Project",  # legacy department name retained for existing records/accounts
+    "Accounts",
+    "Payroll Department",
+    "ACoole Electrical Ltd",
+    "Store",
+    "HR",
+]
 EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Category Reason", "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name", "Status", "Director Comments", "Decision Date", "Decision By", "Submitted By", "PDF File Path", "Edited From ID", "Old Data"]
 WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours", "Amount (£)", "Manager", "Description", "Attachment Name", "Status", "Site Address", "Customer Job No.", "Manager Comments", "Manager Decision Date", "Manager Decision By", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date", "Payroll By", "PDF File Path"]
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
@@ -853,53 +912,31 @@ def _write_empty_excel(path, columns):
                 pass
 
 def safe_init_excel(path, columns):
+    """Fast startup initializer. Never opens an existing workbook during app import.
+
+    Existing workbooks are treated as the source of truth and are validated/repaired
+    lazily by the specific data-loading function that actually needs them. This is
+    important for Streamlit because reading several large XLSX files here blocks the
+    first page from rendering.
+    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if not os.path.exists(path):
-        tmp_path = f"{path}.init.tmp.xlsx"
-        try:
-            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
-            os.replace(tmp_path, path)
-            return True
-        finally:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return True
+
+    tmp_path = f"{path}.init.tmp.xlsx"
     try:
-        df = pd.read_excel(path, engine="openpyxl").fillna("")
-        changed = False
-        for col in columns:
-            if col not in df.columns:
-                df[col] = ""
-                changed = True
-        if changed:
-            tmp_path = f"{path}.repair.tmp.xlsx"
-            try:
-                df.to_excel(tmp_path, index=False, engine="openpyxl")
-                os.replace(tmp_path, path)
-            finally:
-                try:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    pass
+        pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
+        os.replace(tmp_path, path)
         return True
     except Exception as e:
-        print(f"Excel initialisation/recovery for {path} failed: {e}")
-        if os.path.exists(path):
-            return False
-        tmp_path = f"{path}.init.tmp.xlsx"
+        print(f"Excel initialisation for {path} failed: {e}")
+        return False
+    finally:
         try:
-            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
-            os.replace(tmp_path, path)
-            return True
-        finally:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 def _invalidate_data_cache(*names):
     for name in names: st.session_state.pop(name, None)
@@ -1167,7 +1204,7 @@ def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         with st.spinner("Refreshing from Google Drive..."):
             if drive_service is not None:
-                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH, EMPLOYEE_ITEMS_PATH, ITEM_CHECKIN_PATH):
+                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH, EMPLOYEE_ITEMS_PATH, ITEM_CHECKIN_PATH, LEAVER_CLEARANCE_PATH):
                     with _DRIVE_SYNC_LOCK:
                         pending = path in DRIVE_PENDING_SYNC
                     if pending:
@@ -1203,7 +1240,20 @@ def _load_setting_value(setting_name, default_values):
     vals = [v.strip() for v in str(raw).split("|") if v.strip()]
     return vals if vals else list(default_values)
 
-def load_departments(): return _load_setting_value("departments", DEFAULT_DEPARTMENTS)
+def load_departments():
+    """Return configured departments while preserving required HR employee options.
+
+    Existing settings are retained so we do not overwrite an administrator's
+    custom department list. The standard departments needed by HR registration
+    are appended if they are missing. This also keeps the legacy "Project"
+    department valid for existing employees and user accounts.
+    """
+    departments = _load_setting_value("departments", DEFAULT_DEPARTMENTS)
+    departments = [str(d).strip() for d in departments if str(d).strip()]
+    for required in DEFAULT_DEPARTMENTS:
+        if required not in departments:
+            departments.append(required)
+    return departments
 
 def save_departments(dept_list):
     init_settings()
@@ -1269,10 +1319,8 @@ def save_hr_categories(cats):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
-try:
-    initialise_drive_storage()
-except Exception as e:
-    print(f"Drive storage initialisation skipped: {e}")
+# Google Drive storage is intentionally NOT initialised during module import.
+# Local Excel files are initialised below; Drive is connected lazily by backup operations.
 
 def init_user_db():
     safe_init_excel(USER_DB_PATH, USER_DB_COLUMNS)
@@ -1397,6 +1445,7 @@ def load_users(force=False):
         for username, u in users.items():
             if str(u.get("dept", "")).strip().casefold() == "store":
                 u["can_access_store_deduction"] = True
+                u["can_access_employee_items"] = True
 
         migrated_leave_request = False
         for username, u in users.items():
@@ -1422,6 +1471,26 @@ def load_users(force=False):
 # ════════════════════════════════════════════════════════════
 HR_PORTAL_DEPARTMENTS = ["HR", "Operations", "Sales", "Admin", "Finance"]
 HR_PORTAL_AGREEMENT_TYPES = ["Permanent", "Fixed Term", "Part-Time", "Temporary", "Apprentice", "Contractor"]
+
+HR_DEPARTMENT_WORK_TYPES = {
+    "Projects": ["Office Staff", "Site Electrician"],
+    "Project": ["Office Staff", "Site Electrician"],  # legacy name
+    "National Grid": ["Office Staff", "National Grid Inspector"],
+    "Isolator": ["Office Staff", "Isolator Installer"],
+}
+
+def _hrp_work_type_options(department):
+    return HR_DEPARTMENT_WORK_TYPES.get(str(department or "").strip(), ["Office Staff"])
+
+def _hrp_normalize_work_type(department, work_type="", job_title=""):
+    options = _hrp_work_type_options(department)
+    raw, title = str(work_type or "").strip(), str(job_title or "").strip()
+    if raw in options: return raw
+    if title in options: return title
+    aliases = {"site electrician":"Site Electrician", "national grid inspector":"National Grid Inspector", "isolator installer":"Isolator Installer", "office staff":"Office Staff"}
+    alias = aliases.get(title.casefold())
+    return alias if alias in options else "Office Staff"
+
 HR_PORTAL_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday", "Sick Leave", "Family / Emergency Leave", "Unpaid Holiday", "Unpaid Absence", "Maternity Leave", "Paternity Leave", "Other Absence", "College (Apprenticeship)", "Training Course"]
 HR_PORTAL_HOLIDAY_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday"]
 
@@ -1490,6 +1559,7 @@ def _hrp_load_employees():
                 "start_date": start_date,
                 "department": str(r.get("Department", "")).strip() or "Other",
                 "job_title": str(r.get("Position / Job Title", "")).strip(),
+                "work_type": _hrp_normalize_work_type(str(r.get("Department", "")).strip() or "Other", r.get("Work Type / Sub-department", ""), r.get("Position / Job Title", "")),
                 "agreement_type": str(r.get("Agreement Type", "")).strip() or "Permanent",
                 "status": str(r.get("Status", "Active")).strip() or "Active",
                 "working_pattern": str(r.get("Working Pattern", "Regular hours")).strip() or "Regular hours",
@@ -1514,6 +1584,7 @@ def _hrp_save_employees():
             "Start Date": e.get("start_date", ""),
             "Position / Job Title": e.get("job_title", ""),
             "Department": e.get("department", ""),
+            "Work Type / Sub-department": e.get("work_type", _hrp_normalize_work_type(e.get("department", ""), "", e.get("job_title", ""))),
             "Agreement Type": e.get("agreement_type", ""),
             "Status": e.get("status", "Active"),
             "Working Pattern": e.get("working_pattern", "Regular hours"),
@@ -3188,18 +3259,33 @@ def render_hr_portal(current_user_info=None):
             st.subheader("🧑‍💼 HR Management")
             if is_hr_manager:
                 st.caption("Employee Overview, Leave Approvals, Holiday Calculator, Employee Leaving and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab, hr_reports_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee", "📥 HR Reports"
+                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_clearance_tab, hr_leavers_tab, employee_edit_tab, hr_reports_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "🔗 Leaver Clearance", "📚 Leavers", "✏️ Edit / Deactivate Employee", "📥 HR Reports"
                 ])
             else:
                 st.caption("Employee Overview, Holiday Calculator, Employee Leaving and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_leavers_tab, employee_edit_tab, hr_reports_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "📚 Leavers", "✏️ Edit / Deactivate Employee", "📥 HR Reports"
+                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_clearance_tab, hr_leavers_tab, employee_edit_tab, hr_reports_tab = st.tabs([
+                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "🔗 Leaver Clearance", "📚 Leavers", "✏️ Edit / Deactivate Employee", "📥 HR Reports"
                 ])
                 hr_approval_tab = None
 
             with employee_overview_tab:
                 st.subheader("📊 Employee Overview — All Employees")
+                if st.session_state.hrp_employees:
+                    active_employees = [e for e in st.session_state.hrp_employees if str(e.get("status", "")).casefold() == "active"]
+                    site_electricians = sum(e.get("work_type") == "Site Electrician" and str(e.get("status", "")).casefold() == "active" for e in st.session_state.hrp_employees)
+                    national_grid_inspectors = sum(e.get("work_type") == "National Grid Inspector" and str(e.get("status", "")).casefold() == "active" for e in st.session_state.hrp_employees)
+                    isolator_installers = sum(e.get("work_type") == "Isolator Installer" and str(e.get("status", "")).casefold() == "active" for e in st.session_state.hrp_employees)
+                    office_staff = sum(e.get("work_type") == "Office Staff" and str(e.get("status", "")).casefold() == "active" for e in st.session_state.hrp_employees)
+                    site_workers_total = site_electricians + national_grid_inspectors + isolator_installers
+                    m1, m2, m3, m4, m5, m6 = st.columns(6)
+                    m1.metric("Total Active Staff", len(active_employees))
+                    m2.metric("Site / Field Workers", site_workers_total)
+                    m3.metric("Site Electricians", site_electricians)
+                    m4.metric("National Grid Inspectors", national_grid_inspectors)
+                    m5.metric("Isolator Installers", isolator_installers)
+                    m6.metric("Office Staff", office_staff)
+                    st.caption("These categories are controlled selections, so headcount is not affected by spelling differences.")
                 if st.session_state.hrp_employees:
                     overview_rows = []
                     for e in st.session_state.hrp_employees:
@@ -3207,7 +3293,7 @@ def render_hr_portal(current_user_info=None):
                         summary = _hrp_get_leave_summary(e["emp_id"])
                         overview_rows.append({
                             "Employee ID": e["emp_id"], "Name": e["name"], "Status": e.get("status", "Active"),
-                            "Department": e.get("department", ""), "Position": e.get("job_title", ""),
+                            "Department": e.get("department", ""), "Work Type": e.get("work_type", "Office Staff"), "Position": e.get("job_title", ""),
                             "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
                             "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
                             "Holiday Entitlement": pos["entitlement"], "Bank Holidays (Separate)": _hrp_get_bank_holiday_days(e, e.get("start_date"), date.today()), "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
@@ -3245,17 +3331,26 @@ def render_hr_portal(current_user_info=None):
                                 value=date.today(),
                                 key=f"hrp_new_start_{new_form_version}",
                             )
-                            new_position = st.text_input(
-                                "Position / Job Title",
-                                placeholder="e.g. Electrician",
-                                key=f"hrp_new_pos_{new_form_version}",
-                            )
+
                         with col2:
                             hr_software_departments = load_departments()
                             new_department = st.selectbox(
                                 "Department",
                                 options=hr_software_departments,
+                                help=(
+                                    "Select the department this employee works under. "
+                                    "For example: Isolator for Isolator Installers, or "
+                                    "Projects for Site Electricians. This department is stored "
+                                    "on the employee master record and is carried into the "
+                                    "leaver clearance shown to Store and Payroll."
+                                ),
                                 key=f"hrp_new_dept_{new_form_version}",
+                            )
+                            new_work_type = st.selectbox(
+                                "Working As / Sub-department",
+                                options=_hrp_work_type_options(new_department),
+                                key=f"hrp_new_work_type_{new_form_version}",
+                                help="Controlled category: Projects → Office Staff/Site Electrician; National Grid → Office Staff/National Grid Inspector; Isolator → Office Staff/Isolator Installer.",
                             )
                             new_agreement = st.selectbox(
                                 "Agreement Type",
@@ -3284,15 +3379,14 @@ def render_hr_portal(current_user_info=None):
                             st.error(result)
                         elif not new_name.strip():
                             st.error("Please enter the employee's full name.")
-                        elif not new_position.strip():
-                            st.error("Please enter the position / job title.")
                         else:
                             new_employee = {
                                 "emp_id": result,
                                 "name": new_name.strip(),
                                 "start_date": new_start_date,
                                 "department": new_department,
-                                "job_title": new_position.strip(),
+                                "work_type": new_work_type,
+                                "job_title": new_work_type,
                                 "agreement_type": new_agreement,
                                 "status": "Active",
                                 "working_pattern": new_pattern,
@@ -3309,12 +3403,18 @@ def render_hr_portal(current_user_info=None):
                             st.rerun()
 
                     st.subheader("Employee Directory")
+                    st.caption(
+                        "Employees are registered against a department here. For example, "
+                        "Isolator Installers can be assigned to Isolator and Site Electricians "
+                        "to Projects. The selected department remains attached to the employee "
+                        "through the leaver process for Store and Payroll."
+                    )
                     st.caption("Edit employee details or permanently delete an employee record. Use Employee Leaving for all employee departures and final holiday settlement.")
 
                     employee_table = [
                         {
                             "Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"],
-                            "Position": e["job_title"], "Department": e["department"],
+                            "Position": e["job_title"], "Department": e["department"], "Work Type": e.get("work_type", "Office Staff"),
                             "Agreement": e["agreement_type"], "Status": e["status"],
                         }
                         for e in st.session_state.hrp_employees
@@ -3548,6 +3648,10 @@ def render_hr_portal(current_user_info=None):
                                 leaving_emp["leaving_date"] = leaving_date
                                 leaving_emp["leaving_reason"] = leaving_reason.strip()
                                 _hrp_save_employees()
+                                _ensure_leaver_clearance(
+                                    leaving_emp,
+                                    str((current_user_info or {}).get("full_name") or (current_user_info or {}).get("username") or "HR").strip() or "HR",
+                                )
                                 log_action(
                                     "HR_EMPLOYEE_LEFT",
                                     leaving_id,
@@ -3713,6 +3817,9 @@ def render_hr_portal(current_user_info=None):
                                         st.rerun()
             else:
                 st.info("No final holiday settlements have been submitted yet.")
+
+            with hr_clearance_tab:
+                render_leaver_clearance_hr()
 
             with hr_leavers_tab:
                 _hrp_render_leavers_tab()
@@ -6035,14 +6142,12 @@ def get_hr_daily_rate(dept, transaction_type):
 # ============================================================
 def initialise_store_deduction():
     safe_init_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
-    safe_init_excel(STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS)
-    try:
-        df_items = _read_excel_records(STORE_ITEMS_PATH)
-        if df_items.empty:
+    if not os.path.exists(STORE_ITEMS_PATH) or os.path.getsize(STORE_ITEMS_PATH) == 0:
+        try:
             pd.DataFrame(DEFAULT_STORE_ITEMS).to_excel(STORE_ITEMS_PATH, index=False, engine="openpyxl")
             sync_saved_file_to_drive(STORE_ITEMS_PATH)
-    except Exception:
-        pass
+        except Exception as e:
+            print(f"Store items initialisation failed: {e}")
 
 def load_store_deductions(force=False):
     if not force and "_store_deduction_cache" in st.session_state:
@@ -6146,6 +6251,799 @@ def save_store_items(records):
     sync_saved_file_to_drive(STORE_ITEMS_PATH)
 
 # ============================================================
+# 🔗 EMPLOYEE LEAVER CLEARANCE — COMPANY-WIDE WORKFLOW
+# ============================================================
+def initialise_leaver_clearance():
+    safe_init_excel(LEAVER_CLEARANCE_PATH, LEAVER_CLEARANCE_COLUMNS)
+
+
+def _normalise_clearance_record(r):
+    def _money(v):
+        try: return float(v or 0)
+        except Exception: return 0.0
+    return {
+        "clearance_id": str(r.get("Clearance ID", r.get("clearance_id", ""))).strip(),
+        "employee_id": str(r.get("Employee ID", r.get("employee_id", ""))).strip(),
+        "emp_name": str(r.get("Employee Name", r.get("emp_name", ""))).strip(),
+        "emp_dept": str(r.get("Department", r.get("emp_dept", ""))).strip(),
+        "leaving_date": str(r.get("Leaving Date", r.get("leaving_date", ""))).strip(),
+        "leaving_reason": str(r.get("Leaving Reason", r.get("leaving_reason", ""))).strip(),
+        "created_by": str(r.get("Created By", r.get("created_by", ""))).strip(),
+        "created_at": str(r.get("Created At", r.get("created_at", ""))).strip(),
+        "hr_status": str(r.get("HR Status", r.get("hr_status", "Pending"))).strip() or "Pending",
+        "holiday_balance": _money(r.get("Holiday Balance (Days)", r.get("holiday_balance", 0))),
+        "holiday_settlement_id": str(r.get("Holiday Settlement ID", r.get("holiday_settlement_id", ""))).strip(),
+        "holiday_settlement_status": str(r.get("Holiday Settlement Status", r.get("holiday_settlement_status", "Not Required"))).strip() or "Not Required",
+        "holiday_settlement_amount": _money(r.get("Holiday Settlement Amount (£)", r.get("holiday_settlement_amount", 0))),
+        "holiday_settlement_type": str(r.get("Holiday Settlement Type", r.get("holiday_settlement_type", ""))).strip(),
+        "store_status": str(r.get("Store Status", r.get("store_status", "Pending"))).strip() or "Pending",
+        "store_checkin_id": str(r.get("Store Check-in ID", r.get("store_checkin_id", ""))).strip(),
+        "store_deduction_id": str(r.get("Store Deduction ID", r.get("store_deduction_id", ""))).strip(),
+        "store_return_id": str(r.get("Store Return ID", r.get("store_return_id", ""))).strip(),
+        "outstanding_item_value": _money(r.get("Outstanding Item Value (£)", r.get("outstanding_item_value", 0))),
+        "store_completed_by": str(r.get("Store Completed By", r.get("store_completed_by", ""))).strip(),
+        "store_completed_at": str(r.get("Store Completed At", r.get("store_completed_at", ""))).strip(),
+        "payroll_status": str(r.get("Payroll Status", r.get("payroll_status", "Pending"))).strip() or "Pending",
+        "payroll_request_ids": str(r.get("Payroll Request IDs", r.get("payroll_request_ids", ""))).strip(),
+        "payroll_total_addition": _money(r.get("Payroll Total Addition (£)", r.get("payroll_total_addition", 0))),
+        "payroll_total_deduction": _money(r.get("Payroll Total Deduction (£)", r.get("payroll_total_deduction", 0))),
+        "payroll_completed_by": str(r.get("Payroll Completed By", r.get("payroll_completed_by", ""))).strip(),
+        "payroll_completed_at": str(r.get("Payroll Completed At", r.get("payroll_completed_at", ""))).strip(),
+        "final_status": str(r.get("Final Status", r.get("final_status", "Open"))).strip() or "Open",
+        "final_cleared_by": str(r.get("Final Cleared By", r.get("final_cleared_by", ""))).strip(),
+        "final_cleared_at": str(r.get("Final Cleared At", r.get("final_cleared_at", ""))).strip(),
+        "notes": str(r.get("Notes", r.get("notes", ""))).strip(),
+    }
+
+
+def load_leaver_clearances(force=False):
+    if not force and "_leaver_clearance_cache" in st.session_state:
+        return list(st.session_state["_leaver_clearance_cache"])
+    initialise_leaver_clearance()
+    try:
+        df = _read_excel_records(LEAVER_CLEARANCE_PATH)
+        records = [_normalise_clearance_record(r) for r in df.to_dict(orient="records")]
+        records = [r for r in records if r.get("clearance_id") and r.get("employee_id")]
+        _set_data_cache("_leaver_clearance_cache", records)
+        return list(records)
+    except Exception as e:
+        st.error(f"Leaver Clearance Load Error: {e}")
+        return []
+
+
+def save_all_leaver_clearances(records, sync=True):
+    rows = []
+    for r in records:
+        rows.append({
+            "Clearance ID": str(r.get("clearance_id", "")), "Employee ID": str(r.get("employee_id", "")),
+            "Employee Name": str(r.get("emp_name", "")), "Department": str(r.get("emp_dept", "")),
+            "Leaving Date": str(r.get("leaving_date", "")), "Leaving Reason": str(r.get("leaving_reason", "")),
+            "Created By": str(r.get("created_by", "")), "Created At": str(r.get("created_at", "")),
+            "HR Status": str(r.get("hr_status", "Pending")), "Holiday Balance (Days)": float(r.get("holiday_balance", 0) or 0),
+            "Holiday Settlement ID": str(r.get("holiday_settlement_id", "")), "Holiday Settlement Status": str(r.get("holiday_settlement_status", "Not Required")),
+            "Holiday Settlement Amount (£)": float(r.get("holiday_settlement_amount", 0) or 0), "Holiday Settlement Type": str(r.get("holiday_settlement_type", "")),
+            "Store Status": str(r.get("store_status", "Pending")), "Store Check-in ID": str(r.get("store_checkin_id", "")),
+            "Store Deduction ID": str(r.get("store_deduction_id", "")), "Store Return ID": str(r.get("store_return_id", "")),
+            "Outstanding Item Value (£)": float(r.get("outstanding_item_value", 0) or 0), "Store Completed By": str(r.get("store_completed_by", "")),
+            "Store Completed At": str(r.get("store_completed_at", "")),
+            "Payroll Status": str(r.get("payroll_status", "Pending")), "Payroll Request IDs": str(r.get("payroll_request_ids", "")),
+            "Payroll Total Addition (£)": float(r.get("payroll_total_addition", 0) or 0), "Payroll Total Deduction (£)": float(r.get("payroll_total_deduction", 0) or 0),
+            "Payroll Completed By": str(r.get("payroll_completed_by", "")), "Payroll Completed At": str(r.get("payroll_completed_at", "")),
+            "Final Status": str(r.get("final_status", "Open")), "Final Cleared By": str(r.get("final_cleared_by", "")),
+            "Final Cleared At": str(r.get("final_cleared_at", "")), "Notes": str(r.get("notes", "")),
+        })
+    pd.DataFrame(rows, columns=LEAVER_CLEARANCE_COLUMNS).to_excel(LEAVER_CLEARANCE_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_leaver_clearance_cache", list(records))
+    if sync: sync_saved_file_to_drive(LEAVER_CLEARANCE_PATH)
+
+
+def get_next_leaver_clearance_id(records):
+    nums = []
+    for r in records or []:
+        m = re.fullmatch(r"LC-(\d+)", str(r.get("clearance_id", "")).strip().upper())
+        if m: nums.append(int(m.group(1)))
+    return f"LC-{(max(nums) + 1 if nums else 1):06d}"
+
+
+def _get_latest_final_settlement(employee_id):
+    records = _hrp_get_final_settlement_records(employee_id)
+    return records[0] if records else None
+
+
+def _get_leaver_holiday_balance(employee, leaving_date):
+    try:
+        if not isinstance(leaving_date, date): leaving_date = pd.to_datetime(leaving_date).date()
+    except Exception: leaving_date = date.today()
+    calc = _hrp_get_leaving_entitlement(employee, leaving_date)
+    used = _hrp_get_approved_holiday_days_to_date(employee.get("emp_id", ""), leaving_date)
+    try:
+        start = employee.get("start_date")
+        if not isinstance(start, date): start = pd.to_datetime(start).date()
+    except Exception: start = leaving_date
+    closure = _hrp_get_company_closure_holiday_days(employee, start, leaving_date)
+    return round(round(calc["net"] - calc["bank_holidays"], 1) - round(used + closure, 1), 1)
+
+
+def _get_payroll_requests_for_clearance(rec):
+    ids = {str(x).strip() for x in str(rec.get("payroll_request_ids", "")).split(",") if str(x).strip()}
+    if not ids: return []
+    return [r for r in load_records_from_excel(force=True) if str(r.get("id", "")) in ids]
+
+
+def _sync_clearance_payroll_status(rec, records=None):
+    reqs = _get_payroll_requests_for_clearance(rec)
+    if not reqs:
+        # A Payroll officer may explicitly confirm that final pay is correct and
+        # that no Addition/Deduction is required. Do not reset that completed
+        # state to Pending on the next page refresh/session.
+        if str(rec.get("payroll_status", "")).casefold() not in {"cleared", "not required"}:
+            rec["payroll_status"] = "Pending"
+        rec["payroll_total_addition"] = 0.0
+        rec["payroll_total_deduction"] = 0.0
+        return rec
+    additions = sum(float(r.get("amount", 0) or 0) for r in reqs if str(r.get("type", "")).casefold() == "addition" and str(r.get("status", "")).casefold() == "approved")
+    deductions = sum(float(r.get("amount", 0) or 0) for r in reqs if str(r.get("type", "")).casefold() == "deduction" and str(r.get("status", "")).casefold() == "approved")
+    rec["payroll_total_addition"] = additions
+    rec["payroll_total_deduction"] = deductions
+    statuses = {str(r.get("status", "pending")).casefold() for r in reqs}
+
+    # Once Payroll has explicitly completed the clearance, do not downgrade the
+    # master clearance back to Approved/Rejected on the next page refresh. If a
+    # brand-new pending adjustment is later raised, that pending request correctly
+    # moves Payroll back to Pending Director Approval.
+    if str(rec.get("payroll_status", "")).casefold() == "cleared" and "pending" not in statuses:
+        return rec
+
+    if "pending" in statuses:
+        rec["payroll_status"] = "Pending Director Approval"
+    elif "approved" in statuses:
+        rec["payroll_status"] = "Approved"
+    elif statuses and statuses.issubset({"rejected"}):
+        rec["payroll_status"] = "Rejected"
+    else:
+        rec["payroll_status"] = "Pending"
+    return rec
+
+
+def _ensure_leaver_clearance(employee, created_by="HR"):
+    if not employee or not employee.get("leaving_date"): return None
+    emp_id = str(employee.get("emp_id", "")).strip()
+    if not emp_id: return None
+    records = load_leaver_clearances(force=True)
+    rec = next((r for r in records if str(r.get("employee_id", "")).casefold() == emp_id.casefold()), None)
+    try:
+        leaving_date = employee.get("leaving_date") if isinstance(employee.get("leaving_date"), date) else pd.to_datetime(employee.get("leaving_date")).date()
+    except Exception: leaving_date = employee.get("leaving_date")
+    holiday_balance = _get_leaver_holiday_balance(employee, leaving_date)
+    settlement = _get_latest_final_settlement(emp_id)
+    if settlement:
+        settlement_status = str(settlement.get("status", "pending")).strip().title()
+        settlement_id = str(settlement.get("id", "")); settlement_amount = float(settlement.get("amount", 0) or 0); settlement_type = str(settlement.get("type", ""))
+    elif abs(holiday_balance) < 0.05:
+        settlement_status = "Not Required"; settlement_id = ""; settlement_amount = 0.0; settlement_type = ""
+    else:
+        settlement_status = "Required"; settlement_id = ""; settlement_amount = 0.0; settlement_type = ""
+    all_items = load_employee_items()
+    outstanding = get_employee_outstanding_items(emp_id, all_items)
+    outstanding_value = sum(float(r.get("qty_outstanding", 0) or 0) * float(r.get("unit_price", 0) or 0) for r in outstanding)
+    checkins = load_item_checkins(force=True)
+    emp_checkins = [c for c in checkins if str(c.get("employee_id", "")).casefold() == emp_id.casefold()]
+    latest = emp_checkins[-1] if emp_checkins else None
+    created_new = rec is None
+    if created_new:
+        rec = {"clearance_id": get_next_leaver_clearance_id(records), "employee_id": emp_id, "emp_name": employee.get("name", ""), "emp_dept": employee.get("department", ""), "leaving_date": str(leaving_date), "leaving_reason": str(employee.get("leaving_reason", "")), "created_by": created_by or "HR", "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "hr_status": "Complete", "store_status": "Pending", "payroll_status": "Pending", "payroll_request_ids": "", "final_status": "Open", "final_cleared_by": "", "final_cleared_at": "", "notes": ""}
+        records.append(rec)
+    rec.update({"emp_name": employee.get("name", rec.get("emp_name", "")), "emp_dept": employee.get("department", rec.get("emp_dept", "")), "leaving_date": str(leaving_date), "leaving_reason": str(employee.get("leaving_reason", rec.get("leaving_reason", ""))), "hr_status": "Complete", "holiday_balance": holiday_balance, "holiday_settlement_id": settlement_id, "holiday_settlement_status": settlement_status, "holiday_settlement_amount": settlement_amount, "holiday_settlement_type": settlement_type, "outstanding_item_value": outstanding_value})
+    if latest:
+        rec["store_checkin_id"] = str(latest.get("id", "")); rec["store_deduction_id"] = str(latest.get("deduction_request_id", "")); rec["store_return_id"] = str(latest.get("return_request_id", ""))
+    if outstanding_value > 0:
+        rec["store_status"] = "Pending"
+    elif str(rec.get("store_status", "")).casefold() not in {"completed", "cleared"}:
+        rec["store_status"] = "Not Required" if not latest else "Check-in Complete"
+    _sync_clearance_payroll_status(rec)
+    save_all_leaver_clearances(records, sync=created_new)
+    return rec
+
+
+def _clearance_hr_ready(rec):
+    return str(rec.get("hr_status", "")).casefold() == "complete"
+
+
+def _clearance_director_hr_ready(rec):
+    status = str(rec.get("holiday_settlement_status", "")).casefold()
+    return status in {"approved", "not required"} or (not status and abs(float(rec.get("holiday_balance", 0) or 0)) < 0.05)
+
+
+def _clearance_store_ready(rec):
+    if str(rec.get("store_status", "")).casefold() not in {"not required", "check-in complete", "completed", "cleared"}: return False
+    if float(rec.get("outstanding_item_value", 0) or 0) > 0: return False
+    # Only Store Deductions require Director approval. Returned items are cleared
+    # directly from employee holdings and never create an Addition.
+    linked_ids = {x.strip() for x in str(rec.get("store_deduction_id", "")).split(",") if x.strip()}
+    if not linked_ids: return True
+    try:
+        store_reqs = load_store_deductions(force=True)
+        linked = [r for r in store_reqs if str(r.get("id", "")) in linked_ids]
+        if not linked: return True
+        return all(str(r.get("status", "pending")).casefold() == "approved" for r in linked)
+    except Exception:
+        return False
+
+
+def _maybe_finalize_clearance(rec, records):
+    _sync_clearance_payroll_status(rec)
+    if _clearance_all_ready(rec) and str(rec.get("final_status", "")).casefold() != "cleared":
+        rec["final_status"] = "Cleared"
+        rec["final_cleared_by"] = "System"
+        rec["final_cleared_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        save_all_leaver_clearances(records)
+        log_action("LEAVER_FINAL_CLEARANCE_COMPLETED", rec.get("clearance_id"), new_data=rec)
+        return True
+    return False
+
+
+def _clearance_payroll_ready(rec):
+    status = str(rec.get("payroll_status", "Pending")).casefold()
+    return status in {"approved", "not required", "cleared"}
+
+
+def _clearance_all_ready(rec):
+    return _clearance_hr_ready(rec) and _clearance_director_hr_ready(rec) and _clearance_store_ready(rec) and _clearance_payroll_ready(rec)
+
+
+def _create_payroll_clearance_request(rec, user_name, trans_type, amount, reason):
+    """Create a normal generic Addition/Deduction request for Director approval."""
+    trans_type = str(trans_type or "").strip().title()
+    if trans_type not in {"Addition", "Deduction"}:
+        raise ValueError("Payroll adjustment must be Addition or Deduction.")
+    amount = float(amount or 0)
+    if amount <= 0:
+        raise ValueError("Payroll adjustment amount must be greater than £0.")
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValueError("A reason is required for a Payroll Addition/Deduction.")
+
+    requests = load_records_from_excel(force=True)
+    # Do not accidentally create the same leaver adjustment twice from a rerun.
+    clearance_id = str(rec.get("clearance_id", "")).strip()
+    for existing in requests:
+        if (str(existing.get("category", "")).casefold() == "leaver payroll adjustment"
+                and clearance_id
+                and clearance_id in str(existing.get("desc", ""))
+                and str(existing.get("type", "")).casefold() == trans_type.casefold()
+                and str(existing.get("status", "")).casefold() in {"pending", "approved"}):
+            raise ValueError(f"A {trans_type} for {clearance_id} is already pending/approved (Request #{existing.get('id')}).")
+
+    new_id = get_next_id(requests)
+    request = {
+        "id": new_id,
+        "emp_name": rec.get("emp_name", ""),
+        "dept": "Payroll Department",
+        "type": trans_type,
+        "category": "Leaver Payroll Adjustment",
+        "date": str(rec.get("leaving_date", date.today())),
+        "amount": amount,
+        "manager": "Payroll",
+        "desc": f"Leaver Clearance {clearance_id}: {reason}",
+        "attachment_name": "None",
+        "status": "pending",
+        "director_comments": "",
+        "decision_date": "",
+        "decision_by": "",
+        "submitted_by": user_name,
+        "pdf_path": "",
+        "edited_from_id": "",
+        "old_data": "",
+    }
+    requests.append(request)
+    save_all_records(requests)
+
+    current_ids = [x.strip() for x in str(rec.get("payroll_request_ids", "")).split(",") if x.strip()]
+    if str(new_id) not in current_ids:
+        current_ids.append(str(new_id))
+    rec["payroll_request_ids"] = ",".join(current_ids)
+    rec["payroll_status"] = "Pending Director Approval"
+    log_action("LEAVER_PAYROLL_ADJUSTMENT_CREATED", new_id, new_data={"clearance_id": clearance_id, **request})
+    return request
+
+
+def _build_final_leaver_clearance_pdf(rec):
+    if not PDF_AVAILABLE: return b""
+    try:
+        pdf = FPDF()
+        pdf.add_page(); pdf.set_font("Arial", "B", 16); pdf.cell(0, 10, "EMPLOYEE LEAVER CLEARANCE FORM", ln=1, align="C")
+        pdf.set_font("Arial", "", 10); pdf.cell(0, 7, f"Clearance ID: {rec.get('clearance_id')}   Employee: {rec.get('emp_name')} ({rec.get('employee_id')})", ln=1)
+        pdf.cell(0, 7, f"Department: {rec.get('emp_dept')}   Leaving Date: {rec.get('leaving_date')}", ln=1); pdf.ln(3)
+        for title, lines in [("HR CLEARANCE", [f"Status: {rec.get('hr_status')}", f"Holiday balance: {float(rec.get('holiday_balance',0) or 0):.1f} days", f"Settlement: {rec.get('holiday_settlement_id') or 'Not required'} / {rec.get('holiday_settlement_status')}", f"Settlement amount: £{float(rec.get('holiday_settlement_amount',0) or 0):,.2f}"]), ("STORE CLEARANCE", [f"Status: {rec.get('store_status')}", f"Check-in: {rec.get('store_checkin_id') or 'None'}", f"Outstanding property value: £{float(rec.get('outstanding_item_value',0) or 0):,.2f}", f"Store deduction: {rec.get('store_deduction_id') or 'None'}"]), ("PAYROLL CLEARANCE", [f"Status: {rec.get('payroll_status')}", f"Payroll requests: {rec.get('payroll_request_ids') or 'None'}", f"Approved additions: £{float(rec.get('payroll_total_addition',0) or 0):,.2f}", f"Approved deductions: £{float(rec.get('payroll_total_deduction',0) or 0):,.2f}"]), ("FINAL CLEARANCE", [f"Status: {rec.get('final_status')}", f"Cleared by: {rec.get('final_cleared_by') or '—'}", f"Cleared at: {rec.get('final_cleared_at') or '—'}"])] :
+            pdf.set_font("Arial", "B", 12); pdf.cell(0, 8, title, ln=1); pdf.set_font("Arial", "", 10)
+            for line in lines: pdf.cell(0, 6, line, ln=1)
+            pdf.ln(2)
+        return bytes(pdf.output(dest="S"))
+    except Exception: return b""
+
+
+def _save_leaver_clearance_pdf(rec):
+    """Create a persistent PDF copy so the completed clearance can be downloaded again later."""
+    pdf = _build_final_leaver_clearance_pdf(rec)
+    if not pdf:
+        return ""
+    try:
+        os.makedirs(PDF_DIR, exist_ok=True)
+        path = os.path.join(PDF_DIR, f"Leaver_Clearance_{rec.get('clearance_id')}.pdf")
+        with open(path, "wb") as f:
+            f.write(pdf)
+        return path
+    except Exception:
+        return ""
+
+
+def render_leaver_clearance_hr():
+    st.subheader("🔗 Employee Leaver Clearance — HR")
+    st.caption("HR starts the company-wide clearance. The clearance record is permanent and remains searchable after the employee has left and been fully cleared.")
+
+    # IMPORTANT: use the persisted HR register, not session state. This ensures a
+    # leaver already declared in HR is recreated/loaded after a fresh login or restart.
+    employees = _hrp_load_employees()
+    user_name = st.session_state.get("user_info", {}).get("full_name", "HR")
+    for emp in [e for e in employees if str(e.get("status", "")).casefold() == "left" and e.get("leaving_date")]:
+        _ensure_leaver_clearance(emp, user_name)
+
+    records = load_leaver_clearances(force=True)
+    if not records:
+        st.info("No employee leaver clearances have been created yet. Record an employee as Left in Employee Leaving to start one.")
+        return
+
+    # Search the permanent register at any time, including fully-cleared leavers.
+    q = st.text_input("🔎 Search clearance", placeholder="Name, Employee ID or Clearance ID (e.g. LC-000125)", key="leaver_clearance_search")
+    status_filter = st.selectbox("Status", ["All", "Open", "Fully Cleared"], key="leaver_clearance_status_filter")
+    qn = str(q or "").strip().casefold()
+    filtered = []
+    for r in records:
+        hay = " ".join([str(r.get("clearance_id", "")), str(r.get("emp_name", "")), str(r.get("employee_id", "")), str(r.get("emp_dept", ""))]).casefold()
+        is_cleared = str(r.get("final_status", "")).casefold() == "cleared"
+        if qn and qn not in hay:
+            continue
+        if status_filter == "Open" and is_cleared:
+            continue
+        if status_filter == "Fully Cleared" and not is_cleared:
+            continue
+        filtered.append(r)
+
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Open",sum(str(r.get("final_status","Open")).casefold()!="cleared" for r in records))
+    m2.metric("HR",sum(_clearance_hr_ready(r) for r in records))
+    m3.metric("Store",sum(_clearance_store_ready(r) for r in records))
+    m4.metric("Fully Cleared",sum(str(r.get("final_status","")).casefold()=="cleared" for r in records))
+    st.caption(f"Showing {len(filtered)} of {len(records)} permanent clearance record(s).")
+
+    for rec in reversed(filtered):
+        _sync_clearance_payroll_status(rec)
+        status=str(rec.get("final_status","Open")).casefold()
+        with st.expander(f"{'🟢' if status=='cleared' else '🟡'} {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}", expanded=status!="cleared"):
+            a,b,c,d,e=st.columns(5)
+            a.metric("HR",rec.get("hr_status")); b.metric("Director",rec.get("holiday_settlement_status")); c.metric("Store",rec.get("store_status")); d.metric("Payroll",rec.get("payroll_status")); e.metric("Final",rec.get("final_status"))
+            st.write(f"**Leaving:** {rec.get('leaving_date')} · **Reason:** {rec.get('leaving_reason','')}")
+            st.write(f"**Holiday:** {float(rec.get('holiday_balance',0) or 0):.1f} days · Settlement #{rec.get('holiday_settlement_id') or '—'} · £{float(rec.get('holiday_settlement_amount',0) or 0):,.2f}")
+            st.write(f"**Store:** Outstanding £{float(rec.get('outstanding_item_value',0) or 0):,.2f} · Check-in #{rec.get('store_checkin_id') or '—'} · Deduction #{rec.get('store_deduction_id') or '—'}")
+            st.write(f"**Payroll:** Requests {rec.get('payroll_request_ids') or 'None'} · Approved additions £{float(rec.get('payroll_total_addition',0) or 0):,.2f} · deductions £{float(rec.get('payroll_total_deduction',0) or 0):,.2f}")
+            if status == "cleared":
+                st.success(f"Fully cleared by {rec.get('final_cleared_by')} on {rec.get('final_cleared_at')}")
+            else:
+                if not _clearance_director_hr_ready(rec): st.warning("⏳ Director approval is still required for the HR holiday settlement.")
+                if not _clearance_store_ready(rec): st.info("📦 Store clearance is still outstanding.")
+                if not _clearance_payroll_ready(rec): st.info("🧾 Payroll clearance is still outstanding.")
+            pdf = _build_final_leaver_clearance_pdf(rec)
+            if status == "cleared":
+                _save_leaver_clearance_pdf(rec)
+            st.download_button("📄 Download Leaver Clearance Form", data=pdf, file_name=f"Leaver_Clearance_{rec.get('clearance_id')}.pdf", mime="application/pdf", disabled=not bool(pdf), key=f"lc_hr_pdf_{rec.get('clearance_id')}")
+
+
+def render_leaver_clearance_store(user_name):
+    st.subheader("🔗 Leaver Clearance — Store")
+    st.caption("Store receives every HR-cleared leaver, including employees with no company property. Store must explicitly clear the employee.")
+    employees=_hrp_load_employees(); leavers=[e for e in employees if str(e.get("status","")).casefold()=="left" and e.get("leaving_date")]
+    for emp in leavers: _ensure_leaver_clearance(emp,user_name)
+    records=load_leaver_clearances(force=True); all_items=load_employee_items(); checkins=load_item_checkins(force=True)
+    visible=False
+    for rec in reversed(records):
+        if str(rec.get("final_status","")).casefold()=="cleared": continue
+        # Store sees the leaver immediately after HR declares them. Director approval
+        # only controls final Store sign-off; it does not hide the employee from Store.
+        visible=True; emp_id=rec.get("employee_id",""); outstanding=get_employee_outstanding_items(emp_id,all_items); value=sum(float(r.get("qty_outstanding",0) or 0)*float(r.get("unit_price",0) or 0) for r in outstanding); emp_checkins=[c for c in checkins if str(c.get("employee_id","")).casefold()==str(emp_id).casefold()]; latest=emp_checkins[-1] if emp_checkins else None
+        rec["outstanding_item_value"]=value
+        if latest: rec["store_checkin_id"]=str(latest.get("id","")); rec["store_deduction_id"]=str(latest.get("deduction_request_id","")); rec["store_return_id"]=str(latest.get("return_request_id",""))
+        if value>0: rec["store_status"]="Pending"
+        elif str(rec.get("store_status","")).casefold() not in {"completed","cleared"}: rec["store_status"]="Not Required" if not latest else "Check-in Complete"
+        with st.expander(f"🟡 {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",expanded=True):
+            a,b,c=st.columns(3); a.metric("Property", "Outstanding" if outstanding else "None"); b.metric("Value",f"£{value:,.2f}"); c.metric("Status",rec.get("store_status"))
+            if outstanding: st.dataframe(pd.DataFrame([{"Item":r.get("item_name",""),"Qty Outstanding":float(r.get("qty_outstanding",0) or 0),"Unit Price":f"£{float(r.get('unit_price',0) or 0):,.2f}","Value":f"£{float(r.get('qty_outstanding',0) or 0)*float(r.get('unit_price',0) or 0):,.2f}"} for r in outstanding]),width="stretch",hide_index=True); st.info("Use Leaver Item Check-in to record returned quantities. Any unreturned items continue through Store's Director approval process.")
+            else: st.success("✅ No company property remains outstanding.")
+            if not _clearance_director_hr_ready(rec):
+                st.info("ℹ️ HR/Director holiday approval is separate from Store. Store can clear its own section now; any Store Deduction still requires Director approval.")
+            if not outstanding and str(rec.get("store_status","")).casefold() not in {"completed","cleared"}:
+                if st.button("✅ Approve / Clear Store — Nothing Outstanding",key=f"store_clear_{rec.get('clearance_id')}",type="primary",width="stretch"):
+                    now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    rec["store_status"]="Cleared"
+                    rec["store_completed_by"]=user_name
+                    rec["store_completed_at"]=now
+                    save_all_leaver_clearances(records)
+                    log_action("LEAVER_STORE_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
+                    st.success("Store clearance completed and recorded as Cleared.")
+                    st.rerun()
+            elif str(rec.get("store_status","")).casefold() in {"completed","cleared"}:
+                st.success(f"✅ Store Cleared by {rec.get('store_completed_by')} on {rec.get('store_completed_at')}")
+    if not visible: st.info("No leavers are currently waiting for Store clearance.")
+
+
+def render_leaver_clearance_payroll(user_name):
+    st.subheader("🧾 Leaver Clearance — Payroll")
+    st.caption(
+        "Check the leaver's final pay. Choose Addition or Deduction if an adjustment is needed. "
+        "If nothing is required, choose Everything Clear and then click the clear button."
+    )
+
+    # Make sure Payroll can see the same master clearance records even if HR/Store
+    # has not opened the clearance screen during this session.
+    for emp in _hrp_load_employees():
+        if str(emp.get("status", "")).casefold() == "left" and emp.get("leaving_date"):
+            _ensure_leaver_clearance(emp, user_name)
+
+    records = load_leaver_clearances(force=True)
+    if not records:
+        st.info("No leaver clearances exist yet.")
+        return
+
+    for rec in reversed(records):
+        _sync_clearance_payroll_status(rec)
+
+        if str(rec.get("final_status", "")).casefold() == "cleared":
+            continue
+
+        clearance_key = str(rec.get("clearance_id", ""))
+
+        with st.expander(
+            f"🧾 {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",
+            expanded=True,
+        ):
+            a, b, c = st.columns(3)
+            a.metric("Store", rec.get("store_status"))
+            b.metric("Payroll", rec.get("payroll_status"))
+            c.metric("Final", rec.get("final_status"))
+
+            st.write(
+                f"**HR holiday settlement:** {rec.get('holiday_settlement_status')} · "
+                f"£{float(rec.get('holiday_settlement_amount', 0) or 0):,.2f}"
+            )
+
+            linked = _get_payroll_requests_for_clearance(rec)
+            if linked:
+                st.dataframe(
+                    pd.DataFrame([
+                        {
+                            "Request": r.get("id"),
+                            "Type": r.get("type"),
+                            "Amount": f"£{float(r.get('amount', 0) or 0):,.2f}",
+                            "Status": r.get("status"),
+                            "Description": r.get("desc"),
+                        }
+                        for r in linked
+                    ]),
+                    width="stretch",
+                    hide_index=True,
+                )
+            else:
+                st.info(
+                    "No Payroll adjustment has been raised. Select the Payroll outcome below."
+                )
+
+            linked_statuses = {
+                str(r.get("status", "pending")).casefold() for r in linked
+            }
+            has_open_adjustment = bool(
+                linked_statuses.intersection({"pending", "approved"})
+            )
+
+            # IMPORTANT: Keep the outcome selector OUTSIDE a st.form.
+            # Streamlit reruns immediately when this selectbox changes, so the
+            # Addition/Deduction fields disappear immediately when Everything Clear
+            # is selected and the correct Clear button is rendered.
+            typ = st.selectbox(
+                "Payroll outcome",
+                [
+                    "Everything Clear — No Addition/Deduction",
+                    "Addition",
+                    "Deduction",
+                ],
+                key=f"plc_type_{clearance_key}",
+            )
+
+            if typ == "Everything Clear — No Addition/Deduction":
+                st.success(
+                    "✅ No Payroll Addition or Deduction is required. "
+                    "Click the button below to complete Payroll clearance."
+                )
+
+                if has_open_adjustment:
+                    st.warning(
+                        "⚠️ An existing Payroll Addition/Deduction is still Pending or Approved. "
+                        "You must complete or resolve that adjustment before selecting no adjustment."
+                    )
+                    clear_disabled = True
+                else:
+                    clear_disabled = False
+
+                if st.button(
+                    "✅ Clear Payroll — No Addition/Deduction Required",
+                    key=f"plc_clear_{clearance_key}",
+                    type="primary",
+                    width="stretch",
+                    disabled=clear_disabled,
+                ):
+                    rec["payroll_status"] = "Cleared"
+                    # Do not remove historical request IDs. Rejected requests should
+                    # remain available for the audit trail.
+                    rec["payroll_total_addition"] = 0.0
+                    rec["payroll_total_deduction"] = 0.0
+                    rec["payroll_completed_by"] = user_name
+                    rec["payroll_completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    save_all_leaver_clearances(records)
+                    _maybe_finalize_clearance(rec, records)
+
+                    if str(rec.get("final_status", "")).casefold() == "cleared":
+                        _save_leaver_clearance_pdf(rec)
+
+                    log_action(
+                        "LEAVER_PAYROLL_CLEARANCE_COMPLETED",
+                        rec.get("clearance_id"),
+                        new_data=rec,
+                    )
+                    st.success(
+                        "✅ Payroll cleared — no Addition or Deduction is required. "
+                        "The leaver can now proceed to final clearance."
+                    )
+                    st.rerun()
+
+            else:
+                # Addition/Deduction gets its own form. Because the selector is
+                # outside this form, changing the outcome immediately switches the UI.
+                with st.form(f"payroll_adjustment_form_{clearance_key}"):
+                    amount = st.number_input(
+                        f"{typ} Amount (£)",
+                        min_value=0.01,
+                        step=1.0,
+                        format="%.2f",
+                        key=f"plc_amount_{clearance_key}_{typ.casefold()}",
+                    )
+                    reason = st.text_area(
+                        f"Reason for {typ}",
+                        key=f"plc_reason_{clearance_key}_{typ.casefold()}",
+                        placeholder=(
+                            f"Enter the reason for the Payroll {typ.lower()}, "
+                            "for example overtime, missing pay, or an authorised deduction."
+                        ),
+                    )
+                    submitted = st.form_submit_button(
+                        f"📤 Raise Payroll {typ} — Send to Director",
+                        type="primary",
+                        width="stretch",
+                    )
+
+                if submitted:
+                    try:
+                        created = _create_payroll_clearance_request(
+                            rec,
+                            user_name,
+                            typ,
+                            amount,
+                            str(reason).strip(),
+                        )
+                        save_all_leaver_clearances(records)
+                        st.success(
+                            f"✅ Payroll {typ} Request #{created.get('id')} has been sent "
+                            "to the Director for approval."
+                        )
+                        st.info(
+                            "Payroll remains pending until the Director approves or rejects "
+                            "this request."
+                        )
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    except Exception as exc:
+                        st.error(f"Unable to create the Payroll {typ} request: {exc}")
+
+            # Approved Payroll adjustments can be completed after Director approval.
+            _sync_clearance_payroll_status(rec)
+            if not _clearance_store_ready(rec):
+                st.info(
+                    "📦 Payroll can be cleared independently. Store completion is only "
+                    "required before the overall Final Clearance can become Fully Cleared."
+                )
+
+            if (
+                linked
+                and _clearance_payroll_ready(rec)
+                and str(rec.get("payroll_status", "")).casefold() != "cleared"
+            ):
+                if st.button(
+                    "✅ Complete Payroll Clearance — Approved Adjustment",
+                    key=f"plc_complete_{clearance_key}",
+                    type="primary",
+                ):
+                    rec["payroll_completed_by"] = user_name
+                    rec["payroll_completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    rec["payroll_status"] = "Cleared"
+                    save_all_leaver_clearances(records)
+                    _maybe_finalize_clearance(rec, records)
+                    log_action(
+                        "LEAVER_PAYROLL_CLEARANCE_COMPLETED",
+                        rec.get("clearance_id"),
+                        new_data=rec,
+                    )
+                    st.success("✅ Payroll clearance completed and recorded as Cleared.")
+                    st.rerun()
+            elif str(rec.get("payroll_status", "")).casefold() == "cleared":
+                st.success(
+                    f"✅ Payroll Cleared by {rec.get('payroll_completed_by')} "
+                    f"on {rec.get('payroll_completed_at')}"
+                )
+
+    save_all_leaver_clearances(records)
+
+def render_director_leaver_payroll_portal(director_name):
+    """Dedicated Director approval screen for Payroll leaver Additions/Deductions.
+    These requests are deliberately kept separate from the normal Addition/Deduction
+    queue so approval always updates the linked leaver-clearance record.
+    """
+    st.subheader("🧾 Director Approval — Leaver Payroll")
+    st.caption("Approve or reject Payroll Additions/Deductions raised during employee leaver clearance. Every decision updates both the request and the linked leaver clearance.")
+
+    requests = load_records_from_excel(force=True)
+    leaver_requests = [
+        r for r in requests
+        if str(r.get("category", "")).strip().casefold() == "leaver payroll adjustment"
+    ]
+
+    def linked_clearance_ids(req):
+        desc = str(req.get("desc", ""))
+        m = re.search(r"Leaver Clearance\s+(LC-\d+)", desc, flags=re.I)
+        return [m.group(1)] if m else []
+
+    def set_request_status(req_id, new_status, comments=""):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        records_now = load_records_from_excel(force=True)
+        target = None
+        for r in records_now:
+            if str(r.get("id", "")) == str(req_id):
+                target = r
+                break
+        if target is None:
+            st.error(f"Request #{req_id} could not be found in the live request register.")
+            return
+
+        old_status = str(target.get("status", "pending")).strip().lower()
+        target["status"] = new_status
+        target["decision_by"] = director_name
+        target["decision_date"] = now
+        target["director_comments"] = str(comments or "").strip()
+        if new_status == "approved":
+            target["approved_by"] = director_name
+            target["approved_date"] = now
+            target["rejection_reason"] = ""
+        elif new_status == "rejected":
+            target["rejection_reason"] = str(comments or "").strip()
+        save_all_records(records_now)
+
+        # IMPORTANT: immediately synchronize the linked permanent leaver-clearance record.
+        clearance_ids = linked_clearance_ids(target)
+        clearance_records = load_leaver_clearances(force=True)
+        for clearance in clearance_records:
+            if str(clearance.get("clearance_id", "")) in clearance_ids:
+                _sync_clearance_payroll_status(clearance)
+                save_all_leaver_clearances(clearance_records)
+                break
+
+        log_action(
+            "LEAVER_PAYROLL_DIRECTOR_DECISION",
+            req_id,
+            old_data={"status": old_status},
+            new_data={"status": new_status, "decision_by": director_name},
+            decision_by=director_name,
+            decision_date=now,
+        )
+        st.success(f"Payroll request #{req_id} has been {new_status.title()} and the linked leaver clearance has been updated.")
+        st.rerun()
+
+    pending = [r for r in leaver_requests if str(r.get("status", "")).casefold() == "pending"]
+    approved = [r for r in leaver_requests if str(r.get("status", "")).casefold() == "approved"]
+    rejected = [r for r in leaver_requests if str(r.get("status", "")).casefold() == "rejected"]
+
+    t_pending, t_approved, t_rejected = st.tabs(["⏳ Pending", "✅ Approved", "❌ Rejected"])
+
+    def show_request(req, current_status):
+        rid = req.get("id")
+        amount = float(req.get("amount", 0) or 0)
+        clearance_id = linked_clearance_ids(req)
+        with st.expander(f"{'🟡' if current_status == 'pending' else '🟢' if current_status == 'approved' else '🔴'} #{rid} | {req.get('emp_name')} | {req.get('type')} | £{amount:.2f} | {clearance_id[0] if clearance_id else '—'}", expanded=current_status == "pending"):
+            st.write(f"**Employee:** {req.get('emp_name')}  ")
+            st.write(f"**Clearance:** {clearance_id[0] if clearance_id else 'Not linked'}  ")
+            st.write(f"**Type:** {req.get('type')}  ")
+            st.write(f"**Amount:** £{amount:,.2f}  ")
+            st.write(f"**Submitted by:** {get_submitted_by(req) or req.get('submitted_by', '—')}  ")
+            st.info(f"**Reason:** {req.get('desc', '')}")
+            if req.get("director_comments"):
+                st.write(f"**Director comments:** {req.get('director_comments')}")
+            if current_status == "pending":
+                comments = st.text_area("Director comments / decision note", key=f"lc_pay_dir_comm_{rid}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ APPROVE PAYROLL", key=f"lc_pay_dir_approve_{rid}", type="primary", width="stretch"):
+                        set_request_status(rid, "approved", comments)
+                with c2:
+                    if st.button("❌ REJECT PAYROLL", key=f"lc_pay_dir_reject_{rid}", width="stretch"):
+                        if not comments.strip():
+                            st.error("A rejection reason is required.")
+                        else:
+                            set_request_status(rid, "rejected", comments)
+            elif current_status == "approved":
+                st.success(f"Approved by {req.get('decision_by', 'Director')} on {req.get('decision_date', '—')}")
+            else:
+                st.error(f"Rejected by {req.get('decision_by', 'Director')} on {req.get('decision_date', '—')}")
+
+    with t_pending:
+        st.metric("Pending Payroll Adjustments", len(pending))
+        if not pending:
+            st.success("✅ No pending Leaver Payroll adjustments.")
+        for req in reversed(pending):
+            show_request(req, "pending")
+    with t_approved:
+        st.metric("Approved Payroll Adjustments", len(approved))
+        if not approved:
+            st.info("No approved Leaver Payroll adjustments yet.")
+        for req in reversed(approved):
+            show_request(req, "approved")
+    with t_rejected:
+        st.metric("Rejected Payroll Adjustments", len(rejected))
+        if not rejected:
+            st.info("No rejected Leaver Payroll adjustments yet.")
+        for req in reversed(rejected):
+            show_request(req, "rejected")
+
+
+def render_leaver_clearance_final():
+    st.subheader("📋 Final Leaver Clearance Register")
+    st.caption("Permanent, searchable record of HR, Director, Store and Payroll clearance. Reports can be downloaded at any time.")
+    records=load_leaver_clearances(force=True)
+    if not records:
+        st.info("No leaver clearance records exist yet.")
+        return
+    q=st.text_input("🔎 Search permanent clearance register", placeholder="Name, Employee ID or Clearance ID", key="final_leaver_clearance_search")
+    status_filter=st.selectbox("Status", ["All", "Open", "Fully Cleared"], key="final_leaver_clearance_status")
+    qn=str(q or "").strip().casefold()
+    filtered=[]
+    for rec in records:
+        hay=" ".join([str(rec.get("clearance_id","")),str(rec.get("emp_name","")),str(rec.get("employee_id","")),str(rec.get("emp_dept",""))]).casefold()
+        cleared=str(rec.get("final_status","")).casefold()=="cleared"
+        if qn and qn not in hay: continue
+        if status_filter=="Open" and cleared: continue
+        if status_filter=="Fully Cleared" and not cleared: continue
+        filtered.append(rec)
+    st.caption(f"Showing {len(filtered)} of {len(records)} clearance record(s).")
+    for rec in reversed(filtered):
+        _sync_clearance_payroll_status(rec)
+        if _clearance_all_ready(rec) and str(rec.get("final_status","")).casefold()!="cleared":
+            rec["final_status"]="Cleared"; rec["final_cleared_by"]="System"; rec["final_cleared_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_all_leaver_clearances(records); log_action("LEAVER_FINAL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
+        if str(rec.get("final_status","")).casefold()=="cleared":
+            _save_leaver_clearance_pdf(rec)
+        with st.expander(f"{'🟢' if str(rec.get('final_status')).casefold()=='cleared' else '🟡'} {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",expanded=False):
+            st.write(f"HR: **{rec.get('hr_status')}** · Director: **{rec.get('holiday_settlement_status')}** · Store: **{rec.get('store_status')}** · Payroll: **{rec.get('payroll_status')}** · Final: **{rec.get('final_status')}**")
+            pdf=_build_final_leaver_clearance_pdf(rec)
+            st.download_button("📄 Download Final Clearance Form",data=pdf,file_name=f"Leaver_Clearance_{rec.get('clearance_id')}.pdf",mime="application/pdf",disabled=not bool(pdf),key=f"final_lc_pdf_{rec.get('clearance_id')}")
+    save_all_leaver_clearances(records)
+
+
 # 🧰 EMPLOYEE ITEMS — DATA LAYER
 # ============================================================
 def initialise_employee_items():
@@ -7182,9 +8080,12 @@ def _super_admin_transaction_control():
                 new_id=c1.text_input("ACE-ID / Employee ID", value=old_id)
                 new_name=c2.text_input("Full Name", value=emp.get("name",""))
                 new_start=c1.date_input("Start Date", value=emp.get("start_date") or date.today())
-                new_position=c2.text_input("Position / Job Title", value=emp.get("job_title",""))
                 depts=load_departments(); dept_idx=depts.index(emp.get("department")) if emp.get("department") in depts else 0
                 new_dept=c1.selectbox("Department", depts, index=dept_idx)
+                edit_work_options=_hrp_work_type_options(new_dept)
+                current_work=_hrp_normalize_work_type(new_dept, emp.get("work_type", ""), emp.get("job_title", ""))
+                work_idx=edit_work_options.index(current_work) if current_work in edit_work_options else 0
+                new_work_type=c2.selectbox("Working As / Sub-department", edit_work_options, index=work_idx)
                 agreements=["Permanent","Temporary","Fixed Term","Apprenticeship","Other"]; ag_idx=agreements.index(emp.get("agreement_type")) if emp.get("agreement_type") in agreements else 0
                 new_agreement=c2.selectbox("Agreement Type", agreements, index=ag_idx)
                 statuses=["Active","Inactive","Left"]; st_idx=statuses.index(emp.get("status")) if emp.get("status") in statuses else 0
@@ -7207,7 +8108,7 @@ def _super_admin_transaction_control():
                     emp["leaving_date"] = None
                     emp["leaving_reason"] = ""
                     pd.DataFrame([{
-                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
                     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
                     st.session_state.hrp_employees = employees
@@ -7223,7 +8124,7 @@ def _super_admin_transaction_control():
                 else:
                     new_id = validated_id
                 if valid_id:
-                    emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["job_title"]=new_position.strip(); emp["department"]=new_dept; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
+                    emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["department"]=new_dept; emp["work_type"]=new_work_type; emp["job_title"]=new_work_type; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
                     if new_id != old_id:
                         users=load_users()
                         changed=False
@@ -7241,7 +8142,7 @@ def _super_admin_transaction_control():
                         st.session_state["hrp_leave_records"]=portal
                         _hrp_save_leave_records()
                     pd.DataFrame([{
-                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
                     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
                     st.session_state.hrp_employees=employees
@@ -8391,7 +9292,7 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
     new_id = get_next_item_checkin_id(checkins)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     deduction_req_id = ""
-    return_req_id = ""
+    return_req_id = ""  # kept for compatibility with older check-in records; no new returns are created
 
     store_records = load_store_deductions()
 
@@ -8431,50 +9332,11 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
         deduction_req_id = str(ded_id)
         log_action("STORE_DEDUCTION_CREATED", ded_id, new_data=ded_rec)
 
-    # Every physically returned item is also recorded as a Store Return (Addition)
-    # linked back to this exact leaver check-in. It follows the existing Director
-    # approval workflow used by Store Returns.
-    if returned_items:
-        return_id = get_next_store_deduction_id(store_records)
-        return_items = [{
-            "item_name": it["item_name"],
-            "quantity": int(it["quantity"]),
-            "price": float(it["unit_price"]),
-        } for it in returned_items]
-        total_return = sum(
-            float(it["quantity"]) * float(it["unit_price"])
-            for it in returned_items
-        )
-        return_desc = (f"Auto-generated from Leaver Item Check-in #{new_id}. "
-                       f"Items physically returned by {employee['name']} ({employee['emp_id']}). "
-                       f"{(notes or '').strip()}").strip()
-        return_rec = {
-            "id": return_id,
-            "emp_name": employee["name"],
-            "date_leaving": str(leaving_date),
-            "emp_dept": employee.get("department", ""),
-            "manager": user_name,
-            "date_submit": str(checkin_date),
-            "type": "Addition",
-            "items": return_items,
-            "total_deduction": float(total_return),
-            "desc": return_desc,
-            "attachment_name": "None",
-            "status": "pending",
-            "director_comments": "",
-            "rejection_reason": "",
-            "decision_date": "",
-            "decision_by": "",
-            "submitted_by": user_name,
-            "submitted_date": now,
-            "pdf_path": "",
-        }
-        store_records.append(return_rec)
-        return_req_id = str(return_id)
-        log_action("STORE_DEDUCTION_CREATED", return_id, new_data=return_rec)
-
-    # Save both linked Store transactions together, if any were created.
-    if deduction_req_id or return_req_id:
+    # Returned company property is simply cleared from the employee's holdings.
+    # IMPORTANT: a returned item does NOT create a Store Addition transaction.
+    # Only items that remain unreturned can create a Store Deduction for Director approval.
+    # Save Store data only when a non-returned item created a deduction.
+    if deduction_req_id:
         save_all_store_deductions(store_records)
 
     checkins.append({
@@ -8535,11 +9397,6 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
         st.success(
             f"✅ Check-in #{new_id} saved. Store Deduction #{deduction_req_id} created for "
             f"£{total_deduction:.2f} — sent to Director for approval."
-        )
-    elif return_req_id:
-        st.success(
-            f"✅ Check-in #{new_id} saved. Store Return #{return_req_id} created "
-            f"for returned items — sent to Director for approval."
         )
     else:
         st.success(f"✅ Check-in #{new_id} saved. Holdings updated.")
@@ -9052,7 +9909,7 @@ def refresh_authenticated_user_session():
     if not current_username:
         return
     try:
-        users = load_users(force=True)
+        users = load_users(force=False)
         current = users.get(current_username)
         if not current:
             st.session_state.clear()
@@ -9270,7 +10127,7 @@ st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 
 change_my_password_form()
 
-all_live_requests = load_records_from_excel()
+all_live_requests = load_records_from_excel(force=False)
 CATEGORIES = load_categories()
 
 st.divider()
@@ -9650,11 +10507,12 @@ elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_work_orders, tab_inspector_bonus = st.tabs([
+    tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = st.tabs([
         "➕ Addition & Deduction",
         "👥 HR Leave Settlement",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
+        "🧾 Leaver Clearance",
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus"
     ])
@@ -9707,6 +10565,7 @@ elif role == "Payroll":
     with tab_hr_leave: render_hr_leave_payroll_portal()
     with tab_store_ded: render_store_payroll_portal(type_filter="Deduction")
     with tab_store_ret: render_store_payroll_portal(type_filter="Addition")
+    with tab_leaver: render_leaver_clearance_payroll(full_name)
     with tab_work_orders: render_work_order_payroll_portal(full_name)
     with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
 
@@ -9893,7 +10752,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
     if has_store_deduction: labels.append("📋 My Submitted Store Requests")
     if has_employee_items: labels.append("🧰 Issue Items")
     if has_employee_items: labels.append("📊 Employee Holdings")
+    is_store_user = str(dept_name or "").strip().casefold() == "store"
     if has_employee_items: labels.append("📋 Leaver Item Check-in")
+    if is_store_user: labels.append("🔗 Leaver Clearance")
     if has_employee_items: labels.append("📚 Check-in History")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
@@ -10099,6 +10960,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
             with tabs[tab_idx]:
                 render_item_checkin_form(full_name)
             tab_idx += 1
+        if is_store_user:
+            with tabs[tab_idx]:
+                render_leaver_clearance_store(full_name)
+            tab_idx += 1
         if has_employee_items:
             with tabs[tab_idx]:
                 render_item_checkin_history()
@@ -10121,6 +10986,7 @@ elif role == "Director":
     ))
     director_tab_labels = [
         "➕ Addition & Deduction",
+        "🧾 Leaver Payroll",
         "👥 HR Leave Settlement",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
@@ -10134,20 +11000,22 @@ elif role == "Director":
     director_addition_tab = director_tabs[0]
     if director_hr_access_enabled:
         director_hr_access_tab = director_tabs[1]
+        director_leaver_payroll_tab = director_tabs[2]
+        director_hr_leave_tab = director_tabs[3]
+        director_store_ded_tab = director_tabs[4]
+        director_store_ret_tab = director_tabs[5]
+        director_employee_items_tab = director_tabs[6]
+        director_work_order_tab = director_tabs[7]
+        director_inspector_tab = director_tabs[8]
+    else:
+        director_hr_access_tab = None
+        director_leaver_payroll_tab = director_tabs[1]
         director_hr_leave_tab = director_tabs[2]
         director_store_ded_tab = director_tabs[3]
         director_store_ret_tab = director_tabs[4]
         director_employee_items_tab = director_tabs[5]
         director_work_order_tab = director_tabs[6]
         director_inspector_tab = director_tabs[7]
-    else:
-        director_hr_access_tab = None
-        director_hr_leave_tab = director_tabs[1]
-        director_store_ded_tab = director_tabs[2]
-        director_store_ret_tab = director_tabs[3]
-        director_employee_items_tab = director_tabs[4]
-        director_work_order_tab = director_tabs[5]
-        director_inspector_tab = director_tabs[6]
     with director_addition_tab:
         st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -10278,6 +11146,9 @@ elif role == "Director":
                                         break
                                 save_all_records(records); log_action("STATUS_CHANGED", req_id, old_data={"status":"rejected"}, new_data={"status":"approved"})
                                 st.success(f"✅ Request #{req_id} changed to Approved."); st.rerun()
+    with director_leaver_payroll_tab:
+        render_director_leaver_payroll_portal(full_name)
+
     if director_hr_access_enabled and director_hr_access_tab is not None:
         with director_hr_access_tab:
             render_director_hr_access_portal(user_info)
@@ -10485,6 +11356,7 @@ elif role == "Super Admin":
             ("📥 Audit Log", AUDIT_LOG_PATH, "audit_log", "backup_audit_log"),
             ("📥 Employee Items", EMPLOYEE_ITEMS_PATH, "employee_items", "backup_employee_items"),
             ("📥 Item Check-ins", ITEM_CHECKIN_PATH, "item_checkins", "backup_item_checkins"),
+            ("📥 Leaver Clearance", LEAVER_CLEARANCE_PATH, "leaver_clearance", "backup_leaver_clearance"),
         ]
         backup_cols = st.columns(3)
         for i, (label, path, stem, key) in enumerate(backup_files):
