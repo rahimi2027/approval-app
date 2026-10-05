@@ -86,7 +86,7 @@ HR_PORTAL_LEAVE_PATH = os.path.join(APP_FOLDER, "hr_portal_leave_records.xlsx")
 os.makedirs(HR_LEAVE_PDF_DIR, exist_ok=True)
 
 HR_EMPLOYEE_COLUMNS = [
-    "Employee ID", "Full Name", "Start Date", "Position / Job Title", "Department",
+    "Employee ID", "Full Name", "Start Date", "Position / Job Title", "Department", "Work Type / Sub-department",
     "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Holiday Entitlement Override", "Entitlement Adjustment Note", "Leaving Date", "Leaving Reason"
 ]
 HR_PORTAL_LEAVE_COLUMNS = [
@@ -1477,6 +1477,26 @@ def load_users(force=False):
 # ════════════════════════════════════════════════════════════
 HR_PORTAL_DEPARTMENTS = ["HR", "Operations", "Sales", "Admin", "Finance"]
 HR_PORTAL_AGREEMENT_TYPES = ["Permanent", "Fixed Term", "Part-Time", "Temporary", "Apprentice", "Contractor"]
+
+HR_DEPARTMENT_WORK_TYPES = {
+    "Projects": ["Office Staff", "Site Electrician"],
+    "Project": ["Office Staff", "Site Electrician"],  # legacy name
+    "National Grid": ["Office Staff", "National Grid Inspector"],
+    "Isolator": ["Office Staff", "Isolator Installer"],
+}
+
+def _hrp_work_type_options(department):
+    return HR_DEPARTMENT_WORK_TYPES.get(str(department or "").strip(), ["Office Staff"])
+
+def _hrp_normalize_work_type(department, work_type="", job_title=""):
+    options = _hrp_work_type_options(department)
+    raw, title = str(work_type or "").strip(), str(job_title or "").strip()
+    if raw in options: return raw
+    if title in options: return title
+    aliases = {"site electrician":"Site Electrician", "national grid inspector":"National Grid Inspector", "isolator installer":"Isolator Installer", "office staff":"Office Staff"}
+    alias = aliases.get(title.casefold())
+    return alias if alias in options else "Office Staff"
+
 HR_PORTAL_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday", "Sick Leave", "Family / Emergency Leave", "Unpaid Holiday", "Unpaid Absence", "Maternity Leave", "Paternity Leave", "Other Absence", "College (Apprenticeship)", "Training Course"]
 HR_PORTAL_HOLIDAY_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday"]
 
@@ -1545,6 +1565,7 @@ def _hrp_load_employees():
                 "start_date": start_date,
                 "department": str(r.get("Department", "")).strip() or "Other",
                 "job_title": str(r.get("Position / Job Title", "")).strip(),
+                "work_type": _hrp_normalize_work_type(str(r.get("Department", "")).strip() or "Other", r.get("Work Type / Sub-department", ""), r.get("Position / Job Title", "")),
                 "agreement_type": str(r.get("Agreement Type", "")).strip() or "Permanent",
                 "status": str(r.get("Status", "Active")).strip() or "Active",
                 "working_pattern": str(r.get("Working Pattern", "Regular hours")).strip() or "Regular hours",
@@ -1569,6 +1590,7 @@ def _hrp_save_employees():
             "Start Date": e.get("start_date", ""),
             "Position / Job Title": e.get("job_title", ""),
             "Department": e.get("department", ""),
+            "Work Type / Sub-department": e.get("work_type", _hrp_normalize_work_type(e.get("department", ""), "", e.get("job_title", ""))),
             "Agreement Type": e.get("agreement_type", ""),
             "Status": e.get("status", "Active"),
             "Working Pattern": e.get("working_pattern", "Regular hours"),
@@ -3256,13 +3278,28 @@ def render_hr_portal(current_user_info=None):
             with employee_overview_tab:
                 st.subheader("📊 Employee Overview — All Employees")
                 if st.session_state.hrp_employees:
+                    active_employees = [e for e in st.session_state.hrp_employees if str(e.get("status", "")).casefold() == "active"]
+                    site_electricians = sum(e.get("work_type") == "Site Electrician" and str(e.get("status", "")).casefold() == "active" for e in st.session_state.hrp_employees)
+                    national_grid_inspectors = sum(e.get("work_type") == "National Grid Inspector" and str(e.get("status", "")).casefold() == "active" for e in st.session_state.hrp_employees)
+                    isolator_installers = sum(e.get("work_type") == "Isolator Installer" and str(e.get("status", "")).casefold() == "active" for e in st.session_state.hrp_employees)
+                    office_staff = sum(e.get("work_type") == "Office Staff" and str(e.get("status", "")).casefold() == "active" for e in st.session_state.hrp_employees)
+                    site_workers_total = site_electricians + national_grid_inspectors + isolator_installers
+                    m1, m2, m3, m4, m5, m6 = st.columns(6)
+                    m1.metric("Total Active Staff", len(active_employees))
+                    m2.metric("Site / Field Workers", site_workers_total)
+                    m3.metric("Site Electricians", site_electricians)
+                    m4.metric("National Grid Inspectors", national_grid_inspectors)
+                    m5.metric("Isolator Installers", isolator_installers)
+                    m6.metric("Office Staff", office_staff)
+                    st.caption("These categories are controlled selections, so headcount is not affected by spelling differences.")
+                if st.session_state.hrp_employees:
                     overview_rows = []
                     for e in st.session_state.hrp_employees:
                         pos = _hrp_get_holiday_position(e["emp_id"])
                         summary = _hrp_get_leave_summary(e["emp_id"])
                         overview_rows.append({
                             "Employee ID": e["emp_id"], "Name": e["name"], "Status": e.get("status", "Active"),
-                            "Department": e.get("department", ""), "Position": e.get("job_title", ""),
+                            "Department": e.get("department", ""), "Work Type": e.get("work_type", "Office Staff"), "Position": e.get("job_title", ""),
                             "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
                             "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
                             "Holiday Entitlement": pos["entitlement"], "Bank Holidays (Separate)": _hrp_get_bank_holiday_days(e, e.get("start_date"), date.today()), "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
@@ -3300,11 +3337,7 @@ def render_hr_portal(current_user_info=None):
                                 value=date.today(),
                                 key=f"hrp_new_start_{new_form_version}",
                             )
-                            new_position = st.text_input(
-                                "Position / Job Title",
-                                placeholder="e.g. Electrician",
-                                key=f"hrp_new_pos_{new_form_version}",
-                            )
+
                         with col2:
                             hr_software_departments = load_departments()
                             new_department = st.selectbox(
@@ -3318,6 +3351,12 @@ def render_hr_portal(current_user_info=None):
                                     "leaver clearance shown to Store and Payroll."
                                 ),
                                 key=f"hrp_new_dept_{new_form_version}",
+                            )
+                            new_work_type = st.selectbox(
+                                "Working As / Sub-department",
+                                options=_hrp_work_type_options(new_department),
+                                key=f"hrp_new_work_type_{new_form_version}",
+                                help="Controlled category: Projects → Office Staff/Site Electrician; National Grid → Office Staff/National Grid Inspector; Isolator → Office Staff/Isolator Installer.",
                             )
                             new_agreement = st.selectbox(
                                 "Agreement Type",
@@ -3346,15 +3385,14 @@ def render_hr_portal(current_user_info=None):
                             st.error(result)
                         elif not new_name.strip():
                             st.error("Please enter the employee's full name.")
-                        elif not new_position.strip():
-                            st.error("Please enter the position / job title.")
                         else:
                             new_employee = {
                                 "emp_id": result,
                                 "name": new_name.strip(),
                                 "start_date": new_start_date,
                                 "department": new_department,
-                                "job_title": new_position.strip(),
+                                "work_type": new_work_type,
+                                "job_title": new_work_type,
                                 "agreement_type": new_agreement,
                                 "status": "Active",
                                 "working_pattern": new_pattern,
@@ -3382,7 +3420,7 @@ def render_hr_portal(current_user_info=None):
                     employee_table = [
                         {
                             "Employee ID": e["emp_id"], "Name": e["name"], "Start Date": e["start_date"],
-                            "Position": e["job_title"], "Department": e["department"],
+                            "Position": e["job_title"], "Department": e["department"], "Work Type": e.get("work_type", "Office Staff"),
                             "Agreement": e["agreement_type"], "Status": e["status"],
                         }
                         for e in st.session_state.hrp_employees
@@ -8050,9 +8088,12 @@ def _super_admin_transaction_control():
                 new_id=c1.text_input("ACE-ID / Employee ID", value=old_id)
                 new_name=c2.text_input("Full Name", value=emp.get("name",""))
                 new_start=c1.date_input("Start Date", value=emp.get("start_date") or date.today())
-                new_position=c2.text_input("Position / Job Title", value=emp.get("job_title",""))
                 depts=load_departments(); dept_idx=depts.index(emp.get("department")) if emp.get("department") in depts else 0
                 new_dept=c1.selectbox("Department", depts, index=dept_idx)
+                edit_work_options=_hrp_work_type_options(new_dept)
+                current_work=_hrp_normalize_work_type(new_dept, emp.get("work_type", ""), emp.get("job_title", ""))
+                work_idx=edit_work_options.index(current_work) if current_work in edit_work_options else 0
+                new_work_type=c2.selectbox("Working As / Sub-department", edit_work_options, index=work_idx)
                 agreements=["Permanent","Temporary","Fixed Term","Apprenticeship","Other"]; ag_idx=agreements.index(emp.get("agreement_type")) if emp.get("agreement_type") in agreements else 0
                 new_agreement=c2.selectbox("Agreement Type", agreements, index=ag_idx)
                 statuses=["Active","Inactive","Left"]; st_idx=statuses.index(emp.get("status")) if emp.get("status") in statuses else 0
@@ -8075,7 +8116,7 @@ def _super_admin_transaction_control():
                     emp["leaving_date"] = None
                     emp["leaving_reason"] = ""
                     pd.DataFrame([{
-                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
                     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
                     st.session_state.hrp_employees = employees
@@ -8091,7 +8132,7 @@ def _super_admin_transaction_control():
                 else:
                     new_id = validated_id
                 if valid_id:
-                    emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["job_title"]=new_position.strip(); emp["department"]=new_dept; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
+                    emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["department"]=new_dept; emp["work_type"]=new_work_type; emp["job_title"]=new_work_type; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
                     if new_id != old_id:
                         users=load_users()
                         changed=False
@@ -8109,7 +8150,7 @@ def _super_admin_transaction_control():
                         st.session_state["hrp_leave_records"]=portal
                         _hrp_save_leave_records()
                     pd.DataFrame([{
-                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
                     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
                     st.session_state.hrp_employees=employees
