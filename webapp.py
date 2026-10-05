@@ -68,6 +68,9 @@ APPROVED_STAMP_PATH = os.path.join(BASE_DIR, "approved_stamp.png")
 REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
 EXCEL_PATH = os.path.join(APP_FOLDER, "requests.xlsx")
 USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
+# Optional bundled user database used to bootstrap a fresh/empty APP_FOLDER.
+# Once copied into APP_FOLDER, the persistent APP_FOLDER copy is authoritative.
+BUNDLED_USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
 SETTINGS_PATH = os.path.join(APP_FOLDER, "settings.xlsx")
 WORK_ORDERS_PATH = os.path.join(APP_FOLDER, "work_orders.xlsx")
 WORK_ORDER_PDF_DIR = os.path.join(APP_FOLDER, "work_order_pdfs")
@@ -358,10 +361,49 @@ def _drive_remote_workbook_has_rows(file_id):
             pass
 
 
+def _workbook_has_rows(path):
+    """Return True when an Excel workbook exists and contains at least one data row."""
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        df = pd.read_excel(path, engine="openpyxl")
+        return not df.empty
+    except Exception as e:
+        print(f"Workbook row check failed for {path}: {e}")
+        return False
+
+def _bootstrap_bundled_user_db():
+    """Seed the persistent user DB from a bundled user_database.xlsx when needed.
+
+    This is intentionally only a missing/empty-file recovery path. It prevents a
+    bundled replacement user file from being ignored because the app stores its
+    live copy inside Acoole_App_Uploads.
+    """
+    if not _workbook_has_rows(BUNDLED_USER_DB_PATH):
+        return False
+    if _workbook_has_rows(USER_DB_PATH):
+        return False
+    try:
+        os.makedirs(os.path.dirname(USER_DB_PATH), exist_ok=True)
+        shutil.copy2(BUNDLED_USER_DB_PATH, USER_DB_PATH)
+        print(f"Bootstrapped user database from bundled file: {BUNDLED_USER_DB_PATH}")
+        return True
+    except Exception as e:
+        print(f"Bundled user database bootstrap failed: {e}")
+        return False
+
 def sync_persistent_file(local_path, columns=None):
     if drive_service is None:
         if not os.path.exists(local_path) and columns is not None:
             pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
+        return
+
+    # USER_DB_PATH is deliberately local-first. A valid deployed user workbook
+    # must never be silently replaced by an older Google Drive copy. Google Drive
+    # is the backup/replication target; recovery from Drive only happens when the
+    # local user database is missing or empty.
+    if local_path == USER_DB_PATH and _workbook_has_rows(local_path):
+        _drive_upload_path(local_path, os.path.basename(local_path))
         return
 
     with _DRIVE_SYNC_LOCK:
@@ -744,6 +786,10 @@ def _initialise_drive_storage_once():
     if drive_service is None:
         return False
     os.makedirs(APP_FOLDER, exist_ok=True)
+    # If the deployment includes the replacement user_database.xlsx beside the
+    # Python app, import it into the persistent APP_FOLDER location before Drive
+    # recovery is considered. This is only used when the live copy is missing/empty.
+    _bootstrap_bundled_user_db()
     critical = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, USER_DB_COLUMNS),
@@ -1208,7 +1254,10 @@ def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
         with st.spinner("Refreshing from Google Drive..."):
             if drive_service is not None:
-                for path in (EXCEL_PATH, USER_DB_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH, EMPLOYEE_ITEMS_PATH, ITEM_CHECKIN_PATH, LEAVER_CLEARANCE_PATH):
+                # User accounts are intentionally excluded from the manual Drive
+                # download refresh. The local user DB is authoritative so an older
+                # Drive copy cannot lock everyone out after a page refresh.
+                for path in (EXCEL_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH, EMPLOYEE_ITEMS_PATH, ITEM_CHECKIN_PATH, LEAVER_CLEARANCE_PATH):
                     with _DRIVE_SYNC_LOCK:
                         pending = path in DRIVE_PENDING_SYNC
                     if pending:
@@ -10101,7 +10150,7 @@ if not st.session_state.logged_in:
         username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
         password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
         if st.form_submit_button("🔐 Authenticate Portal", type="primary", width="stretch"):
-            USERS = load_users()
+            USERS = load_users(force=True)
             if username in USERS and USERS[username]["password"] == password:
                 if not USERS[username].get("is_active", True):
                     st.error("❌ Your account has been deactivated. Please contact your Super Admin.")
