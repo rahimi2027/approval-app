@@ -2378,7 +2378,7 @@ def _hrp_get_approved_final_settlement_offset(employee_id):
 def _hrp_get_final_settlement_records(employee_id):
     target = str(employee_id or "").strip().casefold()
     try:
-        records = load_hr_leave(force=False)
+        records = load_hr_leave(force=True)
     except Exception:
         return []
     out = []
@@ -3018,6 +3018,59 @@ def _hrp_render_leavers_tab():
     if history["settlements"]:
         st.dataframe(pd.DataFrame([{"Settlement ID":r.get('id'),"Type":r.get('type'),"Days":float(r.get('days',0) or 0),"Amount (£)":float(r.get('amount',0) or 0),"Status":r.get('status','').title(),"Date":r.get('date')} for r in history["settlements"]]), width="stretch", hide_index=True)
     else: st.info("No final holiday settlement found.")
+    st.divider()
+    st.subheader("↩️ HR Leaver Control")
+    st.warning(
+        "Returning this employee to Active will cancel their active final holiday settlement, "
+        "Addition/Deduction requests and Store deductions linked to the leaver process. "
+        "Those records remain in the audit/history as Cancelled."
+    )
+    confirm_return_key = f"hrp_confirm_return_active_{employee.get('emp_id')}"
+    if not st.session_state.get(confirm_return_key, False):
+        if st.button(
+            "↩️ Remove from Leaver & Return to Active Employee",
+            key=f"hrp_return_active_{employee.get('emp_id')}",
+            type="primary",
+            width="stretch",
+        ):
+            st.session_state[confirm_return_key] = True
+            st.rerun()
+    else:
+        st.error(
+            f"⚠️ Confirm: return {employee.get('name', employee.get('emp_id'))} to Active status? "
+            "Any active leaver Additions/Deductions, Store deductions and final holiday settlement "
+            "will be cancelled and removed from approval queues."
+        )
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            if st.button(
+                "✅ Yes — Return to Active",
+                key=f"hrp_confirm_return_active_yes_{employee.get('emp_id')}",
+                type="primary",
+                width="stretch",
+            ):
+                try:
+                    actor_info = st.session_state.get("user_info", {}) or {}
+                    actor = str(actor_info.get("full_name") or actor_info.get("name") or actor_info.get("username") or "HR").strip() or "HR"
+                    counts = _hrp_return_employee_to_active(employee.get("emp_id"), actor)
+                    st.session_state.pop(confirm_return_key, None)
+                    st.success(
+                        f"✅ {employee.get('name', employee.get('emp_id'))} has been returned to Active. "
+                        f"Cancelled: {counts['main']} Addition/Deduction request(s), "
+                        f"{counts['store']} Store deduction(s), {counts['hr']} final holiday settlement(s)."
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Unable to return employee to Active: {exc}")
+        with rc2:
+            if st.button(
+                "↩️ Cancel",
+                key=f"hrp_confirm_return_active_no_{employee.get('emp_id')}",
+                width="stretch",
+            ):
+                st.session_state.pop(confirm_return_key, None)
+                st.rerun()
+
     if st.button("📄 Generate Complete Leaver History PDF", key=f"gen_leaver_pdf_{employee.get('emp_id')}", type="primary"):
         with st.spinner("Generating leaver history PDF..."):
             pdf_path = _hrp_leaver_history_pdf(employee, history)
@@ -6633,6 +6686,190 @@ def _sync_clearance_payroll_status(rec, records=None):
     return rec
 
 
+
+def _leaver_employee_matches(record, employee):
+    """Match a transaction to a leaver without relying only on employee name."""
+    if not isinstance(record, dict) or not isinstance(employee, dict):
+        return False
+    emp_id = str(employee.get("emp_id", "")).strip().casefold()
+    emp_name = str(employee.get("name", "")).strip().casefold()
+    if not emp_id and not emp_name:
+        return False
+    record_name = str(record.get("emp_name", record.get("Employee Name", ""))).strip().casefold()
+    haystack = json.dumps(record, default=str, ensure_ascii=False).casefold()
+    return bool((emp_name and record_name == emp_name) or (emp_id and emp_id in haystack))
+
+
+def _cancel_leaver_related_transactions(employee, actor):
+    """Cancel active leaver-related Addition/Deduction transactions and settlements.
+
+    Records are retained for audit/history; they are moved to Cancelled so they no
+    longer appear as active Director approval work when an employee is returned to Active.
+    """
+    if not employee:
+        return {"main": 0, "store": 0, "hr": 0, "clearance": 0}
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    actor = str(actor or "HR").strip() or "HR"
+    counts = {"main": 0, "store": 0, "hr": 0, "clearance": 0}
+    employee_id = str(employee.get("emp_id", "")).strip()
+
+    # Main Addition & Deduction register — includes Payroll leaver adjustments
+    # and Addition/Deduction requests raised by other departments.
+    main_records = load_records_from_excel(force=True)
+    main_changed = False
+    for r in main_records:
+        if not _leaver_employee_matches(r, employee):
+            continue
+        typ = str(r.get("type", "")).strip().casefold()
+        status = str(r.get("status", "")).strip().casefold()
+        if typ not in {"addition", "deduction"}:
+            continue
+        if status in {"cancelled", "canceled", "rejected"}:
+            continue
+        old_status = r.get("status", "")
+        r["status"] = "cancelled"
+        r["decision_by"] = actor
+        r["decision_date"] = now
+        r["director_comments"] = (
+            str(r.get("director_comments", "")).strip()
+            + f"\n[{now[:16]}] Cancelled by {actor}: employee removed from leaver process and returned to Active."
+        ).strip()
+        main_changed = True
+        counts["main"] += 1
+        log_action(
+            "HR_LEAVER_TRANSACTION_CANCELLED",
+            r.get("id"),
+            old_data={"status": old_status, "employee_id": employee_id},
+            new_data={"status": "cancelled", "employee_id": employee_id},
+            decision_by=actor,
+            decision_date=now,
+        )
+    if main_changed:
+        save_all_records(main_records)
+
+    # Store deduction register. Keep the transaction for audit but remove it from
+    # active Store/Director approval queues.
+    store_records = load_store_deductions(force=True)
+    store_changed = False
+    for r in store_records:
+        if not _leaver_employee_matches(r, employee):
+            continue
+        status = str(r.get("status", "")).strip().casefold()
+        if status in {"cancelled", "canceled", "rejected"}:
+            continue
+        old_status = r.get("status", "")
+        r["status"] = "cancelled"
+        r["decision_by"] = actor
+        r["decision_date"] = now
+        r["director_comments"] = (
+            str(r.get("director_comments", "")).strip()
+            + f"\n[{now[:16]}] Cancelled by {actor}: employee returned to Active."
+        ).strip()
+        store_changed = True
+        counts["store"] += 1
+        log_action(
+            "HR_LEAVER_STORE_TRANSACTION_CANCELLED",
+            r.get("id"),
+            old_data={"status": old_status, "employee_id": employee_id},
+            new_data={"status": "cancelled", "employee_id": employee_id},
+            decision_by=actor,
+            decision_date=now,
+        )
+    if store_changed:
+        save_all_store_deductions(store_records)
+
+    # Final HR holiday settlements must also be cancelled so an old leaver
+    # settlement cannot later be approved after the employee is reactivated.
+    hr_records = load_hr_leave(force=True)
+    hr_changed = False
+    for r in hr_records:
+        if not _leaver_employee_matches(r, employee):
+            continue
+        if not r.get("final_holiday_settlement", False):
+            continue
+        status = str(r.get("status", "")).strip().casefold()
+        if status in {"cancelled", "canceled", "rejected"}:
+            continue
+        old_status = r.get("status", "")
+        r["status"] = "cancelled"
+        r["decision_by"] = actor
+        r["decision_date"] = now
+        r["rejection_reason"] = "Cancelled by HR because the employee was returned to Active status."
+        r["director_comments"] = (
+            str(r.get("director_comments", "")).strip()
+            + f"\n[{now[:16]}] Cancelled by {actor}: employee returned to Active."
+        ).strip()
+        hr_changed = True
+        counts["hr"] += 1
+        log_action(
+            "HR_LEAVER_HOLIDAY_SETTLEMENT_CANCELLED",
+            r.get("id"),
+            old_data={"status": old_status, "employee_id": employee_id},
+            new_data={"status": "cancelled", "employee_id": employee_id},
+            decision_by=actor,
+            decision_date=now,
+        )
+    if hr_changed:
+        save_all_hr_leave(hr_records)
+
+    # Remove the active master clearance record. The transaction/audit records above
+    # remain available, but there is no stale clearance left saying Director approval is required.
+    clearance_records = load_leaver_clearances(force=True)
+    kept = []
+    for r in clearance_records:
+        if str(r.get("employee_id", "")).strip().casefold() == employee_id.casefold():
+            counts["clearance"] += 1
+            log_action(
+                "HR_LEAVER_CLEARANCE_CANCELLED",
+                r.get("clearance_id"),
+                old_data=r,
+                new_data={"status": "cancelled", "employee_id": employee_id},
+                decision_by=actor,
+                decision_date=now,
+            )
+        else:
+            kept.append(r)
+    if len(kept) != len(clearance_records):
+        save_all_leaver_clearances(kept)
+
+    # Clear session/cache copies so the old clearance cannot reappear immediately.
+    for key in (
+        "_records_cache", "_store_deduction_cache", "_hr_leave_cache",
+        "_leaver_clearance_cache",
+    ):
+        st.session_state.pop(key, None)
+    return counts
+
+
+def _hrp_return_employee_to_active(employee_id, actor):
+    """Return a leaver to Active and cancel all linked leaver transactions."""
+    employee = _hrp_get_employee(employee_id)
+    if not employee:
+        raise ValueError("Employee could not be found.")
+    if str(employee.get("status", "")).strip().casefold() != "left":
+        raise ValueError("This employee is not currently recorded as Left.")
+
+    old_employee = dict(employee)
+    counts = _cancel_leaver_related_transactions(employee, actor)
+
+    employee["status"] = "Active"
+    employee["leaving_date"] = None
+    employee["leaving_reason"] = ""
+    _hrp_save_employees()
+
+    st.session_state.hrp_current_emp_id = employee_id
+    st.session_state.hrp_leaving_employee = employee_id
+    log_action(
+        "HR_EMPLOYEE_RETURNED_TO_ACTIVE",
+        employee_id,
+        old_data=old_employee,
+        new_data=employee,
+        decision_by=actor,
+        decision_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    return counts
+
 def _ensure_leaver_clearance(employee, created_by="HR"):
     if not employee or not employee.get("leaving_date"): return None
     emp_id = str(employee.get("emp_id", "")).strip()
@@ -6857,7 +7094,14 @@ def render_leaver_clearance_hr():
             if status == "cleared":
                 st.success(f"Fully cleared by {rec.get('final_cleared_by')} on {rec.get('final_cleared_at')}")
             else:
-                if not _clearance_director_hr_ready(rec): st.warning("⏳ Director approval is still required for the HR holiday settlement.")
+                director_status = str(rec.get("holiday_settlement_status", "")).strip().casefold()
+                if director_status == "required":
+                    st.warning("⚠️ Final holiday settlement is required but has NOT been submitted to the Director yet.")
+                    st.info("Go to HR → Employee Leaving, select this leaver, and submit the final holiday settlement for Director approval.")
+                elif director_status in {"pending", "pending director approval"}:
+                    st.warning("⏳ Final holiday settlement has been submitted and is awaiting Director approval.")
+                elif not _clearance_director_hr_ready(rec):
+                    st.warning("⏳ Director approval is still required for the HR holiday settlement.")
                 if not _clearance_store_ready(rec): st.info("📦 Store clearance is still outstanding.")
                 if not _clearance_payroll_ready(rec): st.info("🧾 Payroll clearance is still outstanding.")
             pdf = _build_final_leaver_clearance_pdf(rec)
@@ -8026,7 +8270,7 @@ def render_hr_leave_director_portal(director_name):
     st.subheader("👥 HR Leave Settlement — Director Approval")
     st.info("Review HR leave settlement requests. The Director can move any request between Pending, Approved and Rejected. Rejection requires a reason.")
     st.divider()
-    records = [r for r in load_hr_leave(force=False) if r.get("final_holiday_settlement", False)]
+    records = [r for r in load_hr_leave(force=True) if r.get("final_holiday_settlement", False)]
     pending = [r for r in records if str(r.get("status", "")).strip().lower() == "pending"]
     approved = [r for r in records if str(r.get("status", "")).strip().lower() == "approved"]
     rejected = [r for r in records if str(r.get("status", "")).strip().lower() == "rejected"]
@@ -10975,18 +11219,15 @@ elif role in ["Manager", "Staff", "Team Member"]:
         labels.append("📝 Leave Request")
     if has_employee_hr_reports:
         labels.append("👤 My HR Report")
-
-    # Store Department is organised into three clear top-level groups.
-    # Each group contains its related functions as sub-tabs.
-    if has_store_deduction:
-        labels.append("📦 Store Requests")
-    if has_employee_items:
-        labels.append("🧰 Issue Items & Employee Holdings")
-
+    if has_store_deduction: labels.append("📦 Store Deduction")
+    if has_store_deduction: labels.append("📦 Store Return (Addition)")
+    if has_store_deduction: labels.append("📋 My Submitted Store Requests")
+    if has_employee_items: labels.append("🧰 Issue Items")
+    if has_employee_items: labels.append("📊 Employee Holdings")
     is_store_user = str(dept_name or "").strip().casefold() == "store"
-    if has_employee_items or is_store_user:
-        labels.append("🔗 Leaver Item Check-in & Clearance")
-
+    if has_employee_items: labels.append("📋 Leaver Item Check-in")
+    if is_store_user: labels.append("🔗 Leaver Clearance")
+    if has_employee_items: labels.append("📚 Check-in History")
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
     if not labels:
@@ -11167,67 +11408,37 @@ elif role in ["Manager", "Staff", "Team Member"]:
             with tabs[tab_idx]:
                 render_employee_hr_reports(user_info)
             tab_idx += 1
-        # ------------------------------------------------------------
-        # 📦 STORE REQUESTS
-        #    Sub-tabs: Deduction | Return (Addition) | My Submitted Requests
-        # ------------------------------------------------------------
         if has_store_deduction:
             with tabs[tab_idx]:
-                store_req_tabs = st.tabs([
-                    "📦 Store Deduction",
-                    "📦 Store Return (Addition)",
-                    "📋 My Submitted Store Requests",
-                ])
-                with store_req_tabs[0]:
-                    render_store_deduction_form(full_name, dept_name)
-                with store_req_tabs[1]:
-                    render_store_return_form(full_name, dept_name)
-                with store_req_tabs[2]:
-                    render_store_my_submissions(full_name)
+                render_store_deduction_form(full_name, dept_name)
             tab_idx += 1
-
-        # ------------------------------------------------------------
-        # 🧰 ISSUE ITEMS & EMPLOYEE HOLDINGS
-        #    Sub-tabs: Issue Items | Employee Holdings
-        # ------------------------------------------------------------
+        if has_store_deduction:
+            with tabs[tab_idx]:
+                render_store_return_form(full_name, dept_name)
+            tab_idx += 1
+        if has_store_deduction:
+            with tabs[tab_idx]:
+                render_store_my_submissions(full_name)
+            tab_idx += 1
         if has_employee_items:
             with tabs[tab_idx]:
-                item_tabs = st.tabs([
-                    "🧰 Issue Items",
-                    "📊 Employee Holdings",
-                ])
-                with item_tabs[0]:
-                    render_item_issue_form(full_name, dept_name)
-                with item_tabs[1]:
-                    render_employee_holdings_overview(role)
+                render_item_issue_form(full_name, dept_name)
             tab_idx += 1
-
-        # ------------------------------------------------------------
-        # 🔗 LEAVER ITEM CHECK-IN & CLEARANCE
-        #    Sub-tabs: Leaver Item Check-in | Leaver Clearance | Check-in History
-        # ------------------------------------------------------------
-        if has_employee_items or is_store_user:
+        if has_employee_items:
             with tabs[tab_idx]:
-                leaver_tabs = st.tabs([
-                    "📋 Leaver Item Check-in",
-                    "🔗 Leaver Clearance",
-                    "📚 Check-in History",
-                ])
-                with leaver_tabs[0]:
-                    if has_employee_items:
-                        render_item_checkin_form(full_name)
-                    else:
-                        st.info("You do not have permission to access Leaver Item Check-in.")
-                with leaver_tabs[1]:
-                    if is_store_user:
-                        render_leaver_clearance_store(full_name)
-                    else:
-                        st.info("Leaver Clearance is available to Store Department users.")
-                with leaver_tabs[2]:
-                    if has_employee_items:
-                        render_item_checkin_history()
-                    else:
-                        st.info("You do not have permission to access Check-in History.")
+                render_employee_holdings_overview(role)
+            tab_idx += 1
+        if has_employee_items:
+            with tabs[tab_idx]:
+                render_item_checkin_form(full_name)
+            tab_idx += 1
+        if is_store_user:
+            with tabs[tab_idx]:
+                render_leaver_clearance_store(full_name)
+            tab_idx += 1
+        if has_employee_items:
+            with tabs[tab_idx]:
+                render_item_checkin_history()
             tab_idx += 1
         if has_work_orders:
             with tabs[tab_idx]:
