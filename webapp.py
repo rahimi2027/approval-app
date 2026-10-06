@@ -3608,9 +3608,9 @@ def render_hr_portal(current_user_info=None):
             st.caption("Employee management, leave & holidays, leavers, clearance and HR reports")
 
             hr_employee_section, hr_leave_section, hr_leaver_section = st.tabs([
-                "1. 👥 Employee Management",
-                "2. 📅 Leave & Holidays",
-                "3. 🚪 Leavers, Clearance & Reports",
+                "👥 Employee Management",
+                "📅 Leave & Holidays",
+                "🚪 Leavers, Clearance & Reports",
             ])
 
             with hr_employee_section:
