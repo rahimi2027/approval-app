@@ -11102,6 +11102,54 @@ def render_director_hr_access_portal(current_user_info):
 # ============================================================
 # 📋 ROLE-BASED PORTALS
 # ============================================================
+def render_new_store_department_layout(full_name, dept_name):
+    """Render the Store department using the requested grouped navigation layout."""
+    st.subheader("📦 Store Department")
+    st.caption("Store requests, employee holdings, and leaver clearance.")
+
+    store_requests_tab, store_items_tab, store_clearance_tab = st.tabs([
+        "1. 📦 Store Requests",
+        "2. 🧰 Issue Items & Employee Holdings",
+        "3. 🔗 Leaver Item Check-in & Clearance",
+    ])
+
+    with store_requests_tab:
+        request_tab, return_tab, submitted_tab = st.tabs([
+            "📦 Store Deduction",
+            "📦 Store Return (Addition)",
+            "📋 My Submitted Store Requests",
+        ])
+        with request_tab:
+            render_store_deduction_form(full_name, dept_name)
+        with return_tab:
+            render_store_return_form(full_name, dept_name)
+        with submitted_tab:
+            render_store_my_submissions(full_name)
+
+    with store_items_tab:
+        issue_tab, holdings_tab = st.tabs([
+            "🧰 Issue Items",
+            "📊 Employee Holdings",
+        ])
+        with issue_tab:
+            render_item_issue_form(full_name, dept_name)
+        with holdings_tab:
+            render_employee_holdings_overview("Store")
+
+    with store_clearance_tab:
+        checkin_tab, clearance_tab, history_tab = st.tabs([
+            "📋 Leaver Item Check-in",
+            "🔗 Leaver Clearance",
+            "📚 Check-in History",
+        ])
+        with checkin_tab:
+            render_item_checkin_form(full_name)
+        with clearance_tab:
+            render_leaver_clearance_store(full_name)
+        with history_tab:
+            render_item_checkin_history()
+
+
 if role == "Employee":
     if user_info.get("can_access_employee_items", False):
         st.subheader(f"🧰 My Employee Items — {full_name}")
@@ -11364,243 +11412,243 @@ elif role in ["Manager", "Staff", "Team Member"]:
     has_employee_hr_reports = user_info.get("can_access_employee_hr_reports", False)
     has_store_deduction = user_info.get("can_access_store_deduction", False)
     has_employee_items = user_info.get("can_access_employee_items", False)
-    labels = []
-    if has_addition_deduction: labels.append("➕ Addition & Deduction")
-    if has_hr_leave:
-        labels.append("🏢 HR Department")
-    if has_leave_request:
-        labels.append("📝 Leave Request")
-    if has_employee_hr_reports:
-        labels.append("👤 My HR Report")
-    if has_store_deduction: labels.append("📦 Store Deduction")
-    if has_store_deduction: labels.append("📦 Store Return (Addition)")
-    if has_store_deduction: labels.append("📋 My Submitted Store Requests")
-    if has_employee_items: labels.append("🧰 Issue Items")
-    if has_employee_items: labels.append("📊 Employee Holdings")
     is_store_user = str(dept_name or "").strip().casefold() == "store"
-    if has_employee_items: labels.append("📋 Leaver Item Check-in")
-    if is_store_user: labels.append("🔗 Leaver Clearance")
-    if has_employee_items: labels.append("📚 Check-in History")
-    if has_work_orders: labels.append("🛠️ Work Orders")
-    if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
-    if not labels:
-        st.subheader("🔐 Access Restricted")
-        st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
+
+    if is_store_user:
+        render_new_store_department_layout(full_name, dept_name)
     else:
-        tabs = st.tabs(labels)
-        tab_idx = 0
-        if has_addition_deduction:
-            with tabs[tab_idx]:
-                if st.session_state.get("editing_request_id"):
-                    eid = st.session_state.editing_request_id
-                    rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
-                    if rec:
-                        st.subheader(f"✏️ Edit Request #{eid}")
-                        st.markdown("### 📎 Manage Attachments")
-                        att_name_raw = rec.get("attachment_name", "None")
-                        existing_files = []
-                        if att_name_raw and str(att_name_raw).strip().lower() != "none":
-                            existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
-                        files_to_keep = []; files_to_remove = []
-                        if existing_files:
-                            st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
-                            for fname in existing_files:
-                                file_path = os.path.join(UPLOAD_DIR, fname)
-                                safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
-                                col_check, col_name, col_dl = st.columns([1, 5, 2])
-                                keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
-                                col_name.markdown(f"📄 `{fname}`")
-                                if os.path.exists(file_path):
-                                    with open(file_path, "rb") as f: col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
-                                else: col_dl.caption("⚠️ Missing")
-                                if keep: files_to_keep.append(fname)
-                                else: files_to_remove.append(fname)
-                            if files_to_remove: st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
-                        else: st.info("📋 No attachments currently attached.")
-                        st.markdown("#### ➕ Attach New Files")
-                        new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
-                        with st.form("edit_form"):
+        labels = []
+        if has_addition_deduction: labels.append("➕ Addition & Deduction")
+        if has_hr_leave:
+            labels.append("🏢 HR Department")
+        if has_leave_request:
+            labels.append("📝 Leave Request")
+        if has_employee_hr_reports:
+            labels.append("👤 My HR Report")
+        if has_store_deduction: labels.append("📦 Store Deduction")
+        if has_store_deduction: labels.append("📦 Store Return (Addition)")
+        if has_store_deduction: labels.append("📋 My Submitted Store Requests")
+        if has_employee_items: labels.append("🧰 Issue Items")
+        if has_employee_items: labels.append("📊 Employee Holdings")
+        if has_employee_items: labels.append("📋 Leaver Item Check-in")
+        if is_store_user: labels.append("🔗 Leaver Clearance")
+        if has_employee_items: labels.append("📚 Check-in History")
+        if has_work_orders: labels.append("🛠️ Work Orders")
+        if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
+        if not labels:
+            st.subheader("🔐 Access Restricted")
+            st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
+        else:
+            tabs = st.tabs(labels)
+            tab_idx = 0
+            if has_addition_deduction:
+                with tabs[tab_idx]:
+                    if st.session_state.get("editing_request_id"):
+                        eid = st.session_state.editing_request_id
+                        rec = next((r for r in all_live_requests if int(r.get("id", 0)) == int(eid)), None)
+                        if rec:
+                            st.subheader(f"✏️ Edit Request #{eid}")
+                            st.markdown("### 📎 Manage Attachments")
+                            att_name_raw = rec.get("attachment_name", "None")
+                            existing_files = []
+                            if att_name_raw and str(att_name_raw).strip().lower() != "none":
+                                existing_files = [n.strip() for n in str(att_name_raw).split(",") if n.strip()]
+                            files_to_keep = []; files_to_remove = []
+                            if existing_files:
+                                st.info(f"📋 **{len(existing_files)} attachment(s) currently attached:**")
+                                for fname in existing_files:
+                                    file_path = os.path.join(UPLOAD_DIR, fname)
+                                    safe_key = f"keep_{eid}_{fname.replace(' ','_').replace('.','_')}"
+                                    col_check, col_name, col_dl = st.columns([1, 5, 2])
+                                    keep = col_check.checkbox("✅ Keep", value=True, key=safe_key)
+                                    col_name.markdown(f"📄 `{fname}`")
+                                    if os.path.exists(file_path):
+                                        with open(file_path, "rb") as f: col_dl.download_button("⬇️", f.read(), file_name=fname, key=f"dl_{safe_key}")
+                                    else: col_dl.caption("⚠️ Missing")
+                                    if keep: files_to_keep.append(fname)
+                                    else: files_to_remove.append(fname)
+                                if files_to_remove: st.warning(f"🗑️ Will remove: {', '.join(files_to_remove)}")
+                            else: st.info("📋 No attachments currently attached.")
+                            st.markdown("#### ➕ Attach New Files")
+                            new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
+                            with st.form("edit_form"):
+                                c1, c2 = st.columns(2)
+                                with c1:
+                                    en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
+                                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
+                                    cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
+                                    ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
+                                    amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
+                                with c2:
+                                    from datetime import datetime as dt
+                                    try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
+                                    except: d = dt.today()
+                                    dt_val = st.date_input("📅 Date", d)
+                                    mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
+                                    desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
+                                if st.form_submit_button("✅ Submit Edit", type="primary"):
+                                    final_attachments = list(files_to_keep)
+                                    if new_files_upload:
+                                        for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
+                                            fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
+                                            edit_path = os.path.join(UPLOAD_DIR, fn)
+                                            with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
+                                            _upload_to_drive_bg(edit_path, fn)
+                                            final_attachments.append(fn)
+                                    records = load_records_from_excel()
+                                    old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
+                                    new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
+                                    for r in records:
+                                        if int(r.get("id", 0)) == int(eid):
+                                            r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
+                                            break
+                                    log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
+                                    save_all_records(records)
+                                    st.success(f"✅ Updated!"); st.session_state.editing_request_id = None; st.rerun()
+                            if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
+                                st.session_state.editing_request_id = None; st.rerun()
+                    else:
+                        st.subheader(f"➕ New Request — {dept_name}")
+                        nid = get_next_id(all_live_requests)
+                        form_version = st.session_state.get("new_req_form_version", 0)
+                        # Keep Employee Source outside the form so switching between
+                        # Registered Employee and Manual Employee immediately reruns the
+                        # app and reveals the appropriate employee input.
+                        employee_source = st.radio(
+                            "👤 Employee Source",
+                            ["Registered Employee", "Manual Employee"],
+                            horizontal=True,
+                            key=f"employee_source_v{form_version}",
+                        )
+                        with st.form(f"new_req_v{form_version}", clear_on_submit=False):
                             c1, c2 = st.columns(2)
                             with c1:
-                                en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
-                                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
-                                cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
-                                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
-                                amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
+                                registered_employee = None
+                                if employee_source == "Registered Employee":
+                                    registered = [
+                                        e for e in _hrp_load_employees()
+                                        if str(e.get("status", "Active")).strip().casefold() == "active"
+                                        and str(e.get("name", "")).strip()
+                                    ]
+                                    dept_filtered = [
+                                        e for e in registered
+                                        if str(e.get("department", "")).strip().casefold() == str(dept_name).strip().casefold()
+                                    ]
+                                    if dept_filtered:
+                                        registered = dept_filtered
+                                    registered = sorted(registered, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
+                                    if registered:
+                                        labels = [f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}" for e in registered]
+                                        selected_label = st.selectbox("Registered Employee", labels, key=f"registered_emp_v{form_version}")
+                                        registered_employee = {label: emp for label, emp in zip(labels, registered)}.get(selected_label)
+                                        en = str((registered_employee or {}).get("name", "")).strip()
+                                        request_dept = str((registered_employee or {}).get("department", dept_name)).strip() or dept_name
+                                        if registered_employee:
+                                            st.caption(f"Employee ID: {registered_employee.get('emp_id', '-')} · Department: {request_dept}")
+                                    else:
+                                        st.warning("No active registered employees found for this department. You can use Manual Employee instead.")
+                                        en = ""
+                                        request_dept = dept_name
+                                else:
+                                    en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
+                                    request_dept = dept_name
+                                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
+                                ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
+                                amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
                             with c2:
                                 from datetime import datetime as dt
-                                try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
-                                except: d = dt.today()
-                                dt_val = st.date_input("📅 Date", d)
-                                mgr = st.text_input("👔 Line Manager", rec.get("manager", ""))
-                                desc = st.text_area("📝 Description / Justification", rec.get("desc", ""))
-                            if st.form_submit_button("✅ Submit Edit", type="primary"):
-                                final_attachments = list(files_to_keep)
-                                if new_files_upload:
-                                    for idx, f in enumerate(new_files_upload, start=len(final_attachments)+1):
-                                        fn = f"ID_{eid}_EDIT_F{idx}_{f.name}"
-                                        edit_path = os.path.join(UPLOAD_DIR, fn)
-                                        with open(edit_path, "wb") as outfile: outfile.write(f.getbuffer())
-                                        _upload_to_drive_bg(edit_path, fn)
-                                        final_attachments.append(fn)
-                                records = load_records_from_excel()
-                                old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
-                                new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
-                                for r in records:
-                                    if int(r.get("id", 0)) == int(eid):
-                                        r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
-                                        break
-                                log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
-                                save_all_records(records)
-                                st.success(f"✅ Updated!"); st.session_state.editing_request_id = None; st.rerun()
-                        if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
-                            st.session_state.editing_request_id = None; st.rerun()
-                else:
-                    st.subheader(f"➕ New Request — {dept_name}")
-                    nid = get_next_id(all_live_requests)
-                    form_version = st.session_state.get("new_req_form_version", 0)
-                    # Keep Employee Source outside the form so switching between
-                    # Registered Employee and Manual Employee immediately reruns the
-                    # app and reveals the appropriate employee input.
-                    employee_source = st.radio(
-                        "👤 Employee Source",
-                        ["Registered Employee", "Manual Employee"],
-                        horizontal=True,
-                        key=f"employee_source_v{form_version}",
-                    )
-                    with st.form(f"new_req_v{form_version}", clear_on_submit=False):
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            registered_employee = None
-                            if employee_source == "Registered Employee":
-                                registered = [
-                                    e for e in _hrp_load_employees()
-                                    if str(e.get("status", "Active")).strip().casefold() == "active"
-                                    and str(e.get("name", "")).strip()
-                                ]
-                                dept_filtered = [
-                                    e for e in registered
-                                    if str(e.get("department", "")).strip().casefold() == str(dept_name).strip().casefold()
-                                ]
-                                if dept_filtered:
-                                    registered = dept_filtered
-                                registered = sorted(registered, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
-                                if registered:
-                                    labels = [f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}" for e in registered]
-                                    selected_label = st.selectbox("Registered Employee", labels, key=f"registered_emp_v{form_version}")
-                                    registered_employee = {label: emp for label, emp in zip(labels, registered)}.get(selected_label)
-                                    en = str((registered_employee or {}).get("name", "")).strip()
-                                    request_dept = str((registered_employee or {}).get("department", dept_name)).strip() or dept_name
-                                    if registered_employee:
-                                        st.caption(f"Employee ID: {registered_employee.get('emp_id', '-')} · Department: {request_dept}")
-                                else:
-                                    st.warning("No active registered employees found for this department. You can use Manual Employee instead.")
-                                    en = ""
-                                    request_dept = dept_name
-                            else:
-                                en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
-                                request_dept = dept_name
-                            rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
-                            ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
-                            amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
-                        with c2:
-                            from datetime import datetime as dt
-                            dt_val = st.date_input("📅 Date", value=dt.today(), key=f"dt_v{form_version}")
-                            mgr = st.text_input("👔 Line Manager", key=f"mgr_v{form_version}")
-                            files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"files_v{form_version}")
-                            desc = st.text_area("📝 Description / Justification", key=f"desc_v{form_version}")
-                        if st.form_submit_button("📤 Send to Director", type="primary"):
-                            if en.strip() and mgr.strip() and desc.strip():
-                                att_list = []
-                                if files:
-                                    for i, f in enumerate(files, 1):
-                                        fn = f"ID_{nid}_F{i}_{f.name}"
-                                        file_path = os.path.join(UPLOAD_DIR, fn)
-                                        with open(file_path, "wb") as out: out.write(f.getbuffer())
-                                        att_list.append(fn)
-                                        _upload_to_drive_bg(file_path, fn)
-                                payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
-                                save_record_to_excel(payload)
-                                log_action("CREATED", nid)
-                                st.session_state["new_req_form_version"] = form_version + 1
-                                st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
-                            else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
-                    st.divider()
-                    st.subheader("📋 My Department Requests")
-                    my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
-                    if not my_reqs: st.info("📋 No requests yet.")
+                                dt_val = st.date_input("📅 Date", value=dt.today(), key=f"dt_v{form_version}")
+                                mgr = st.text_input("👔 Line Manager", key=f"mgr_v{form_version}")
+                                files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"files_v{form_version}")
+                                desc = st.text_area("📝 Description / Justification", key=f"desc_v{form_version}")
+                            if st.form_submit_button("📤 Send to Director", type="primary"):
+                                if en.strip() and mgr.strip() and desc.strip():
+                                    att_list = []
+                                    if files:
+                                        for i, f in enumerate(files, 1):
+                                            fn = f"ID_{nid}_F{i}_{f.name}"
+                                            file_path = os.path.join(UPLOAD_DIR, fn)
+                                            with open(file_path, "wb") as out: out.write(f.getbuffer())
+                                            att_list.append(fn)
+                                            _upload_to_drive_bg(file_path, fn)
+                                    payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                                    save_record_to_excel(payload)
+                                    log_action("CREATED", nid)
+                                    st.session_state["new_req_form_version"] = form_version + 1
+                                    st.success(f"✅ Request #{nid} sent for approval!"); st.rerun()
+                                else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
+                        st.divider()
+                        st.subheader("📋 My Department Requests")
+                        my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+                        if not my_reqs: st.info("📋 No requests yet.")
+                        else:
+                            for req in reversed(my_reqs):
+                                status = req.get("status", "pending").lower()
+                                icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+                                with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f}"):
+                                    st.write(f"👤 {req.get('emp_name')} | 👔 {req.get('manager')}")
+                                    st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')}")
+                                    st.info(f"📝 {req.get('desc')}")
+                                    display_attachments(req)
+                                    if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
+                                    if status == "approved": display_pdf_button(req, can_generate=True)
+                                    if status in ["pending", "rejected"]:
+                                        if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
+                                            st.session_state.editing_request_id = req.get("id"); st.rerun()
+                tab_idx += 1
+            if has_hr_leave:
+                with tabs[tab_idx]:
+                    render_hr_department(current_user_info=user_info, has_hr_access=True, director_name=full_name)
+                tab_idx += 1
+            if has_leave_request:
+                with tabs[tab_idx]:
+                    normalized_dept = re.sub(r"\s+", " ", str(dept_name or "")).strip().casefold()
+                    is_hr_manager_account = normalized_dept in {"hr", "human resource", "human resources", "hr department", "human resource department"} and has_hr_leave
+                    if is_hr_manager_account:
+                        render_hr_leave_approvals()
                     else:
-                        for req in reversed(my_reqs):
-                            status = req.get("status", "pending").lower()
-                            icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-                            with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f}"):
-                                st.write(f"👤 {req.get('emp_name')} | 👔 {req.get('manager')}")
-                                st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')}")
-                                st.info(f"📝 {req.get('desc')}")
-                                display_attachments(req)
-                                if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
-                                if status == "approved": display_pdf_button(req, can_generate=True)
-                                if status in ["pending", "rejected"]:
-                                    if st.button(f"✏️ Edit Request #{req.get('id')}", key=f"edit_{req.get('id')}"):
-                                        st.session_state.editing_request_id = req.get("id"); st.rerun()
-            tab_idx += 1
-        if has_hr_leave:
-            with tabs[tab_idx]:
-                render_hr_department(current_user_info=user_info, has_hr_access=True, director_name=full_name)
-            tab_idx += 1
-        if has_leave_request:
-            with tabs[tab_idx]:
-                normalized_dept = re.sub(r"\s+", " ", str(dept_name or "")).strip().casefold()
-                is_hr_manager_account = normalized_dept in {"hr", "human resource", "human resources", "hr department", "human resource department"} and has_hr_leave
-                if is_hr_manager_account:
-                    render_hr_leave_approvals()
-                else:
-                    render_department_manager_leave_request(current_user_info=user_info)
-            tab_idx += 1
-        if has_employee_hr_reports:
-            with tabs[tab_idx]:
-                render_employee_hr_reports(user_info)
-            tab_idx += 1
-        if has_store_deduction:
-            with tabs[tab_idx]:
-                render_store_deduction_form(full_name, dept_name)
-            tab_idx += 1
-        if has_store_deduction:
-            with tabs[tab_idx]:
-                render_store_return_form(full_name, dept_name)
-            tab_idx += 1
-        if has_store_deduction:
-            with tabs[tab_idx]:
-                render_store_my_submissions(full_name)
-            tab_idx += 1
-        if has_employee_items:
-            with tabs[tab_idx]:
-                render_item_issue_form(full_name, dept_name)
-            tab_idx += 1
-        if has_employee_items:
-            with tabs[tab_idx]:
-                render_employee_holdings_overview(role)
-            tab_idx += 1
-        if has_employee_items:
-            with tabs[tab_idx]:
-                render_item_checkin_form(full_name)
-            tab_idx += 1
-        if is_store_user:
-            with tabs[tab_idx]:
-                render_leaver_clearance_store(full_name)
-            tab_idx += 1
-        if has_employee_items:
-            with tabs[tab_idx]:
-                render_item_checkin_history()
-            tab_idx += 1
-        if has_work_orders:
-            with tabs[tab_idx]:
-                render_work_order_employee_portal(full_name, dept_name)
-            tab_idx += 1
-        if has_inspector_bonus:
-            with tabs[tab_idx]:
-                render_inspector_bonus_portal(full_name, dept_name)
-            tab_idx += 1
+                        render_department_manager_leave_request(current_user_info=user_info)
+                tab_idx += 1
+            if has_employee_hr_reports:
+                with tabs[tab_idx]:
+                    render_employee_hr_reports(user_info)
+                tab_idx += 1
+            if has_store_deduction:
+                with tabs[tab_idx]:
+                    render_store_deduction_form(full_name, dept_name)
+                tab_idx += 1
+            if has_store_deduction:
+                with tabs[tab_idx]:
+                    render_store_return_form(full_name, dept_name)
+                tab_idx += 1
+            if has_store_deduction:
+                with tabs[tab_idx]:
+                    render_store_my_submissions(full_name)
+                tab_idx += 1
+            if has_employee_items:
+                with tabs[tab_idx]:
+                    render_item_issue_form(full_name, dept_name)
+                tab_idx += 1
+            if has_employee_items:
+                with tabs[tab_idx]:
+                    render_employee_holdings_overview(role)
+                tab_idx += 1
+            if has_employee_items:
+                with tabs[tab_idx]:
+                    render_item_checkin_form(full_name)
+                tab_idx += 1
+            if has_employee_items:
+                with tabs[tab_idx]:
+                    render_item_checkin_history()
+                tab_idx += 1
+            if has_work_orders:
+                with tabs[tab_idx]:
+                    render_work_order_employee_portal(full_name, dept_name)
+                tab_idx += 1
+            if has_inspector_bonus:
+                with tabs[tab_idx]:
+                    render_inspector_bonus_portal(full_name, dept_name)
+                tab_idx += 1
 
 
 elif role == "Director":
