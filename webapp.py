@@ -210,6 +210,10 @@ _DRIVE_SYNC_QUEUE = None
 LOCAL_RECOVERY_DIR = os.path.join(APP_FOLDER, "local_recovery")
 DRIVE_SYNC_STATE_PATH = os.path.join(APP_FOLDER, "drive_sync_state.json")
 DRIVE_AUTO_SYNC_INTERVAL_SECONDS = 3600
+# User accounts are business-critical. Keep timestamped Drive recovery copies so
+# a bad/empty local file or a failed overwrite can never destroy the last good user DB.
+USER_DB_RECOVERY_PREFIX = "RECOVERY_users_"
+USER_DB_RECOVERY_KEEP = 20
 _DRIVE_WORKER_STARTED = False
 _DRIVE_WORKER_WAKE = threading.Event()
 _DRIVE_STATE_LOCK = threading.RLock()
@@ -293,25 +297,35 @@ def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
         return None
 
 def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    if drive_service is None or not os.path.exists(local_path): return None
+    if drive_service is None or not os.path.exists(local_path):
+        return None
     filename = filename or os.path.basename(local_path)
     cache_key = f"{parent_id}::{filename}"
     def _do(file_id=None):
         media = MediaFileUpload(local_path, resumable=False)
         if file_id:
-            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
+            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents,modifiedTime", supportsAllDrives=True).execute()
         metadata = {"name": filename, "parents": [parent_id]}
-        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
+        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents,modifiedTime", supportsAllDrives=True).execute()
     try:
         cached_id = _DRIVE_ID_CACHE.get(cache_key)
         if cached_id:
-            try: return _do(cached_id).get("id")
-            except Exception: _DRIVE_ID_CACHE.pop(cache_key, None)
+            try:
+                result = _do(cached_id)
+                _invalidate_drive_file_cache(filename, parent_id)
+                _DRIVE_ID_CACHE[cache_key] = result.get("id")
+                return result.get("id")
+            except Exception:
+                _DRIVE_ID_CACHE.pop(cache_key, None)
         existing = _drive_find_file(filename, parent_id)
         if existing:
             _DRIVE_ID_CACHE[cache_key] = existing["id"]
-            return _do(existing["id"]).get("id")
+            result = _do(existing["id"])
+            _invalidate_drive_file_cache(filename, parent_id)
+            _DRIVE_ID_CACHE[cache_key] = result.get("id")
+            return result.get("id")
         created = _do(None)
+        _invalidate_drive_file_cache(filename, parent_id)
         _DRIVE_ID_CACHE[cache_key] = created.get("id")
         return created.get("id")
     except Exception as e:
@@ -361,6 +375,43 @@ def _drive_remote_workbook_has_rows(file_id):
             pass
 
 
+def _drive_verify_file_matches_local(local_path, file_id):
+    """Download a Drive file to a temporary location and verify its bytes match the local file."""
+    if drive_service is None or not file_id or not os.path.exists(local_path):
+        return False
+    import hashlib
+    tmp_path = os.path.join(APP_FOLDER, f".__drive_verify_{file_id}.xlsx")
+    try:
+        if not _drive_download_file(file_id, tmp_path):
+            return False
+        def _sha256(path):
+            h = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        local_hash = _sha256(local_path)
+        remote_hash = _sha256(tmp_path)
+        return local_hash == remote_hash
+    except Exception as e:
+        print(f"Drive file verification failed for {os.path.basename(local_path)}: {e}")
+        return False
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+def _invalidate_drive_file_cache(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    """Forget cached Drive lookup information after an upload/update."""
+    if not filename:
+        return
+    cache_key = f"{parent_id}::{filename}"
+    _DRIVE_FIND_CACHE.pop(cache_key, None)
+    _DRIVE_ID_CACHE.pop(cache_key, None)
+
+
 def _workbook_has_rows(path):
     """Return True when an Excel workbook exists and contains at least one data row."""
     if not path or not os.path.exists(path):
@@ -392,18 +443,96 @@ def _bootstrap_bundled_user_db():
         print(f"Bundled user database bootstrap failed: {e}")
         return False
 
+def _drive_user_recovery_snapshot(local_path):
+    """Upload a timestamped recovery copy of the current user DB before replacing the live Drive copy."""
+    if drive_service is None or local_path != USER_DB_PATH or not _workbook_has_rows(local_path):
+        return False
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    snapshot_name = f"{USER_DB_RECOVERY_PREFIX}{stamp}.xlsx"
+    try:
+        snapshot_id = _drive_upload_path(local_path, snapshot_name)
+        if not snapshot_id:
+            return False
+        # Keep a bounded number of recovery copies. The newest copies are retained.
+        safe_prefix = USER_DB_RECOVERY_PREFIX.replace("'", "\\'")
+        q = f"name contains '{safe_prefix}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false"
+        result = drive_service.files().list(
+            q=q, spaces="drive",
+            fields="files(id,name,modifiedTime)",
+            orderBy="modifiedTime desc", pageSize=100,
+            includeItemsFromAllDrives=True, supportsAllDrives=True,
+        ).execute()
+        recovery_files = result.get("files", [])
+        for old in recovery_files[USER_DB_RECOVERY_KEEP:]:
+            try:
+                drive_service.files().delete(fileId=old["id"], supportsAllDrives=True).execute()
+            except Exception as e:
+                print(f"Could not prune old user recovery copy {old.get('name')}: {e}")
+        return True
+    except Exception as e:
+        print(f"User DB Drive recovery snapshot failed: {type(e).__name__}: {e}")
+        return False
+
+def _recover_user_db_from_drive():
+    """Recover the newest valid user DB from live, rolling backup, or timestamped recovery copies."""
+    if drive_service is None:
+        return False
+    candidates = []
+    live = _drive_find_file(os.path.basename(USER_DB_PATH))
+    if live:
+        candidates.append(live)
+    backup = _drive_find_file(DRIVE_BACKUP_FILENAMES.get(USER_DB_PATH, ""))
+    if backup:
+        candidates.append(backup)
+    try:
+        q = f"name contains '{USER_DB_RECOVERY_PREFIX}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false"
+        result = drive_service.files().list(
+            q=q, spaces="drive",
+            fields="files(id,name,modifiedTime)",
+            orderBy="modifiedTime desc", pageSize=100,
+            includeItemsFromAllDrives=True, supportsAllDrives=True,
+        ).execute()
+        candidates.extend(result.get("files", []))
+    except Exception as e:
+        print(f"User DB recovery list failed: {e}")
+
+    seen = set()
+    candidates = [c for c in candidates if c.get("id") and not (c.get("id") in seen or seen.add(c.get("id")))]
+    for remote in candidates:
+        if not _drive_remote_workbook_has_rows(remote["id"]):
+            continue
+        if _drive_download_file(remote["id"], USER_DB_PATH):
+            if _workbook_has_rows(USER_DB_PATH):
+                print(f"Recovered user database from Google Drive: {remote.get('name', remote.get('id'))}")
+                return True
+    return False
+
 def sync_persistent_file(local_path, columns=None):
     if drive_service is None:
         if not os.path.exists(local_path) and columns is not None:
-            pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
+            # If a bundled user database is present, use it instead of creating defaults.
+            if local_path == USER_DB_PATH and _workbook_has_rows(BUNDLED_USER_DB_PATH):
+                shutil.copy2(BUNDLED_USER_DB_PATH, local_path)
+            else:
+                pd.DataFrame(columns=columns).to_excel(local_path, index=False, engine="openpyxl")
         return
 
-    # USER_DB_PATH is deliberately local-first. A valid deployed user workbook
-    # must never be silently replaced by an older Google Drive copy. Google Drive
-    # is the backup/replication target; recovery from Drive only happens when the
-    # local user database is missing or empty.
+    # User DB startup recovery is special: NEVER upload a local copy just because the
+    # Streamlit server restarted. First recover the durable Drive copy. Only when no
+    # valid Drive copy exists do we use the bundled workbook as the initial seed.
+    if local_path == USER_DB_PATH and not _workbook_has_rows(local_path):
+        if _recover_user_db_from_drive():
+            return
+        if _workbook_has_rows(BUNDLED_USER_DB_PATH):
+            os.makedirs(os.path.dirname(USER_DB_PATH), exist_ok=True)
+            shutil.copy2(BUNDLED_USER_DB_PATH, USER_DB_PATH)
+            _drive_user_recovery_snapshot(USER_DB_PATH)
+            _drive_upload_path(USER_DB_PATH, os.path.basename(USER_DB_PATH))
+            return
+
     if local_path == USER_DB_PATH and _workbook_has_rows(local_path):
-        _drive_upload_path(local_path, os.path.basename(local_path))
+        # Existing local user data is kept. It will be uploaded by the normal save
+        # hook/manual backup, not silently replaced during startup.
         return
 
     with _DRIVE_SYNC_LOCK:
@@ -419,10 +548,8 @@ def sync_persistent_file(local_path, columns=None):
                         if _drive_download_file(backup_remote["id"], local_path):
                             print(f"Recovered {filename} from non-empty Drive backup {backup_name}")
                             return
-
             if _drive_download_file(remote["id"], local_path):
                 return
-            print(f"Using local copy of {filename} because Drive download failed")
             if os.path.exists(local_path):
                 return
 
@@ -430,7 +557,6 @@ def sync_persistent_file(local_path, columns=None):
             backup_remote = _drive_find_file(backup_name)
             if backup_remote and _drive_remote_workbook_has_rows(backup_remote["id"]):
                 if _drive_download_file(backup_remote["id"], local_path):
-                    print(f"Recovered missing {filename} from Drive backup {backup_name}")
                     return
 
         if not os.path.exists(local_path) and columns is not None:
@@ -550,7 +676,7 @@ def sync_backup_file_to_drive(local_path):
 
 
 def _sync_saved_file_to_drive_now(local_path):
-    """Actually upload one file. This is deliberately called only by the background worker or manual force-sync."""
+    """Upload one file and verify the Drive copy. User DB is treated as business-critical."""
     local_path = os.path.abspath(local_path)
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
@@ -568,13 +694,21 @@ def _sync_saved_file_to_drive_now(local_path):
         try:
             live_id = _drive_upload_path(local_path, filename)
             if live_id:
-                live_ok = True
-                DRIVE_LAST_SYNC[filename] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                DRIVE_LAST_SYNC_ERROR.pop(filename, None)
+                # For the user database, prove the uploaded bytes are identical before
+                # reporting success. This prevents a false "saved" state.
+                if local_path == USER_DB_PATH:
+                    if _drive_verify_file_matches_local(local_path, live_id):
+                        live_ok = True
+                    else:
+                        live_error = "Google Drive user database upload could not be verified against the local file."
+                        DRIVE_LAST_SYNC_ERROR[filename] = live_error
+                else:
+                    live_ok = True
+                if live_ok:
+                    DRIVE_LAST_SYNC[filename] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    DRIVE_LAST_SYNC_ERROR.pop(filename, None)
             else:
-                live_error = DRIVE_LAST_SYNC_ERROR.get(
-                    filename, "Live Google Drive upload returned no file ID."
-                )
+                live_error = DRIVE_LAST_SYNC_ERROR.get(filename, "Live Google Drive upload returned no file ID.")
         except Exception as e:
             live_error = f"{type(e).__name__}: {e}"
             DRIVE_LAST_SYNC_ERROR[filename] = live_error
@@ -605,7 +739,12 @@ def _sync_saved_file_to_drive_now(local_path):
                 _DRIVE_SYNC_FINGERPRINTS[local_path] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
             except Exception:
                 pass
-            # Only remove the pending flag after at least one Drive copy succeeded.
+            # A user DB is considered fully synced only when its live Drive copy was
+            # verified. A backup-only success is not enough for this critical file.
+            if local_path == USER_DB_PATH and not live_ok:
+                DRIVE_PENDING_SYNC.add(local_path)
+                _save_drive_sync_state()
+                return False
             DRIVE_PENDING_SYNC.discard(local_path)
             _save_drive_sync_state()
             return True
@@ -614,6 +753,7 @@ def _sync_saved_file_to_drive_now(local_path):
         _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
         _save_drive_sync_state()
         return False
+
 
 
 _DRIVE_STORAGE_PROCESS_READY = False
@@ -720,6 +860,7 @@ def _force_sync_all_drive_files():
 
 def _drive_status_rows():
     files = [
+        ("Users", USER_DB_PATH),
         ("HR Leave Requests", HR_LEAVE_PATH),
         ("HR Daily Rates", HR_DAILY_RATES_PATH),
         ("Store Transactions", STORE_DEDUCTION_PATH),
@@ -786,10 +927,6 @@ def _initialise_drive_storage_once():
     if drive_service is None:
         return False
     os.makedirs(APP_FOLDER, exist_ok=True)
-    # If the deployment includes the replacement user_database.xlsx beside the
-    # Python app, import it into the persistent APP_FOLDER location before Drive
-    # recovery is considered. This is only used when the live copy is missing/empty.
-    _bootstrap_bundled_user_db()
     critical = [
         (EXCEL_PATH, EXCEL_COLUMNS),
         (USER_DB_PATH, USER_DB_COLUMNS),
@@ -1379,14 +1516,34 @@ except Exception as e:
 
 def init_user_db():
     safe_init_excel(USER_DB_PATH, USER_DB_COLUMNS)
-    try:
-        df = pd.read_excel(USER_DB_PATH, engine="openpyxl")
-        if df.empty:
-            pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-            sync_saved_file_to_drive(USER_DB_PATH)
-    except:
-        pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
-        sync_saved_file_to_drive(USER_DB_PATH)
+    if _workbook_has_rows(USER_DB_PATH):
+        return True
+
+    # An empty user DB must NEVER be turned into DEFAULT_USERS when Google Drive may
+    # contain the real accounts. Recover first; if Drive is unavailable, fail safely
+    # instead of overwriting the durable account set with defaults.
+    if drive_service is not None:
+        if _recover_user_db_from_drive():
+            _invalidate_data_cache("_users_cache")
+            return True
+        if _workbook_has_rows(BUNDLED_USER_DB_PATH):
+            shutil.copy2(BUNDLED_USER_DB_PATH, USER_DB_PATH)
+            _invalidate_data_cache("_users_cache")
+            _drive_user_recovery_snapshot(USER_DB_PATH)
+            _drive_upload_path(USER_DB_PATH, os.path.basename(USER_DB_PATH))
+            return True
+        print("WARNING: User database is empty and no valid Google Drive/bundled copy could be recovered.")
+        return False
+
+    # No Drive connection: use the bundled database if available. Only use defaults
+    # when there is genuinely no persisted user workbook at all.
+    if _workbook_has_rows(BUNDLED_USER_DB_PATH):
+        shutil.copy2(BUNDLED_USER_DB_PATH, USER_DB_PATH)
+        _invalidate_data_cache("_users_cache")
+        return True
+    pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+    _invalidate_data_cache("_users_cache")
+    return True
 
 def save_users(users_dict):
     rows = []
@@ -1418,7 +1575,21 @@ def save_users(users_dict):
         })
     pd.DataFrame(rows, columns=USER_DB_COLUMNS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
     _invalidate_data_cache("_users_cache")
-    sync_saved_file_to_drive(USER_DB_PATH)
+    # User changes are business-critical: create a timestamped recovery copy first,
+    # then update the live and rolling-backup Drive files. A later bad startup cannot
+    # erase yesterday's working account set.
+    if drive_service is not None:
+        snapshot_ok = _drive_user_recovery_snapshot(USER_DB_PATH)
+        if not snapshot_ok:
+            DRIVE_LAST_SYNC_ERROR["Users"] = "Recovery snapshot could not be created on Google Drive."
+    sync_ok = _sync_saved_file_to_drive_now(USER_DB_PATH) if drive_service is not None else False
+    if not sync_ok:
+        if drive_service is None:
+            DRIVE_LAST_SYNC_ERROR["Users"] = "Google Drive is not connected; the user database was saved locally only."
+        st.error("⚠️ User database was saved locally, but Google Drive verification did not succeed. Do NOT assume the new user is permanently saved until Drive shows a successful sync.")
+        return False
+    st.success("✅ User database saved and verified on Google Drive.")
+    return True
 
 def _flag_or_default(raw_value, role, key):
     s = str(raw_value).strip().lower()
