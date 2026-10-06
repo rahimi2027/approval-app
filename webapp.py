@@ -3605,17 +3605,40 @@ def render_hr_portal(current_user_info=None):
     if is_hr and tab_hr is not None:
         with tab_hr:
             st.subheader("🧑‍💼 HR Management")
-            if is_hr_manager:
-                st.caption("Employee Overview, Leave Approvals, Holiday Calculator, Employee Leaving and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_approval_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_clearance_tab, hr_leavers_tab, employee_edit_tab, hr_reports_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "✅ Leave Approvals", "📊 Holiday Calculator", "🚪 Employee Leaving", "🔗 Leaver Clearance", "📚 Leavers", "✏️ Edit / Deactivate Employee", "📥 HR Reports"
+            st.caption("Employee management, leave & holidays, leavers, clearance and HR reports")
+
+            hr_employee_section, hr_leave_section, hr_leaver_section = st.tabs([
+                "1. 👥 Employee Management",
+                "2. 📅 Leave & Holidays",
+                "3. 🚪 Leavers, Clearance & Reports",
+            ])
+
+            with hr_employee_section:
+                hr_employee_tab, employee_overview_tab, employee_edit_tab = st.tabs([
+                    "👤 Employee Directory",
+                    "📊 Employee Overview",
+                    "✏️ Edit / Deactivate Employee",
                 ])
-            else:
-                st.caption("Employee Overview, Holiday Calculator, Employee Leaving and Employee Directory")
-                hr_employee_tab, employee_overview_tab, hr_holiday_calc_tab, hr_leaving_tab, hr_clearance_tab, hr_leavers_tab, employee_edit_tab, hr_reports_tab = st.tabs([
-                    "👤 Employee Directory", "📊 Employee Overview", "📊 Holiday Calculator", "🚪 Employee Leaving", "🔗 Leaver Clearance", "📚 Leavers", "✏️ Edit / Deactivate Employee", "📥 HR Reports"
+
+            with hr_leave_section:
+                if is_hr_manager:
+                    hr_approval_tab, hr_holiday_calc_tab = st.tabs([
+                        "✅ Leave Approvals",
+                        "📊 Holiday Calculator",
+                    ])
+                else:
+                    hr_holiday_calc_tab = st.tabs([
+                        "📊 Holiday Calculator",
+                    ])[0]
+                    hr_approval_tab = None
+
+            with hr_leaver_section:
+                hr_leaving_tab, hr_clearance_tab, hr_leavers_tab, hr_reports_tab = st.tabs([
+                    "🚪 Employee Leaving",
+                    "🔗 Leaver Clearance",
+                    "📚 Leavers",
+                    "📥 HR Reports",
                 ])
-                hr_approval_tab = None
 
             with employee_overview_tab:
                 st.subheader("📊 Employee Overview — All Employees")
@@ -11108,9 +11131,9 @@ def render_new_store_department_layout(full_name, dept_name):
     st.caption("Store requests, employee holdings, and leaver clearance.")
 
     store_requests_tab, store_items_tab, store_clearance_tab = st.tabs([
-        "📦 Store Requests",
-        "🧰 Issue Items & Employee Holdings",
-        "🔗 Leaver Item Check-in & Clearance",
+        "1. 📦 Store Requests",
+        "2. 🧰 Issue Items & Employee Holdings",
+        "3. 🔗 Leaver Item Check-in & Clearance",
     ])
 
     with store_requests_tab:
