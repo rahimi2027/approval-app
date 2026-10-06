@@ -90,7 +90,7 @@ os.makedirs(HR_LEAVE_PDF_DIR, exist_ok=True)
 
 HR_EMPLOYEE_COLUMNS = [
     "Employee ID", "Full Name", "Start Date", "Position / Job Title", "Department", "Work Type / Sub-department",
-    "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Holiday Entitlement Override", "Entitlement Adjustment Note", "Leaving Date", "Leaving Reason"
+    "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Contracted Hours Per Week", "Holiday Entitlement Override", "Entitlement Adjustment Note", "Leaving Date", "Leaving Reason"
 ]
 HR_PORTAL_LEAVE_COLUMNS = [
     "Leave ID", "Employee ID", "Date From", "Date To", "Leave Type", "Days",
@@ -1856,6 +1856,7 @@ def _hrp_load_employees():
                 "status": str(r.get("Status", "Active")).strip() or "Active",
                 "working_pattern": str(r.get("Working Pattern", "Regular hours")).strip() or "Regular hours",
                 "days_per_week": float(r.get("Days Worked Per Week", 5) or 5),
+                "contracted_hours_per_week": float(r.get("Contracted Hours Per Week", 40) or 40),
                 "entitlement_override": override,
                 "adjustment_note": str(r.get("Entitlement Adjustment Note", "")).strip(),
                 "leaving_date": _hrp_normalize_employee_date(r.get("Leaving Date", ""), None),
@@ -1881,6 +1882,7 @@ def _hrp_save_employees():
             "Status": e.get("status", "Active"),
             "Working Pattern": e.get("working_pattern", "Regular hours"),
             "Days Worked Per Week": e.get("days_per_week", 5),
+            "Contracted Hours Per Week": e.get("contracted_hours_per_week", 40),
             "Holiday Entitlement Override": e.get("entitlement_override", "") if e.get("entitlement_override") is not None else "",
             "Entitlement Adjustment Note": e.get("adjustment_note", ""),
             "Leaving Date": e.get("leaving_date", "") or "",
@@ -3322,6 +3324,7 @@ def _hrp_build_employee_report_xlsx():
                 "Department": e.get("department", ""), "Agreement Type": e.get("agreement_type", ""),
                 "Status": e.get("status", ""), "Working Pattern": e.get("working_pattern", ""),
                 "Days Worked Per Week": e.get("days_per_week", 5),
+                "Contracted Hours Per Week": e.get("contracted_hours_per_week", 40),
                 "Holiday Entitlement Override": e.get("entitlement_override", ""),
                 "Entitlement Adjustment Note": e.get("adjustment_note", ""),
                 "Leaving Date": e.get("leaving_date", ""), "Leaving Reason": e.get("leaving_reason", ""),
@@ -3640,7 +3643,7 @@ def render_hr_portal(current_user_info=None):
                             "Employee ID": e["emp_id"], "Name": e["name"], "Status": e.get("status", "Active"),
                             "Department": e.get("department", ""), "Work Type": e.get("work_type", "Office Staff"), "Position": e.get("job_title", ""),
                             "Start Date": e.get("start_date", ""), "Agreement": e.get("agreement_type", ""),
-                            "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5),
+                            "Working Pattern": e.get("working_pattern", "Regular hours"), "Days/Week": e.get("days_per_week", 5), "Hours/Week": e.get("contracted_hours_per_week", 40),
                             "Holiday Entitlement": pos["entitlement"], "Bank Holidays (Separate)": _hrp_get_bank_holiday_days(e, e.get("start_date"), date.today()), "Holiday Used": pos["used"], "Holiday Balance": pos["balance"],
                             "Company Owes": pos["company_owes_employee"], "Employee Owes": pos["employee_owes_company"],
                             "Sick Days": summary["sick"], "Family / Emergency": summary["family"],
@@ -3713,6 +3716,14 @@ def render_hr_portal(current_user_info=None):
                                 step=0.5,
                                 key=f"hrp_new_days_{new_form_version}",
                             )
+                            new_contracted_hours = st.selectbox(
+                                "Contracted Hours Per Week",
+                                options=[37.5, 40.0, 42.0],
+                                format_func=lambda h: f"{h:g} hours",
+                                index=1,
+                                key=f"hrp_new_hours_{new_form_version}",
+                                help="Select the employee's contracted weekly hours: 37.5, 40 or 42 hours.",
+                            )
 
                         create_employee = st.form_submit_button("➕ Create Employee", type="primary", width="stretch")
 
@@ -3734,6 +3745,7 @@ def render_hr_portal(current_user_info=None):
                                 "status": "Active",
                                 "working_pattern": new_pattern,
                                 "days_per_week": new_days_per_week,
+                                "contracted_hours_per_week": new_contracted_hours,
                                 "entitlement_override": None,
                                 "adjustment_note": "",
                             }
@@ -3816,6 +3828,14 @@ def render_hr_portal(current_user_info=None):
                                 value=float(edit_emp.get("days_per_week", 5) or 5),
                                 step=0.5,
                             )
+                            contracted_hour_options = [37.5, 40.0, 42.0]
+                            current_hours = float(edit_emp.get("contracted_hours_per_week", 40) or 40)
+                            edit_hours = st.selectbox(
+                                "Contracted Hours Per Week",
+                                contracted_hour_options,
+                                format_func=lambda h: f"{h:g} hours",
+                                index=contracted_hour_options.index(current_hours) if current_hours in contracted_hour_options else 1,
+                            )
                             if edit_emp.get("status") == "Left":
                                 edit_status = "Left"
                             else:
@@ -3843,6 +3863,7 @@ def render_hr_portal(current_user_info=None):
                             edit_emp["agreement_type"] = edit_agreement
                             edit_emp["working_pattern"] = edit_pattern
                             edit_emp["days_per_week"] = edit_days
+                            edit_emp["contracted_hours_per_week"] = edit_hours
                             if edit_emp.get("status") != "Left":
                                 edit_emp["status"] = edit_status
                             if validated_id != old_id:
@@ -3942,6 +3963,7 @@ def render_hr_portal(current_user_info=None):
                         d2.write(f"**Agreement:** {leaving_emp.get('agreement_type', '')}")
                         d3.write(f"**Working Pattern:** {leaving_emp.get('working_pattern', '')}")
                         d3.write(f"**Days Per Week:** {float(leaving_emp.get('days_per_week', 5) or 5):g}")
+                        d3.write(f"**Contracted Hours/Week:** {float(leaving_emp.get('contracted_hours_per_week', 40) or 40):g}")
                         d3.write(f"**Current Status:** {leaving_emp.get('status', 'Active')}")
 
                         st.divider()
@@ -4287,6 +4309,7 @@ def render_hr_portal(current_user_info=None):
                 st.text_input("Working Pattern", value=emp.get("working_pattern", "Regular hours"), disabled=True, key=f"hrp_emp_pattern_display_{emp['emp_id']}")
             with col3:
                 st.number_input("Contracted Days Per Week", min_value=0.5, max_value=7.0, value=float(emp.get("days_per_week", 5) or 5), step=0.5, disabled=True, key=f"hrp_emp_days_display_{emp['emp_id']}")
+                st.number_input("Contracted Hours Per Week", min_value=0.0, max_value=168.0, value=float(emp.get("contracted_hours_per_week", 40) or 40), step=0.5, disabled=True, key=f"hrp_emp_hours_display_{emp['emp_id']}")
 
             if is_hr:
                 if st.button("💾 Save Employee Details", type="primary", key=f"hrp_save_emp_{emp['emp_id']}"):
@@ -8631,6 +8654,9 @@ def _super_admin_transaction_control():
                 patterns=["Regular hours","Irregular hours / Part-Year"]; wp_idx=patterns.index(emp.get("working_pattern")) if emp.get("working_pattern") in patterns else 0
                 new_pattern=c2.selectbox("Working Pattern", patterns, index=wp_idx)
                 new_days=c1.number_input("Days Worked Per Week", min_value=0.0, max_value=7.0, step=0.5, value=float(emp.get("days_per_week",5)))
+                hours_options=[37.5,40.0,42.0]
+                current_hours=float(emp.get("contracted_hours_per_week",40) or 40)
+                new_hours=c2.selectbox("Contracted Hours Per Week", hours_options, format_func=lambda h:f"{h:g} hours", index=hours_options.index(current_hours) if current_hours in hours_options else 1) 
                 ov=emp.get("entitlement_override")
                 new_override=c2.number_input("Holiday Entitlement Override (blank = automatic)", min_value=0.0, max_value=365.0, step=0.5, value=float(ov) if ov is not None else 0.0)
                 new_note=st.text_area("Entitlement Adjustment Note", value=emp.get("adjustment_note",""))
@@ -8644,7 +8670,7 @@ def _super_admin_transaction_control():
                     emp["leaving_date"] = None
                     emp["leaving_reason"] = ""
                     pd.DataFrame([{
-                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Contracted Hours Per Week":x.get("contracted_hours_per_week",40),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
                     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
                     st.session_state.hrp_employees = employees
@@ -8660,7 +8686,7 @@ def _super_admin_transaction_control():
                 else:
                     new_id = validated_id
                 if valid_id:
-                    emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["department"]=new_dept; emp["work_type"]=new_work_type; emp["job_title"]=new_work_type; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
+                    emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["department"]=new_dept; emp["work_type"]=new_work_type; emp["job_title"]=new_work_type; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["contracted_hours_per_week"]=float(new_hours); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
                     if new_id != old_id:
                         users=load_users()
                         changed=False
@@ -8678,7 +8704,7 @@ def _super_admin_transaction_control():
                         st.session_state["hrp_leave_records"]=portal
                         _hrp_save_leave_records()
                     pd.DataFrame([{
-                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Contracted Hours Per Week":x.get("contracted_hours_per_week",40),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
                     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
                     st.session_state.hrp_employees=employees
@@ -10885,6 +10911,7 @@ def render_employee_hr_reports(current_user_info):
         "Start Date": employee.get("start_date", ""), "Agreement": employee.get("agreement_type", ""),
         "Status": employee.get("status", ""), "Working Pattern": employee.get("working_pattern", ""),
         "Days Worked / Week": employee.get("days_per_week", 5),
+        "Contracted Hours / Week": employee.get("contracted_hours_per_week", 40),
     }])
     st.dataframe(details, width="stretch", hide_index=True)
 
@@ -11066,6 +11093,7 @@ def render_director_hr_access_portal(current_user_info):
                         "Start Date": e.get("start_date", ""),
                         "Working Pattern": e.get("working_pattern", ""),
                         "Days Worked / Week": e.get("days_per_week", 5),
+                        "Contracted Hours / Week": e.get("contracted_hours_per_week", 40),
                     } for e in employees]
                     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
                     st.caption(f"Total employees: {len(rows)}")
