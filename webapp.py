@@ -1705,8 +1705,74 @@ HR_DEPARTMENT_WORK_TYPES = {
     "Isolator": ["Office Staff", "Isolator Installer"],
 }
 
+def _default_department_subdepartments():
+    return {
+        "National Grid": ["Office Staff", "National Grid Inspector"],
+        "Isolator": ["Office Staff", "Isolator Installer"],
+        "Projects": ["Office Staff", "Site Electrician"],
+        "Project": ["Office Staff", "Site Electrician"],
+        "Accounts": ["Office Staff"],
+        "Payroll Department": ["Office Staff"],
+        "ACoole Electrical Ltd": ["Office Staff"],
+        "Store": ["Office Staff"],
+        "HR": ["Office Staff"],
+    }
+
+def load_department_subdepartments():
+    """Load the Super Admin controlled Department -> Sub-department mapping."""
+    defaults = _default_department_subdepartments()
+    raw_values = _load_setting_value("department_subdepartments", [])
+    raw = raw_values[0] if isinstance(raw_values, list) and raw_values else raw_values
+    mapping = {}
+    if isinstance(raw, str) and raw.strip():
+        try:
+            decoded = json.loads(raw)
+            if isinstance(decoded, dict):
+                for dept, values in decoded.items():
+                    dept = str(dept).strip()
+                    if dept:
+                        vals = [str(v).strip() for v in (values or []) if str(v).strip()]
+                        mapping[dept] = vals or ["Office Staff"]
+        except Exception:
+            mapping = {}
+    if not mapping:
+        mapping = {k: list(v) for k, v in defaults.items()}
+    for dept in load_departments():
+        mapping.setdefault(dept, ["Office Staff"])
+        if not mapping[dept]:
+            mapping[dept] = ["Office Staff"]
+    return mapping
+
+def save_department_subdepartments(mapping):
+    init_settings()
+    clean_mapping = {}
+    for dept, values in mapping.items():
+        dept = str(dept).strip()
+        if not dept:
+            continue
+        clean_values = []
+        for value in values or []:
+            value = str(value).strip()
+            if value and value not in clean_values:
+                clean_values.append(value)
+        clean_mapping[dept] = clean_values or ["Office Staff"]
+    encoded = json.dumps(clean_mapping, ensure_ascii=False)
+    df = _read_excel_records(SETTINGS_PATH)
+    found = False
+    for idx, r in df.iterrows():
+        if str(r.get("setting", "")).strip() == "department_subdepartments":
+            df.at[idx, "value"] = encoded
+            found = True
+            break
+    if not found:
+        df = pd.concat([df, pd.DataFrame([{"setting": "department_subdepartments", "value": encoded}])], ignore_index=True)
+    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    _invalidate_data_cache("_settings_cache")
+    sync_saved_file_to_drive(SETTINGS_PATH)
+
 def _hrp_work_type_options(department):
-    return HR_DEPARTMENT_WORK_TYPES.get(str(department or "").strip(), ["Office Staff"])
+    mapping = load_department_subdepartments()
+    return mapping.get(str(department or "").strip(), ["Office Staff"]) or ["Office Staff"]
 
 def _hrp_normalize_work_type(department, work_type="", job_title=""):
     options = _hrp_work_type_options(department)
@@ -3592,6 +3658,23 @@ def render_hr_portal(current_user_info=None):
                     st.info("HR enters the company Employee ID manually. Any unique letters/numbers format used by your company is accepted.")
 
                     new_form_version = st.session_state.hrp_new_employee_form_version
+                    hr_software_departments = load_departments()
+                    dept_col, subdept_col = st.columns(2)
+                    with dept_col:
+                        new_department = st.selectbox(
+                            "Department",
+                            options=hr_software_departments,
+                            help="Select the main Department. The Sub-department list changes automatically based on this selection.",
+                            key=f"hrp_new_dept_{new_form_version}",
+                        )
+                    with subdept_col:
+                        new_work_type = st.selectbox(
+                            "Working As / Sub-department",
+                            options=_hrp_work_type_options(new_department),
+                            key=f"hrp_new_work_type_{new_form_version}_{str(new_department).replace(' ', '_').replace('/', '_')}",
+                            help="These options are controlled by Super Admin in System Settings → Manage Sub-departments.",
+                        )
+
                     with st.form(f"hrp_new_employee_form_{new_form_version}", clear_on_submit=False):
                         col1, col2 = st.columns(2)
                         with col1:
@@ -3612,25 +3695,6 @@ def render_hr_portal(current_user_info=None):
                             )
 
                         with col2:
-                            hr_software_departments = load_departments()
-                            new_department = st.selectbox(
-                                "Department",
-                                options=hr_software_departments,
-                                help=(
-                                    "Select the department this employee works under. "
-                                    "For example: Isolator for Isolator Installers, or "
-                                    "Projects for Site Electricians. This department is stored "
-                                    "on the employee master record and is carried into the "
-                                    "leaver clearance shown to Store and Payroll."
-                                ),
-                                key=f"hrp_new_dept_{new_form_version}",
-                            )
-                            new_work_type = st.selectbox(
-                                "Working As / Sub-department",
-                                options=_hrp_work_type_options(new_department),
-                                key=f"hrp_new_work_type_{new_form_version}",
-                                help="Controlled category: Projects → Office Staff/Site Electrician; National Grid → Office Staff/National Grid Inspector; Isolator → Office Staff/Isolator Installer.",
-                            )
                             new_agreement = st.selectbox(
                                 "Agreement Type",
                                 options=HR_PORTAL_AGREEMENT_TYPES,
@@ -10260,7 +10324,12 @@ def change_my_password_form():
 def settings_management_panel():
     st.subheader("⚙️ System Settings — Categories, Departments & Roles")
     st.info("🛡️ Super Admin Only — Add, Edit, Delete Categories, Departments & Roles."); st.divider()
-    cats_tab, dept_tab, roles_tab = st.tabs(["🏷️ Manage Categories", "🏢 Manage Departments", "🎖️ Manage Roles / Permissions"])
+    cats_tab, dept_tab, subdept_tab, roles_tab = st.tabs([
+        "🏷️ Manage Categories",
+        "🏢 Manage Departments",
+        "🔹 Manage Sub-departments",
+        "🎖️ Manage Roles / Permissions",
+    ])
     with cats_tab:
         st.markdown("### 🏷️ Request Categories")
         st.info("These appear in the request form dropdown."); st.divider()
@@ -10331,6 +10400,62 @@ def settings_management_panel():
                             st.success(f"✅ Renamed to: {renamed}"); st.rerun()
                     with col2:
                         if st.form_submit_button("❌ Cancel"): st.session_state[f"editing_dept_{i}"] = False; st.rerun()
+    with subdept_tab:
+        st.markdown("### 🔹 Manage Sub-departments")
+        st.info("🛡️ Super Admin Only — create or remove the Sub-departments available under each main Department. HR will see the linked options automatically when registering an employee.")
+        st.divider()
+
+        mapping = load_department_subdepartments()
+        departments_for_mapping = load_departments()
+
+        map_col1, map_col2 = st.columns(2)
+        with map_col1:
+            selected_mapping_department = st.selectbox(
+                "🏢 Main Department",
+                options=departments_for_mapping,
+                key="super_admin_subdept_department",
+            )
+        with map_col2:
+            new_subdept = st.text_input(
+                "🔹 New Sub-department",
+                placeholder="e.g. Apprentice Electrician",
+                key="super_admin_new_subdept",
+            )
+
+        if st.button("➕ Add Sub-department", type="primary", key="super_admin_add_subdept", width="stretch"):
+            clean_subdept = str(new_subdept or "").strip()
+            if not clean_subdept:
+                st.warning("Please enter a Sub-department name.")
+            else:
+                current = list(mapping.get(selected_mapping_department, ["Office Staff"]))
+                if clean_subdept.casefold() in {x.casefold() for x in current}:
+                    st.warning(f"Sub-department '{clean_subdept}' already exists under {selected_mapping_department}.")
+                else:
+                    current.append(clean_subdept)
+                    mapping[selected_mapping_department] = current
+                    save_department_subdepartments(mapping)
+                    log_action("SUBDEPARTMENT_ADDED", new_data={"department": selected_mapping_department, "subdepartment": clean_subdept})
+                    st.success(f"✅ Added '{clean_subdept}' under {selected_mapping_department}.")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("#### Current Department Structure")
+        for dept_name in departments_for_mapping:
+            values = mapping.get(dept_name, ["Office Staff"])
+            st.markdown(f"**🏢 {dept_name}**")
+            for idx, sub_name in enumerate(values):
+                c1, c2 = st.columns([6, 1])
+                with c1:
+                    st.write(f"• {sub_name}")
+                with c2:
+                    if len(values) > 1 and st.button("🗑️", key=f"delete_subdept_{dept_name}_{idx}", help=f"Remove {sub_name} from {dept_name}"):
+                        removed = values.pop(idx)
+                        mapping[dept_name] = values
+                        save_department_subdepartments(mapping)
+                        log_action("SUBDEPARTMENT_DELETED", old_data={"department": dept_name, "subdepartment": removed})
+                        st.success(f"Removed '{removed}' from {dept_name}.")
+                        st.rerun()
+
     with roles_tab:
         st.markdown("### 🎖️ User Roles / Permission Levels")
         st.info("⚠️ 'Super Admin' cannot be deleted."); st.divider()
