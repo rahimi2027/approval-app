@@ -10975,15 +10975,18 @@ elif role in ["Manager", "Staff", "Team Member"]:
         labels.append("📝 Leave Request")
     if has_employee_hr_reports:
         labels.append("👤 My HR Report")
-    if has_store_deduction: labels.append("📦 Store Deduction")
-    if has_store_deduction: labels.append("📦 Store Return (Addition)")
-    if has_store_deduction: labels.append("📋 My Submitted Store Requests")
-    if has_employee_items: labels.append("🧰 Issue Items")
-    if has_employee_items: labels.append("📊 Employee Holdings")
+
+    # Store Department is organised into three clear top-level groups.
+    # Each group contains its related functions as sub-tabs.
+    if has_store_deduction:
+        labels.append("📦 Store Requests")
+    if has_employee_items:
+        labels.append("🧰 Issue Items & Employee Holdings")
+
     is_store_user = str(dept_name or "").strip().casefold() == "store"
-    if has_employee_items: labels.append("📋 Leaver Item Check-in")
-    if is_store_user: labels.append("🔗 Leaver Clearance")
-    if has_employee_items: labels.append("📚 Check-in History")
+    if has_employee_items or is_store_user:
+        labels.append("🔗 Leaver Item Check-in & Clearance")
+
     if has_work_orders: labels.append("🛠️ Work Orders")
     if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
     if not labels:
@@ -11164,37 +11167,67 @@ elif role in ["Manager", "Staff", "Team Member"]:
             with tabs[tab_idx]:
                 render_employee_hr_reports(user_info)
             tab_idx += 1
+        # ------------------------------------------------------------
+        # 📦 STORE REQUESTS
+        #    Sub-tabs: Deduction | Return (Addition) | My Submitted Requests
+        # ------------------------------------------------------------
         if has_store_deduction:
             with tabs[tab_idx]:
-                render_store_deduction_form(full_name, dept_name)
+                store_req_tabs = st.tabs([
+                    "📦 Store Deduction",
+                    "📦 Store Return (Addition)",
+                    "📋 My Submitted Store Requests",
+                ])
+                with store_req_tabs[0]:
+                    render_store_deduction_form(full_name, dept_name)
+                with store_req_tabs[1]:
+                    render_store_return_form(full_name, dept_name)
+                with store_req_tabs[2]:
+                    render_store_my_submissions(full_name)
             tab_idx += 1
-        if has_store_deduction:
-            with tabs[tab_idx]:
-                render_store_return_form(full_name, dept_name)
-            tab_idx += 1
-        if has_store_deduction:
-            with tabs[tab_idx]:
-                render_store_my_submissions(full_name)
-            tab_idx += 1
+
+        # ------------------------------------------------------------
+        # 🧰 ISSUE ITEMS & EMPLOYEE HOLDINGS
+        #    Sub-tabs: Issue Items | Employee Holdings
+        # ------------------------------------------------------------
         if has_employee_items:
             with tabs[tab_idx]:
-                render_item_issue_form(full_name, dept_name)
+                item_tabs = st.tabs([
+                    "🧰 Issue Items",
+                    "📊 Employee Holdings",
+                ])
+                with item_tabs[0]:
+                    render_item_issue_form(full_name, dept_name)
+                with item_tabs[1]:
+                    render_employee_holdings_overview(role)
             tab_idx += 1
-        if has_employee_items:
+
+        # ------------------------------------------------------------
+        # 🔗 LEAVER ITEM CHECK-IN & CLEARANCE
+        #    Sub-tabs: Leaver Item Check-in | Leaver Clearance | Check-in History
+        # ------------------------------------------------------------
+        if has_employee_items or is_store_user:
             with tabs[tab_idx]:
-                render_employee_holdings_overview(role)
-            tab_idx += 1
-        if has_employee_items:
-            with tabs[tab_idx]:
-                render_item_checkin_form(full_name)
-            tab_idx += 1
-        if is_store_user:
-            with tabs[tab_idx]:
-                render_leaver_clearance_store(full_name)
-            tab_idx += 1
-        if has_employee_items:
-            with tabs[tab_idx]:
-                render_item_checkin_history()
+                leaver_tabs = st.tabs([
+                    "📋 Leaver Item Check-in",
+                    "🔗 Leaver Clearance",
+                    "📚 Check-in History",
+                ])
+                with leaver_tabs[0]:
+                    if has_employee_items:
+                        render_item_checkin_form(full_name)
+                    else:
+                        st.info("You do not have permission to access Leaver Item Check-in.")
+                with leaver_tabs[1]:
+                    if is_store_user:
+                        render_leaver_clearance_store(full_name)
+                    else:
+                        st.info("Leaver Clearance is available to Store Department users.")
+                with leaver_tabs[2]:
+                    if has_employee_items:
+                        render_item_checkin_history()
+                    else:
+                        st.info("You do not have permission to access Check-in History.")
             tab_idx += 1
         if has_work_orders:
             with tabs[tab_idx]:
