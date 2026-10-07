@@ -3591,7 +3591,7 @@ def _hrp_pdf_employee_metrics(employee):
     }
 
 
-def _hrp_pdf_setup(title, subtitle=""):
+def _hrp_pdf_setup(title, subtitle="", prepared_by=None):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=14)
     pdf.add_page()
@@ -3629,7 +3629,9 @@ def _hrp_pdf_setup(title, subtitle=""):
     if subtitle:
         line(subtitle, 6, False, 9)
     line(f"Report Generated: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 5, False, 8)
-    line(f"Prepared By: {st.session_state.get('full_name', st.session_state.get('username', 'HR'))}", 5, False, 8)
+    actor = str(prepared_by or st.session_state.get("full_name") or st.session_state.get("username") or "").strip()
+    if actor:
+        line(f"Prepared By: {actor}", 5, False, 8)
     pdf.ln(3)
     return pdf, family, safe, wrap, line
 
@@ -11835,8 +11837,8 @@ def _store_pdf_clearance(pdf, family, safe, records, title="Leaver Clearance"):
     )
 
 
-def _store_department_report_pdf(requests, holdings, checkins, clearances, items, title="Store Department Complete Report"):
-    pdf, family, safe, wrap, line = _hrp_pdf_setup(title, "Complete Store Department report covering every Store tab and its underlying records")
+def _store_department_report_pdf(requests, holdings, checkins, clearances, items, title="Store Department Complete Report", prepared_by=None):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup(title, "Complete Store Department report covering every Store tab and its underlying records", prepared_by=prepared_by)
     _hrp_pdf_section(pdf, family, safe, "Executive Summary")
     approved = sum(1 for r in requests if str(r.get("status", "")).casefold() == "approved")
     pending = sum(1 for r in requests if str(r.get("status", "")).casefold() == "pending")
@@ -11857,10 +11859,11 @@ def _store_department_report_pdf(requests, holdings, checkins, clearances, items
     return pdf
 
 
-def _store_employee_file_pdf(employee, requests, holdings, checkins, clearances):
+def _store_employee_file_pdf(employee, requests, holdings, checkins, clearances, prepared_by=None):
     pdf, family, safe, wrap, line = _hrp_pdf_setup(
         f"Store Employee File — {employee.get('name', '')}",
         "Complete Store Department record for the selected employee",
+        prepared_by=prepared_by,
     )
     _store_pdf_employee_header(pdf, family, safe, employee)
     _hrp_pdf_section(pdf, family, safe, "Store Summary")
@@ -11877,27 +11880,27 @@ def _store_employee_file_pdf(employee, requests, holdings, checkins, clearances)
     return pdf
 
 
-def _store_requests_report_pdf(records):
-    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Requests Report", "All Store Department deduction and return transactions in the selected scope")
+def _store_requests_report_pdf(records, prepared_by=None):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Requests Report", "All Store Department deduction and return transactions in the selected scope", prepared_by=prepared_by)
     _store_pdf_requests(pdf, family, safe, records)
     return pdf
 
 
-def _store_holdings_report_pdf(records):
-    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Employee Items & Holdings Report", "Issued, returned and outstanding company property")
+def _store_holdings_report_pdf(records, prepared_by=None):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Employee Items & Holdings Report", "Issued, returned and outstanding company property", prepared_by=prepared_by)
     _store_pdf_holdings(pdf, family, safe, records)
     return pdf
 
 
-def _store_checkin_clearance_report_pdf(checkins, clearances):
-    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Leaver Check-in & Clearance Report", "Leaver property return, deductions and clearance status")
+def _store_checkin_clearance_report_pdf(checkins, clearances, prepared_by=None):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Leaver Check-in & Clearance Report", "Leaver property return, deductions and clearance status", prepared_by=prepared_by)
     _store_pdf_checkins(pdf, family, safe, checkins)
     _store_pdf_clearance(pdf, family, safe, clearances)
     return pdf
 
 
-def _store_items_prices_report_pdf(items):
-    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Items & Prices Report", "Current Store item master list")
+def _store_items_prices_report_pdf(items, prepared_by=None):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Items & Prices Report", "Current Store item master list", prepared_by=prepared_by)
     _hrp_pdf_section(pdf, family, safe, "Store Item Master")
     rows = [[i.get("name", ""), _store_report_money(i.get("price", 0)), "Active" if i.get("active") else "Inactive"] for i in items]
     _store_pdf_table(pdf, family, safe, ["Item Name", "Price", "Status"], rows, [90, 35, 35], 8)
@@ -11916,10 +11919,9 @@ def render_store_reports_tab(full_name, dept_name):
     items = load_store_items(force=True)
     employees = _store_report_employee_lookup()
 
-    # Store reports are intentionally limited to Store employees/transactions where a department is recorded.
-    store_dept = str(dept_name or "Store").strip()
-    def is_store_record(r):
-        return str(r.get("emp_dept", r.get("department", ""))).strip().casefold() == store_dept.casefold()
+    # Store reports cover ALL records managed by the Store module.
+    # Store equipment/transactions can belong to employees in any company department,
+    # so company-wide Store reports must not be filtered by the employee department.
 
     report_options = [
         "📦 Complete Store Department Report — All Store Tabs",
@@ -11943,11 +11945,11 @@ def render_store_reports_tab(full_name, dept_name):
 
     selected_employee = None
     if scope == "👤 Selected Employee Report":
-        status_filter = st.selectbox("📌 Employee Status", ["All Store Employees", "Active Store Employees", "Inactive Store Employees"], key="store_report_status")
-        store_employees = [e for e in employees if str(e.get("department", "")).strip().casefold() == store_dept.casefold()]
-        if status_filter == "Active Store Employees":
+        status_filter = st.selectbox("📌 Employee Status", ["All Employees", "Active Employees", "Inactive Employees"], key="store_report_status")
+        store_employees = list(employees)
+        if status_filter == "Active Employees":
             store_employees = [e for e in store_employees if str(e.get("status", "Active")).strip().casefold() == "active"]
-        elif status_filter == "Inactive Store Employees":
+        elif status_filter == "Inactive Employees":
             store_employees = [e for e in store_employees if str(e.get("status", "")).strip().casefold() != "active"]
         if not store_employees:
             st.warning("No HR employees are currently registered under the Store department.")
@@ -11977,10 +11979,13 @@ def render_store_reports_tab(full_name, dept_name):
         checkins_scope = _store_employee_records(selected_employee, checkins)
         clearances_scope = _store_employee_records(selected_employee, clearances)
     else:
-        requests_scope = [r for r in requests if is_store_record(r)]
-        holdings_scope = [r for r in holdings if is_store_record(r)]
-        checkins_scope = [r for r in checkins if is_store_record(r)]
-        clearances_scope = [r for r in clearances if is_store_record(r)]
+        # Company/department scope means the complete Store data set.
+        # Do not filter by employee department: Store manages company property
+        # and transactions for employees across the whole company.
+        requests_scope = list(requests)
+        holdings_scope = list(holdings)
+        checkins_scope = list(checkins)
+        clearances_scope = list(clearances)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Requests", len(requests_scope))
@@ -11991,25 +11996,25 @@ def render_store_reports_tab(full_name, dept_name):
     if st.button("📄 Generate & Save PDF Report", type="primary", width="stretch", key="store_generate_report_pdf"):
         try:
             if report_type.startswith("📦 Complete"):
-                pdf = _store_department_report_pdf(requests_scope, holdings_scope, checkins_scope, clearances_scope, items, "Store Department Complete Report")
+                pdf = _store_department_report_pdf(requests_scope, holdings_scope, checkins_scope, clearances_scope, items, "Store Department Complete Report", prepared_by=full_name)
                 filename = "Store_Department_Complete_Report.pdf" if scope.startswith("🏢") else f"Store_Employee_Complete_{selected_employee.get('emp_id','employee')}.pdf"
             elif report_type.startswith("🧾"):
-                pdf = _store_requests_report_pdf(requests_scope)
+                pdf = _store_requests_report_pdf(requests_scope, prepared_by=full_name)
                 filename = "Store_Requests_Report.pdf" if scope.startswith("🏢") else f"Store_Requests_{selected_employee.get('emp_id','employee')}.pdf"
             elif report_type.startswith("🧰"):
-                pdf = _store_holdings_report_pdf(holdings_scope)
+                pdf = _store_holdings_report_pdf(holdings_scope, prepared_by=full_name)
                 filename = "Store_Employee_Holdings_Report.pdf" if scope.startswith("🏢") else f"Employee_Holdings_{selected_employee.get('emp_id','employee')}.pdf"
             elif report_type.startswith("🔗"):
-                pdf = _store_checkin_clearance_report_pdf(checkins_scope, clearances_scope)
+                pdf = _store_checkin_clearance_report_pdf(checkins_scope, clearances_scope, prepared_by=full_name)
                 filename = "Store_Leaver_Checkin_Clearance_Report.pdf" if scope.startswith("🏢") else f"Leaver_Checkin_Clearance_{selected_employee.get('emp_id','employee')}.pdf"
             elif report_type.startswith("👤"):
                 if not selected_employee:
                     st.error("Please select an employee for the Employee Store File report.")
                     return
-                pdf = _store_employee_file_pdf(selected_employee, requests_scope, holdings_scope, checkins_scope, clearances_scope)
+                pdf = _store_employee_file_pdf(selected_employee, requests_scope, holdings_scope, checkins_scope, clearances_scope, prepared_by=full_name)
                 filename = f"Store_Employee_File_{selected_employee.get('emp_id','employee')}.pdf"
             else:
-                pdf = _store_items_prices_report_pdf(items)
+                pdf = _store_items_prices_report_pdf(items, prepared_by=full_name)
                 filename = "Store_Items_and_Prices_Report.pdf"
             data = _hrp_save_pdf(pdf, filename)
             if data:
