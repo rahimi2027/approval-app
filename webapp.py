@@ -3543,14 +3543,396 @@ def _hrp_build_holiday_report_xlsx(report_year):
     return output.getvalue()
 
 
+
+def _hrp_pdf_employee_history(employee):
+    """Return approved leave/absence history and final settlement records for any employee."""
+    emp_id = str(employee.get("emp_id", "")).strip().casefold()
+    leave_records = []
+    types = {}
+    holiday_taken = 0.0
+    for record in _hrp_load_leave_records():
+        if str(record.get("employee_id", "")).strip().casefold() != emp_id:
+            continue
+        if str(record.get("status", "")).strip().casefold() != "approved":
+            continue
+        days = float(record.get("days", 0) or 0)
+        leave_type = str(record.get("type", record.get("leave_type", "Other")) or "Other").strip() or "Other"
+        types[leave_type] = round(types.get(leave_type, 0.0) + days, 1)
+        if leave_type.casefold() in {"holiday", "annual holiday", "annual leave", "holiday leave"}:
+            holiday_taken += days
+        leave_records.append(record)
+    leave_records.sort(key=lambda r: (_hrp_report_date(r.get("date_from")) or date.min))
+    settlements = [
+        r for r in load_hr_leave(force=False)
+        if r.get("final_holiday_settlement", False)
+        and str(r.get("employee_id", "")).strip().casefold() == emp_id
+    ]
+    settlements.sort(key=lambda r: (_hrp_report_date(r.get("date")) or date.min))
+    return {
+        "leave_records": leave_records,
+        "settlements": settlements,
+        "holiday_taken": round(holiday_taken, 1),
+        "types": types,
+    }
+
+
+def _hrp_pdf_employee_metrics(employee):
+    """Build the live holiday/service figures used by the HR PDF reports."""
+    entitlement, entitlement_note, service_years, _ = _hrp_get_employee_entitlement(employee)
+    position = _hrp_get_holiday_position(employee.get("emp_id", ""))
+    return {
+        "entitlement": float(entitlement or 0),
+        "entitlement_note": entitlement_note or "",
+        "service_years": float(service_years or 0),
+        "used": float(position.get("used", 0) or 0),
+        "balance": float(position.get("balance", 0) or 0),
+        "bank_holidays_passed": float(position.get("bank_holidays_passed", 0) or 0),
+        "upcoming_bank_holidays": float(position.get("upcoming_bank_holidays", 0) or 0),
+    }
+
+
+def _hrp_pdf_setup(title, subtitle=""):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.add_page()
+    regular_font, bold_font = _pdf_font_paths()
+    if regular_font and bold_font:
+        pdf.add_font("DejaVu", "", regular_font)
+        pdf.add_font("DejaVu", "B", bold_font)
+        family = "DejaVu"
+    else:
+        family = "Helvetica"
+
+    def safe(value):
+        text_value = _pdf_text(value)
+        return text_value if family == "DejaVu" else text_value.encode("latin-1", "replace").decode("latin-1")
+
+    def wrap(value, width=92):
+        text_value = safe("-" if value in (None, "") else value)
+        return "\n".join(
+            "\n".join(textwrap.wrap(part, width=width, break_long_words=True, break_on_hyphens=False) or [""])
+            for part in text_value.splitlines()
+        ) or "-"
+
+    def line(value, h=6, bold=False, size=9):
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font(family, "B" if bold else "", size)
+        pdf.multi_cell(pdf.epw, h, wrap(value), new_x="LMARGIN", new_y="NEXT")
+
+    if os.path.exists(LOGO_PATH):
+        try:
+            pdf.image(LOGO_PATH, x=75, y=8, w=60)
+            pdf.ln(27)
+        except Exception:
+            pdf.ln(4)
+    line(title, 10, True, 16)
+    if subtitle:
+        line(subtitle, 6, False, 9)
+    line(f"Report Generated: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 5, False, 8)
+    line(f"Prepared By: {st.session_state.get('full_name', st.session_state.get('username', 'HR'))}", 5, False, 8)
+    pdf.ln(3)
+    return pdf, family, safe, wrap, line
+
+
+def _hrp_pdf_section(pdf, family, safe, heading):
+    pdf.ln(2)
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font(family, "B", 11)
+    pdf.multi_cell(pdf.epw, 7, safe(heading), new_x="LMARGIN", new_y="NEXT")
+
+
+def _hrp_pdf_label_value(pdf, family, safe, wrap, label, value):
+    label_w = 53
+    value_w = max(20, pdf.epw - label_w)
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font(family, "B", 9)
+    pdf.cell(label_w, 6, safe(f"{label}:"))
+    pdf.set_font(family, "", 9)
+    pdf.multi_cell(value_w, 6, wrap(value), new_x="LMARGIN", new_y="NEXT")
+
+
+def _hrp_pdf_add_leave_history(pdf, family, safe, wrap, employee, include_settlement=True):
+    history = _hrp_pdf_employee_history(employee)
+    _hrp_pdf_section(pdf, family, safe, "ABSENCE / LEAVE SUMMARY")
+    if history["types"]:
+        for leave_type, days in history["types"].items():
+            pdf.set_font(family, "", 9)
+            pdf.multi_cell(pdf.epw, 5.5, wrap(f"{leave_type}: {days:.1f} day(s)"), new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font(family, "", 9)
+        pdf.multi_cell(pdf.epw, 5.5, safe("No approved leave records found."), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(family, "B", 9)
+    pdf.multi_cell(pdf.epw, 5.5, safe(f"Approved annual holiday taken: {history['holiday_taken']:.1f} days"), new_x="LMARGIN", new_y="NEXT")
+
+    _hrp_pdf_section(pdf, family, safe, "DETAILED APPROVED LEAVE RECORDS")
+    if history["leave_records"]:
+        for record in history["leave_records"]:
+            d_from = record.get("date_from", "")
+            d_to = record.get("date_to", "")
+            days = float(record.get("days", 0) or 0)
+            leave_type = record.get("type", "")
+            status = record.get("status", "")
+            notes = record.get("notes", "")
+            reference = record.get("leave_id", "")
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Leave Record", f"#{reference} | {d_from} → {d_to}")
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Type / Days", f"{leave_type} | {days:.1f} day(s) | {status}")
+            if notes:
+                _hrp_pdf_label_value(pdf, family, safe, wrap, "Notes", notes)
+    else:
+        pdf.set_font(family, "", 9)
+        pdf.multi_cell(pdf.epw, 5.5, safe("No approved leave records found."), new_x="LMARGIN", new_y="NEXT")
+
+    if include_settlement:
+        _hrp_pdf_section(pdf, family, safe, "FINAL SETTLEMENT INFORMATION")
+        if history["settlements"]:
+            for record in history["settlements"]:
+                days = float(record.get("days", 0) or 0)
+                amount = float(record.get("amount", 0) or 0)
+                _hrp_pdf_label_value(
+                    pdf, family, safe, wrap, "Settlement",
+                    f"#{record.get('id')} | {record.get('type', '')} | {days:.1f} days | £{amount:,.2f} | {str(record.get('status', '')).title()} | {record.get('date', '')}"
+                )
+                if record.get("director_comments"):
+                    _hrp_pdf_label_value(pdf, family, safe, wrap, "Director Comments", record.get("director_comments"))
+                if record.get("rejection_reason"):
+                    _hrp_pdf_label_value(pdf, family, safe, wrap, "Rejection Reason", record.get("rejection_reason"))
+        else:
+            pdf.set_font(family, "", 9)
+            pdf.multi_cell(pdf.epw, 5.5, safe("No final holiday settlement record found."), new_x="LMARGIN", new_y="NEXT")
+    return history
+
+
+def _hrp_employee_details_pdf(employee):
+    if not PDF_AVAILABLE:
+        return None
+    try:
+        metrics = _hrp_pdf_employee_metrics(employee)
+        pdf, family, safe, wrap, line = _hrp_pdf_setup(
+            "EMPLOYEE DETAILS — HR PDF",
+            f"Individual employee report — {employee.get('name', '')} ({employee.get('emp_id', '')})",
+        )
+        _hrp_pdf_section(pdf, family, safe, "EMPLOYEE DETAILS")
+        details = [
+            ("Employee ID", employee.get("emp_id")),
+            ("Full Name", employee.get("name")),
+            ("Status", employee.get("status")),
+            ("Department", employee.get("department")),
+            ("Sub-department / Working As", employee.get("work_type", employee.get("job_title"))),
+            ("Job Title", employee.get("job_title")),
+            ("Start Date", employee.get("start_date")),
+            ("Leaving Date", employee.get("leaving_date")),
+            ("Leaving Reason", employee.get("leaving_reason")),
+            ("Agreement Type", employee.get("agreement_type")),
+            ("Working Pattern", employee.get("working_pattern")),
+            ("Contracted Days", employee.get("days_per_week")),
+            ("Contracted Hours", employee.get("contracted_hours_per_week")),
+            ("Holiday Entitlement", f"{metrics['entitlement']:.1f} days"),
+            ("Holiday Used / Balance", f"{metrics['used']:.1f} / {metrics['balance']:.1f} days"),
+            ("Bank Holidays", f"{metrics['bank_holidays_passed']:.1f} passed; {metrics['upcoming_bank_holidays']:.1f} upcoming"),
+            ("Service Length", _hrp_work_duration(employee.get("start_date"), employee.get("leaving_date") or date.today())),
+        ]
+        for label, value in details:
+            _hrp_pdf_label_value(pdf, family, safe, wrap, label, value)
+        if metrics["entitlement_note"]:
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Entitlement Note", metrics["entitlement_note"])
+        _hrp_pdf_add_leave_history(pdf, family, safe, wrap, employee, include_settlement=True)
+        return _hrp_save_pdf(pdf, f"Employee_Details_{employee.get('emp_id', 'employee')}.pdf")
+    except Exception as exc:
+        st.error(f"Employee Details PDF error: {type(exc).__name__}: {exc}")
+        return None
+
+
+def _hrp_employee_master_pdf(employees, report_label="Company-wide"):
+    if not PDF_AVAILABLE:
+        return None
+    try:
+        employees = sorted(employees, key=lambda e: (str(e.get("department", "")).casefold(), str(e.get("name", "")).casefold()))
+        pdf, family, safe, wrap, line = _hrp_pdf_setup(
+            "EMPLOYEE OVERVIEW — FULL EMPLOYEE MASTER",
+            f"{report_label} detailed employee master PDF — {len(employees)} employee(s)",
+        )
+        _hrp_pdf_section(pdf, family, safe, "EMPLOYEE MASTER SUMMARY")
+        departments = sorted({str(e.get("department", "")).strip() or "Unassigned" for e in employees}, key=str.casefold)
+        line(f"Total Employees: {len(employees)}", 5.5, True, 9)
+        line(f"Active Employees: {sum(str(e.get('status', '')).casefold() == 'active' for e in employees)}", 5.5, False, 9)
+        line(f"Inactive / Left Employees: {sum(str(e.get('status', '')).casefold() != 'active' for e in employees)}", 5.5, False, 9)
+        line(f"Departments: {len(departments)}", 5.5, False, 9)
+        for index, employee in enumerate(employees, 1):
+            pdf.add_page()
+            line(f"EMPLOYEE {index} OF {len(employees)}", 6, True, 10)
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Employee ID", employee.get("emp_id"))
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Full Name", employee.get("name"))
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Status", employee.get("status"))
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Department", employee.get("department"))
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Sub-department / Working As", employee.get("work_type", employee.get("job_title")))
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Job Title", employee.get("job_title"))
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Start / Leaving Date", f"{employee.get('start_date', '')} / {employee.get('leaving_date', '') or '-'}")
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Agreement Type", employee.get("agreement_type"))
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Working Pattern", employee.get("working_pattern"))
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Contracted Days / Hours", f"{employee.get('days_per_week', '')} / {employee.get('contracted_hours_per_week', '')}")
+            metrics = _hrp_pdf_employee_metrics(employee)
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Holiday Entitlement", f"{metrics['entitlement']:.1f} days")
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Holiday Used / Balance", f"{metrics['used']:.1f} / {metrics['balance']:.1f} days")
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Bank Holidays", f"{metrics['bank_holidays_passed']:.1f} passed; {metrics['upcoming_bank_holidays']:.1f} upcoming")
+            _hrp_pdf_label_value(pdf, family, safe, wrap, "Service Length", _hrp_work_duration(employee.get("start_date"), employee.get("leaving_date") or date.today()))
+            _hrp_pdf_add_leave_history(pdf, family, safe, wrap, employee, include_settlement=True)
+        return _hrp_save_pdf(pdf, f"Employee_Master_Full_{date.today().strftime('%Y-%m-%d')}.pdf")
+    except Exception as exc:
+        st.error(f"Employee Overview PDF error: {type(exc).__name__}: {exc}")
+        return None
+
+
+def _hrp_employee_hr_file_pdf(employee):
+    if not PDF_AVAILABLE:
+        return None
+    try:
+        metrics = _hrp_pdf_employee_metrics(employee)
+        pdf, family, safe, wrap, line = _hrp_pdf_setup(
+            "EMPLOYEE HR FILE",
+            f"Complete HR file — {employee.get('name', '')} ({employee.get('emp_id', '')})",
+        )
+        _hrp_pdf_section(pdf, family, safe, "EMPLOYEE RECORD")
+        for label, value in [
+            ("Employee ID", employee.get("emp_id")), ("Full Name", employee.get("name")),
+            ("Status", employee.get("status")), ("Department", employee.get("department")),
+            ("Sub-department / Working As", employee.get("work_type", employee.get("job_title"))),
+            ("Job Title", employee.get("job_title")), ("Start Date", employee.get("start_date")),
+            ("Leaving Date", employee.get("leaving_date")), ("Leaving Reason", employee.get("leaving_reason")),
+            ("Agreement Type", employee.get("agreement_type")), ("Working Pattern", employee.get("working_pattern")),
+            ("Contracted Days", employee.get("days_per_week")), ("Contracted Hours", employee.get("contracted_hours_per_week")),
+            ("Holiday Entitlement", f"{metrics['entitlement']:.1f} days"),
+            ("Holiday Used / Balance", f"{metrics['used']:.1f} / {metrics['balance']:.1f} days"),
+            ("Bank Holidays", f"{metrics['bank_holidays_passed']:.1f} passed; {metrics['upcoming_bank_holidays']:.1f} upcoming"),
+            ("Service Length", _hrp_work_duration(employee.get("start_date"), employee.get("leaving_date") or date.today())),
+        ]:
+            _hrp_pdf_label_value(pdf, family, safe, wrap, label, value)
+        _hrp_pdf_add_leave_history(pdf, family, safe, wrap, employee, include_settlement=True)
+        return _hrp_save_pdf(pdf, f"Employee_HR_File_{employee.get('emp_id', 'employee')}.pdf")
+    except Exception as exc:
+        st.error(f"Employee HR File PDF error: {type(exc).__name__}: {exc}")
+        return None
+
+
+def _hrp_save_pdf(pdf, filename):
+    """Persist a generated HR PDF and return its bytes for Streamlit download."""
+    os.makedirs(PDF_DIR, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(filename or "HR_Report.pdf"))
+    path = os.path.join(PDF_DIR, safe_name)
+    pdf.output(path)
+    _upload_to_drive_bg(path, os.path.basename(path))
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _hrp_filtered_pdf_employees():
+    """Render shared department/status filtering for the HR PDF report selector."""
+    employees = _hrp_normalize_employee_records(st.session_state.get("hrp_employees", []))
+    departments = sorted({str(e.get("department", "")).strip() or "Unassigned" for e in employees}, key=str.casefold)
+    department_options = ["All Departments"] + departments
+    selected_department = st.selectbox("🏢 Department", department_options, key="hr_pdf_department")
+    status_filter = st.selectbox(
+        "📌 Employee Status",
+        ["All Employees", "Active Only", "Inactive Only"],
+        key="hr_pdf_status",
+    )
+    filtered = employees
+    if selected_department != "All Departments":
+        filtered = [e for e in filtered if (str(e.get("department", "")).strip() or "Unassigned") == selected_department]
+    if status_filter == "Active Only":
+        filtered = [e for e in filtered if str(e.get("status", "")).strip().casefold() == "active"]
+    elif status_filter == "Inactive Only":
+        filtered = [e for e in filtered if str(e.get("status", "")).strip().casefold() != "active"]
+    filtered.sort(key=lambda e: (str(e.get("department", "")).casefold(), str(e.get("name", "")).casefold()))
+    return filtered, selected_department, status_filter
+
+
 def render_hr_download_reports():
     st.subheader("📥 HR Reports")
-    st.caption("Download professional Excel reports grouped by department.")
+    st.caption("Generate HR reports as PDF, with department and Active / Inactive employee filters. Existing Excel reports remain available below.")
 
+    if not PDF_AVAILABLE:
+        st.error("PDF generation is unavailable because the FPDF package is not installed on this deployment.")
+        return
+
+    st.markdown("### 📄 PDF Report Options")
+    report_type = st.selectbox(
+        "Select HR PDF Report",
+        [
+            "1. 👤 Employee Details — Individual Employee PDF",
+            "2. 📊 Employee Overview — Full Employee Master PDF",
+            "3. 📋 Leave History — Employee HR File PDF",
+            "4. 📚 Leavers — Complete Leaver History PDF",
+        ],
+        key="hr_pdf_report_type",
+    )
+
+    filtered, selected_department, status_filter = _hrp_filtered_pdf_employees()
+    if not filtered:
+        st.warning("No employees match the selected department and status filters.")
+    else:
+        st.caption(f"{len(filtered)} employee(s) match: {selected_department} · {status_filter}.")
+
+    if report_type.startswith("1."):
+        if filtered:
+            labels = [f"{e.get('name', '')} — {e.get('emp_id', '')} · {e.get('department', '')}" for e in filtered]
+            selected_label = st.selectbox("👤 Select Employee", labels, key="hr_pdf_detail_employee")
+            selected_employee = filtered[labels.index(selected_label)]
+            if st.button("📄 Generate Individual Employee PDF", key="hr_pdf_generate_detail", type="primary"):
+                with st.spinner("Generating Employee Details PDF..."):
+                    pdf_bytes = _hrp_employee_details_pdf(selected_employee)
+                if pdf_bytes:
+                    st.download_button("⬇️ Download Employee Details PDF", pdf_bytes, file_name=f"Employee_Details_{selected_employee.get('emp_id')}.pdf", mime="application/pdf", key="hr_pdf_download_detail", type="primary")
+
+    elif report_type.startswith("2."):
+        scope = st.radio("👥 Employee Selection", ["All matching employees", "Select employees"], horizontal=True, key="hr_pdf_master_scope")
+        report_employees = filtered
+        if scope == "Select employees" and filtered:
+            labels = [f"{e.get('name', '')} — {e.get('emp_id', '')} · {e.get('department', '')}" for e in filtered]
+            selected_labels = st.multiselect("Select employees for the PDF", labels, default=labels, key="hr_pdf_master_employees")
+            label_map = dict(zip(labels, filtered))
+            report_employees = [label_map[x] for x in selected_labels]
+        st.info("The default option is the Full Employee Master PDF: one detailed section for every employee matching the filters. Select All Departments + All Employees for the full company-wide master.")
+        if report_employees and st.button("📄 Generate Full Employee Master PDF", key="hr_pdf_generate_master", type="primary"):
+            with st.spinner("Generating Full Employee Master PDF..."):
+                pdf_bytes = _hrp_employee_master_pdf(report_employees, f"{selected_department} · {status_filter}")
+            if pdf_bytes:
+                st.download_button("⬇️ Download Full Employee Master PDF", pdf_bytes, file_name=f"Employee_Master_Full_{date.today().strftime('%Y-%m-%d')}.pdf", mime="application/pdf", key="hr_pdf_download_master", type="primary")
+
+    elif report_type.startswith("3."):
+        if filtered:
+            labels = [f"{e.get('name', '')} — {e.get('emp_id', '')} · {e.get('department', '')}" for e in filtered]
+            selected_label = st.selectbox("👤 Select Employee", labels, key="hr_pdf_file_employee")
+            selected_employee = filtered[labels.index(selected_label)]
+            if st.button("📄 Generate Employee HR File PDF", key="hr_pdf_generate_file", type="primary"):
+                with st.spinner("Generating complete Employee HR File PDF..."):
+                    pdf_bytes = _hrp_employee_hr_file_pdf(selected_employee)
+                if pdf_bytes:
+                    st.download_button("⬇️ Download Employee HR File PDF", pdf_bytes, file_name=f"Employee_HR_File_{selected_employee.get('emp_id')}.pdf", mime="application/pdf", key="hr_pdf_download_file", type="primary")
+
+    else:
+        leavers = [e for e in filtered if str(e.get("status", "")).strip().casefold() == "left"]
+        if not leavers:
+            st.info("No leavers match the current filters. For all leavers, choose All Departments and Inactive Only.")
+        else:
+            labels = [f"{e.get('name', '')} — {e.get('emp_id', '')} · {e.get('department', '')}" for e in leavers]
+            selected_label = st.selectbox("👤 Select Leaver", labels, key="hr_pdf_leaver_employee")
+            selected_employee = leavers[labels.index(selected_label)]
+            history = _hrp_leaver_history(selected_employee)
+            if st.button("📄 Generate Complete Leaver History PDF", key="hr_pdf_generate_leaver", type="primary"):
+                with st.spinner("Generating Complete Leaver History PDF..."):
+                    pdf_path = _hrp_leaver_history_pdf(selected_employee, history)
+                if pdf_path and os.path.exists(pdf_path):
+                    with open(pdf_path, "rb") as fh:
+                        st.download_button("⬇️ Download Complete Leaver History PDF", fh.read(), file_name=os.path.basename(pdf_path), mime="application/pdf", key="hr_pdf_download_leaver", type="primary")
+                else:
+                    st.error("Could not generate the Complete Leaver History PDF.")
+
+    st.divider()
+    st.subheader("📊 Existing Excel Reports")
+    st.caption("The existing Excel Employee Master and Holiday reports are retained.")
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("### 👥 Employee Master Report")
-        st.caption("All employees, grouped by department, with complete employee fields and company total.")
         if st.button("🔄 Prepare Employee Report", key="hr_prepare_employee_report", type="secondary"):
             try:
                 st.session_state.hrp_employee_report_bytes = _hrp_build_employee_report_xlsx()
@@ -3566,14 +3948,9 @@ def render_hr_download_reports():
                 key="hr_download_employee_report",
                 type="primary",
             )
-
     with c2:
         st.markdown("### 📅 Employee Holiday Report")
-        st.caption("Department-wise employees, holiday allowance, holiday used, balance and individual holiday records.")
-        report_year = st.number_input(
-            "Holiday Year", min_value=2020, max_value=2100, value=date.today().year,
-            step=1, key="hr_download_holiday_year"
-        )
+        report_year = st.number_input("Holiday Year", min_value=2020, max_value=2100, value=date.today().year, step=1, key="hr_download_holiday_year")
         if st.button("🔄 Prepare Holiday Report", key="hr_prepare_holiday_report", type="secondary"):
             try:
                 st.session_state.hrp_holiday_report_bytes = _hrp_build_holiday_report_xlsx(int(report_year))
@@ -4753,8 +5130,30 @@ def render_hr_portal(current_user_info=None):
                         file_name=f"{selected_history_employee_id}_leave_history.csv",
                         mime="text/csv", key=f"hrp_export_csv_{selected_history_employee_id}"
                     )
+                    selected_history_employee = _hrp_get_employee(selected_history_employee_id)
+                    if selected_history_employee:
+                        if st.button("📄 Generate Employee HR File PDF", key=f"hrp_employee_hr_file_pdf_{selected_history_employee_id}", type="primary"):
+                            with st.spinner("Generating complete Employee HR File PDF..."):
+                                pdf_bytes = _hrp_employee_hr_file_pdf(selected_history_employee)
+                            if pdf_bytes:
+                                st.download_button(
+                                    "⬇️ Download Employee HR File PDF", pdf_bytes,
+                                    file_name=f"Employee_HR_File_{selected_history_employee_id}.pdf",
+                                    mime="application/pdf", key=f"hrp_download_employee_hr_file_pdf_{selected_history_employee_id}", type="primary"
+                                )
                 else:
                     st.info(f"No leave history is currently recorded for {history_employee['name'] if history_employee else selected_history_employee_id}.")
+                    selected_history_employee = _hrp_get_employee(selected_history_employee_id)
+                    if selected_history_employee:
+                        if st.button("📄 Generate Employee HR File PDF", key=f"hrp_employee_hr_file_pdf_empty_{selected_history_employee_id}", type="primary"):
+                            with st.spinner("Generating complete Employee HR File PDF..."):
+                                pdf_bytes = _hrp_employee_hr_file_pdf(selected_history_employee)
+                            if pdf_bytes:
+                                st.download_button(
+                                    "⬇️ Download Employee HR File PDF", pdf_bytes,
+                                    file_name=f"Employee_HR_File_{selected_history_employee_id}.pdf",
+                                    mime="application/pdf", key=f"hrp_download_employee_hr_file_pdf_empty_{selected_history_employee_id}", type="primary"
+                                )
         elif emp:
             employee_leave = [r for r in _hrp_get_employee_leave(emp["emp_id"]) if r.get("status") == "Approved"]
             if employee_leave:
