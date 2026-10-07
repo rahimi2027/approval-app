@@ -8839,12 +8839,10 @@ def render_store_deduction_form(user_name, user_dept):
     emp_dept = str(selected_employee.get("department", "")).strip()
 
     # Use the employee ID in the widget key so Streamlit cannot retain the
-    # previous employee's department/date when the employee selection changes.
+    # previous employee's department when the employee selection changes.
+    # Store Deduction is only for employees who are currently Active in HR, so
+    # the Store Department must not manually choose a leaving date here.
     employee_key = re.sub(r"[^A-Za-z0-9_]+", "_", str(selected_employee.get("emp_id", emp_name)))
-    leaving_default = selected_employee.get("leaving_date") or date.today()
-    if not isinstance(leaving_default, date):
-        try: leaving_default = pd.to_datetime(leaving_default).date()
-        except Exception: leaving_default = date.today()
     col1, col2 = st.columns(2)
     with col1:
         st.text_input(
@@ -8855,7 +8853,6 @@ def render_store_deduction_form(user_name, user_dept):
         )
         date_submit = st.date_input("📅 Date of Submit", value=date.today(), key="store_date_submit")
     with col2:
-        date_leaving = st.date_input("📅 Date of Leaving", value=leaving_default, key="store_date_leaving")
         manager = st.text_input("👔 Line Manager", key="store_manager")
         st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("### 📦 Items to Deduct")
@@ -8911,7 +8908,7 @@ def render_store_deduction_form(user_name, user_dept):
                 _upload_to_drive_bg(fp, fn)
                 attachments.append(fn)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            rec = {"id": new_id, "emp_name": emp_name.strip(), "date_leaving": str(date_leaving), "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit), "type": "Deduction", "items": valid_items, "total_deduction": total_deduction, "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending", "director_comments": "", "rejection_reason": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "submitted_date": now, "pdf_path": ""}
+            rec = {"id": new_id, "emp_name": emp_name.strip(), "date_leaving": "", "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit), "type": "Deduction", "items": valid_items, "total_deduction": total_deduction, "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending", "director_comments": "", "rejection_reason": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "submitted_date": now, "pdf_path": ""}
             all_deductions.append(rec)
             save_all_store_deductions(all_deductions)
             log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
@@ -11125,8 +11122,12 @@ def render_director_hr_access_portal(current_user_info):
 # ============================================================
 # 📋 ROLE-BASED PORTALS
 # ============================================================
-def render_new_store_department_layout(full_name, dept_name):
-    """Render the Store department using the requested grouped navigation layout."""
+def render_new_store_department_layout(full_name, dept_name, can_manage_store_items=False):
+    """Render the Store department using the requested grouped navigation layout.
+
+    Store Department Managers can manage the Store Items & Prices master list;
+    other Store users can use the items but cannot change the master list.
+    """
     st.subheader("📦 Store Department")
     st.caption("Store requests, employee holdings, and leaver clearance.")
 
@@ -11150,14 +11151,20 @@ def render_new_store_department_layout(full_name, dept_name):
             render_store_my_submissions(full_name)
 
     with store_items_tab:
-        issue_tab, holdings_tab = st.tabs([
-            "🧰 Issue Items",
-            "📊 Employee Holdings",
-        ])
+        item_tabs = ["🧰 Issue Items", "📊 Employee Holdings"]
+        if can_manage_store_items:
+            item_tabs.append("⚙️ Store Items & Prices")
+        item_tab_objs = st.tabs(item_tabs)
+        issue_tab = item_tab_objs[0]
+        holdings_tab = item_tab_objs[1]
+        store_items_settings_tab = item_tab_objs[2] if can_manage_store_items else None
         with issue_tab:
             render_item_issue_form(full_name, dept_name)
         with holdings_tab:
             render_employee_holdings_overview("Store")
+        if can_manage_store_items and store_items_settings_tab is not None:
+            with store_items_settings_tab:
+                render_store_items_settings()
 
     with store_clearance_tab:
         checkin_tab, clearance_tab, history_tab = st.tabs([
@@ -11438,7 +11445,13 @@ elif role in ["Manager", "Staff", "Team Member"]:
     is_store_user = str(dept_name or "").strip().casefold() == "store"
 
     if is_store_user:
-        render_new_store_department_layout(full_name, dept_name)
+        # Only the Store Department Manager can add/edit/delete Store Items & Prices.
+        is_store_department_manager = str(role).strip().casefold() == "manager"
+        render_new_store_department_layout(
+            full_name,
+            dept_name,
+            can_manage_store_items=is_store_department_manager,
+        )
     else:
         labels = []
         if has_addition_deduction: labels.append("➕ Addition & Deduction")
