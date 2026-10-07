@@ -297,41 +297,67 @@ def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
         return None
 
 def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
+    """Upload/update one workbook using the exact filename requested in Google Drive.
+
+    For BACKUP_*.xlsx files, always resolve the current exact Drive file before
+    updating it. This prevents stale Drive-ID cache entries or path mismatches from
+    sending a workbook to the wrong Drive object.
+    """
     if drive_service is None or not os.path.exists(local_path):
         return None
+
     filename = filename or os.path.basename(local_path)
+    filename = str(filename).strip()
     cache_key = f"{parent_id}::{filename}"
+
     def _do(file_id=None):
         media = MediaFileUpload(local_path, resumable=False)
         if file_id:
-            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents,modifiedTime", supportsAllDrives=True).execute()
+            return drive_service.files().update(
+                fileId=file_id,
+                media_body=media,
+                fields="id,name,parents,modifiedTime,size",
+                supportsAllDrives=True,
+            ).execute()
         metadata = {"name": filename, "parents": [parent_id]}
-        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents,modifiedTime", supportsAllDrives=True).execute()
+        return drive_service.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id,name,parents,modifiedTime,size",
+            supportsAllDrives=True,
+        ).execute()
+
     try:
-        cached_id = _DRIVE_ID_CACHE.get(cache_key)
-        if cached_id:
-            try:
-                result = _do(cached_id)
-                _invalidate_drive_file_cache(filename, parent_id)
-                _DRIVE_ID_CACHE[cache_key] = result.get("id")
-                return result.get("id")
-            except Exception:
-                _DRIVE_ID_CACHE.pop(cache_key, None)
-        existing = _drive_find_file(filename, parent_id)
-        if existing:
-            _DRIVE_ID_CACHE[cache_key] = existing["id"]
-            result = _do(existing["id"])
+        # For the renamed Option A backups, deliberately bypass any old cached ID
+        # and perform an exact-name lookup first.
+        if filename in OPTION_A_DRIVE_BACKUP_NAMES:
             _invalidate_drive_file_cache(filename, parent_id)
-            _DRIVE_ID_CACHE[cache_key] = result.get("id")
-            return result.get("id")
-        created = _do(None)
+            existing = _drive_find_file(filename, parent_id)
+            if existing:
+                result = _do(existing["id"])
+            else:
+                result = _do(None)
+        else:
+            cached_id = _DRIVE_ID_CACHE.get(cache_key)
+            if cached_id:
+                try:
+                    result = _do(cached_id)
+                except Exception:
+                    _DRIVE_ID_CACHE.pop(cache_key, None)
+                    existing = _drive_find_file(filename, parent_id)
+                    result = _do(existing["id"]) if existing else _do(None)
+            else:
+                existing = _drive_find_file(filename, parent_id)
+                result = _do(existing["id"]) if existing else _do(None)
+
         _invalidate_drive_file_cache(filename, parent_id)
-        _DRIVE_ID_CACHE[cache_key] = created.get("id")
-        return created.get("id")
+        _DRIVE_ID_CACHE[cache_key] = result.get("id")
+        return result.get("id")
     except Exception as e:
         DRIVE_LAST_SYNC_ERROR[filename] = f"{type(e).__name__}: {e}"
         print(f"Drive upload failed for {filename}: {e}")
         return None
+
 
 def _drive_download_file(file_id, local_path):
     if drive_service is None:
@@ -537,7 +563,7 @@ def sync_persistent_file(local_path, columns=None):
 
     with _DRIVE_SYNC_LOCK:
         filename = os.path.basename(local_path)
-        backup_name = DRIVE_BACKUP_FILENAMES.get(local_path, "")
+        backup_name = _drive_backup_name_for_path(local_path)
         remote = _drive_find_file(filename)
 
         if remote:
@@ -580,6 +606,24 @@ DRIVE_BACKUP_FILENAMES = {
     ITEM_CHECKIN_PATH:   "BACKUP_item_checkins.xlsx",
     LEAVER_CLEARANCE_PATH: "BACKUP_employee_leaver_clearance.xlsx",
 }
+
+
+def _drive_backup_name_for_path(local_path):
+    """Return the exact Google Drive backup filename for a local workbook.
+
+    Matching is based on the normalized absolute local path so a relative/absolute
+    path difference can never prevent the correct BACKUP_*.xlsx name being used.
+    """
+    if not local_path:
+        return ""
+    target = os.path.normcase(os.path.abspath(os.path.normpath(str(local_path))))
+    for path, backup_name in DRIVE_BACKUP_FILENAMES.items():
+        if os.path.normcase(os.path.abspath(os.path.normpath(str(path)))) == target:
+            return backup_name
+    return ""
+
+
+OPTION_A_DRIVE_BACKUP_NAMES = tuple(DRIVE_BACKUP_FILENAMES.values())
 
 def _load_drive_sync_state():
     try:
@@ -665,7 +709,7 @@ def sync_backup_file_to_drive(local_path):
     """Immediate backup helper used only by the explicit/manual backup path."""
     if drive_service is None or not os.path.exists(local_path):
         return None
-    backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
+    backup_name = _drive_backup_name_for_path(local_path)
     if not backup_name:
         return None
     try:
@@ -717,10 +761,17 @@ def _sync_saved_file_to_drive_now(local_path):
             try:
                 backup_id = _drive_upload_path(local_path, backup_name)
                 if backup_id:
-                    backup_ok = True
-                    synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    DRIVE_LAST_SYNC[backup_name] = synced_at
-                    DRIVE_LAST_SYNC_ERROR.pop(backup_name, None)
+                    # Verify that the exact Option A Drive file can be found after the update.
+                    verified_remote = _drive_find_file(backup_name)
+                    if verified_remote and verified_remote.get("id") == backup_id:
+                        backup_ok = True
+                        synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        DRIVE_LAST_SYNC[backup_name] = synced_at
+                        DRIVE_LAST_SYNC_ERROR.pop(backup_name, None)
+                    else:
+                        DRIVE_LAST_SYNC_ERROR[backup_name] = (
+                            f"Uploaded file ID {backup_id} could not be re-found as {backup_name}."
+                        )
                 else:
                     DRIVE_LAST_SYNC_ERROR[backup_name] = DRIVE_LAST_SYNC_ERROR.get(
                         backup_name, "Backup Google Drive upload returned no file ID."
@@ -778,6 +829,7 @@ def sync_saved_file_to_drive(local_path):
 def ensure_all_drive_backups():
     """Queue all local workbooks; actual uploads are performed by the hourly worker."""
     for local_path in DRIVE_BACKUP_FILENAMES:
+        local_path = os.path.abspath(os.path.normpath(local_path))
         if os.path.exists(local_path):
             _mark_drive_file_dirty(local_path, make_recovery_snapshot=False)
 
@@ -851,6 +903,7 @@ def _force_sync_all_drive_files():
     """Explicit Super Admin/Director action: upload every existing workbook immediately."""
     results = []
     for local_path in DRIVE_BACKUP_FILENAMES:
+        local_path = os.path.abspath(os.path.normpath(local_path))
         if not os.path.exists(local_path):
             continue
         ok = _sync_saved_file_to_drive_now(local_path)
