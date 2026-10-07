@@ -470,16 +470,27 @@ def _bootstrap_bundled_user_db():
         return False
 
 def _drive_user_recovery_snapshot(local_path):
-    """Upload a timestamped recovery copy of the current user DB before replacing the live Drive copy."""
+    """Create and verify a timestamped Drive recovery copy before replacing the live user DB."""
     if drive_service is None or local_path != USER_DB_PATH or not _workbook_has_rows(local_path):
         return False
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     snapshot_name = f"{USER_DB_RECOVERY_PREFIX}{stamp}.xlsx"
     try:
         snapshot_id = _drive_upload_path(local_path, snapshot_name)
         if not snapshot_id:
             return False
-        # Keep a bounded number of recovery copies. The newest copies are retained.
+
+        # Verify the recovery copy itself.  This is important because the recovery
+        # copy is our safety net if the live user database update/verification fails.
+        if not _drive_verify_file_matches_local(local_path, snapshot_id):
+            DRIVE_LAST_SYNC_ERROR["Users"] = (
+                "The Google Drive recovery copy was uploaded but could not be verified."
+            )
+            print("User DB Drive recovery snapshot verification failed.")
+            return False
+
+        # Keep a bounded number of recovery copies. The newest verified copies are retained.
         safe_prefix = USER_DB_RECOVERY_PREFIX.replace("'", "\\'")
         q = f"name contains '{safe_prefix}' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false"
         result = drive_service.files().list(
@@ -497,6 +508,7 @@ def _drive_user_recovery_snapshot(local_path):
         return True
     except Exception as e:
         print(f"User DB Drive recovery snapshot failed: {type(e).__name__}: {e}")
+        DRIVE_LAST_SYNC_ERROR["Users"] = f"Recovery snapshot failed: {type(e).__name__}: {e}"
         return False
 
 def _recover_user_db_from_drive():
@@ -523,7 +535,19 @@ def _recover_user_db_from_drive():
         print(f"User DB recovery list failed: {e}")
 
     seen = set()
-    candidates = [c for c in candidates if c.get("id") and not (c.get("id") in seen or seen.add(c.get("id")))]
+    candidates = [c for c in candidates if c.get("id") and not (c.get("id") in seen or seen.add(c.get("id") ) )]
+
+    # The timestamped recovery copy can contain a newer, valid user database than an
+    # older live/rolling-backup file.  Always consider the newest Drive copy first.
+    # This prevents a failed live upload from causing a later startup to restore an
+    # older user-permission set over a newer verified recovery copy.
+    def _drive_modified_key(item):
+        try:
+            return pd.to_datetime(item.get("modifiedTime"), errors="coerce")
+        except Exception:
+            return pd.Timestamp.min
+
+    candidates.sort(key=_drive_modified_key, reverse=True)
     for remote in candidates:
         if not _drive_remote_workbook_has_rows(remote["id"]):
             continue
@@ -719,8 +743,8 @@ def sync_backup_file_to_drive(local_path):
         return None
 
 
-def _sync_saved_file_to_drive_now(local_path):
-    """Upload one file and verify the Drive copy. User DB is treated as business-critical."""
+def _sync_saved_file_to_drive_now_once(local_path):
+    """Perform one upload/verification attempt for a persistent workbook."""
     local_path = os.path.abspath(local_path)
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
@@ -805,6 +829,41 @@ def _sync_saved_file_to_drive_now(local_path):
         _save_drive_sync_state()
         return False
 
+
+def _sync_saved_file_to_drive_now(local_path):
+    """Upload and verify a workbook, retrying critical user-database syncs automatically.
+
+    User permissions are business-critical.  A transient Google Drive failure should not
+    leave the application permanently waiting for the hourly worker when the user is
+    actively saving permissions, so the user DB gets several immediate attempts.
+    """
+    local_path = os.path.abspath(local_path)
+    attempts = 3 if local_path == os.path.abspath(USER_DB_PATH) else 1
+    last_error = ""
+
+    for attempt in range(1, attempts + 1):
+        try:
+            if _sync_saved_file_to_drive_now_once(local_path):
+                return True
+            last_error = (
+                DRIVE_LAST_SYNC_ERROR.get(os.path.basename(local_path))
+                or DRIVE_LAST_SYNC_ERROR.get("Users")
+                or "Google Drive upload/verification did not succeed."
+            )
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            DRIVE_LAST_SYNC_ERROR[os.path.basename(local_path)] = last_error
+            _save_drive_sync_state()
+
+        if attempt < attempts:
+            # Small delay allows a transient Drive/network/API condition to clear.
+            time.sleep(1.5 * attempt)
+
+    if local_path == os.path.abspath(USER_DB_PATH):
+        DRIVE_PENDING_SYNC.add(local_path)
+        DRIVE_LAST_SYNC_ERROR[os.path.basename(local_path)] = last_error
+        _save_drive_sync_state()
+    return False
 
 
 _DRIVE_STORAGE_PROCESS_READY = False
@@ -1599,6 +1658,14 @@ def init_user_db():
     return True
 
 def save_users(users_dict):
+    """Save user permissions locally and make the Drive copy durable before reporting success.
+
+    The local workbook is written first.  Before replacing the live Drive copy, a verified
+    timestamped recovery copy is created.  The live Drive upload is then retried several
+    times with a fresh exact-name lookup/verification.  If Drive is temporarily unavailable,
+    the local change and recovery snapshot remain intact and the file stays queued for the
+    normal background sync rather than being treated as lost.
+    """
     rows = []
     for username, u in users_dict.items():
         rows.append({
@@ -1626,22 +1693,50 @@ def save_users(users_dict):
             "can_access_employee_items": u.get("can_access_employee_items", False),
             "is_active": u.get("is_active", True)
         })
+
+    # Write the complete new user database locally first.  Never roll this back merely
+    # because Drive is temporarily unavailable.
     pd.DataFrame(rows, columns=USER_DB_COLUMNS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
     _invalidate_data_cache("_users_cache")
-    # User changes are business-critical: create a timestamped recovery copy first,
-    # then update the live and rolling-backup Drive files. A later bad startup cannot
-    # erase yesterday's working account set.
-    if drive_service is not None:
-        snapshot_ok = _drive_user_recovery_snapshot(USER_DB_PATH)
-        if not snapshot_ok:
-            DRIVE_LAST_SYNC_ERROR["Users"] = "Recovery snapshot could not be created on Google Drive."
-    sync_ok = _sync_saved_file_to_drive_now(USER_DB_PATH) if drive_service is not None else False
+
+    # Always keep a local recovery snapshot as an additional safety net.
+    _create_local_recovery_snapshot(USER_DB_PATH)
+
+    if drive_service is None:
+        DRIVE_LAST_SYNC_ERROR["Users"] = "Google Drive is not connected; the updated user database is saved locally and queued for Drive sync."
+        _mark_drive_file_dirty(USER_DB_PATH, make_recovery_snapshot=False)
+        st.warning(
+            "⚠️ User permissions were saved locally. Google Drive is currently unavailable, "
+            "so the change has been queued for Drive synchronization. The local copy was not discarded."
+        )
+        return True
+
+    # Protect the previous/current account set on Drive before touching the live file.
+    snapshot_ok = _drive_user_recovery_snapshot(USER_DB_PATH)
+    if not snapshot_ok:
+        # Do not stop the local save. Keep it pending so a later Drive retry can complete it.
+        _mark_drive_file_dirty(USER_DB_PATH, make_recovery_snapshot=False)
+        st.warning(
+            "⚠️ User permissions were saved locally, but Google Drive could not create a verified "
+            "recovery copy yet. The change is queued and will be retried; do not delete the local "
+            "user database while Drive is unavailable."
+        )
+        return True
+
+    # The live upload/verification has its own retry logic.  If it still fails, the verified
+    # recovery copy remains on Drive and the new local workbook remains queued for retry.
+    sync_ok = _sync_saved_file_to_drive_now(USER_DB_PATH)
     if not sync_ok:
-        if drive_service is None:
-            DRIVE_LAST_SYNC_ERROR["Users"] = "Google Drive is not connected; the user database was saved locally only."
-        st.error("⚠️ User database was saved locally, but Google Drive verification did not succeed. Do NOT assume the new user is permanently saved until Drive shows a successful sync.")
-        return False
-    st.success("✅ User database saved and verified on Google Drive.")
+        _mark_drive_file_dirty(USER_DB_PATH, make_recovery_snapshot=False)
+        last_error = DRIVE_LAST_SYNC_ERROR.get(os.path.basename(USER_DB_PATH)) or DRIVE_LAST_SYNC_ERROR.get("Users") or "Unknown Google Drive verification error."
+        st.warning(
+            "⚠️ User permissions were saved locally and a verified Drive recovery copy was created, "
+            "but the live Drive user database could not be verified yet. The new data is queued for "
+            f"automatic retry.\n\nDrive detail: {last_error}"
+        )
+        return True
+
+    st.success("✅ User permissions saved locally and successfully synchronized and verified on Google Drive.")
     return True
 
 def _flag_or_default(raw_value, role, key):
