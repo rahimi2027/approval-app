@@ -9512,7 +9512,6 @@ def render_item_issue_form(user_name, user_dept):
 
     active = [e for e in employees
               if str(e.get("status", "Active")).strip().casefold() == "active"]
-
     if not active:
         st.info("There are no Active employees in the HR list.")
         return
@@ -9549,7 +9548,6 @@ def render_item_issue_form(user_name, user_dept):
 
     filtered = sorted(filtered, key=lambda e: (str(e.get("name", "")).casefold(),
                                                 str(e.get("emp_id", "")).casefold()))
-
     labels = [f"{e['name']} — {e['emp_id']}  ·  {e.get('department','')}  ·  {e.get('job_title','')}"
               for e in filtered]
     by_label = {lbl: e for lbl, e in zip(labels, filtered)}
@@ -9573,7 +9571,11 @@ def render_item_issue_form(user_name, user_dept):
     st.markdown("### ➕ Add Items to Issue")
 
     store_items_master = load_store_items()
-    item_options = [it["name"] for it in store_items_master if it.get("active")]
+    item_options = [
+        str(it.get("name", "")).strip()
+        for it in store_items_master
+        if it.get("active") and str(it.get("name", "")).strip()
+    ]
 
     if "item_issue_rows" not in st.session_state:
         st.session_state.item_issue_rows = [
@@ -9584,32 +9586,64 @@ def render_item_issue_form(user_name, user_dept):
         c1, c2, c3, c4, c5 = st.columns([3, 1.1, 1.4, 2.2, 0.4])
         opts = [""] + item_options
         with c1:
+            current_item = str(row.get("item_name", "")).strip()
+            current_index = opts.index(current_item) if current_item in opts else 0
             sel_item = st.selectbox(
                 "Item", opts,
-                index=opts.index(row.get("item_name", "")) if row.get("item_name") in opts else 0,
+                index=current_index,
                 key=f"issue_item_sel_{issue_form_version}_{i}",
             )
-            if sel_item != row.get("item_name", ""):
+            if sel_item != current_item:
                 row["item_name"] = sel_item
-                match = next((it for it in store_items_master if it["name"] == sel_item), None)
-                if match:
-                    row["unit_price"] = match["price"]
+                price_key = f"issue_item_price_{issue_form_version}_{i}"
+
+                if not sel_item:
+                    row["unit_price"] = 0.0
+                    st.session_state[price_key] = 0.0
+                else:
+                    match = next(
+                        (it for it in store_items_master
+                         if str(it.get("name", "")).strip() == sel_item),
+                        None,
+                    )
+                    if match:
+                        saved_price = float(match.get("price", 0.0) or 0.0)
+                        row["unit_price"] = saved_price
+                        st.session_state[price_key] = saved_price
+                    else:
+                        row["unit_price"] = 0.0
+                        st.session_state[price_key] = 0.0
                 st.rerun()
+
         with c2:
-            row["quantity"] = st.number_input("Qty", min_value=1, step=1,
-                                              value=int(row.get("quantity", 1)),
-                                              key=f"issue_item_qty_{issue_form_version}_{i}")
+            row["quantity"] = st.number_input(
+                "Qty", min_value=1, step=1,
+                value=int(row.get("quantity", 1)),
+                key=f"issue_item_qty_{issue_form_version}_{i}"
+            )
+
         with c3:
-            row["unit_price"] = st.number_input("Unit £", min_value=0.0, step=1.0,
-                                                format="%.2f", value=float(row.get("unit_price", 0.0)),
-                                                key=f"issue_item_price_{issue_form_version}_{i}")
+            row["unit_price"] = st.number_input(
+                "Unit £", min_value=0.0, step=0.01,
+                format="%.2f",
+                value=float(row.get("unit_price", 0.0)),
+                key=f"issue_item_price_{issue_form_version}_{i}"
+            )
+
         with c4:
-            row["notes"] = st.text_input("Notes", value=row.get("notes", ""),
-                                          key=f"issue_item_notes_{issue_form_version}_{i}")
+            row["notes"] = st.text_input(
+                "Notes", value=row.get("notes", ""),
+                key=f"issue_item_notes_{issue_form_version}_{i}"
+            )
+
         with c5:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️", key=f"issue_item_del_{issue_form_version}_{i}"):
                 st.session_state.item_issue_rows.pop(i)
+                if not st.session_state.item_issue_rows:
+                    st.session_state.item_issue_rows = [
+                        {"item_name": "", "quantity": 1, "unit_price": 0.0, "notes": ""}
+                    ]
                 st.rerun()
 
     if st.button("➕ Add Another Item", key=f"issue_add_row_{issue_form_version}"):
@@ -9618,49 +9652,81 @@ def render_item_issue_form(user_name, user_dept):
         )
         st.rerun()
 
-    total_value = sum(r.get("quantity", 1) * r.get("unit_price", 0.0)
-                      for r in st.session_state.item_issue_rows if r.get("item_name"))
-    st.markdown(f"**Total Value:** £{total_value:.2f}")
+    total_value = sum(
+        float(r.get("quantity", 0) or 0) * float(r.get("unit_price", 0) or 0)
+        for r in st.session_state.item_issue_rows
+        if r.get("item_name")
+    )
+    st.markdown(f"**Total Value: £{total_value:,.2f}**")
     st.divider()
 
     with st.form(f"issue_items_form_{issue_form_version}"):
         issue_date = st.date_input("📅 Issue Date", value=date.today())
-        general_notes = st.text_area("📝 General Notes",
-                                     placeholder="Optional notes about this issue…")
-        submitted = st.form_submit_button("✅ Record Issue", type="primary", width="stretch")
+        general_notes = st.text_area(
+            "📝 General Notes",
+            placeholder="Optional notes about this issue…"
+        )
+        submitted = st.form_submit_button(
+            "✅ Record Issue", type="primary", width="stretch"
+        )
 
     if submitted:
-        valid_rows = [r for r in st.session_state.item_issue_rows
-                      if r.get("item_name") and r.get("quantity", 0) > 0]
+        valid_rows = [
+            r for r in st.session_state.item_issue_rows
+            if str(r.get("item_name", "")).strip()
+            and float(r.get("quantity", 0) or 0) > 0
+        ]
         if not valid_rows:
             st.error("Please add at least one item.")
             return
 
         all_items = load_employee_items()
         next_id = get_next_employee_item_id(all_items)
+
         for r in valid_rows:
-            existing = next((x for x in all_items
-                             if str(x.get("employee_id", "")).strip() == selected_emp["emp_id"]
-                             and x.get("item_name") == r["item_name"]
-                             and float(x.get("qty_outstanding", 0) or 0) > 0), None)
+            employee_id = str(selected_emp.get("emp_id", "")).strip()
+            item_name = str(r.get("item_name", "")).strip()
+            quantity = float(r.get("quantity", 0) or 0)
+            unit_price = float(r.get("unit_price", 0) or 0)
+
+            existing = next(
+                (x for x in all_items
+                 if str(x.get("employee_id", "")).strip() == employee_id
+                 and str(x.get("item_name", "")).strip() == item_name
+                 and float(x.get("qty_outstanding", 0) or 0) > 0),
+                None,
+            )
+
             if existing:
-                existing["qty_issued"] += r["quantity"]
-                existing["qty_outstanding"] += r["quantity"]
-                existing["total_value"] = existing["qty_issued"] * existing["unit_price"]
+                existing["qty_issued"] = (
+                    float(existing.get("qty_issued", 0) or 0) + quantity
+                )
+                existing["qty_outstanding"] = (
+                    float(existing.get("qty_outstanding", 0) or 0) + quantity
+                )
+                existing["unit_price"] = unit_price
+                existing["total_value"] = (
+                    existing["qty_issued"] * existing["unit_price"]
+                )
                 if r.get("notes"):
-                    existing["notes"] = (str(existing.get("notes", "")) + " | " + r["notes"]).strip(" |")
+                    old_notes = str(existing.get("notes", "")).strip()
+                    new_notes = str(r.get("notes", "")).strip()
+                    existing["notes"] = (
+                        f"{old_notes} | {new_notes}".strip(" |")
+                        if old_notes else new_notes
+                    )
             else:
                 all_items.append({
                     "id": next_id,
-                    "employee_id": selected_emp["emp_id"],
+                    "employee_id": employee_id,
                     "emp_name": selected_emp["name"],
                     "emp_dept": selected_emp.get("department", ""),
-                    "item_name": r["item_name"],
-                    "qty_issued": float(r["quantity"]),
+                    "item_name": item_name,
+                    "qty_issued": quantity,
                     "qty_returned": 0.0,
-                    "qty_outstanding": float(r["quantity"]),
-                    "unit_price": float(r["unit_price"]),
-                    "total_value": float(r["quantity"]) * float(r["unit_price"]),
+                    "qty_outstanding": quantity,
+                    "unit_price": unit_price,
+                    "total_value": quantity * unit_price,
                     "issue_date": str(issue_date),
                     "issued_by": user_name,
                     "status": "Issued",
@@ -9669,18 +9735,31 @@ def render_item_issue_form(user_name, user_dept):
                 next_id += 1
 
         save_all_employee_items(all_items)
-        log_action("EMPLOYEE_ITEMS_ISSUED", selected_emp["emp_id"],
-                   new_data={"employee": selected_emp["name"],
-                             "items": valid_rows,
-                             "total": total_value})
+
+        log_action(
+            "EMPLOYEE_ITEMS_ISSUED",
+            selected_emp["emp_id"],
+            new_data={
+                "employee": selected_emp["name"],
+                "items": valid_rows,
+                "total": total_value,
+                "issue_date": str(issue_date),
+                "general_notes": general_notes,
+            },
+        )
+
         st.session_state.item_issue_rows = [
             {"item_name": "", "quantity": 1, "unit_price": 0.0, "notes": ""}
         ]
-        st.session_state.item_issue_form_version = int(st.session_state.get("item_issue_form_version", 0)) + 1
-        st.success(f"✅ {len(valid_rows)} item(s) recorded as issued to "
-                   f"{selected_emp['name']} ({selected_emp['emp_id']}).")
-        st.rerun()
+        st.session_state.item_issue_form_version = (
+            int(st.session_state.get("item_issue_form_version", 0)) + 1
+        )
 
+        st.success(
+            f"✅ {len(valid_rows)} item(s) recorded as issued to "
+            f"{selected_emp['name']} ({selected_emp['emp_id']})."
+        )
+        st.rerun()
 
 def render_employee_holdings_overview(user_role=""):
     st.subheader("📊 Employee Item Holdings")
