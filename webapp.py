@@ -11131,9 +11131,9 @@ def render_new_store_department_layout(full_name, dept_name):
     st.caption("Store requests, employee holdings, and leaver clearance.")
 
     store_requests_tab, store_items_tab, store_clearance_tab = st.tabs([
-        "1. 📦 Store Requests",
-        "2. 🧰 Issue Items & Employee Holdings",
-        "3. 🔗 Leaver Item Check-in & Clearance",
+        "📦 Store Requests",
+        "🧰 Issue Items & Employee Holdings",
+        "🔗 Leaver Item Check-in & Clearance",
     ])
 
     with store_requests_tab:
