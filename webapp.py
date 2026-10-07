@@ -11651,6 +11651,375 @@ def render_director_hr_access_portal(current_user_info):
 
 
 # ============================================================
+# 📦 STORE DEPARTMENT — REPORTS & PDF CENTRE
+# ============================================================
+def _store_report_employee_lookup():
+    employees = _hrp_normalize_employee_records(_hrp_load_employees())
+    return sorted(employees, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
+
+
+def _store_report_employee_label(e):
+    return f"{e.get('name', '')} — {e.get('emp_id', '')} · {e.get('department', '')}"
+
+
+def _store_report_money(value):
+    try:
+        return f"£{float(value or 0):,.2f}"
+    except Exception:
+        return "£0.00"
+
+
+def _store_report_float(value):
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+
+def _store_pdf_table(pdf, family, safe, headers, rows, widths=None, font_size=7.5):
+    if not rows:
+        pdf.set_font(family, "", 8)
+        pdf.multi_cell(pdf.epw, 5, safe("No records found for the selected scope."), new_x="LMARGIN", new_y="NEXT")
+        return
+    widths = widths or [pdf.epw / max(1, len(headers))] * len(headers)
+    total = sum(widths)
+    if total > pdf.epw:
+        scale = pdf.epw / total
+        widths = [w * scale for w in widths]
+    pdf.set_font(family, "B", font_size)
+    for i, h in enumerate(headers):
+        pdf.cell(widths[i], 7, safe(h), border=1, align="L")
+    pdf.ln(7)
+    pdf.set_font(family, "", font_size)
+    for row in rows:
+        values = [safe(v if v not in (None, "") else "-") for v in row]
+        # Estimate row height from wrapped content while keeping the table compact.
+        wrapped = []
+        max_lines = 1
+        for i, value in enumerate(values):
+            chars = max(8, int(widths[i] / 1.8))
+            lines = textwrap.wrap(value, width=chars, break_long_words=True, break_on_hyphens=False) or [""]
+            wrapped.append(lines)
+            max_lines = max(max_lines, len(lines))
+        row_h = max(5, min(5 * max_lines, 25))
+        if pdf.get_y() + row_h > pdf.page_break_trigger:
+            pdf.add_page()
+            pdf.set_font(family, "B", font_size)
+            for i, h in enumerate(headers):
+                pdf.cell(widths[i], 7, safe(h), border=1)
+            pdf.ln(7)
+            pdf.set_font(family, "", font_size)
+        y = pdf.get_y()
+        x = pdf.get_x()
+        for i, lines in enumerate(wrapped):
+            pdf.rect(x, y, widths[i], row_h)
+            pdf.set_xy(x + 1, y + 1)
+            pdf.multi_cell(widths[i] - 2, 4.2, "\n".join(lines[:6]), border=0, new_x="RIGHT", new_y="TOP")
+            x += widths[i]
+            pdf.set_xy(x, y)
+        pdf.set_y(y + row_h)
+
+
+def _store_pdf_employee_header(pdf, family, safe, employee):
+    _hrp_pdf_section(pdf, family, safe, "Employee Details")
+    details = [
+        ("Employee ID", employee.get("emp_id", "")),
+        ("Full Name", employee.get("name", "")),
+        ("Status", employee.get("status", "Active")),
+        ("Department", employee.get("department", "")),
+        ("Sub-department / Working As", employee.get("sub_department", employee.get("working_as", ""))),
+        ("Job Title", employee.get("job_title", "")),
+        ("Start Date", employee.get("start_date", "")),
+        ("Leaving Date", employee.get("leaving_date", "")),
+        ("Leaving Reason", employee.get("leaving_reason", "")),
+    ]
+    for label, value in details:
+        _hrp_pdf_label_value(pdf, family, safe, lambda x, width=92: safe(x), label, value)
+
+
+def _store_employee_records(employee, records):
+    """Match Store records to an HR employee by ID where available, otherwise by name."""
+    if isinstance(employee, dict):
+        target_id = str(employee.get("emp_id", "")).strip().casefold()
+        target_name = str(employee.get("name", "")).strip().casefold()
+    else:
+        target_id = str(employee or "").strip().casefold()
+        target_name = target_id
+    matched = []
+    for r in records:
+        rid = str(r.get("employee_id", "")).strip().casefold()
+        rname = str(r.get("emp_name", r.get("employee", ""))).strip().casefold()
+        if (target_id and rid and rid == target_id) or (target_name and rname == target_name):
+            matched.append(r)
+    return matched
+
+
+def _store_pdf_requests(pdf, family, safe, records, title="Store Requests"):
+    _hrp_pdf_section(pdf, family, safe, title)
+    rows = []
+    for r in sorted(records, key=lambda x: str(x.get("date_submit", x.get("date", ""))), reverse=True):
+        items = "; ".join(
+            f"{i.get('item_name','')} x{i.get('quantity',1)} ({_store_report_money(i.get('price',0))})"
+            for i in (r.get("items") or [])
+        )
+        rows.append([
+            r.get("id", ""), r.get("emp_name", ""), r.get("emp_dept", ""),
+            r.get("type", "Deduction"), r.get("date_submit", r.get("date", "")),
+            r.get("status", ""), _store_report_money(r.get("total_deduction", 0)),
+            items or r.get("desc", ""), r.get("manager", ""), r.get("decision_by", ""),
+        ])
+    _store_pdf_table(
+        pdf, family, safe,
+        ["ID", "Employee", "Department", "Type", "Submitted", "Status", "Value", "Items / Description", "Manager", "Decision By"],
+        rows, [9, 27, 24, 18, 19, 18, 18, 48, 25, 25], 6.4,
+    )
+
+
+def _store_pdf_holdings(pdf, family, safe, records, title="Employee Holdings"):
+    _hrp_pdf_section(pdf, family, safe, title)
+    rows = []
+    for r in sorted(records, key=lambda x: (str(x.get("emp_name", "")).casefold(), str(x.get("item_name", "")).casefold())):
+        rows.append([
+            r.get("employee_id", ""), r.get("emp_name", ""), r.get("emp_dept", ""),
+            r.get("item_name", ""), f"{_store_report_float(r.get('qty_issued')):g}",
+            f"{_store_report_float(r.get('qty_returned')):g}", f"{_store_report_float(r.get('qty_outstanding')):g}",
+            _store_report_money(r.get("unit_price", 0)), _store_report_money(r.get("total_value", 0)),
+            r.get("issue_date", ""), r.get("issued_by", ""), r.get("status", ""), r.get("notes", ""),
+        ])
+    _store_pdf_table(
+        pdf, family, safe,
+        ["Emp ID", "Employee", "Department", "Item", "Issued", "Returned", "Outstanding", "Unit", "Total", "Issue Date", "Issued By", "Status", "Notes"],
+        rows, [19, 28, 23, 30, 14, 15, 18, 18, 18, 20, 24, 20, 34], 5.8,
+    )
+
+
+def _store_pdf_checkins(pdf, family, safe, records, title="Leaver Item Check-in"):
+    _hrp_pdf_section(pdf, family, safe, title)
+    rows = []
+    for r in sorted(records, key=lambda x: str(x.get("checkin_date", "")), reverse=True):
+        returned = "; ".join(
+            f"{i.get('item_name','')} x{i.get('quantity',i.get('qty',1))}" for i in (r.get("returned_items") or [])
+        ) or "None"
+        not_returned = "; ".join(
+            f"{i.get('item_name','')} x{i.get('quantity',i.get('qty',1))} ({_store_report_money(i.get('value', i.get('price',0)))})"
+            for i in (r.get("not_returned_items") or [])
+        ) or "None"
+        rows.append([
+            r.get("id", ""), r.get("employee_id", ""), r.get("emp_name", ""), r.get("emp_dept", ""),
+            r.get("leaving_date", ""), r.get("checkin_date", ""), r.get("status", ""),
+            returned, not_returned, _store_report_money(r.get("total_deduction", 0)),
+            r.get("checked_in_by", ""), r.get("deduction_request_id", ""), r.get("return_request_id", ""), r.get("notes", ""),
+        ])
+    _store_pdf_table(
+        pdf, family, safe,
+        ["ID", "Emp ID", "Employee", "Department", "Leaving", "Check-in", "Status", "Returned Items", "Not Returned", "Deduction", "Checked By", "Deduction #", "Return #", "Notes"],
+        rows, [12, 19, 26, 23, 19, 19, 18, 43, 43, 20, 24, 22, 20, 30], 5.7,
+    )
+
+
+def _store_pdf_clearance(pdf, family, safe, records, title="Leaver Clearance"):
+    _hrp_pdf_section(pdf, family, safe, title)
+    rows = []
+    for r in sorted(records, key=lambda x: str(x.get("leaving_date", "")), reverse=True):
+        rows.append([
+            r.get("clearance_id", ""), r.get("employee_id", ""), r.get("emp_name", ""), r.get("emp_dept", ""),
+            r.get("leaving_date", ""), r.get("leaving_reason", ""), r.get("hr_status", ""),
+            r.get("store_status", ""), _store_report_money(r.get("outstanding_item_value", 0)),
+            r.get("store_checkin_id", ""), r.get("store_deduction_id", ""), r.get("store_return_id", ""),
+            r.get("payroll_status", ""), r.get("final_status", ""), r.get("final_cleared_at", ""), r.get("notes", ""),
+        ])
+    _store_pdf_table(
+        pdf, family, safe,
+        ["Clearance", "Emp ID", "Employee", "Department", "Leaving", "Reason", "HR", "Store", "Outstanding", "Check-in #", "Deduction #", "Return #", "Payroll", "Final", "Cleared At", "Notes"],
+        rows, [22, 19, 28, 23, 19, 30, 17, 20, 20, 22, 22, 20, 20, 20, 27, 30], 5.5,
+    )
+
+
+def _store_department_report_pdf(requests, holdings, checkins, clearances, items, title="Store Department Complete Report"):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup(title, "Complete Store Department report covering every Store tab and its underlying records")
+    _hrp_pdf_section(pdf, family, safe, "Executive Summary")
+    approved = sum(1 for r in requests if str(r.get("status", "")).casefold() == "approved")
+    pending = sum(1 for r in requests if str(r.get("status", "")).casefold() == "pending")
+    rejected = sum(1 for r in requests if str(r.get("status", "")).casefold() == "rejected")
+    outstanding_value = sum(_store_report_float(r.get("total_value", 0)) for r in holdings if _store_report_float(r.get("qty_outstanding", 0)) > 0)
+    deduction_value = sum(_store_report_float(r.get("total_deduction", 0)) for r in requests if str(r.get("type", "")).casefold() == "deduction" and str(r.get("status", "")).casefold() == "approved")
+    line(f"Store requests: {len(requests)} | Approved: {approved} | Pending: {pending} | Rejected: {rejected}")
+    line(f"Employee holding records: {len(holdings)} | Outstanding holding value: {_store_report_money(outstanding_value)}")
+    line(f"Leaver check-ins: {len(checkins)} | Leaver clearance records: {len(clearances)}")
+    line(f"Store item master records: {len(items)} | Approved Store deductions: {_store_report_money(deduction_value)}")
+    _hrp_pdf_section(pdf, family, safe, "Store Items & Prices")
+    item_rows = [[i.get("name", ""), _store_report_money(i.get("price", 0)), "Active" if i.get("active") else "Inactive"] for i in items]
+    _store_pdf_table(pdf, family, safe, ["Item", "Price", "Status"], item_rows, [90, 35, 35], 8)
+    _store_pdf_requests(pdf, family, safe, requests)
+    _store_pdf_holdings(pdf, family, safe, holdings)
+    _store_pdf_checkins(pdf, family, safe, checkins)
+    _store_pdf_clearance(pdf, family, safe, clearances)
+    return pdf
+
+
+def _store_employee_file_pdf(employee, requests, holdings, checkins, clearances):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup(
+        f"Store Employee File — {employee.get('name', '')}",
+        "Complete Store Department record for the selected employee",
+    )
+    _store_pdf_employee_header(pdf, family, safe, employee)
+    _hrp_pdf_section(pdf, family, safe, "Store Summary")
+    outstanding = sum(_store_report_float(r.get("total_value", 0)) for r in holdings if _store_report_float(r.get("qty_outstanding", 0)) > 0)
+    line(f"Store request records: {len(requests)}")
+    line(f"Employee item records: {len(holdings)}")
+    line(f"Outstanding company property value: {_store_report_money(outstanding)}")
+    line(f"Leaver check-in records: {len(checkins)}")
+    line(f"Leaver clearance records: {len(clearances)}")
+    _store_pdf_requests(pdf, family, safe, requests, "Employee Store Requests")
+    _store_pdf_holdings(pdf, family, safe, holdings, "Employee Item History & Holdings")
+    _store_pdf_checkins(pdf, family, safe, checkins, "Employee Leaver Item Check-in History")
+    _store_pdf_clearance(pdf, family, safe, clearances, "Employee Leaver Clearance History")
+    return pdf
+
+
+def _store_requests_report_pdf(records):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Requests Report", "All Store Department deduction and return transactions in the selected scope")
+    _store_pdf_requests(pdf, family, safe, records)
+    return pdf
+
+
+def _store_holdings_report_pdf(records):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Employee Items & Holdings Report", "Issued, returned and outstanding company property")
+    _store_pdf_holdings(pdf, family, safe, records)
+    return pdf
+
+
+def _store_checkin_clearance_report_pdf(checkins, clearances):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Leaver Check-in & Clearance Report", "Leaver property return, deductions and clearance status")
+    _store_pdf_checkins(pdf, family, safe, checkins)
+    _store_pdf_clearance(pdf, family, safe, clearances)
+    return pdf
+
+
+def _store_items_prices_report_pdf(items):
+    pdf, family, safe, wrap, line = _hrp_pdf_setup("Store Items & Prices Report", "Current Store item master list")
+    _hrp_pdf_section(pdf, family, safe, "Store Item Master")
+    rows = [[i.get("name", ""), _store_report_money(i.get("price", 0)), "Active" if i.get("active") else "Inactive"] for i in items]
+    _store_pdf_table(pdf, family, safe, ["Item Name", "Price", "Status"], rows, [90, 35, 35], 8)
+    return pdf
+
+
+def render_store_reports_tab(full_name, dept_name):
+    """Dedicated Store Reports tab with selectable company/employee PDF reports."""
+    st.subheader("📊 Store Department Reports")
+    st.caption("Generate detailed PDFs from the live Store Department records. Choose the report and whether it is for the whole Store department or one employee.")
+
+    requests = load_store_deductions(force=True)
+    holdings = load_employee_items(force=True)
+    checkins = load_item_checkins(force=True)
+    clearances = load_leaver_clearances(force=True)
+    items = load_store_items(force=True)
+    employees = _store_report_employee_lookup()
+
+    # Store reports are intentionally limited to Store employees/transactions where a department is recorded.
+    store_dept = str(dept_name or "Store").strip()
+    def is_store_record(r):
+        return str(r.get("emp_dept", r.get("department", ""))).strip().casefold() == store_dept.casefold()
+
+    report_options = [
+        "📦 Complete Store Department Report — All Store Tabs",
+        "🧾 Store Requests — Deductions & Returns",
+        "🧰 Employee Items & Holdings",
+        "🔗 Leaver Check-in & Clearance",
+        "👤 Employee Store File — Complete Employee Report",
+        "⚙️ Store Items & Prices",
+    ]
+    report_type = st.selectbox("📄 Report to Generate", report_options, key="store_report_type")
+
+    scope_options = ["🏢 Store Department / Company Report", "👤 Selected Employee Report"]
+    if report_type in {"⚙️ Store Items & Prices", "👤 Employee Store File — Complete Employee Report"}:
+        scope = "👤 Selected Employee Report" if report_type.startswith("👤") else "🏢 Store Department / Company Report"
+        if report_type.startswith("⚙️"):
+            st.info("This report is a Store item-master report and does not require an employee selection.")
+        else:
+            st.info("Employee Store File is always generated for one selected employee so the PDF contains a complete individual record.")
+    else:
+        scope = st.radio("📌 Report Scope", scope_options, horizontal=True, key="store_report_scope")
+
+    selected_employee = None
+    if scope == "👤 Selected Employee Report":
+        status_filter = st.selectbox("📌 Employee Status", ["All Store Employees", "Active Store Employees", "Inactive Store Employees"], key="store_report_status")
+        store_employees = [e for e in employees if str(e.get("department", "")).strip().casefold() == store_dept.casefold()]
+        if status_filter == "Active Store Employees":
+            store_employees = [e for e in store_employees if str(e.get("status", "Active")).strip().casefold() == "active"]
+        elif status_filter == "Inactive Store Employees":
+            store_employees = [e for e in store_employees if str(e.get("status", "")).strip().casefold() != "active"]
+        if not store_employees:
+            st.warning("No HR employees are currently registered under the Store department.")
+            return
+        labels = [_store_report_employee_label(e) for e in store_employees]
+        selected_label = st.selectbox("👤 Employee", labels, key="store_report_employee")
+        selected_employee = {label: emp for label, emp in zip(labels, store_employees)}.get(selected_label)
+
+    st.divider()
+    with st.expander("🔎 Report contents", expanded=True):
+        if report_type.startswith("📦 Complete"):
+            st.markdown("**Includes:** Store requests, deduction/return history, employee item holdings, item master/prices, leaver item check-ins, leaver clearance status, approval/decision details, outstanding values and notes.")
+        elif report_type.startswith("🧾"):
+            st.markdown("**Includes:** request ID, employee, department, transaction type, submitted date, items, quantities, values, manager, description, attachments reference, status, Director decision and comments.")
+        elif report_type.startswith("🧰"):
+            st.markdown("**Includes:** employee, department, item, issued/returned/outstanding quantities, unit price, total value, issue date, issued by, status and notes.")
+        elif report_type.startswith("🔗"):
+            st.markdown("**Includes:** leaver check-in details, returned/not-returned items, deductions, check-in status, Store clearance status, linked request IDs, payroll/final clearance status and notes.")
+        elif report_type.startswith("👤"):
+            st.markdown("**Includes:** employee details plus all Store requests, complete item history/holdings, leaver check-ins and leaver clearance history for that employee.")
+        else:
+            st.markdown("**Includes:** every Store item, current price and active/inactive status.")
+
+    if scope == "👤 Selected Employee Report" and selected_employee:
+        requests_scope = _store_employee_records(selected_employee, requests)
+        holdings_scope = _store_employee_records(selected_employee, holdings)
+        checkins_scope = _store_employee_records(selected_employee, checkins)
+        clearances_scope = _store_employee_records(selected_employee, clearances)
+    else:
+        requests_scope = [r for r in requests if is_store_record(r)]
+        holdings_scope = [r for r in holdings if is_store_record(r)]
+        checkins_scope = [r for r in checkins if is_store_record(r)]
+        clearances_scope = [r for r in clearances if is_store_record(r)]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Requests", len(requests_scope))
+    c2.metric("Item Records", len(holdings_scope))
+    c3.metric("Check-ins", len(checkins_scope))
+    c4.metric("Clearances", len(clearances_scope))
+
+    if st.button("📄 Generate & Save PDF Report", type="primary", width="stretch", key="store_generate_report_pdf"):
+        try:
+            if report_type.startswith("📦 Complete"):
+                pdf = _store_department_report_pdf(requests_scope, holdings_scope, checkins_scope, clearances_scope, items, "Store Department Complete Report")
+                filename = "Store_Department_Complete_Report.pdf" if scope.startswith("🏢") else f"Store_Employee_Complete_{selected_employee.get('emp_id','employee')}.pdf"
+            elif report_type.startswith("🧾"):
+                pdf = _store_requests_report_pdf(requests_scope)
+                filename = "Store_Requests_Report.pdf" if scope.startswith("🏢") else f"Store_Requests_{selected_employee.get('emp_id','employee')}.pdf"
+            elif report_type.startswith("🧰"):
+                pdf = _store_holdings_report_pdf(holdings_scope)
+                filename = "Store_Employee_Holdings_Report.pdf" if scope.startswith("🏢") else f"Employee_Holdings_{selected_employee.get('emp_id','employee')}.pdf"
+            elif report_type.startswith("🔗"):
+                pdf = _store_checkin_clearance_report_pdf(checkins_scope, clearances_scope)
+                filename = "Store_Leaver_Checkin_Clearance_Report.pdf" if scope.startswith("🏢") else f"Leaver_Checkin_Clearance_{selected_employee.get('emp_id','employee')}.pdf"
+            elif report_type.startswith("👤"):
+                if not selected_employee:
+                    st.error("Please select an employee for the Employee Store File report.")
+                    return
+                pdf = _store_employee_file_pdf(selected_employee, requests_scope, holdings_scope, checkins_scope, clearances_scope)
+                filename = f"Store_Employee_File_{selected_employee.get('emp_id','employee')}.pdf"
+            else:
+                pdf = _store_items_prices_report_pdf(items)
+                filename = "Store_Items_and_Prices_Report.pdf"
+            data = _hrp_save_pdf(pdf, filename)
+            if data:
+                st.success(f"✅ PDF generated and saved: {filename}")
+                st.download_button("⬇️ Download Generated PDF", data=data, file_name=filename, mime="application/pdf", key=f"store_report_download_{re.sub(r'[^A-Za-z0-9]+','_',filename)}")
+        except Exception as exc:
+            st.error(f"Store PDF report error: {type(exc).__name__}: {exc}")
+
+
+# ============================================================
 # 📋 ROLE-BASED PORTALS
 # ============================================================
 def render_new_store_department_layout(full_name, dept_name, can_manage_store_items=False):
@@ -11662,10 +12031,11 @@ def render_new_store_department_layout(full_name, dept_name, can_manage_store_it
     st.subheader("📦 Store Department")
     st.caption("Store requests, employee holdings, and leaver clearance.")
 
-    store_requests_tab, store_items_tab, store_clearance_tab = st.tabs([
+    store_requests_tab, store_items_tab, store_clearance_tab, store_reports_tab = st.tabs([
         "📦 Store Requests",
         "🧰 Issue Items & Employee Holdings",
         "🔗 Leaver Item Check-in & Clearance",
+        "📊 Reports",
     ])
 
     with store_requests_tab:
@@ -11709,6 +12079,9 @@ def render_new_store_department_layout(full_name, dept_name, can_manage_store_it
             render_leaver_clearance_store(full_name)
         with history_tab:
             render_item_checkin_history()
+
+    with store_reports_tab:
+        render_store_reports_tab(full_name, dept_name)
 
 
 if role == "Employee":
