@@ -68,6 +68,14 @@ APPROVED_STAMP_PATH = os.path.join(BASE_DIR, "approved_stamp.png")
 REJECTED_STAMP_PATH = os.path.join(BASE_DIR, "rejected_stamp.png")
 EXCEL_PATH = os.path.join(APP_FOLDER, "requests.xlsx")
 USER_DB_PATH = os.path.join(APP_FOLDER, "user_database.xlsx")
+TRAINING_CHAT_PATH = os.path.join(APP_FOLDER, "training_support_chat.xlsx")
+TRAINING_CHAT_COLUMNS = [
+    "Message_ID", "Conversation_ID", "Timestamp", "Sender_Username", "Sender_Name",
+    "Sender_Role", "Sender_Department", "Recipient_Username", "Recipient_Name",
+    "Message", "Read_By_Recipient"
+]
+TRAINING_SUPPORT_USERNAME = "wais"
+TRAINING_SUPPORT_CONTACT = "Wais Rahimi"
 # Optional bundled user database used to bootstrap a fresh/empty APP_FOLDER.
 # Once copied into APP_FOLDER, the persistent APP_FOLDER copy is authoritative.
 BUNDLED_USER_DB_PATH = os.path.join(BASE_DIR, "user_database.xlsx")
@@ -12408,6 +12416,252 @@ def _training_role_key(role_name, department_name=""):
     return raw
 
 
+
+def _is_training_support_admin(user_info=None):
+    """Only the designated trainer account (Wais) and Super Admin can manage the support inbox."""
+    user = user_info or st.session_state.get("user_info", {}) or {}
+    username = str(user.get("username", "")).strip().casefold()
+    full_name = str(user.get("full_name", "")).strip().casefold()
+    role = str(user.get("role", "")).strip().casefold()
+    return username == TRAINING_SUPPORT_USERNAME.casefold() or full_name == TRAINING_SUPPORT_CONTACT.casefold() or role == "super admin"
+
+
+def _training_chat_init():
+    """Create the support chat workbook, recovering the shared Drive copy when available."""
+    if os.path.exists(TRAINING_CHAT_PATH):
+        return True
+    if drive_service is not None:
+        try:
+            remote = _drive_find_file(os.path.basename(TRAINING_CHAT_PATH))
+            if remote and _drive_download_file(remote["id"], TRAINING_CHAT_PATH):
+                return True
+        except Exception as exc:
+            print(f"Training chat Drive recovery failed: {exc}")
+    return safe_init_excel(TRAINING_CHAT_PATH, TRAINING_CHAT_COLUMNS)
+
+
+def load_training_chat_messages(force=False):
+    """Load support messages. force=True bypasses the session cache for live chat refresh."""
+    _training_chat_init()
+    if not force and "_training_chat_cache" in st.session_state:
+        return list(st.session_state["_training_chat_cache"])
+    try:
+        df = _read_excel_records(TRAINING_CHAT_PATH)
+        records = df.to_dict(orient="records")
+        return _set_data_cache("_training_chat_cache", records).copy()
+    except Exception as exc:
+        print(f"Training chat load failed: {exc}")
+        return []
+
+
+def _training_chat_next_id(messages):
+    ids = []
+    for row in messages:
+        try:
+            ids.append(int(str(row.get("Message_ID", "")).strip()))
+        except Exception:
+            pass
+    return max(ids, default=0) + 1
+
+
+def save_training_chat_messages(messages):
+    """Persist chat locally and synchronise the shared workbook to Google Drive."""
+    rows = []
+    for row in messages:
+        rows.append({col: row.get(col, "") for col in TRAINING_CHAT_COLUMNS})
+    pd.DataFrame(rows, columns=TRAINING_CHAT_COLUMNS).to_excel(TRAINING_CHAT_PATH, index=False, engine="openpyxl")
+    _set_data_cache("_training_chat_cache", rows)
+    _create_local_recovery_snapshot(TRAINING_CHAT_PATH)
+    if drive_service is None:
+        _mark_drive_file_dirty(TRAINING_CHAT_PATH, make_recovery_snapshot=False)
+        return True
+    if _sync_saved_file_to_drive_now(TRAINING_CHAT_PATH):
+        return True
+    _mark_drive_file_dirty(TRAINING_CHAT_PATH, make_recovery_snapshot=False)
+    return True
+
+
+def _training_chat_append_message(sender_user, sender_name, sender_role, sender_dept,
+                                  recipient_user, recipient_name, message, conversation_id=None):
+    text = str(message or "").strip()
+    if not text:
+        return False
+    messages = load_training_chat_messages(force=True)
+    conversation_id = conversation_id or str(sender_user).strip()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    messages.append({
+        "Message_ID": _training_chat_next_id(messages),
+        "Conversation_ID": conversation_id,
+        "Timestamp": now,
+        "Sender_Username": str(sender_user).strip(),
+        "Sender_Name": str(sender_name).strip(),
+        "Sender_Role": str(sender_role).strip(),
+        "Sender_Department": str(sender_dept).strip(),
+        "Recipient_Username": str(recipient_user).strip(),
+        "Recipient_Name": str(recipient_name).strip(),
+        "Message": text,
+        "Read_By_Recipient": False,
+    })
+    return save_training_chat_messages(messages)
+
+
+def _training_chat_mark_read(conversation_id, recipient_username):
+    messages = load_training_chat_messages(force=True)
+    changed = False
+    recipient_username = str(recipient_username).strip()
+    for row in messages:
+        if (str(row.get("Conversation_ID", "")) == str(conversation_id)
+                and str(row.get("Recipient_Username", "")).strip() == recipient_username
+                and str(row.get("Read_By_Recipient", "")).strip().lower() != "true"):
+            row["Read_By_Recipient"] = True
+            changed = True
+    if changed:
+        save_training_chat_messages(messages)
+    return changed
+
+
+def _training_chat_unread_count(recipient_username):
+    recipient_username = str(recipient_username).strip()
+    count = 0
+    for row in load_training_chat_messages(force=True):
+        if (str(row.get("Recipient_Username", "")).strip() == recipient_username
+                and str(row.get("Read_By_Recipient", "")).strip().lower() != "true"):
+            count += 1
+    return count
+
+
+def _training_chat_messages_for(conversation_id):
+    rows = [r for r in load_training_chat_messages(force=True)
+            if str(r.get("Conversation_ID", "")) == str(conversation_id)]
+    return sorted(rows, key=lambda r: str(r.get("Timestamp", "")))
+
+
+def _render_training_chat_messages_live(conversation_id, viewer_username):
+    """Render messages and refresh every 5 seconds when Streamlit fragments are supported."""
+    messages = _training_chat_messages_for(conversation_id)
+    if not messages:
+        st.info("💬 No messages yet. Send a message below and Wais will receive it here.")
+        return
+    for row in messages:
+        mine = str(row.get("Sender_Username", "")).strip() == str(viewer_username).strip()
+        with st.chat_message("user" if mine else "assistant"):
+            st.markdown(f"**{row.get('Sender_Name', 'User')}** · {row.get('Timestamp', '')}")
+            st.write(str(row.get("Message", "")))
+
+
+if hasattr(st, "fragment"):
+    _render_training_chat_messages_live = st.fragment(run_every="5s")(_render_training_chat_messages_live)
+
+
+def render_training_support_chat(current_user_info=None):
+    """Employee-facing private support conversation with Wais Rahimi."""
+    user = current_user_info or st.session_state.get("user_info", {}) or {}
+    username = str(user.get("username", "")).strip()
+    if not username:
+        return
+    st.markdown("### 💬 Chat with Wais Rahimi")
+    st.caption("Private support conversation. Only you and the Training Support account can see these messages.")
+    st.info("🟢 Send your question here. Wais can reply from the Training Support inbox. The chat refreshes automatically when supported by the app.")
+
+    _render_training_chat_messages_live(username, username)
+
+    with st.form(f"training_support_message_form_{username}", clear_on_submit=True):
+        message = st.text_area("✍️ Your message", placeholder="Tell Wais what you need help with...", height=100)
+        send = st.form_submit_button("📤 Send Message", type="primary", width="stretch")
+    if send:
+        if not message.strip():
+            st.warning("Please enter a message before sending.")
+            return
+        ok = _training_chat_append_message(
+            sender_user=username,
+            sender_name=user.get("full_name", username),
+            sender_role=user.get("role", ""),
+            sender_dept=user.get("dept", ""),
+            recipient_user=TRAINING_SUPPORT_USERNAME,
+            recipient_name=TRAINING_SUPPORT_CONTACT,
+            message=message,
+            conversation_id=username,
+        )
+        if ok:
+            st.success("✅ Message sent to Wais Rahimi.")
+            st.rerun()
+        st.error("❌ The message could not be saved. Please try again.")
+
+
+def render_training_support_inbox(current_user_info=None):
+    """Trainer-facing support inbox. Restricted to Wais/Super Admin."""
+    user = current_user_info or st.session_state.get("user_info", {}) or {}
+    if not _is_training_support_admin(user):
+        return
+    username = str(user.get("username", "")).strip()
+    messages = load_training_chat_messages(force=True)
+    conversations = {}
+    for row in messages:
+        cid = str(row.get("Conversation_ID", "")).strip()
+        if not cid:
+            continue
+        conversations.setdefault(cid, []).append(row)
+    for cid in conversations:
+        conversations[cid].sort(key=lambda r: str(r.get("Timestamp", "")))
+
+    unread = _training_chat_unread_count(username)
+    st.markdown("### 📨 Training Support Inbox")
+    st.caption("Private conversations started from the Training & Help Centre.")
+    c1, c2 = st.columns(2)
+    c1.metric("💬 Conversations", len(conversations))
+    c2.metric("🔴 Unread Messages", unread)
+    if not conversations:
+        st.success("✅ No support conversations yet.")
+        return
+
+    options = []
+    for cid, rows in conversations.items():
+        first = rows[0]
+        employee_name = str(first.get("Sender_Name", cid)).strip()
+        employee_dept = str(first.get("Sender_Department", "")).strip()
+        unread_count = sum(
+            1 for r in rows
+            if str(r.get("Recipient_Username", "")).strip() == username
+            and str(r.get("Read_By_Recipient", "")).strip().lower() != "true"
+        )
+        last = rows[-1]
+        suffix = f" · 🔴 {unread_count} unread" if unread_count else ""
+        options.append((cid, f"{employee_name} · {employee_dept or 'No department'}{suffix}", str(last.get("Timestamp", ""))))
+    options.sort(key=lambda x: x[2], reverse=True)
+    selected = st.selectbox("👤 Select conversation", options, format_func=lambda x: x[1], key="training_support_selected_conversation")
+    selected_cid = selected[0]
+    selected_rows = conversations[selected_cid]
+    _training_chat_mark_read(selected_cid, username)
+
+    first = selected_rows[0]
+    st.markdown(f"**👤 {first.get('Sender_Name', selected_cid)}** · {first.get('Sender_Department', '')} · {first.get('Sender_Role', '')}")
+    _render_training_chat_messages_live(selected_cid, username)
+
+    with st.form(f"training_support_reply_form_{selected_cid}", clear_on_submit=True):
+        reply = st.text_area("✍️ Reply", placeholder="Type your reply to the employee...", height=100)
+        send_reply = st.form_submit_button("📤 Send Reply", type="primary", width="stretch")
+    if send_reply:
+        if not reply.strip():
+            st.warning("Please enter a reply before sending.")
+            return
+        employee_username = str(first.get("Sender_Username", selected_cid)).strip()
+        employee_name = str(first.get("Sender_Name", employee_username)).strip()
+        ok = _training_chat_append_message(
+            sender_user=username or TRAINING_SUPPORT_USERNAME,
+            sender_name=user.get("full_name", TRAINING_SUPPORT_CONTACT),
+            sender_role=user.get("role", ""),
+            sender_dept=user.get("dept", ""),
+            recipient_user=employee_username,
+            recipient_name=employee_name,
+            message=reply,
+            conversation_id=selected_cid,
+        )
+        if ok:
+            st.success("✅ Reply sent.")
+            st.rerun()
+        st.error("❌ The reply could not be saved. Please try again.")
+
+
 def render_training_help(current_user_info=None):
     """Render only the training assigned to the currently authenticated role."""
     user = current_user_info or st.session_state.get("user_info", {}) or {}
@@ -12421,6 +12675,11 @@ def render_training_help(current_user_info=None):
     if not content:
         st.warning("No role-specific training has been configured for this account yet.")
         st.write(f"Please contact **{TRAINING_SUPPORT_CONTACT}** for your training guide.")
+        st.divider()
+        if _is_training_support_admin(user):
+            render_training_support_inbox(user)
+        else:
+            render_training_support_chat(user)
         return
     st.markdown(f"### {content['emoji']} {content['title']}")
     st.write(content["intro"])
@@ -12430,6 +12689,11 @@ def render_training_help(current_user_info=None):
         topics = [(title, steps) for title, steps in topics if search in title.casefold() or any(search in str(step).casefold() for step in steps)]
         if not topics:
             st.warning(f"No training topic matched **{search}**. Contact {TRAINING_SUPPORT_CONTACT} if you need help finding the right process.")
+            st.divider()
+            if not _is_training_support_admin(user):
+                render_training_support_chat(user)
+            else:
+                render_training_support_inbox(user)
             return
     for topic_index, (topic_title, steps) in enumerate(topics):
         with st.expander(topic_title, expanded=(len(topics) == 1 or topic_index == 0)):
@@ -12438,6 +12702,11 @@ def render_training_help(current_user_info=None):
     st.divider()
     st.markdown("### 🧑‍🏫 Still need help?")
     st.success(f"If the guide does not answer your question, please contact **{TRAINING_SUPPORT_CONTACT}** for a walkthrough or further training.")
+    st.divider()
+    if _is_training_support_admin(user):
+        render_training_support_inbox(user)
+    else:
+        render_training_support_chat(user)
 
 
 # ============================================================
