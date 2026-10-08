@@ -7596,9 +7596,9 @@ def _clearance_store_ready(rec):
 
 def _maybe_finalize_clearance(rec, records):
     _sync_clearance_payroll_status(rec)
-    if _clearance_all_ready(rec) and str(rec.get("final_status", "")).casefold() != "cleared":
-        rec["final_status"] = "Cleared"
-        rec["final_cleared_by"] = "System"
+    if _clearance_all_ready(rec) and str(rec.get("final_status", "")).casefold() not in {"cleared", "cleared all"}:
+        rec["final_status"] = "Cleared All"
+        rec["final_cleared_by"] = "System (Automatic)"
         rec["final_cleared_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_all_leaver_clearances(records)
         log_action("LEAVER_FINAL_CLEARANCE_COMPLETED", rec.get("clearance_id"), new_data=rec)
@@ -7671,19 +7671,91 @@ def _create_payroll_clearance_request(rec, user_name, trans_type, amount, reason
     return request
 
 
+def _get_store_clearance_amounts(rec):
+    """Return linked Store Addition/Deduction totals for a leaver clearance."""
+    additions = 0.0
+    deductions = 0.0
+    try:
+        store_records = load_store_deductions(force=True)
+        linked_ids = set()
+        for field in ("store_deduction_id", "store_return_id"):
+            linked_ids.update(x.strip() for x in str(rec.get(field, "")).split(",") if x.strip())
+        for r in store_records:
+            if str(r.get("id", "")).strip() not in linked_ids:
+                continue
+            amount = float(r.get("total_deduction", 0) or 0)
+            if str(r.get("type", "Deduction")).strip().casefold() == "addition":
+                additions += amount
+            else:
+                deductions += amount
+    except Exception:
+        pass
+    return additions, deductions
+
+
 def _build_final_leaver_clearance_pdf(rec):
     if not PDF_AVAILABLE: return b""
     try:
         pdf = FPDF()
-        pdf.add_page(); pdf.set_font("Arial", "B", 16); pdf.cell(0, 10, "EMPLOYEE LEAVER CLEARANCE FORM", ln=1, align="C")
-        pdf.set_font("Arial", "", 10); pdf.cell(0, 7, f"Clearance ID: {rec.get('clearance_id')}   Employee: {rec.get('emp_name')} ({rec.get('employee_id')})", ln=1)
-        pdf.cell(0, 7, f"Department: {rec.get('emp_dept')}   Leaving Date: {rec.get('leaving_date')}", ln=1); pdf.ln(3)
-        for title, lines in [("HR CLEARANCE", [f"Status: {rec.get('hr_status')}", f"Holiday balance: {float(rec.get('holiday_balance',0) or 0):.1f} days", f"Settlement: {rec.get('holiday_settlement_id') or 'Not required'} / {rec.get('holiday_settlement_status')}", f"Settlement amount: £{float(rec.get('holiday_settlement_amount',0) or 0):,.2f}"]), ("STORE CLEARANCE", [f"Status: {rec.get('store_status')}", f"Check-in: {rec.get('store_checkin_id') or 'None'}", f"Outstanding property value: £{float(rec.get('outstanding_item_value',0) or 0):,.2f}", f"Store deduction: {rec.get('store_deduction_id') or 'None'}"]), ("PAYROLL CLEARANCE", [f"Status: {rec.get('payroll_status')}", f"Payroll requests: {rec.get('payroll_request_ids') or 'None'}", f"Approved additions: £{float(rec.get('payroll_total_addition',0) or 0):,.2f}", f"Approved deductions: £{float(rec.get('payroll_total_deduction',0) or 0):,.2f}"]), ("FINAL CLEARANCE", [f"Status: {rec.get('final_status')}", f"Cleared by: {rec.get('final_cleared_by') or '—'}", f"Cleared at: {rec.get('final_cleared_at') or '—'}"])] :
-            pdf.set_font("Arial", "B", 12); pdf.cell(0, 8, title, ln=1); pdf.set_font("Arial", "", 10)
+        pdf.set_auto_page_break(auto=True, margin=12)
+        pdf.add_page()
+        if os.path.exists(LOGO_PATH):
+            try:
+                pdf.image(LOGO_PATH, x=75, y=8, w=60)
+                pdf.ln(27)
+            except Exception:
+                pdf.ln(4)
+        else:
+            pdf.ln(4)
+
+        store_addition, store_deduction = _get_store_clearance_amounts(rec)
+        final_status = str(rec.get("final_status", "Open"))
+        final_cleared_by = str(rec.get("final_cleared_by") or "—")
+
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, "EMPLOYEE LEAVER CLEARANCE FORM", ln=1, align="C")
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 7, f"Clearance ID: {rec.get('clearance_id')}   Employee: {rec.get('emp_name')} ({rec.get('employee_id')})", ln=1)
+        pdf.cell(0, 7, f"Department: {rec.get('emp_dept')}   Leaving Date: {rec.get('leaving_date')}", ln=1)
+        pdf.ln(3)
+
+        sections = [
+            ("HR CLEARANCE", [
+                f"Status: {rec.get('hr_status')}",
+                f"Holiday balance: {float(rec.get('holiday_balance',0) or 0):.1f} days",
+                f"Settlement: {rec.get('holiday_settlement_id') or 'Not required'} / {rec.get('holiday_settlement_status')}",
+                f"Settlement amount: £{float(rec.get('holiday_settlement_amount',0) or 0):,.2f}",
+            ]),
+            ("STORE CLEARANCE", [
+                f"Status: {rec.get('store_status')}",
+                f"Check-in: {rec.get('store_checkin_id') or 'None'}",
+                f"Outstanding property value: £{float(rec.get('outstanding_item_value',0) or 0):,.2f}",
+                f"Store Addition: £{store_addition:,.2f}",
+                f"Store Deduction: £{store_deduction:,.2f}",
+                f"Store deduction request: {rec.get('store_deduction_id') or 'None'}",
+                f"Store return request: {rec.get('store_return_id') or 'None'}",
+            ]),
+            ("PAYROLL CLEARANCE", [
+                f"Status: {rec.get('payroll_status')}",
+                f"Payroll requests: {rec.get('payroll_request_ids') or 'None'}",
+                f"Approved additions: £{float(rec.get('payroll_total_addition',0) or 0):,.2f}",
+                f"Approved deductions: £{float(rec.get('payroll_total_deduction',0) or 0):,.2f}",
+            ]),
+            ("FINAL CLEARANCE", [
+                f"Status: {final_status}",
+                f"Cleared by: {final_cleared_by}",
+                f"Cleared at: {rec.get('final_cleared_at') or '—'}",
+            ]),
+        ]
+        for title, lines in sections:
+            pdf.set_font("Arial", "B", 12)
+            pdf.cell(0, 8, title, ln=1)
+            pdf.set_font("Arial", "", 10)
             for line in lines: pdf.cell(0, 6, line, ln=1)
             pdf.ln(2)
         return bytes(pdf.output(dest="S"))
-    except Exception: return b""
+    except Exception:
+        return b""
 
 
 def _save_leaver_clearance_pdf(rec):
@@ -7719,7 +7791,7 @@ def render_leaver_clearance_hr():
 
     # Search the permanent register at any time, including fully-cleared leavers.
     q = st.text_input("🔎 Search clearance", placeholder="Name, Employee ID or Clearance ID (e.g. LC-000125)", key="leaver_clearance_search")
-    status_filter = st.selectbox("Status", ["All", "Open", "Fully Cleared"], key="leaver_clearance_status_filter")
+    status_filter = st.selectbox("Status", ["All", "Open", "Cleared All"], key="leaver_clearance_status_filter")
     qn = str(q or "").strip().casefold()
     filtered = []
     for r in records:
@@ -7729,7 +7801,7 @@ def render_leaver_clearance_hr():
             continue
         if status_filter == "Open" and is_cleared:
             continue
-        if status_filter == "Fully Cleared" and not is_cleared:
+        if status_filter == "Cleared All" and not is_cleared:
             continue
         filtered.append(r)
 
@@ -7737,7 +7809,7 @@ def render_leaver_clearance_hr():
     m1.metric("Open",sum(str(r.get("final_status","Open")).casefold()!="cleared" for r in records))
     m2.metric("HR",sum(_clearance_hr_ready(r) for r in records))
     m3.metric("Store",sum(_clearance_store_ready(r) for r in records))
-    m4.metric("Fully Cleared",sum(str(r.get("final_status","")).casefold()=="cleared" for r in records))
+    m4.metric("Cleared All",sum(str(r.get("final_status","")).casefold() in {"cleared", "cleared all"} for r in records))
     st.caption(f"Showing {len(filtered)} of {len(records)} permanent clearance record(s).")
 
     for rec in reversed(filtered):
@@ -7827,7 +7899,7 @@ def render_leaver_clearance_payroll(user_name):
     for rec in reversed(records):
         _sync_clearance_payroll_status(rec)
 
-        if str(rec.get("final_status", "")).casefold() == "cleared":
+        if str(rec.get("final_status", "")).casefold() in {"cleared", "cleared all"}:
             continue
 
         clearance_key = str(rec.get("clearance_id", ""))
@@ -7921,7 +7993,7 @@ def render_leaver_clearance_payroll(user_name):
                     save_all_leaver_clearances(records)
                     _maybe_finalize_clearance(rec, records)
 
-                    if str(rec.get("final_status", "")).casefold() == "cleared":
+                    if str(rec.get("final_status", "")).casefold() in {"cleared", "cleared all"}:
                         _save_leaver_clearance_pdf(rec)
 
                     log_action(
@@ -7989,7 +8061,7 @@ def render_leaver_clearance_payroll(user_name):
             if not _clearance_store_ready(rec):
                 st.info(
                     "📦 Payroll can be cleared independently. Store completion is only "
-                    "required before the overall Final Clearance can become Fully Cleared."
+                    "required before the overall Final Clearance can become Cleared All."
                 )
 
             if (
@@ -8150,7 +8222,7 @@ def render_leaver_clearance_final():
         st.info("No leaver clearance records exist yet.")
         return
     q=st.text_input("🔎 Search permanent clearance register", placeholder="Name, Employee ID or Clearance ID", key="final_leaver_clearance_search")
-    status_filter=st.selectbox("Status", ["All", "Open", "Fully Cleared"], key="final_leaver_clearance_status")
+    status_filter=st.selectbox("Status", ["All", "Open", "Cleared All"], key="final_leaver_clearance_status")
     qn=str(q or "").strip().casefold()
     filtered=[]
     for rec in records:
@@ -8158,13 +8230,13 @@ def render_leaver_clearance_final():
         cleared=str(rec.get("final_status","")).casefold()=="cleared"
         if qn and qn not in hay: continue
         if status_filter=="Open" and cleared: continue
-        if status_filter=="Fully Cleared" and not cleared: continue
+        if status_filter=="Cleared All" and not cleared: continue
         filtered.append(rec)
     st.caption(f"Showing {len(filtered)} of {len(records)} clearance record(s).")
     for rec in reversed(filtered):
         _sync_clearance_payroll_status(rec)
         if _clearance_all_ready(rec) and str(rec.get("final_status","")).casefold()!="cleared":
-            rec["final_status"]="Cleared"; rec["final_cleared_by"]="System"; rec["final_cleared_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            rec["final_status"]="Cleared All"; rec["final_cleared_by"]="System (Automatic)"; rec["final_cleared_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_all_leaver_clearances(records); log_action("LEAVER_FINAL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
         if str(rec.get("final_status","")).casefold()=="cleared":
             _save_leaver_clearance_pdf(rec)
@@ -9932,6 +10004,14 @@ def _build_item_holdings_pdf(records, title="Employee Item Holdings"):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
+    if os.path.exists(LOGO_PATH):
+        try:
+            pdf.image(LOGO_PATH, x=75, y=8, w=60)
+            pdf.ln(27)
+        except Exception:
+            pdf.ln(4)
+    else:
+        pdf.ln(4)
     pdf.set_font("Arial", "B", 15)
     _pdf_multiline(pdf, title, 9)
     pdf.set_font("Arial", "", 9)
@@ -10332,8 +10412,11 @@ def render_item_checkin_form(user_name):
     outstanding_ids = {str(r.get("employee_id", "")).strip()
                        for r in all_items
                        if float(r.get("qty_outstanding", 0) or 0) > 0}
+    # HR is the source of truth for leaver eligibility and leaving date.
     candidates = [e for e in employees
-                  if str(e.get("emp_id", "")).strip() in outstanding_ids]
+                  if str(e.get("emp_id", "")).strip() in outstanding_ids
+                  and str(e.get("status", "")).strip().casefold() == "left"
+                  and e.get("leaving_date")]
 
     if not candidates:
         st.info("No employees currently hold any outstanding items.")
@@ -10453,10 +10536,16 @@ def render_item_checkin_form(user_name):
 
     col1, col2 = st.columns(2)
     with col1:
+        # Store cannot override the HR-selected leaving date.
+        hr_leaving_date = pd.to_datetime(selected_emp.get("leaving_date"), errors="coerce")
+        if pd.isna(hr_leaving_date):
+            st.error("This employee has no valid Leaving Date in HR. Update the HR employee record first.")
+            return
         leaving_date = st.date_input(
-            "📅 Leaving Date",
-            value=selected_emp.get("leaving_date") or date.today(),
+            "📅 Leaving Date (from HR)",
+            value=hr_leaving_date.date(),
             key="checkin_leaving_date",
+            disabled=True,
         )
     with col2:
         checkin_date = st.date_input("📅 Check-in Date", value=date.today(),
