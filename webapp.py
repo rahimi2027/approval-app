@@ -1692,6 +1692,7 @@ def save_users(users_dict):
             "employee_id": u.get("employee_id", ""),
             "can_access_store_deduction": u.get("can_access_store_deduction", False),
             "can_access_employee_items": u.get("can_access_employee_items", False),
+            "can_access_training_help": u.get("can_access_training_help", False),
             "is_active": u.get("is_active", True)
         })
 
