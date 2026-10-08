@@ -3062,6 +3062,7 @@ def _hrp_leaver_history(employee):
 
 
 def _hrp_leaver_history_pdf(employee, history):
+    """Generate one genuinely complete leaver-history PDF covering HR, Store, Payroll and final clearance."""
     if not PDF_AVAILABLE:
         return None
     try:
@@ -3080,94 +3081,186 @@ def _hrp_leaver_history_pdf(employee, history):
             txt = _pdf_text(v)
             return txt if family == "DejaVu" else txt.encode("latin-1", "replace").decode("latin-1")
 
-        def hard_wrap(v, width=80):
+        def hard_wrap(v, width=92):
             txt = safe(v)
             return "\n".join(
                 "\n".join(textwrap.wrap(part, width=width, break_long_words=True, break_on_hyphens=False) or [""])
                 for part in txt.splitlines()
             ) or "-"
 
-        def full_line(text, h=6, bold=False, size=9):
+        def line(text, h=5.5, bold=False, size=8.5):
             pdf.set_x(pdf.l_margin)
             pdf.set_font(family, "B" if bold else "", size)
             pdf.multi_cell(pdf.epw, h, hard_wrap(text), new_x="LMARGIN", new_y="NEXT")
 
+        def section(title):
+            pdf.ln(2)
+            line(title, 7, True, 11)
+
         if os.path.exists(LOGO_PATH):
             try:
-                pdf.image(LOGO_PATH, x=75, y=10, w=60)
+                pdf.image(LOGO_PATH, x=75, y=8, w=60)
                 pdf.ln(28)
             except Exception:
                 pdf.ln(5)
 
-        full_line("EMPLOYEE LEAVER COMPLETE HISTORY", 10, True, 16)
-        pdf.ln(3)
-        full_line("EMPLOYEE DETAILS", 7, True, 11)
+        line("EMPLOYEE LEAVER COMPLETE HISTORY", 10, True, 16)
+        line("This report combines the employee's HR/holiday history, Store property history, Store check-in and deductions/returns, Payroll leaver adjustments, and the permanent final clearance record.", 5, False, 8)
 
+        section("EMPLOYEE DETAILS")
         details = [
-            ("Employee ID", employee.get("emp_id")), ("Full Name", employee.get("name")),
-            ("Department", employee.get("department")), ("Position", employee.get("job_title")),
-            ("Start Date", employee.get("start_date")), ("End / Leaving Date", employee.get("leaving_date")),
+            ("Employee ID", employee.get("emp_id")),
+            ("Full Name", employee.get("name")),
+            ("Department", employee.get("department")),
+            ("Position", employee.get("job_title")),
+            ("Start Date", employee.get("start_date")),
+            ("End / Leaving Date", employee.get("leaving_date")),
             ("Duration of Work", _hrp_work_duration(employee.get("start_date"), employee.get("leaving_date"))),
-            ("Agreement", employee.get("agreement_type")), ("Working Pattern", employee.get("working_pattern")),
-            ("Days Per Week", employee.get("days_per_week")), ("Reason for Leaving", employee.get("leaving_reason")),
+            ("Agreement", employee.get("agreement_type")),
+            ("Working Pattern", employee.get("working_pattern")),
+            ("Days Per Week", employee.get("days_per_week")),
+            ("Reason for Leaving", employee.get("leaving_reason")),
         ]
-        label_w = 48
-        value_w = max(20, pdf.epw - label_w)
         for label, value in details:
             pdf.set_x(pdf.l_margin)
-            pdf.set_font(family, "B", 9)
-            pdf.cell(label_w, 6, safe(f"{label}:"))
-            pdf.set_font(family, "", 9)
-            pdf.multi_cell(value_w, 6, hard_wrap(value if value not in (None, "") else "-"), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(family, "B", 8.5)
+            pdf.cell(48, 5.5, safe(f"{label}:"))
+            pdf.set_font(family, "", 8.5)
+            pdf.multi_cell(pdf.epw - 48, 5.5, hard_wrap(value if value not in (None, "") else "-"), new_x="LMARGIN", new_y="NEXT")
 
-        pdf.ln(3)
-        full_line("HOLIDAY / LEAVE HISTORY", 7, True, 11)
+        # ---------------- HR / HOLIDAY ----------------
+        section("HR / HOLIDAY / LEAVE HISTORY")
         if history.get("types"):
             for typ, days in history["types"].items():
-                full_line(f"{typ}: {days:.1f} day(s)", 6, False, 9)
+                line(f"{typ}: {days:.1f} day(s)")
         else:
-            full_line("No approved leave records found.", 6, False, 9)
+            line("No approved leave records found.")
+        line(f"Approved annual holiday taken: {history.get('holiday_taken', 0.0):.1f} day(s)", 5.5, True, 9)
 
-        pdf.ln(2)
-        full_line(f"Approved annual holiday taken: {history.get('holiday_taken', 0.0):.1f} days", 6, True, 10)
-        pdf.ln(3)
-        full_line("FINAL HOLIDAY SETTLEMENTS", 7, True, 11)
-        if history.get("settlements"):
-            for r in history["settlements"]:
-                try:
-                    days = float(r.get("days", 0) or 0)
-                except Exception:
-                    days = 0.0
-                try:
-                    amount = float(r.get("amount", 0) or 0)
-                except Exception:
-                    amount = 0.0
-                full_line(
-                    f"Settlement #{r.get('id')} | {r.get('type','')} | {days:.1f} days | £{amount:.2f} | {str(r.get('status','')).title()} | {r.get('date','')}",
-                    6, False, 9
-                )
+        section("FINAL HOLIDAY SETTLEMENTS")
+        settlements = history.get("settlements") or []
+        if settlements:
+            for r in settlements:
+                try: days = float(r.get("days", 0) or 0)
+                except Exception: days = 0.0
+                try: amount = float(r.get("amount", 0) or 0)
+                except Exception: amount = 0.0
+                line(f"Settlement #{r.get('id')} | Type: {r.get('type','')} | {days:.1f} days | £{amount:.2f} | Status: {str(r.get('status','')).title()} | Date: {r.get('date','')}")
+                line(f"Submitted by: {r.get('submitted_by','')} | Submitted: {r.get('submitted_date','')} | Decision by: {r.get('decision_by','')} | Decision date: {r.get('decision_date','')}", 5, False, 8)
                 if r.get("director_comments"):
-                    full_line(f"Director comments: {r.get('director_comments')}", 5, False, 8)
+                    line(f"Director comments: {r.get('director_comments')}", 5, False, 8)
                 if r.get("rejection_reason"):
-                    full_line(f"Rejection reason: {r.get('rejection_reason')}", 5, False, 8)
+                    line(f"Rejection reason: {r.get('rejection_reason')}", 5, False, 8)
         else:
-            full_line("No final holiday settlement records found.", 6, False, 9)
+            line("No final holiday settlement records found.")
 
-        pdf.ln(3)
-        full_line("LEAVE RECORDS", 7, True, 11)
-        if history.get("leave_records"):
-            for r in history["leave_records"]:
-                try:
-                    days = float(r.get("days", 0) or 0)
-                except Exception:
-                    days = 0.0
-                line = (
-                    f"{r.get('date_from','')} → {r.get('date_to','')} | "
-                    f"{r.get('type','')} | {days:.1f} days | {r.get('status','')} | {r.get('notes','')}"
-                )
-                full_line(line, 5, False, 8)
+        section("APPROVED LEAVE RECORDS")
+        leave_records = history.get("leave_records") or []
+        if leave_records:
+            for r in leave_records:
+                try: days = float(r.get("days", 0) or 0)
+                except Exception: days = 0.0
+                line(f"{r.get('date_from','')} → {r.get('date_to','')} | {r.get('type', r.get('leave_type',''))} | {days:.1f} days | {r.get('status','')} | {r.get('notes','')}")
         else:
-            full_line("No leave records found.", 5, False, 8)
+            line("No approved leave records found.")
+
+        # ---------------- STORE ----------------
+        emp_id = str(employee.get("emp_id", "")).strip()
+        name = str(employee.get("name", "")).strip()
+        emp_id_cf = emp_id.casefold()
+        name_cf = name.casefold()
+        all_items = load_employee_items(force=True)
+        employee_items = [r for r in all_items if str(r.get("employee_id", "")).strip().casefold() == emp_id_cf or str(r.get("emp_name", "")).strip().casefold() == name_cf]
+        checkins = [r for r in load_item_checkins(force=True) if str(r.get("employee_id", "")).strip().casefold() == emp_id_cf or str(r.get("emp_name", "")).strip().casefold() == name_cf]
+        clearances = load_leaver_clearances(force=True)
+        clearance = next((r for r in clearances if str(r.get("employee_id", "")).strip().casefold() == emp_id_cf), None)
+        store_records = load_store_deductions(force=True)
+        linked_ids = set()
+        if clearance:
+            for field in ("store_deduction_id", "store_return_id"):
+                linked_ids.update(x.strip() for x in str(clearance.get(field, "")).split(",") if x.strip())
+        store_transactions = [r for r in store_records if str(r.get("id", "")).strip() in linked_ids or str(r.get("emp_name", "")).strip().casefold() == name_cf or str(r.get("emp_dept", "")).strip().casefold() == str(employee.get("department", "")).strip().casefold() and str(r.get("date_leaving", "")).strip() == str(employee.get("leaving_date", "")).strip()]
+
+        section("STORE — EMPLOYEE ITEMS / HOLDINGS")
+        if employee_items:
+            for r in employee_items:
+                value = float(r.get("total_value", 0) or 0)
+                line(f"Item #{r.get('id')} | {r.get('item_name','')} | Issued: {r.get('qty_issued',0):g} | Returned: {r.get('qty_returned',0):g} | Outstanding: {r.get('qty_outstanding',0):g} | Unit: £{float(r.get('unit_price',0) or 0):,.2f} | Total: £{value:,.2f} | Status: {r.get('status','')}")
+                line(f"Issue date: {r.get('issue_date','')} | Issued by: {r.get('issued_by','')} | Notes: {r.get('notes','')}", 5, False, 8)
+        else:
+            line("No Store employee-item records found.")
+
+        section("STORE — LEAVER ITEM CHECK-IN")
+        if checkins:
+            for r in checkins:
+                line(f"Check-in #{r.get('id')} | Leaving date: {r.get('leaving_date','')} | Check-in date: {r.get('checkin_date','')} | Checked in by: {r.get('checked_in_by','')} | Status: {r.get('status','')} | Deduction: £{float(r.get('total_deduction',0) or 0):,.2f}")
+                line(f"Deduction request: {r.get('deduction_request_id','') or 'None'} | Return request: {r.get('return_request_id','') or 'None'} | Notes: {r.get('notes','')}", 5, False, 8)
+                if r.get("returned_items"):
+                    line(f"Returned items: {json.dumps(r.get('returned_items'), ensure_ascii=False)}", 5, False, 8)
+                if r.get("not_returned_items"):
+                    line(f"Not returned items: {json.dumps(r.get('not_returned_items'), ensure_ascii=False)}", 5, False, 8)
+        else:
+            line("No Store leaver item check-in records found.")
+
+        section("STORE — DEDUCTIONS / RETURNS / APPROVALS")
+        if store_transactions:
+            for r in store_transactions:
+                line(f"Store request #{r.get('id')} | Type: {r.get('type','')} | Amount: £{float(r.get('total_deduction',0) or 0):,.2f} | Status: {str(r.get('status','')).title()} | Date submitted: {r.get('date_submit','')}")
+                line(f"Description: {r.get('desc','')} | Line manager: {r.get('manager','')} | Submitted by: {r.get('submitted_by','')} | Submitted date: {r.get('submitted_date','')}", 5, False, 8)
+                line(f"Decision by: {r.get('decision_by','')} | Decision date: {r.get('decision_date','')} | Director comments: {r.get('director_comments','')} | Rejection: {r.get('rejection_reason','')}", 5, False, 8)
+                if r.get("items"):
+                    line(f"Items / transaction details: {json.dumps(r.get('items'), ensure_ascii=False)}", 5, False, 8)
+                if r.get("attachment_name") and str(r.get("attachment_name")).casefold() not in {"none", "nan", ""}:
+                    line(f"Attachment: {r.get('attachment_name')}", 5, False, 8)
+        else:
+            line("No linked Store deduction/return requests found.")
+
+        # ---------------- PAYROLL ----------------
+        payroll = []
+        for r in load_records_from_excel(force=True):
+            category = str(r.get("category", "")).strip().casefold()
+            desc = str(r.get("desc", ""))
+            hay = " ".join(str(r.get(k, "")) for k in ("emp_name", "dept", "desc", "category")).casefold()
+            linked = bool(emp_id and emp_id_cf in desc.casefold()) or name_cf in hay
+            if category == "leaver payroll adjustment" and linked:
+                payroll.append(r)
+        if clearance and clearance.get("payroll_request_ids"):
+            ids = {x.strip() for x in str(clearance.get("payroll_request_ids")).split(",") if x.strip()}
+            for r in load_records_from_excel(force=True):
+                if str(r.get("id", "")).strip() in ids and r not in payroll:
+                    payroll.append(r)
+
+        section("PAYROLL — LEAVER ADDITIONS / DEDUCTIONS")
+        if payroll:
+            for r in payroll:
+                line(f"Payroll request #{r.get('id')} | {r.get('type','')} | £{float(r.get('amount',0) or 0):,.2f} | Status: {str(r.get('status','')).title()} | Date: {r.get('date','')}")
+                line(f"Category: {r.get('category','')} | Description: {r.get('desc','')} | Manager: {r.get('manager','')} | Submitted by: {r.get('submitted_by','')}", 5, False, 8)
+                line(f"Decision by: {r.get('decision_by','')} | Decision date: {r.get('decision_date','')} | Director comments: {r.get('director_comments','')}", 5, False, 8)
+                if r.get("attachment_name") and str(r.get("attachment_name")).casefold() not in {"none", "nan", ""}:
+                    line(f"Attachment: {r.get('attachment_name')}", 5, False, 8)
+        else:
+            line("No Payroll leaver adjustment requests found.")
+
+        # ---------------- PERMANENT CLEARANCE ----------------
+        section("LEAVER CLEARANCE — HR / STORE / PAYROLL / FINAL")
+        if clearance:
+            line(f"Clearance ID: {clearance.get('clearance_id')} | Created by: {clearance.get('created_by')} | Created at: {clearance.get('created_at')}")
+            line(f"HR: {clearance.get('hr_status')} | Holiday balance: {float(clearance.get('holiday_balance',0) or 0):.1f} days | Settlement: {clearance.get('holiday_settlement_id') or 'None'} | Settlement status: {clearance.get('holiday_settlement_status')} | Settlement amount: £{float(clearance.get('holiday_settlement_amount',0) or 0):,.2f}")
+            line(f"Store: {clearance.get('store_status')} | Check-in: {clearance.get('store_checkin_id') or 'None'} | Outstanding property: £{float(clearance.get('outstanding_item_value',0) or 0):,.2f} | Deduction: {clearance.get('store_deduction_id') or 'None'} | Return: {clearance.get('store_return_id') or 'None'}")
+            line(f"Payroll: {clearance.get('payroll_status')} | Requests: {clearance.get('payroll_request_ids') or 'None'} | Approved additions: £{float(clearance.get('payroll_total_addition',0) or 0):,.2f} | Approved deductions: £{float(clearance.get('payroll_total_deduction',0) or 0):,.2f}")
+            line(f"Store completed by: {clearance.get('store_completed_by')} | Store completed at: {clearance.get('store_completed_at')}")
+            line(f"Payroll completed by: {clearance.get('payroll_completed_by')} | Payroll completed at: {clearance.get('payroll_completed_at')}")
+            line(f"FINAL: {clearance.get('final_status')} | Cleared by: {clearance.get('final_cleared_by') or '—'} | Cleared at: {clearance.get('final_cleared_at') or '—'}")
+            if clearance.get("notes"):
+                line(f"Clearance notes: {clearance.get('notes')}")
+        else:
+            line("No permanent leaver-clearance record found for this employee.")
+
+        section("REPORT SUMMARY")
+        line(f"HR/holiday records: {len(leave_records)} approved leave record(s), {len(settlements)} settlement record(s).")
+        line(f"Store records: {len(employee_items)} item/holding record(s), {len(checkins)} check-in record(s), {len(store_transactions)} deduction/return request(s).")
+        line(f"Payroll records: {len(payroll)} leaver adjustment request(s).")
+        line(f"Permanent clearance record: {'Present' if clearance else 'Not found'}. Final status: {clearance.get('final_status') if clearance else 'N/A'}.")
 
         os.makedirs(PDF_DIR, exist_ok=True)
         safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(employee.get("emp_id", "leaver")))
@@ -3286,14 +3379,6 @@ def _hrp_render_leavers_tab():
             ):
                 st.session_state.pop(confirm_return_key, None)
                 st.rerun()
-
-    if st.button("📄 Generate Complete Leaver History PDF", key=f"gen_leaver_pdf_{employee.get('emp_id')}", type="primary"):
-        with st.spinner("Generating leaver history PDF..."):
-            pdf_path = _hrp_leaver_history_pdf(employee, history)
-        if pdf_path and os.path.exists(pdf_path):
-            with open(pdf_path, "rb") as f: st.download_button("⬇️ Download Complete Leaver History PDF", f.read(), file_name=os.path.basename(pdf_path), mime="application/pdf", type="primary", key=f"leaver_pdf_{employee.get('emp_id')}")
-        else:
-            st.error("Could not generate the leaver history PDF.")
 
 
 def _hrp_report_date(value):
@@ -8227,7 +8312,7 @@ def render_leaver_clearance_final():
     filtered=[]
     for rec in records:
         hay=" ".join([str(rec.get("clearance_id","")),str(rec.get("emp_name","")),str(rec.get("employee_id","")),str(rec.get("emp_dept",""))]).casefold()
-        cleared=str(rec.get("final_status","")).casefold()=="cleared"
+        cleared=str(rec.get("final_status","")).casefold() in {"cleared", "cleared all"}
         if qn and qn not in hay: continue
         if status_filter=="Open" and cleared: continue
         if status_filter=="Cleared All" and not cleared: continue
@@ -8238,7 +8323,7 @@ def render_leaver_clearance_final():
         if _clearance_all_ready(rec) and str(rec.get("final_status","")).casefold()!="cleared":
             rec["final_status"]="Cleared All"; rec["final_cleared_by"]="System (Automatic)"; rec["final_cleared_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_all_leaver_clearances(records); log_action("LEAVER_FINAL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
-        if str(rec.get("final_status","")).casefold()=="cleared":
+        if str(rec.get("final_status","")).casefold() in {"cleared", "cleared all"}:
             _save_leaver_clearance_pdf(rec)
         with st.expander(f"{'🟢' if str(rec.get('final_status')).casefold()=='cleared' else '🟡'} {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",expanded=False):
             st.write(f"HR: **{rec.get('hr_status')}** · Director: **{rec.get('holiday_settlement_status')}** · Store: **{rec.get('store_status')}** · Payroll: **{rec.get('payroll_status')}** · Final: **{rec.get('final_status')}**")
