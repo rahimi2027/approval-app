@@ -12373,17 +12373,47 @@ TRAINING_ROLE_CONTENT = {
 }
 
 
-def _training_role_key(role_name):
+def _training_role_key(role_name, department_name=""):
+    """Resolve the training-deck role from the user's stored role + department.
+
+    The application stores several departmental managers simply as ``Manager``.
+    The training deck, however, has department-specific manager sections such as
+    Accounts Manager, National Grid Manager, HR Manager, etc.  Resolve those
+    combinations before falling back to the literal role name.
+    """
     raw = str(role_name or "").strip()
-    aliases = {"Store Clerk / Staff": "Store Clerk", "Store Department Manager": "Store Manager"}
-    return aliases.get(raw, raw)
+    dept = str(department_name or "").strip()
+    aliases = {
+        "Store Clerk / Staff": "Store Clerk",
+        "Store Department Manager": "Store Manager",
+    }
+    if raw in aliases:
+        return aliases[raw]
+
+    # Department-specific manager roles used by the training deck.
+    manager_by_department = {
+        "Accounts": "Accounts Manager",
+        "National Grid": "National Grid Manager",
+        "Isolator": "Isolator Manager",
+        "Project": "Project Manager",
+        "Store": "Store Manager",
+        "HR": "HR Manager",
+        "Human Resources": "HR Manager",
+        "Work Orders": "Work Order Manager",
+        "Work Order": "Work Order Manager",
+    }
+    if raw.casefold() in {"manager", "department manager", "team manager"}:
+        return manager_by_department.get(dept, raw)
+
+    return raw
 
 
 def render_training_help(current_user_info=None):
     """Render only the training assigned to the currently authenticated role."""
     user = current_user_info or st.session_state.get("user_info", {}) or {}
     role_name = str(user.get("role", "")).strip()
-    role_key = _training_role_key(role_name)
+    department_name = str(user.get("dept", user.get("department", ""))).strip()
+    role_key = _training_role_key(role_name, department_name)
     content = TRAINING_ROLE_CONTENT.get(role_key)
     st.subheader("📚 Training & Help Centre")
     st.caption(f"Training is restricted to your signed-in role: **{role_name or 'User'}**")
