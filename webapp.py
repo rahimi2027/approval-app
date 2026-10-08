@@ -180,7 +180,7 @@ USER_DB_COLUMNS = [
     "can_access_holiday_calendar", "can_access_hr_reports", "can_access_employee_overview",
     "can_access_holiday_calculator", "can_access_employee_directory",
     "employee_id", "can_access_store_deduction", "can_access_employee_items",
-    "is_active"
+    "can_access_training_help", "is_active"
 ]
 
 ONEDRIVE_CLIENT_ID = ""
@@ -1119,15 +1119,15 @@ DEFAULT_USERS = [
     {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "can_access_store_deduction": True, "is_active": True}
 ]
 PERMISSION_DEFAULTS = {
-    "Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_employee_hr_reports": True, "can_access_store_deduction": False, "can_access_employee_items": False},
-    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False, "can_access_employee_items": False},
-    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False, "can_access_employee_items": False},
-    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True},
-    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True},
-    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True, "can_access_employee_items": True},
-    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True},
-    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True, "can_access_employee_items": True},
-    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True}
+    "Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_employee_hr_reports": True, "can_access_store_deduction": False, "can_access_employee_items": False, "can_access_training_help": False},
+    "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False, "can_access_employee_items": False, "can_access_training_help": False},
+    "Work Order Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False, "can_access_employee_items": False, "can_access_training_help": False},
+    "Staff": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True, "can_access_training_help": False},
+    "Team Member": {"can_view_all_dept": True, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True, "can_access_training_help": False},
+    "Manager": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True, "can_access_employee_items": True, "can_access_training_help": False},
+    "Director": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True, "can_access_training_help": False},
+    "Payroll": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": False, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": True, "can_access_leave_request": False, "can_access_store_deduction": True, "can_access_employee_items": True, "can_access_training_help": False},
+    "Super Admin": {"can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True, "can_approve_requests": True, "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": True, "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_store_deduction": True, "can_access_employee_items": True, "can_access_training_help": False}
 }
 
 _HR_REPORT_PERMISSION_DEFAULTS = {
@@ -1158,7 +1158,8 @@ PERMISSION_LABELS = {
     "can_access_holiday_calculator": "🧮 Holiday Calculator (View Only)",
     "can_access_employee_directory": "👥 Employee Directory (View Only)",
     "can_access_store_deduction": "📦 Store Department Deduction",
-    "can_access_employee_items": "🧰 Employee Items / Holdings"
+    "can_access_employee_items": "🧰 Employee Items / Holdings",
+    "can_access_training_help": "📚 Training & Help Centre"
 }
 
 try:
@@ -1787,6 +1788,7 @@ def load_users(force=False):
                 "employee_id": str(r.get("employee_id", "")).strip(),
                 "can_access_store_deduction": _flag_or_default(r.get("can_access_store_deduction", ""), user_role, "can_access_store_deduction"),
                 "can_access_employee_items": _flag_or_default(r.get("can_access_employee_items", ""), user_role, "can_access_employee_items"),
+                "can_access_training_help": _flag_or_default(r.get("can_access_training_help", ""), user_role, "can_access_training_help"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
             if user_role == "Super Admin":
@@ -3062,7 +3064,6 @@ def _hrp_leaver_history(employee):
 
 
 def _hrp_leaver_history_pdf(employee, history):
-    """Generate one genuinely complete leaver-history PDF covering HR, Store, Payroll and final clearance."""
     if not PDF_AVAILABLE:
         return None
     try:
@@ -3081,186 +3082,94 @@ def _hrp_leaver_history_pdf(employee, history):
             txt = _pdf_text(v)
             return txt if family == "DejaVu" else txt.encode("latin-1", "replace").decode("latin-1")
 
-        def hard_wrap(v, width=92):
+        def hard_wrap(v, width=80):
             txt = safe(v)
             return "\n".join(
                 "\n".join(textwrap.wrap(part, width=width, break_long_words=True, break_on_hyphens=False) or [""])
                 for part in txt.splitlines()
             ) or "-"
 
-        def line(text, h=5.5, bold=False, size=8.5):
+        def full_line(text, h=6, bold=False, size=9):
             pdf.set_x(pdf.l_margin)
             pdf.set_font(family, "B" if bold else "", size)
             pdf.multi_cell(pdf.epw, h, hard_wrap(text), new_x="LMARGIN", new_y="NEXT")
 
-        def section(title):
-            pdf.ln(2)
-            line(title, 7, True, 11)
-
         if os.path.exists(LOGO_PATH):
             try:
-                pdf.image(LOGO_PATH, x=75, y=8, w=60)
+                pdf.image(LOGO_PATH, x=75, y=10, w=60)
                 pdf.ln(28)
             except Exception:
                 pdf.ln(5)
 
-        line("EMPLOYEE LEAVER COMPLETE HISTORY", 10, True, 16)
-        line("This report combines the employee's HR/holiday history, Store property history, Store check-in and deductions/returns, Payroll leaver adjustments, and the permanent final clearance record.", 5, False, 8)
+        full_line("EMPLOYEE LEAVER COMPLETE HISTORY", 10, True, 16)
+        pdf.ln(3)
+        full_line("EMPLOYEE DETAILS", 7, True, 11)
 
-        section("EMPLOYEE DETAILS")
         details = [
-            ("Employee ID", employee.get("emp_id")),
-            ("Full Name", employee.get("name")),
-            ("Department", employee.get("department")),
-            ("Position", employee.get("job_title")),
-            ("Start Date", employee.get("start_date")),
-            ("End / Leaving Date", employee.get("leaving_date")),
+            ("Employee ID", employee.get("emp_id")), ("Full Name", employee.get("name")),
+            ("Department", employee.get("department")), ("Position", employee.get("job_title")),
+            ("Start Date", employee.get("start_date")), ("End / Leaving Date", employee.get("leaving_date")),
             ("Duration of Work", _hrp_work_duration(employee.get("start_date"), employee.get("leaving_date"))),
-            ("Agreement", employee.get("agreement_type")),
-            ("Working Pattern", employee.get("working_pattern")),
-            ("Days Per Week", employee.get("days_per_week")),
-            ("Reason for Leaving", employee.get("leaving_reason")),
+            ("Agreement", employee.get("agreement_type")), ("Working Pattern", employee.get("working_pattern")),
+            ("Days Per Week", employee.get("days_per_week")), ("Reason for Leaving", employee.get("leaving_reason")),
         ]
+        label_w = 48
+        value_w = max(20, pdf.epw - label_w)
         for label, value in details:
             pdf.set_x(pdf.l_margin)
-            pdf.set_font(family, "B", 8.5)
-            pdf.cell(48, 5.5, safe(f"{label}:"))
-            pdf.set_font(family, "", 8.5)
-            pdf.multi_cell(pdf.epw - 48, 5.5, hard_wrap(value if value not in (None, "") else "-"), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(family, "B", 9)
+            pdf.cell(label_w, 6, safe(f"{label}:"))
+            pdf.set_font(family, "", 9)
+            pdf.multi_cell(value_w, 6, hard_wrap(value if value not in (None, "") else "-"), new_x="LMARGIN", new_y="NEXT")
 
-        # ---------------- HR / HOLIDAY ----------------
-        section("HR / HOLIDAY / LEAVE HISTORY")
+        pdf.ln(3)
+        full_line("HOLIDAY / LEAVE HISTORY", 7, True, 11)
         if history.get("types"):
             for typ, days in history["types"].items():
-                line(f"{typ}: {days:.1f} day(s)")
+                full_line(f"{typ}: {days:.1f} day(s)", 6, False, 9)
         else:
-            line("No approved leave records found.")
-        line(f"Approved annual holiday taken: {history.get('holiday_taken', 0.0):.1f} day(s)", 5.5, True, 9)
+            full_line("No approved leave records found.", 6, False, 9)
 
-        section("FINAL HOLIDAY SETTLEMENTS")
-        settlements = history.get("settlements") or []
-        if settlements:
-            for r in settlements:
-                try: days = float(r.get("days", 0) or 0)
-                except Exception: days = 0.0
-                try: amount = float(r.get("amount", 0) or 0)
-                except Exception: amount = 0.0
-                line(f"Settlement #{r.get('id')} | Type: {r.get('type','')} | {days:.1f} days | £{amount:.2f} | Status: {str(r.get('status','')).title()} | Date: {r.get('date','')}")
-                line(f"Submitted by: {r.get('submitted_by','')} | Submitted: {r.get('submitted_date','')} | Decision by: {r.get('decision_by','')} | Decision date: {r.get('decision_date','')}", 5, False, 8)
+        pdf.ln(2)
+        full_line(f"Approved annual holiday taken: {history.get('holiday_taken', 0.0):.1f} days", 6, True, 10)
+        pdf.ln(3)
+        full_line("FINAL HOLIDAY SETTLEMENTS", 7, True, 11)
+        if history.get("settlements"):
+            for r in history["settlements"]:
+                try:
+                    days = float(r.get("days", 0) or 0)
+                except Exception:
+                    days = 0.0
+                try:
+                    amount = float(r.get("amount", 0) or 0)
+                except Exception:
+                    amount = 0.0
+                full_line(
+                    f"Settlement #{r.get('id')} | {r.get('type','')} | {days:.1f} days | £{amount:.2f} | {str(r.get('status','')).title()} | {r.get('date','')}",
+                    6, False, 9
+                )
                 if r.get("director_comments"):
-                    line(f"Director comments: {r.get('director_comments')}", 5, False, 8)
+                    full_line(f"Director comments: {r.get('director_comments')}", 5, False, 8)
                 if r.get("rejection_reason"):
-                    line(f"Rejection reason: {r.get('rejection_reason')}", 5, False, 8)
+                    full_line(f"Rejection reason: {r.get('rejection_reason')}", 5, False, 8)
         else:
-            line("No final holiday settlement records found.")
+            full_line("No final holiday settlement records found.", 6, False, 9)
 
-        section("APPROVED LEAVE RECORDS")
-        leave_records = history.get("leave_records") or []
-        if leave_records:
-            for r in leave_records:
-                try: days = float(r.get("days", 0) or 0)
-                except Exception: days = 0.0
-                line(f"{r.get('date_from','')} → {r.get('date_to','')} | {r.get('type', r.get('leave_type',''))} | {days:.1f} days | {r.get('status','')} | {r.get('notes','')}")
+        pdf.ln(3)
+        full_line("LEAVE RECORDS", 7, True, 11)
+        if history.get("leave_records"):
+            for r in history["leave_records"]:
+                try:
+                    days = float(r.get("days", 0) or 0)
+                except Exception:
+                    days = 0.0
+                line = (
+                    f"{r.get('date_from','')} → {r.get('date_to','')} | "
+                    f"{r.get('type','')} | {days:.1f} days | {r.get('status','')} | {r.get('notes','')}"
+                )
+                full_line(line, 5, False, 8)
         else:
-            line("No approved leave records found.")
-
-        # ---------------- STORE ----------------
-        emp_id = str(employee.get("emp_id", "")).strip()
-        name = str(employee.get("name", "")).strip()
-        emp_id_cf = emp_id.casefold()
-        name_cf = name.casefold()
-        all_items = load_employee_items(force=True)
-        employee_items = [r for r in all_items if str(r.get("employee_id", "")).strip().casefold() == emp_id_cf or str(r.get("emp_name", "")).strip().casefold() == name_cf]
-        checkins = [r for r in load_item_checkins(force=True) if str(r.get("employee_id", "")).strip().casefold() == emp_id_cf or str(r.get("emp_name", "")).strip().casefold() == name_cf]
-        clearances = load_leaver_clearances(force=True)
-        clearance = next((r for r in clearances if str(r.get("employee_id", "")).strip().casefold() == emp_id_cf), None)
-        store_records = load_store_deductions(force=True)
-        linked_ids = set()
-        if clearance:
-            for field in ("store_deduction_id", "store_return_id"):
-                linked_ids.update(x.strip() for x in str(clearance.get(field, "")).split(",") if x.strip())
-        store_transactions = [r for r in store_records if str(r.get("id", "")).strip() in linked_ids or str(r.get("emp_name", "")).strip().casefold() == name_cf or str(r.get("emp_dept", "")).strip().casefold() == str(employee.get("department", "")).strip().casefold() and str(r.get("date_leaving", "")).strip() == str(employee.get("leaving_date", "")).strip()]
-
-        section("STORE — EMPLOYEE ITEMS / HOLDINGS")
-        if employee_items:
-            for r in employee_items:
-                value = float(r.get("total_value", 0) or 0)
-                line(f"Item #{r.get('id')} | {r.get('item_name','')} | Issued: {r.get('qty_issued',0):g} | Returned: {r.get('qty_returned',0):g} | Outstanding: {r.get('qty_outstanding',0):g} | Unit: £{float(r.get('unit_price',0) or 0):,.2f} | Total: £{value:,.2f} | Status: {r.get('status','')}")
-                line(f"Issue date: {r.get('issue_date','')} | Issued by: {r.get('issued_by','')} | Notes: {r.get('notes','')}", 5, False, 8)
-        else:
-            line("No Store employee-item records found.")
-
-        section("STORE — LEAVER ITEM CHECK-IN")
-        if checkins:
-            for r in checkins:
-                line(f"Check-in #{r.get('id')} | Leaving date: {r.get('leaving_date','')} | Check-in date: {r.get('checkin_date','')} | Checked in by: {r.get('checked_in_by','')} | Status: {r.get('status','')} | Deduction: £{float(r.get('total_deduction',0) or 0):,.2f}")
-                line(f"Deduction request: {r.get('deduction_request_id','') or 'None'} | Return request: {r.get('return_request_id','') or 'None'} | Notes: {r.get('notes','')}", 5, False, 8)
-                if r.get("returned_items"):
-                    line(f"Returned items: {json.dumps(r.get('returned_items'), ensure_ascii=False)}", 5, False, 8)
-                if r.get("not_returned_items"):
-                    line(f"Not returned items: {json.dumps(r.get('not_returned_items'), ensure_ascii=False)}", 5, False, 8)
-        else:
-            line("No Store leaver item check-in records found.")
-
-        section("STORE — DEDUCTIONS / RETURNS / APPROVALS")
-        if store_transactions:
-            for r in store_transactions:
-                line(f"Store request #{r.get('id')} | Type: {r.get('type','')} | Amount: £{float(r.get('total_deduction',0) or 0):,.2f} | Status: {str(r.get('status','')).title()} | Date submitted: {r.get('date_submit','')}")
-                line(f"Description: {r.get('desc','')} | Line manager: {r.get('manager','')} | Submitted by: {r.get('submitted_by','')} | Submitted date: {r.get('submitted_date','')}", 5, False, 8)
-                line(f"Decision by: {r.get('decision_by','')} | Decision date: {r.get('decision_date','')} | Director comments: {r.get('director_comments','')} | Rejection: {r.get('rejection_reason','')}", 5, False, 8)
-                if r.get("items"):
-                    line(f"Items / transaction details: {json.dumps(r.get('items'), ensure_ascii=False)}", 5, False, 8)
-                if r.get("attachment_name") and str(r.get("attachment_name")).casefold() not in {"none", "nan", ""}:
-                    line(f"Attachment: {r.get('attachment_name')}", 5, False, 8)
-        else:
-            line("No linked Store deduction/return requests found.")
-
-        # ---------------- PAYROLL ----------------
-        payroll = []
-        for r in load_records_from_excel(force=True):
-            category = str(r.get("category", "")).strip().casefold()
-            desc = str(r.get("desc", ""))
-            hay = " ".join(str(r.get(k, "")) for k in ("emp_name", "dept", "desc", "category")).casefold()
-            linked = bool(emp_id and emp_id_cf in desc.casefold()) or name_cf in hay
-            if category == "leaver payroll adjustment" and linked:
-                payroll.append(r)
-        if clearance and clearance.get("payroll_request_ids"):
-            ids = {x.strip() for x in str(clearance.get("payroll_request_ids")).split(",") if x.strip()}
-            for r in load_records_from_excel(force=True):
-                if str(r.get("id", "")).strip() in ids and r not in payroll:
-                    payroll.append(r)
-
-        section("PAYROLL — LEAVER ADDITIONS / DEDUCTIONS")
-        if payroll:
-            for r in payroll:
-                line(f"Payroll request #{r.get('id')} | {r.get('type','')} | £{float(r.get('amount',0) or 0):,.2f} | Status: {str(r.get('status','')).title()} | Date: {r.get('date','')}")
-                line(f"Category: {r.get('category','')} | Description: {r.get('desc','')} | Manager: {r.get('manager','')} | Submitted by: {r.get('submitted_by','')}", 5, False, 8)
-                line(f"Decision by: {r.get('decision_by','')} | Decision date: {r.get('decision_date','')} | Director comments: {r.get('director_comments','')}", 5, False, 8)
-                if r.get("attachment_name") and str(r.get("attachment_name")).casefold() not in {"none", "nan", ""}:
-                    line(f"Attachment: {r.get('attachment_name')}", 5, False, 8)
-        else:
-            line("No Payroll leaver adjustment requests found.")
-
-        # ---------------- PERMANENT CLEARANCE ----------------
-        section("LEAVER CLEARANCE — HR / STORE / PAYROLL / FINAL")
-        if clearance:
-            line(f"Clearance ID: {clearance.get('clearance_id')} | Created by: {clearance.get('created_by')} | Created at: {clearance.get('created_at')}")
-            line(f"HR: {clearance.get('hr_status')} | Holiday balance: {float(clearance.get('holiday_balance',0) or 0):.1f} days | Settlement: {clearance.get('holiday_settlement_id') or 'None'} | Settlement status: {clearance.get('holiday_settlement_status')} | Settlement amount: £{float(clearance.get('holiday_settlement_amount',0) or 0):,.2f}")
-            line(f"Store: {clearance.get('store_status')} | Check-in: {clearance.get('store_checkin_id') or 'None'} | Outstanding property: £{float(clearance.get('outstanding_item_value',0) or 0):,.2f} | Deduction: {clearance.get('store_deduction_id') or 'None'} | Return: {clearance.get('store_return_id') or 'None'}")
-            line(f"Payroll: {clearance.get('payroll_status')} | Requests: {clearance.get('payroll_request_ids') or 'None'} | Approved additions: £{float(clearance.get('payroll_total_addition',0) or 0):,.2f} | Approved deductions: £{float(clearance.get('payroll_total_deduction',0) or 0):,.2f}")
-            line(f"Store completed by: {clearance.get('store_completed_by')} | Store completed at: {clearance.get('store_completed_at')}")
-            line(f"Payroll completed by: {clearance.get('payroll_completed_by')} | Payroll completed at: {clearance.get('payroll_completed_at')}")
-            line(f"FINAL: {clearance.get('final_status')} | Cleared by: {clearance.get('final_cleared_by') or '—'} | Cleared at: {clearance.get('final_cleared_at') or '—'}")
-            if clearance.get("notes"):
-                line(f"Clearance notes: {clearance.get('notes')}")
-        else:
-            line("No permanent leaver-clearance record found for this employee.")
-
-        section("REPORT SUMMARY")
-        line(f"HR/holiday records: {len(leave_records)} approved leave record(s), {len(settlements)} settlement record(s).")
-        line(f"Store records: {len(employee_items)} item/holding record(s), {len(checkins)} check-in record(s), {len(store_transactions)} deduction/return request(s).")
-        line(f"Payroll records: {len(payroll)} leaver adjustment request(s).")
-        line(f"Permanent clearance record: {'Present' if clearance else 'Not found'}. Final status: {clearance.get('final_status') if clearance else 'N/A'}.")
+            full_line("No leave records found.", 5, False, 8)
 
         os.makedirs(PDF_DIR, exist_ok=True)
         safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(employee.get("emp_id", "leaver")))
@@ -3379,6 +3288,14 @@ def _hrp_render_leavers_tab():
             ):
                 st.session_state.pop(confirm_return_key, None)
                 st.rerun()
+
+    if st.button("📄 Generate Complete Leaver History PDF", key=f"gen_leaver_pdf_{employee.get('emp_id')}", type="primary"):
+        with st.spinner("Generating leaver history PDF..."):
+            pdf_path = _hrp_leaver_history_pdf(employee, history)
+        if pdf_path and os.path.exists(pdf_path):
+            with open(pdf_path, "rb") as f: st.download_button("⬇️ Download Complete Leaver History PDF", f.read(), file_name=os.path.basename(pdf_path), mime="application/pdf", type="primary", key=f"leaver_pdf_{employee.get('emp_id')}")
+        else:
+            st.error("Could not generate the leaver history PDF.")
 
 
 def _hrp_report_date(value):
@@ -8312,7 +8229,7 @@ def render_leaver_clearance_final():
     filtered=[]
     for rec in records:
         hay=" ".join([str(rec.get("clearance_id","")),str(rec.get("emp_name","")),str(rec.get("employee_id","")),str(rec.get("emp_dept",""))]).casefold()
-        cleared=str(rec.get("final_status","")).casefold() in {"cleared", "cleared all"}
+        cleared=str(rec.get("final_status","")).casefold()=="cleared"
         if qn and qn not in hay: continue
         if status_filter=="Open" and cleared: continue
         if status_filter=="Cleared All" and not cleared: continue
@@ -8323,7 +8240,7 @@ def render_leaver_clearance_final():
         if _clearance_all_ready(rec) and str(rec.get("final_status","")).casefold()!="cleared":
             rec["final_status"]="Cleared All"; rec["final_cleared_by"]="System (Automatic)"; rec["final_cleared_at"]=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             save_all_leaver_clearances(records); log_action("LEAVER_FINAL_CLEARANCE_COMPLETED",rec.get("clearance_id"),new_data=rec)
-        if str(rec.get("final_status","")).casefold() in {"cleared", "cleared all"}:
+        if str(rec.get("final_status","")).casefold()=="cleared":
             _save_leaver_clearance_pdf(rec)
         with st.expander(f"{'🟢' if str(rec.get('final_status')).casefold()=='cleared' else '🟡'} {rec.get('clearance_id')} | {rec.get('emp_name')} | {rec.get('employee_id')}",expanded=False):
             st.write(f"HR: **{rec.get('hr_status')}** · Director: **{rec.get('holiday_settlement_status')}** · Store: **{rec.get('store_status')}** · Payroll: **{rec.get('payroll_status')}** · Final: **{rec.get('final_status')}**")
@@ -11391,10 +11308,17 @@ def user_management_panel():
             perm_download = col2.checkbox(PERMISSION_LABELS["can_download_data"], value=defaults.get("can_download_data", False))
             perm_approve = col2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=defaults.get("can_approve_requests", False))
             st.markdown("### 🧩 Module Access")
+            st.caption("Grant access to individual software modules. Training & Help is controlled separately here.")
+            perm_training_help = st.checkbox(
+                "📚 Training & Help Centre",
+                value=defaults.get("can_access_training_help", False),
+                key="create_training_help_permission",
+                help="Allow this user to see the role-specific Training & Help Centre."
+            )
             mcol1, mcol2 = st.columns(2)
             perm_ad = mcol1.checkbox(PERMISSION_LABELS["can_access_addition_deduction"], value=defaults.get("can_access_addition_deduction", True))
             perm_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=defaults.get("can_access_work_orders", False))
-            perm_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=defaults.get("can_access_wo_total", False))
+            perm_wo_total = mcol1.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=defaults.get("can_access_wo_total", False))
             perm_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=defaults.get("can_access_hr_leave", False))
             perm_leave_req = st.checkbox(PERMISSION_LABELS["can_access_leave_request"], value=defaults.get("can_access_leave_request", False))
             perm_employee_reports = st.checkbox(PERMISSION_LABELS["can_access_employee_hr_reports"], value=defaults.get("can_access_employee_hr_reports", False))
@@ -11417,7 +11341,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_employee_items": perm_employee_items, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "is_active": new_active}
                     save_users(USERS)
                     log_action("USER_CREATED", new_data={"username": new_username, "full_name": new_full_name.strip(), "role": new_role, "department": new_dept, "is_active": new_active})
                     st.success(f"✅ User **'{new_full_name}'** created!"); st.balloons()
@@ -11457,16 +11381,24 @@ def user_management_panel():
                 curr_perm_employee_directory = bool(curr.get("can_access_employee_directory", False))
                 curr_perm_store = bool(curr.get("can_access_store_deduction", False))
                 curr_perm_employee_items = bool(curr.get("can_access_employee_items", False))
+                curr_perm_training_help = bool(curr.get("can_access_training_help", False))
                 ecol1, ecol2 = st.columns(2)
                 edit_view = ecol1.checkbox(PERMISSION_LABELS["can_view_all_dept"], value=curr_perm_view)
                 edit_pdf = ecol1.checkbox(PERMISSION_LABELS["can_generate_pdf"], value=curr_perm_pdf)
                 edit_dl = ecol2.checkbox(PERMISSION_LABELS["can_download_data"], value=curr_perm_dl)
                 edit_app = ecol2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=curr_perm_app)
                 st.markdown("### 🧩 Module Access")
+                st.caption("Grant access to individual software modules. Training & Help is controlled separately here.")
+                edit_training_help = st.checkbox(
+                    "📚 Training & Help Centre",
+                    value=curr_perm_training_help,
+                    key=f"edit_training_help_{edit_user_sel}",
+                    help="Allow this user to see the role-specific Training & Help Centre."
+                )
                 mcol1, mcol2 = st.columns(2)
                 edit_ad = mcol1.checkbox(PERMISSION_LABELS["can_access_addition_deduction"], value=curr_perm_ad)
                 edit_wo = mcol2.checkbox(PERMISSION_LABELS["can_access_work_orders"], value=curr_perm_wo)
-                edit_wo_total = st.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=curr_perm_wo_total)
+                edit_wo_total = mcol1.checkbox(PERMISSION_LABELS["can_access_wo_total"], value=curr_perm_wo_total)
                 edit_hr = st.checkbox(PERMISSION_LABELS["can_access_hr_leave"], value=curr_perm_hr)
                 edit_leave_req = st.checkbox(PERMISSION_LABELS["can_access_leave_request"], value=curr_perm_leave_req)
                 edit_employee_reports = st.checkbox(PERMISSION_LABELS["can_access_employee_hr_reports"], value=bool(curr.get("can_access_employee_hr_reports", False)))
@@ -11485,7 +11417,7 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_employee_items": edit_employee_items, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -11511,6 +11443,7 @@ def user_management_panel():
                         USERS[edit_user_sel]["employee_id"] = edit_employee_id
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["can_access_employee_items"] = edit_employee_items
+                        USERS[edit_user_sel]["can_access_training_help"] = edit_training_help
                         USERS[edit_user_sel]["is_active"] = edit_active
                     save_users(USERS)
                     log_action("USER_EDITED", old_data=curr, new_data={"full_name": upd_full_name.strip(), "username": upd_username_new, "role": upd_role, "department": upd_dept, "is_active": edit_active})
@@ -12294,6 +12227,189 @@ def render_store_reports_tab(full_name, dept_name):
 
 
 # ============================================================
+# 📚 ROLE-BASED TRAINING & HELP CENTRE
+# ============================================================
+TRAINING_SUPPORT_CONTACT = "Wais Rahimi"
+
+# Role-specific training based on the Acoole Training Deck v4.30.
+# The authenticated user's role determines which training content is shown.
+TRAINING_ROLE_CONTENT = {
+    "Employee": {
+        "emoji": "👤", "title": "Employee Training",
+        "intro": "Use this guide when you need help with the employee-facing parts of the portal.",
+        "topics": [
+            ("🔐 Login & navigation", ["Open the Acoole Operations & Authorisation Portal and use the username and password provided for your account.", "Usernames are lowercase. If your account is deactivated, contact Super Admin.", "Role-based access controls which modules you can see."]),
+            ("👤 My HR Reports", ["Open My HR Reports to view your own employee details, holiday position, absence records and calendar.", "Your account must be linked to an Employee ID for the personal HR report to work."]),
+            ("🧰 My Employee Items", ["Use My Employee Items to see company items currently recorded against you.", "Check the item details when an item is returned or checked in."]),
+            ("🔄 Refresh & logout", ["Use Refresh Data when you need the latest portal information.", "Use Secure Logout when you finish using the system, especially on shared devices."])
+        ]
+    },
+    "Work Order Employee": {
+        "emoji": "🛠️", "title": "Work Order Employee Training",
+        "intro": "Training for submitting and viewing your Work Orders.",
+        "topics": [
+            ("🔐 Login", ["Open the portal, enter your assigned username and password, and authenticate.", "Only modules relevant to your role are displayed."]),
+            ("🛠️ Work Orders", ["Open Work Orders from your employee portal.", "Enter the required job information and submit it for the appropriate approval process.", "Review your submitted work orders and their status from the Work Orders area."]),
+            ("💷 Approved totals", ["If your account has access to approved Work Order totals, use that view to check the approved total available to your role."]),
+            ("🔄 Refresh & logout", ["Refresh the portal after changes are expected, then securely log out when finished."])
+        ]
+    },
+    "Work Order Manager": {
+        "emoji": "🛠️", "title": "Work Order Manager Training",
+        "intro": "Training for managing departmental Work Orders and the related request workflow.",
+        "topics": [
+            ("🛠️ Work Orders", ["Open the Work Orders section to review work submitted for your department.", "Use the pending, approved and returned/rejected views to follow status.", "Review the job information before taking the available manager action."]),
+            ("➕ Addition & Deduction", ["Use Addition & Deduction for the request workflow available to your role.", "Check employee, department, type, category, date, amount and description before submitting or updating a request."]),
+            ("💷 Approved totals", ["Where your account has the approved-total permission, use the approved Work Order Total view to review the authorised amount."]),
+            ("🔄 Refresh & support", ["Refresh data after important changes and contact the software trainer if you are unsure what action to take."])
+        ]
+    },
+    "National Grid Manager": {
+        "emoji": "⚡", "title": "National Grid Manager Training",
+        "intro": "Training for National Grid Inspector Bonus records and the modules assigned to this role.",
+        "topics": [
+            ("⚡ Inspector Bonus", ["Open National Grid Inspector Bonus from your portal.", "Enter the required inspector/monthly bonus information and submit it through the approval workflow.", "Review submitted records and their status in the available views."]),
+            ("🔐 Access & approvals", ["Only the modules and actions granted to your account are available.", "Approved records move through the relevant Director/Payroll workflow as defined by the portal."]),
+            ("🔄 Refresh & logout", ["Refresh when you need the latest status and securely log out when finished."])
+        ]
+    },
+    "Isolator Manager": {
+        "emoji": "🔌", "title": "Isolator Manager Training",
+        "intro": "Training for the Isolator Manager workflow available to your account.",
+        "topics": [
+            ("🔐 Login & role access", ["Log in with your assigned credentials.", "The portal uses role-based access, so you only see modules granted to your account."]),
+            ("🔌 Isolator workflow", ["Use the Isolator Manager area for the workflow assigned to your role.", "Check all required information before submitting records into the approval process."]),
+            ("🔄 Refresh & support", ["Refresh after changes and contact Wais Rahimi if you need a walkthrough or are unsure how to use a screen."])
+        ]
+    },
+    "Project Manager": {
+        "emoji": "🏗️", "title": "Project Manager Training",
+        "intro": "Training for project-management functions and the request workflow assigned to this role.",
+        "topics": [
+            ("🔐 Login & navigation", ["Log in with your assigned credentials and use only the modules displayed for your role."]),
+            ("🏗️ Project workflow", ["Use the Project Manager area for the project workflow assigned to your account.", "Review employee/request details carefully before submitting or approving an available action."]),
+            ("🔄 Refresh & support", ["Refresh data when you need the latest information and contact Wais Rahimi for help with any how-to question."])
+        ]
+    },
+    "Accounts Manager": {
+        "emoji": "💷", "title": "Accounts Manager Training",
+        "intro": "Training for Accounts Manager access and the financial request workflow.",
+        "topics": [
+            ("🔐 Login & navigation", ["Log in with your assigned credentials. The portal displays only the modules granted to your role."]),
+            ("➕ Addition & Deduction", ["Review the employee, transaction type, category, date, amount and description before progressing a request.", "Use the request status and approval information to understand where the transaction is in the workflow."]),
+            ("📄 PDFs & records", ["Where PDF access is granted, use the authorised PDF/download controls to retain the required record."]),
+            ("🔄 Refresh & support", ["Refresh data for the latest records and contact Wais Rahimi if you need a walkthrough."])
+        ]
+    },
+    "Store Clerk": {
+        "emoji": "📦", "title": "Store Clerk / Staff Training",
+        "intro": "Training for Store requests, employee items, returns and leaver check-in.",
+        "topics": [
+            ("📦 Store Deduction", ["Open Store Department → Store Requests → Store Deduction.", "Enter the required item/request details, amount and description, then submit the request."]),
+            ("📦 Store Return (Addition)", ["Use Store Return (Addition) when a returned item needs to be recorded through the Store workflow.", "Check the employee and item details before submitting."]),
+            ("🧰 Employee Items & Holdings", ["Use Issue Items & Employee Holdings to record company items issued to employees and review current holdings."]),
+            ("🔗 Leaver Item Check-in", ["Use Leaver Item Check-in for employees who have left and whose HR leaving date is valid.", "Record returned/not-returned items and any applicable deduction information."]),
+            ("📊 Store Reports", ["Use Store Reports for the report types your account is allowed to access."])
+        ]
+    },
+    "Store Manager": {
+        "emoji": "📦", "title": "Store Department Manager Training",
+        "intro": "Full Store training including requests, items, leaver clearance and reports.",
+        "topics": [
+            ("📦 Store Requests", ["Review Store Deduction and Store Return (Addition) workflows.", "Check employee, item, quantity/value and description information before progressing a request."]),
+            ("🧰 Items & Prices", ["Use Issue Items & Employee Holdings to manage employee item records.", "Store Department Managers can manage the Store Items & Prices master list when that permission is available."]),
+            ("🔗 Leaver Check-in & Clearance", ["Use Leaver Item Check-in for employees who have left and record returned/not-returned items and deductions.", "Follow the Store section of Leaver Clearance and check linked records before clearing the Store stage."]),
+            ("📊 Reports", ["Use the Store Reports area for complete Store, request, holdings, check-in and employee Store-file reports available to your account."])
+        ]
+    },
+    "HR Manager": {
+        "emoji": "🏢", "title": "HR Manager Training",
+        "intro": "Training for the HR Portal, leave, employees, leavers, reports and clearance workflow.",
+        "topics": [
+            ("👥 HR Portal", ["Open HR Portal to work with employee records, holiday information and HR functions assigned to HR Manager accounts."]),
+            ("📅 Holiday & Leave", ["Use the holiday/leave areas to review employee holiday position and leave records.", "Leave Approvals are available to HR Manager accounts according to the training guide."]),
+            ("🚪 Leavers & Clearance", ["Use the Leavers area to manage employee leaving information and the HR part of Leaver Clearance.", "Review the employee's leaving date and clearance information before completing the HR stage."]),
+            ("📥 HR Reports", ["Use HR Reports for the report/download functions available to your account."]),
+            ("🔄 Refresh & support", ["Refresh after updates and contact Wais Rahimi if you need a walkthrough."])
+        ]
+    },
+    "Director": {
+        "emoji": "🎯", "title": "Director Training",
+        "intro": "Training for Director approvals across the portal.",
+        "topics": [
+            ("➕ Addition & Deduction", ["Review pending requests, employee details, amount, description and attachments before making the available Director decision.", "Use the approval/rejection controls and record the decision/comments required by the workflow."]),
+            ("🛠️ Work Orders", ["Review and approve Work Orders through the Director workflow.", "Only Director-approved Work Orders count in payroll totals, as stated in the training deck."]),
+            ("👥 HR Leave Settlement", ["Review HR Leave Settlement requests and use the Director approval workflow where available."]),
+            ("📦 Store", ["Review Store Deductions and Returns and use the available Director approval controls."]),
+            ("💰 Inspector Bonus", ["Review monthly National Grid Inspector Bonus records and approve/reject through the Director workflow."]),
+            ("🚪 Leaver Clearance", ["Review the Director part of company-wide Leaver Clearance and approve the relevant payroll/leaver adjustments where applicable."]),
+            ("📊 Optional HR access", ["Some Director HR/report modules are individually granted by Super Admin, including Holiday Calendar, HR Reports, Employee Overview, Holiday Calculator and Employee Directory."])
+        ]
+    },
+    "Payroll": {
+        "emoji": "🧾", "title": "Payroll Training",
+        "intro": "View approved records, download authorised PDFs and process the Payroll section of Leaver Clearance.",
+        "topics": [
+            ("📋 Approved records", ["Payroll can view Director-approved records across the modules available to the role.", "Use the PDF controls to download authorised documents for payroll processing."]),
+            ("🚪 Leaver Clearance", ["Open Leaver Clearance and complete the Payroll section.", "Use Everything Clear when no adjustment is needed, or raise a Payroll Addition/Deduction for Director approval when an adjustment is required."]),
+            ("🛠️ Work Orders", ["Use the Work Orders view to review approved work and the available payroll totals/bulk download functions."]),
+            ("💰 Inspector Bonus", ["Use the National Grid Inspector Bonus area to view approved bonus records available to Payroll."]),
+            ("🔄 Refresh & support", ["Refresh for the latest records and contact Wais Rahimi for a walkthrough if needed."])
+        ]
+    },
+    "Super Admin": {
+        "emoji": "🛡️", "title": "Super Admin Training",
+        "intro": "Full system-management training. Super Admin has the broadest access, including users, permissions, settings and audit controls.",
+        "topics": [
+            ("👤 User Management", ["Create, edit and delete user accounts from System Management → User Management.", "Set the user's role, department, Employee ID link, module permissions and account active status.", "Permission changes are refreshed for authenticated users so updated access can take effect without requiring a fresh login."]),
+            ("🎖️ Roles & permissions", ["Manage role definitions and permission defaults from System Settings.", "Use individual user permissions for granular module access."]),
+            ("🏢 Departments & sub-departments", ["Manage Departments and their Sub-departments from System Settings."]),
+            ("⚙️ System settings", ["Manage categories, departments, sub-departments and roles from the System Settings area."]),
+            ("📖 Audit history", ["Use the Full System Audit Log to review recorded activity.", "Audit/data-reset controls are restricted to Super Admin and include permanent actions; review the warning before using any reset control."]),
+            ("🛡️ Security", ["Keep user accounts active only when required, use secure passwords, and log out when finished."])
+        ]
+    }
+}
+
+
+def _training_role_key(role_name):
+    raw = str(role_name or "").strip()
+    aliases = {"Store Clerk / Staff": "Store Clerk", "Store Department Manager": "Store Manager"}
+    return aliases.get(raw, raw)
+
+
+def render_training_help(current_user_info=None):
+    """Render only the training assigned to the currently authenticated role."""
+    user = current_user_info or st.session_state.get("user_info", {}) or {}
+    role_name = str(user.get("role", "")).strip()
+    role_key = _training_role_key(role_name)
+    content = TRAINING_ROLE_CONTENT.get(role_key)
+    st.subheader("📚 Training & Help Centre")
+    st.caption(f"Training is restricted to your signed-in role: **{role_name or 'User'}**")
+    st.info(f"💡 If you do not understand a step, cannot find a function, or need a walkthrough, please contact **{TRAINING_SUPPORT_CONTACT}**.")
+    if not content:
+        st.warning("No role-specific training has been configured for this account yet.")
+        st.write(f"Please contact **{TRAINING_SUPPORT_CONTACT}** for your training guide.")
+        return
+    st.markdown(f"### {content['emoji']} {content['title']}")
+    st.write(content["intro"])
+    search = st.text_input("🔎 Search your training", placeholder="e.g. leave, work order, store, payroll, login...", key="training_help_search").strip().casefold()
+    topics = content["topics"]
+    if search:
+        topics = [(title, steps) for title, steps in topics if search in title.casefold() or any(search in str(step).casefold() for step in steps)]
+        if not topics:
+            st.warning(f"No training topic matched **{search}**. Contact {TRAINING_SUPPORT_CONTACT} if you need help finding the right process.")
+            return
+    for topic_index, (topic_title, steps) in enumerate(topics):
+        with st.expander(topic_title, expanded=(len(topics) == 1 or topic_index == 0)):
+            for step_number, step in enumerate(steps, 1):
+                st.markdown(f"**{step_number}.** {step}")
+    st.divider()
+    st.markdown("### 🧑‍🏫 Still need help?")
+    st.success(f"If the guide does not answer your question, please contact **{TRAINING_SUPPORT_CONTACT}** for a walkthrough or further training.")
+
+
+# ============================================================
 # 📋 ROLE-BASED PORTALS
 # ============================================================
 def render_new_store_department_layout(full_name, dept_name, can_manage_store_items=False):
@@ -12359,44 +12475,72 @@ def render_new_store_department_layout(full_name, dept_name, can_manage_store_it
 
 
 if role == "Employee":
-    if user_info.get("can_access_employee_items", False):
+    has_training_help = bool(user_info.get("can_access_training_help", False))
+    has_employee_items = bool(user_info.get("can_access_employee_items", False))
+    if has_training_help and has_employee_items:
+        training_tab, items_tab = st.tabs(["📚 Training & Help", "🧰 My Employee Items"])
+        with training_tab:
+            render_training_help(user_info)
+        with items_tab:
+            st.subheader(f"🧰 My Employee Items — {full_name}")
+            itab1, itab2 = st.tabs(["📊 My Holdings", "📚 My Check-in History"])
+            with itab1:
+                linked_id = str(user_info.get("employee_id", "")).strip()
+                all_holdings = load_employee_items(force=True)
+                own = [r for r in all_holdings if str(r.get("employee_id", "")).strip() == linked_id and float(r.get("qty_outstanding",0) or 0) > 0]
+                if own:
+                    st.dataframe(pd.DataFrame([{"Employee":r.get("emp_name"),"Department":r.get("emp_dept"),"Item":r.get("item_name"),"Outstanding":r.get("qty_outstanding"),"Unit £":r.get("unit_price"),"Issue Date":r.get("issue_date")} for r in own]), width="stretch", hide_index=True)
+                    pdf=_build_item_holdings_pdf(own, f"My Employee Item Holdings - {full_name}")
+                    st.download_button("📄 Download My Holdings PDF", data=pdf or b"", file_name="My_Employee_Item_Holdings.pdf", mime="application/pdf", disabled=not bool(pdf), key="employee_my_holdings_pdf")
+                else:
+                    st.info("No outstanding company items are currently recorded against your linked HR employee account.")
+            with itab2:
+                linked_id = str(user_info.get("employee_id", "")).strip()
+                mine=[c for c in load_item_checkins(force=True) if str(c.get("employee_id","")).strip()==linked_id]
+                if not mine: st.info("No check-in history found.")
+                for c in reversed(mine):
+                    st.write(f"#{c.get('id')} | {c.get('checkin_date')} | Deduction £{float(c.get('total_deduction',0) or 0):.2f}")
+                    pdf=_build_item_checkin_pdf(c, f"My Leaver Item Check-in #{c.get('id')}")
+                    st.download_button("📄 PDF", data=pdf or b"", file_name=f"My_Checkin_{c.get('id')}.pdf", mime="application/pdf", disabled=not bool(pdf), key=f"employee_checkin_pdf_{c.get('id')}")
+    elif has_training_help:
+        render_training_help(user_info)
+    elif has_employee_items:
         st.subheader(f"🧰 My Employee Items — {full_name}")
         itab1, itab2 = st.tabs(["📊 My Holdings", "📚 My Check-in History"])
         with itab1:
             linked_id = str(user_info.get("employee_id", "")).strip()
             all_holdings = load_employee_items(force=True)
             own = [r for r in all_holdings if str(r.get("employee_id", "")).strip() == linked_id and float(r.get("qty_outstanding",0) or 0) > 0]
-            if own:
-                st.dataframe(pd.DataFrame([{"Employee":r.get("emp_name"),"Department":r.get("emp_dept"),"Item":r.get("item_name"),"Outstanding":r.get("qty_outstanding"),"Unit £":r.get("unit_price"),"Issue Date":r.get("issue_date")} for r in own]), width="stretch", hide_index=True)
-                pdf=_build_item_holdings_pdf(own, f"My Employee Item Holdings - {full_name}")
-                st.download_button("📄 Download My Holdings PDF", data=pdf or b"", file_name="My_Employee_Item_Holdings.pdf", mime="application/pdf", disabled=not bool(pdf), key="employee_my_holdings_pdf")
-            else:
-                st.info("No outstanding company items are currently recorded against your linked HR employee account.")
+            if own: st.dataframe(pd.DataFrame([{"Employee":r.get("emp_name"),"Department":r.get("emp_dept"),"Item":r.get("item_name"),"Outstanding":r.get("qty_outstanding"),"Unit £":r.get("unit_price"),"Issue Date":r.get("issue_date")} for r in own]), width="stretch", hide_index=True)
+            else: st.info("No outstanding company items are currently recorded against your linked HR employee account.")
         with itab2:
             linked_id = str(user_info.get("employee_id", "")).strip()
             mine=[c for c in load_item_checkins(force=True) if str(c.get("employee_id","")).strip()==linked_id]
             if not mine: st.info("No check-in history found.")
-            for c in reversed(mine):
-                st.write(f"#{c.get('id')} | {c.get('checkin_date')} | Deduction £{float(c.get('total_deduction',0) or 0):.2f}")
-                pdf=_build_item_checkin_pdf(c, f"My Leaver Item Check-in #{c.get('id')}")
-                st.download_button("📄 PDF", data=pdf or b"", file_name=f"My_Checkin_{c.get('id')}.pdf", mime="application/pdf", disabled=not bool(pdf), key=f"employee_checkin_pdf_{c.get('id')}")
+    else:
+        st.info("No modules have been enabled for your account. Please contact your Super Admin.")
 
 elif role == "Work Order Employee":
-    render_work_order_employee_portal(full_name, dept)
+    if user_info.get("can_access_training_help", False):
+        training_tab, portal_tab = st.tabs(["📚 Training & Help", "🛠️ Work Orders"])
+        with training_tab: render_training_help(user_info)
+        with portal_tab: render_work_order_employee_portal(full_name, dept)
+    else:
+        render_work_order_employee_portal(full_name, dept)
 
 elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = st.tabs([
-        "➕ Addition & Deduction",
-        "👥 HR Leave Settlement",
-        "📦 Store Deductions",
-        "📦 Store Returns (Additions)",
-        "🧾 Leaver Clearance",
-        "🛠️ Work Orders",
-        "💰 National Grid Inspector Bonus"
-    ])
+    payroll_tab_labels = [
+        "➕ Addition & Deduction", "👥 HR Leave Settlement",
+        "📦 Store Deductions", "📦 Store Returns (Additions)",
+        "🧾 Leaver Clearance", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"
+    ]
+    if user_info.get("can_access_training_help", False): payroll_tab_labels.append("📚 Training & Help")
+    payroll_tabs = st.tabs(payroll_tab_labels)
+    tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = payroll_tabs[:7]
+    tab_training_help = payroll_tabs[7] if len(payroll_tabs) > 7 else None
     with tab_add_ded:
         tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
         with tab_pending:
@@ -12449,10 +12593,17 @@ elif role == "Payroll":
     with tab_leaver: render_leaver_clearance_payroll(full_name)
     with tab_work_orders: render_work_order_payroll_portal(full_name)
     with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
+    if tab_training_help is not None:
+        with tab_training_help:
+            render_training_help(user_info)
 
 elif role == "Work Order Manager":
     dept_name = dept
-    request_tab, work_order_tab = st.tabs(["➕ Addition & Deduction", "🛠️ Work Orders"])
+    wo_mgr_tab_labels = ["➕ Addition & Deduction", "🛠️ Work Orders"]
+    if user_info.get("can_access_training_help", False): wo_mgr_tab_labels.append("📚 Training & Help")
+    wo_mgr_tabs = st.tabs(wo_mgr_tab_labels)
+    request_tab, work_order_tab = wo_mgr_tabs[0], wo_mgr_tabs[1]
+    training_help_tab = wo_mgr_tabs[2] if len(wo_mgr_tabs) > 2 else None
     with request_tab:
         dept_name = dept
         if st.session_state.get("editing_request_id"):
@@ -12609,6 +12760,9 @@ elif role == "Work Order Manager":
                                 st.session_state.editing_request_id = req.get("id"); st.rerun()
     with work_order_tab:
         render_work_order_manager_portal(full_name, dept_name, show_total=True)
+    if training_help_tab is not None:
+        with training_help_tab:
+            render_training_help(user_info)
 
 elif role in ["Manager", "Staff", "Team Member"]:
     dept_name = dept
@@ -12625,11 +12779,14 @@ elif role in ["Manager", "Staff", "Team Member"]:
     if is_store_user:
         # Only the Store Department Manager can add/edit/delete Store Items & Prices.
         is_store_department_manager = str(role).strip().casefold() == "manager"
-        render_new_store_department_layout(
-            full_name,
-            dept_name,
-            can_manage_store_items=is_store_department_manager,
-        )
+        if user_info.get("can_access_training_help", False):
+            store_portal_tab, training_help_tab = st.tabs(["📦 Store Department", "📚 Training & Help"])
+            with store_portal_tab:
+                render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager)
+            with training_help_tab:
+                render_training_help(user_info)
+        else:
+            render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager)
     else:
         labels = []
         if has_addition_deduction: labels.append("➕ Addition & Deduction")
@@ -12649,6 +12806,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if has_employee_items: labels.append("📚 Check-in History")
         if has_work_orders: labels.append("🛠️ Work Orders")
         if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
+        if user_info.get("can_access_training_help", False): labels.append("📚 Training & Help")
         if not labels:
             st.subheader("🔐 Access Restricted")
             st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
@@ -12863,6 +13021,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 with tabs[tab_idx]:
                     render_inspector_bonus_portal(full_name, dept_name)
                 tab_idx += 1
+            if user_info.get("can_access_training_help", False):
+                with tabs[tab_idx]:
+                    render_training_help(user_info)
+                tab_idx += 1
 
 
 elif role == "Director":
@@ -12883,6 +13045,8 @@ elif role == "Director":
     ]
     if director_hr_access_enabled:
         director_tab_labels.insert(1, "📊 HR Reports & Calendar")
+    if user_info.get("can_access_training_help", False):
+        director_tab_labels.append("📚 Training & Help")
     director_tabs = st.tabs(director_tab_labels)
     director_addition_tab = director_tabs[0]
     if director_hr_access_enabled:
@@ -12894,6 +13058,7 @@ elif role == "Director":
         director_employee_items_tab = director_tabs[6]
         director_work_order_tab = director_tabs[7]
         director_inspector_tab = director_tabs[8]
+        director_training_tab = director_tabs[9] if user_info.get("can_access_training_help", False) else None
     else:
         director_hr_access_tab = None
         director_leaver_payroll_tab = director_tabs[1]
@@ -12903,6 +13068,7 @@ elif role == "Director":
         director_employee_items_tab = director_tabs[5]
         director_work_order_tab = director_tabs[6]
         director_inspector_tab = director_tabs[7]
+        director_training_tab = director_tabs[8] if user_info.get("can_access_training_help", False) else None
     with director_addition_tab:
         st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -13056,8 +13222,12 @@ elif role == "Director":
     with director_work_order_tab: render_work_order_director_portal(full_name)
     with director_inspector_tab: render_inspector_bonus_director_portal(full_name)
 
+    if director_training_tab is not None:
+        with director_training_tab:
+            render_training_help(user_info)
+
 elif role == "Super Admin":
-    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab = st.tabs([
+    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab = st.tabs([
         "➕ Addition & Deduction",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
@@ -13065,7 +13235,8 @@ elif role == "Super Admin":
         "🛠️ Work Orders",
         "💰 National Grid Inspector Bonus",
         "🛡️ Data Control",
-        "🔧 System Management"
+        "🔧 System Management",
+        "📚 Training & Help"
     ])
     with super_add_ded_tab:
         st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
@@ -13348,6 +13519,12 @@ elif role == "Super Admin":
                     st.session_state["confirm_live_launch"] = False
                     st.rerun()
 
+    with super_training_help_tab:
+        if user_info.get("can_access_training_help", False):
+            render_training_help(user_info)
+        else:
+            st.info("Training & Help Centre is not enabled for this account. Please enable the module if required.")
+
 else:
     st.subheader("🔐 Access Restricted")
     st.error("❌ Your role does not have a defined portal. Please contact Super Admin.")
@@ -13356,3 +13533,4 @@ else:
 # ============================================================
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
+
