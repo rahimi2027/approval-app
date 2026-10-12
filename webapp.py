@@ -1053,7 +1053,6 @@ def _initialise_drive_storage_once():
         (SETTINGS_PATH, ["setting", "value"]),
         (HR_EMPLOYEES_PATH, HR_EMPLOYEE_COLUMNS),
         (HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS),
-        (STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS),
     ]
     for path, columns in critical:
         try:
@@ -1511,23 +1510,58 @@ def show_old_new_comparison(old_json, new_rec):
 
 def refresh_data_button():
     if st.button("🔄 Refresh Data", type="secondary", key="refresh_data_btn"):
-        with st.spinner("Refreshing from Google Drive..."):
+        refreshed = []
+        failures = []
+        with st.spinner("Refreshing data from Google Drive..."):
             if drive_service is not None:
-                # User accounts are intentionally excluded from the manual Drive
-                # download refresh. The local user DB is authoritative so an older
-                # Drive copy cannot lock everyone out after a page refresh.
+                # Store Items must be loaded from its named backup: the live local
+                # workbook can be stale even while BACKUP_store_items.xlsx is current.
                 for path in (EXCEL_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH, EMPLOYEE_ITEMS_PATH, ITEM_CHECKIN_PATH, LEAVER_CLEARANCE_PATH):
+                    if path == USER_DB_PATH:
+                        continue
+                    if path == STORE_ITEMS_PATH:
+                        remote = _drive_find_file(DRIVE_BACKUP_FILENAMES[STORE_ITEMS_PATH])
+                        if remote:
+                            temp_path = STORE_ITEMS_PATH + ".refresh.tmp.xlsx"
+                            if _drive_download_file(remote["id"], temp_path):
+                                try:
+                                    check = pd.read_excel(temp_path, engine="openpyxl")
+                                    if not all(c in check.columns for c in STORE_ITEMS_COLUMNS):
+                                        raise ValueError("Backup is missing required columns: " + ", ".join(STORE_ITEMS_COLUMNS))
+                                    if check.empty:
+                                        raise ValueError("Backup contains no item rows; local data was left unchanged.")
+                                    backup_copy = STORE_ITEMS_PATH + ".before_drive_refresh.xlsx"
+                                    if os.path.exists(STORE_ITEMS_PATH):
+                                        shutil.copy2(STORE_ITEMS_PATH, backup_copy)
+                                    os.replace(temp_path, STORE_ITEMS_PATH)
+                                    refreshed.append("Store Items from BACKUP_store_items.xlsx")
+                                except Exception as exc:
+                                    failures.append(f"Store Items backup: {exc}")
+                                    try:
+                                        if os.path.exists(temp_path): os.remove(temp_path)
+                                    except Exception: pass
+                            else:
+                                failures.append("Could not download BACKUP_store_items.xlsx")
+                        else:
+                            failures.append("BACKUP_store_items.xlsx was not found in the configured Drive folder")
+                        continue
                     with _DRIVE_SYNC_LOCK:
-                        pending = path in DRIVE_PENDING_SYNC
+                        pending = os.path.abspath(path) in DRIVE_PENDING_SYNC
                     if pending:
                         continue
                     remote = _drive_find_file(os.path.basename(path))
-                    if remote:
-                        _drive_download_file(remote["id"], path)
+                    if remote and _drive_download_file(remote["id"], path):
+                        refreshed.append(os.path.basename(path))
+            else:
+                failures.append("Google Drive is not connected; check the service-account credentials and folder permissions.")
             _invalidate_data_cache("_records_cache", "_users_cache", "_settings_cache", "_audit_log_cache", "_work_orders_cache", "_inspector_bonus_cache", "_audit_log_count", "_hr_leave_cache", "_hr_daily_rates_cache", "_store_deduction_cache", "_store_items_cache", "_employee_items_cache", "_item_checkins_cache")
             st.session_state["hrp_force_reload"] = True
             st.session_state["hrp_data_loaded"] = False
             st.session_state["_last_refresh"] = datetime.now().isoformat()
+        if refreshed:
+            st.success("Refreshed: " + ", ".join(refreshed))
+        if failures:
+            st.error("Some data could not be refreshed: " + " | ".join(failures))
         st.rerun()
 
 def init_settings():
@@ -9914,75 +9948,53 @@ def render_store_payroll_portal(type_filter="Deduction"):
             st.divider()
             display_store_deduction_pdf_button(r, key_prefix=f"store_payroll_{type_filter}")
 
-def _restore_store_items_from_drive_backup():
-    """Restore Store Items from the exact Google Drive backup after validating it."""
-    if drive_service is None:
-        st.error("Google Drive is not connected, so the Store Items backup cannot be restored.")
-        return False
-
-    backup_name = "BACKUP_store_items.xlsx"
-    remote = _drive_find_file(backup_name)
-    if not remote:
-        _invalidate_drive_file_cache(backup_name, GOOGLE_DRIVE_FOLDER_ID)
-        remote = _drive_find_file(backup_name)
-    if not remote:
-        st.error(f"Could not find {backup_name} in the configured Google Drive backup folder.")
-        return False
-
-    os.makedirs(APP_FOLDER, exist_ok=True)
-    temp_path = STORE_ITEMS_PATH + ".restore.tmp.xlsx"
-    try:
-        if not _drive_download_file(remote.get("id"), temp_path):
-            st.error("Could not download the Store Items backup from Google Drive.")
-            return False
-        df = pd.read_excel(temp_path, engine="openpyxl").fillna("")
-        required = ["Item Name", "Price (£)", "Active"]
-        if any(col not in df.columns for col in required):
-            st.error("The backup does not have the expected columns: Item Name, Price (£), Active. Nothing was changed.")
-            return False
-        clean_rows = []
-        for _, row in df.iterrows():
-            name = str(row.get("Item Name", "")).strip()
-            if not name:
-                continue
-            try:
-                price = float(row.get("Price (£)", 0) or 0)
-            except (TypeError, ValueError):
-                st.error(f"Invalid price for '{name}' in the backup. Nothing was changed.")
-                return False
-            active_value = str(row.get("Active", "True")).strip().lower()
-            active = active_value in ("true", "yes", "1", "y")
-            clean_rows.append({"Item Name": name, "Price (£)": price, "Active": active})
-        if not clean_rows:
-            st.error("The backup contains no valid store items. Nothing was changed.")
-            return False
-        pd.DataFrame(clean_rows, columns=required).to_excel(temp_path, index=False, engine="openpyxl")
-        os.replace(temp_path, STORE_ITEMS_PATH)
-        _invalidate_data_cache("_store_items_cache")
-        st.session_state.pop("editing_store_item_idx", None)
-        _mark_drive_file_dirty(STORE_ITEMS_PATH, make_recovery_snapshot=False)
-        st.success(f"Restored {len(clean_rows)} Store Items from {backup_name}. The page will reload now.")
-        return True
-    except Exception as exc:
-        st.error(f"Store Items restore failed: {type(exc).__name__}: {exc}")
-        return False
-    finally:
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except Exception:
-            pass
-
-
 def render_store_items_settings():
     st.markdown("### 📦 Store Items & Prices")
     st.caption("These items and prices will be available in the Store Department Deduction form dropdown.")
-    with st.expander("Restore Store Items from Google Drive backup", expanded=False):
-        st.warning("This replaces the current Store Items list and prices with the contents of BACKUP_store_items.xlsx. Other app data is not changed.")
-        if st.button("Restore Store Items Backup Now", key="restore_store_items_backup_btn", type="primary"):
-            if _restore_store_items_from_drive_backup():
-                st.rerun()
-    items = load_store_items()
+
+    # Explicit restore action: this reads the exact backup filename and validates it
+    # before replacing the local workbook. Only privileged roles can run it.
+    current_role = str(st.session_state.get("user_info", {}).get("role", "")).strip()
+    if current_role in {"Super Admin", "Director"}:
+        with st.expander("☁️ Restore Store Items from Google Drive backup", expanded=False):
+            st.warning("This replaces the current Store Items list with BACKUP_store_items.xlsx. A local copy of the current workbook is kept first.")
+            if st.button("Restore Store Items Backup Now", key="restore_store_items_drive_backup", type="primary"):
+                if drive_service is None:
+                    st.error("Google Drive is not connected. Check the service-account credentials and Drive folder access.")
+                else:
+                    with st.spinner("Downloading and validating BACKUP_store_items.xlsx..."):
+                        remote = _drive_find_file(DRIVE_BACKUP_FILENAMES[STORE_ITEMS_PATH])
+                        if not remote:
+                            st.error("BACKUP_store_items.xlsx was not found in the configured Google Drive folder.")
+                        else:
+                            temp_path = STORE_ITEMS_PATH + ".restore.tmp.xlsx"
+                            try:
+                                if not _drive_download_file(remote["id"], temp_path):
+                                    raise RuntimeError("Google Drive download failed; the current list was not changed.")
+                                restored_df = pd.read_excel(temp_path, engine="openpyxl")
+                                missing = [c for c in STORE_ITEMS_COLUMNS if c not in restored_df.columns]
+                                if missing:
+                                    raise ValueError("Backup is missing required columns: " + ", ".join(missing))
+                                if restored_df.empty:
+                                    raise ValueError("Backup has no item rows; current list was not changed.")
+                                restored_df = restored_df[STORE_ITEMS_COLUMNS].copy()
+                                restored_df["Item Name"] = restored_df["Item Name"].astype(str).str.strip()
+                                restored_df["Price (£)"] = pd.to_numeric(restored_df["Price (£)"], errors="raise")
+                                if (restored_df["Item Name"] == "").any() or (restored_df["Price (£)"] < 0).any():
+                                    raise ValueError("Backup contains blank item names or negative prices.")
+                                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                if os.path.exists(STORE_ITEMS_PATH):
+                                    shutil.copy2(STORE_ITEMS_PATH, STORE_ITEMS_PATH + ".before_restore_" + stamp + ".xlsx")
+                                os.replace(temp_path, STORE_ITEMS_PATH)
+                                _invalidate_data_cache("_store_items_cache")
+                                st.success(f"Restored {len(restored_df)} Store Items from BACKUP_store_items.xlsx.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Restore failed: {exc}")
+                                try:
+                                    if os.path.exists(temp_path): os.remove(temp_path)
+                                except Exception: pass
+    items = load_store_items(force=True)
     if "editing_store_item_idx" not in st.session_state:
         st.session_state.editing_store_item_idx = None
     with st.form("add_store_item_form", clear_on_submit=True):
