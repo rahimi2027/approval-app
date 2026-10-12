@@ -1053,6 +1053,9 @@ def _initialise_drive_storage_once():
         (SETTINGS_PATH, ["setting", "value"]),
         (HR_EMPLOYEES_PATH, HR_EMPLOYEE_COLUMNS),
         (HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS),
+        # Store item master must be restored from Drive on a fresh/ephemeral
+        # deployment before initialise_store_deduction() seeds default items.
+        (STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS),
     ]
     for path, columns in critical:
         try:
@@ -7196,10 +7199,36 @@ def load_store_items(force=False):
         return []
 
 def save_store_items(records):
-    rows = [{"Item Name": r["name"], "Price (£)": float(r["price"]), "Active": bool(r["active"])} for r in records]
-    pd.DataFrame(rows, columns=STORE_ITEMS_COLUMNS).to_excel(STORE_ITEMS_PATH, index=False, engine="openpyxl")
-    _set_data_cache("_store_items_cache", list(records))
-    sync_saved_file_to_drive(STORE_ITEMS_PATH)
+    rows = [
+        {
+            "Item Name": str(r.get("name", "")).strip(),
+            "Price (£)": float(r.get("price", 0)),
+            "Active": bool(r.get("active", True)),
+        }
+        for r in records
+    ]
+    # Write atomically so a restart cannot leave a half-written item master.
+    temp_path = STORE_ITEMS_PATH + ".tmp.xlsx"
+    pd.DataFrame(rows, columns=STORE_ITEMS_COLUMNS).to_excel(
+        temp_path, index=False, engine="openpyxl"
+    )
+    os.replace(temp_path, STORE_ITEMS_PATH)
+
+    # Keep this session's cache in step with the saved workbook.
+    _set_data_cache("_store_items_cache", [
+        {"name": r["Item Name"], "price": r["Price (£)"], "active": r["Active"]}
+        for r in rows
+    ])
+
+    # Store item prices are used by other staff immediately. Do not leave this
+    # master workbook queued for the hourly backup, or a restart may restore
+    # yesterday's Drive copy over the latest local changes.
+    if drive_service is not None:
+        if not _sync_saved_file_to_drive_now(STORE_ITEMS_PATH):
+            print("Store items saved locally; Google Drive sync is pending.")
+            _mark_drive_file_dirty(STORE_ITEMS_PATH, make_recovery_snapshot=False)
+    else:
+        _mark_drive_file_dirty(STORE_ITEMS_PATH, make_recovery_snapshot=False)
 
 # ============================================================
 # 🔗 EMPLOYEE LEAVER CLEARANCE — COMPANY-WIDE WORKFLOW
