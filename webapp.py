@@ -770,16 +770,14 @@ def _sync_saved_file_to_drive_now_once(local_path):
         try:
             live_id = _drive_upload_path(local_path, filename)
             if live_id:
-                # For the user database, prove the uploaded bytes are identical before
-                # reporting success. This prevents a false "saved" state.
-                if local_path == USER_DB_PATH:
-                    if _drive_verify_file_matches_local(local_path, live_id):
-                        live_ok = True
-                    else:
-                        live_error = "Google Drive user database upload could not be verified against the local file."
-                        DRIVE_LAST_SYNC_ERROR[filename] = live_error
-                else:
+                # Verify the uploaded workbook bytes against the local workbook.
+                # An API upload response alone is not proof that the intended file
+                # now contains these exact bytes.
+                if _drive_verify_file_matches_local(local_path, live_id):
                     live_ok = True
+                else:
+                    live_error = f"Google Drive upload for {filename} could not be verified against the local file."
+                    DRIVE_LAST_SYNC_ERROR[filename] = live_error
                 if live_ok:
                     DRIVE_LAST_SYNC[filename] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     DRIVE_LAST_SYNC_ERROR.pop(filename, None)
@@ -793,16 +791,15 @@ def _sync_saved_file_to_drive_now_once(local_path):
             try:
                 backup_id = _drive_upload_path(local_path, backup_name)
                 if backup_id:
-                    # Verify that the exact Option A Drive file can be found after the update.
-                    verified_remote = _drive_find_file(backup_name)
-                    if verified_remote and verified_remote.get("id") == backup_id:
+                    # Verify the exact uploaded backup file ID contains the same bytes.
+                    if _drive_verify_file_matches_local(local_path, backup_id):
                         backup_ok = True
                         synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         DRIVE_LAST_SYNC[backup_name] = synced_at
                         DRIVE_LAST_SYNC_ERROR.pop(backup_name, None)
                     else:
                         DRIVE_LAST_SYNC_ERROR[backup_name] = (
-                            f"Uploaded file ID {backup_id} could not be re-found as {backup_name}."
+                            f"Google Drive backup {backup_name} did not match the local workbook after upload."
                         )
                 else:
                     DRIVE_LAST_SYNC_ERROR[backup_name] = DRIVE_LAST_SYNC_ERROR.get(
@@ -816,18 +813,16 @@ def _sync_saved_file_to_drive_now_once(local_path):
         if backup_name and not backup_ok:
             print(f"Google Drive backup sync failed for {backup_name}: {DRIVE_LAST_SYNC_ERROR.get(backup_name, '')}")
 
-        if live_ok or backup_ok:
+        # Do not report success if either expected copy failed. In particular,
+        # "Save All Data to Google Drive Now" must not silently accept a backup-only
+        # upload while the live workbook remains stale (or vice versa).
+        all_expected_copies_ok = live_ok and (not backup_name or backup_ok)
+        if all_expected_copies_ok:
             try:
                 st_info = os.stat(local_path)
                 _DRIVE_SYNC_FINGERPRINTS[local_path] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
             except Exception:
                 pass
-            # A user DB is considered fully synced only when its live Drive copy was
-            # verified. A backup-only success is not enough for this critical file.
-            if local_path == USER_DB_PATH and not live_ok:
-                DRIVE_PENDING_SYNC.add(local_path)
-                _save_drive_sync_state()
-                return False
             DRIVE_PENDING_SYNC.discard(local_path)
             _save_drive_sync_state()
             return True
@@ -969,12 +964,15 @@ def _start_drive_background_worker():
 def _force_sync_all_drive_files():
     """Explicit Super Admin/Director action: upload every existing workbook immediately."""
     results = []
-    for local_path in DRIVE_BACKUP_FILENAMES:
-        local_path = os.path.abspath(os.path.normpath(local_path))
+    for configured_path in DRIVE_BACKUP_FILENAMES:
+        local_path = os.path.abspath(os.path.normpath(configured_path))
+        label = os.path.basename(local_path)
         if not os.path.exists(local_path):
+            DRIVE_LAST_SYNC_ERROR[label] = "Local workbook is missing; no upload was attempted."
+            results.append((label, False))
             continue
         ok = _sync_saved_file_to_drive_now(local_path)
-        results.append((os.path.basename(local_path), ok))
+        results.append((label, ok))
     return results
 
 
@@ -1021,7 +1019,7 @@ def render_google_drive_status():
             st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
         else:
             st.success("Google Drive backup is connected.")
-            st.caption("Normal user actions use local persistent files. Google Drive is updated automatically every hour.")
+            st.caption("Normal user actions save locally. Use Refresh Data to restore from Drive; use Save All Data to Google Drive Now to upload local files. A file is marked successful only after the uploaded live workbook and its configured backup are verified.")
 
         if st.button("🔄 Save All Data to Google Drive Now", key="force_drive_sync_all"):
             if drive_service is None:
@@ -7126,14 +7124,73 @@ def get_hr_daily_rate(dept, transaction_type):
 # ============================================================
 def initialise_store_deduction():
     safe_init_excel(STORE_DEDUCTION_PATH, STORE_DEDUCTION_COLUMNS)
-    safe_init_excel(STORE_ITEMS_PATH, STORE_ITEMS_COLUMNS)
+
+    # Store Items must be recovered from the named Drive backup before creating
+    # defaults. Some hosted Streamlit deployments lose local files on restart;
+    # creating defaults first would otherwise make the old 5-item list authoritative.
+    local_has_items = False
+    local_looks_like_legacy_defaults = False
     try:
-        df_items = _read_excel_records(STORE_ITEMS_PATH)
-        if df_items.empty:
-            pd.DataFrame(DEFAULT_STORE_ITEMS).to_excel(STORE_ITEMS_PATH, index=False, engine="openpyxl")
-            sync_saved_file_to_drive(STORE_ITEMS_PATH)
+        if os.path.exists(STORE_ITEMS_PATH) and os.path.getsize(STORE_ITEMS_PATH) > 0:
+            existing_items = pd.read_excel(STORE_ITEMS_PATH, engine="openpyxl")
+            local_has_items = (
+                all(c in existing_items.columns for c in STORE_ITEMS_COLUMNS)
+                and not existing_items.empty
+            )
+            if local_has_items:
+                # The original five-item defaults are the known stale list reported
+                # in the supplied backup. Prefer the Drive backup over that list.
+                local_norm = existing_items[STORE_ITEMS_COLUMNS].copy()
+                local_norm["Item Name"] = local_norm["Item Name"].astype(str).str.strip()
+                local_norm["Price (£)"] = pd.to_numeric(local_norm["Price (£)"], errors="coerce")
+                default_norm = pd.DataFrame(DEFAULT_STORE_ITEMS, columns=STORE_ITEMS_COLUMNS)
+                default_norm["Item Name"] = default_norm["Item Name"].astype(str).str.strip()
+                default_norm["Price (£)"] = pd.to_numeric(default_norm["Price (£)"], errors="coerce")
+                local_looks_like_legacy_defaults = (
+                    len(local_norm) == len(default_norm)
+                    and local_norm["Item Name"].tolist() == default_norm["Item Name"].tolist()
+                    and local_norm["Price (£)"].tolist() == default_norm["Price (£)"].tolist()
+                )
     except Exception:
-        pass
+        local_has_items = False
+        local_looks_like_legacy_defaults = False
+
+    if (not local_has_items or local_looks_like_legacy_defaults) and drive_service is not None:
+        temp_path = STORE_ITEMS_PATH + ".startup_restore.tmp.xlsx"
+        try:
+            backup_name = DRIVE_BACKUP_FILENAMES.get(STORE_ITEMS_PATH, "BACKUP_store_items.xlsx")
+            remote = _drive_find_file(backup_name)
+            if remote and _drive_download_file(remote["id"], temp_path):
+                restored_items = pd.read_excel(temp_path, engine="openpyxl")
+                if not all(c in restored_items.columns for c in STORE_ITEMS_COLUMNS):
+                    raise ValueError("Store Items backup is missing required columns.")
+                if restored_items.empty:
+                    raise ValueError("Store Items backup contains no item rows.")
+                restored_items = restored_items[STORE_ITEMS_COLUMNS].copy()
+                restored_items["Item Name"] = restored_items["Item Name"].astype(str).str.strip()
+                restored_items["Price (£)"] = pd.to_numeric(restored_items["Price (£)"], errors="raise")
+                if (restored_items["Item Name"] == "").any() or (restored_items["Price (£)"] < 0).any():
+                    raise ValueError("Store Items backup contains blank names or negative prices.")
+                os.replace(temp_path, STORE_ITEMS_PATH)
+                print(f"Restored {len(restored_items)} Store Items from {backup_name}.")
+                local_has_items = True
+        except Exception as e:
+            print(f"Store Items startup restore failed; defaults will only be used if no valid local list exists: {e}")
+        finally:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception:
+                pass
+
+    if not local_has_items:
+        # Only create defaults when neither a valid local list nor a valid Drive
+        # backup is available. Do not let this fallback overwrite a good backup.
+        pd.DataFrame(DEFAULT_STORE_ITEMS, columns=STORE_ITEMS_COLUMNS).to_excel(
+            STORE_ITEMS_PATH, index=False, engine="openpyxl"
+        )
+        if drive_service is not None:
+            _sync_saved_file_to_drive_now(STORE_ITEMS_PATH)
 
 def load_store_deductions(force=False):
     if not force and "_store_deduction_cache" in st.session_state:
@@ -7234,7 +7291,14 @@ def save_store_items(records):
     rows = [{"Item Name": r["name"], "Price (£)": float(r["price"]), "Active": bool(r["active"])} for r in records]
     pd.DataFrame(rows, columns=STORE_ITEMS_COLUMNS).to_excel(STORE_ITEMS_PATH, index=False, engine="openpyxl")
     _set_data_cache("_store_items_cache", list(records))
-    sync_saved_file_to_drive(STORE_ITEMS_PATH)
+
+    # Store names/prices are operational data: sync the live workbook and its
+    # BACKUP_store_items.xlsx immediately rather than relying on the hourly queue.
+    if drive_service is not None:
+        if not _sync_saved_file_to_drive_now(STORE_ITEMS_PATH):
+            _mark_drive_file_dirty(STORE_ITEMS_PATH)
+    else:
+        _mark_drive_file_dirty(STORE_ITEMS_PATH)
 
 # ============================================================
 # 🔗 EMPLOYEE LEAVER CLEARANCE — COMPANY-WIDE WORKFLOW
