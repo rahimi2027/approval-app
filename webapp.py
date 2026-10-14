@@ -5309,7 +5309,7 @@ def render_hr_portal(current_user_info=None):
 
     if is_hr and hr_reports_tab is not None:
         with hr_reports_tab:
-            render_hr_download_reports()
+            st.info("HR Reports have moved to the top-level '🚪 Leavers, Clearance & Reports' tab.")
 
     if not is_hr:
         pass
