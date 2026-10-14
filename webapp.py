@@ -9539,16 +9539,37 @@ def render_store_deduction_form(user_name, user_dept):
             selected_item = st.selectbox("Item Name", options=item_options, key=f"{widget_prefix}_item_select_{i}", index=item_options.index(item_row.get("item_name", "")) if item_row.get("item_name") in item_options else 0)
             if selected_item != item_row.get("item_name", ""):
                 item_row["item_name"] = selected_item
-                match = next((it for it in store_items_master if it["name"] == selected_item), None)
+                match = next(
+                    (
+                        it for it in store_items_master
+                        if str(it.get("name", "")).strip().casefold()
+                        == str(selected_item).strip().casefold()
+                    ),
+                    None,
+                )
                 if match:
-                    item_row["price"] = match["price"]
-                    if f"store_item_price_{i}" in st.session_state:
-                        st.session_state[f"store_item_price_{i}"] = match["price"]
+                    item_row["price"] = float(match.get("price", 0) or 0)
+                    # Keep Streamlit's actual Price widget state in sync with the
+                    # selected master item. The old code used a different key, so
+                    # the widget kept displaying its previous/default price.
+                    price_widget_key = f"{widget_prefix}_item_price_{i}"
+                    st.session_state[price_widget_key] = item_row["price"]
+                else:
+                    item_row["price"] = 0.0
+                    st.session_state[f"{widget_prefix}_item_price_{i}"] = 0.0
                 st.rerun()
         with c2:
             item_row["quantity"] = st.number_input("Quantity", min_value=1, step=1, value=int(item_row.get("quantity", 1)), key=f"{widget_prefix}_item_qty_{i}")
         with c3:
-            item_row["price"] = st.number_input("Price (£)", min_value=0.0, step=1.0, format="%.2f", value=float(item_row["price"]), key=f"{widget_prefix}_item_price_{i}")
+            price_widget_key = f"{widget_prefix}_item_price_{i}"
+            item_row["price"] = st.number_input(
+                "Price (£)",
+                min_value=0.0,
+                step=1.0,
+                format="%.2f",
+                value=float(item_row["price"]),
+                key=price_widget_key,
+            )
         with c4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️", key=f"{widget_prefix}_item_remove_{i}"):
