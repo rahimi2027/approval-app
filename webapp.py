@@ -10,6 +10,7 @@ import sys
 import json
 import base64
 import shutil
+import tempfile
 import subprocess
 import pandas as pd
 import io
@@ -93,4 +94,3 @@ HR_LEAVE_PATH = os.path.join(APP_FOLDER, "hr_leave_requests.xlsx")
 HR_DAILY_RATES_PATH = os.path.join(APP_FOLDER, "hr_daily_rates.xlsx")
 HR_LEAVE_PDF_DIR = os.path.join(APP_FOLDER, "hr_leave_pdfs")
 HR_EMPLOYEES_PATH = os.path.join(APP_FOLDER, "hr_employees.xlsx")
-HR_PORTAL_LEAVE_PATH = os.path.join(APP_FOLDER, "hr_portal_leave_records.xlsx")
