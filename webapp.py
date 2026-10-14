@@ -9481,6 +9481,12 @@ def render_hr_leave_settings():
 # 📦 STORE DEPARTMENT DEDUCTION & RETURN — UI
 # ============================================================
 def render_store_deduction_form(user_name, user_dept):
+    # A new generation of widget keys after successful submission guarantees that
+    # Streamlit displays a fresh form on the next rerun.
+    if "store_deduction_form_generation" not in st.session_state:
+        st.session_state["store_deduction_form_generation"] = 0
+    form_gen = st.session_state["store_deduction_form_generation"]
+    widget_prefix = f"store_deduction_g{form_gen}"
     st.subheader("📦 New Request — Store Department Deduction")
     st.caption("Submit unreturned company items for Director approval and final settlement deduction.")
     all_deductions = load_store_deductions(force=True)
@@ -9499,7 +9505,7 @@ def render_store_deduction_form(user_name, user_dept):
     selected_employee_label = st.selectbox(
         "👤 Employee (HR Registered Employees Only)",
         employee_labels,
-        key="store_emp_selector",
+        key=f"{widget_prefix}_emp_selector",
     )
     selected_employee = employee_map[selected_employee_label]
     emp_name = selected_employee.get("name", "")
@@ -9518,9 +9524,9 @@ def render_store_deduction_form(user_name, user_dept):
             disabled=True,
             key=f"store_emp_dept_display_{employee_key}",
         )
-        date_submit = st.date_input("📅 Date of Submit", value=date.today(), key="store_date_submit")
+        date_submit = st.date_input("📅 Date of Submit", value=date.today(), key=f"{widget_prefix}_date_submit")
     with col2:
-        manager = st.text_input("👔 Line Manager", key="store_manager")
+        manager = st.text_input("👔 Line Manager", key=f"{widget_prefix}_manager")
         st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("### 📦 Items to Deduct")
     if "store_form_items" not in st.session_state:
@@ -9530,7 +9536,7 @@ def render_store_deduction_form(user_name, user_dept):
     for i, item_row in enumerate(st.session_state.store_form_items):
         c1, c2, c3, c4 = st.columns([3, 1.5, 2, 0.5])
         with c1:
-            selected_item = st.selectbox("Item Name", options=item_options, key=f"store_item_select_{i}", index=item_options.index(item_row.get("item_name", "")) if item_row.get("item_name") in item_options else 0)
+            selected_item = st.selectbox("Item Name", options=item_options, key=f"{widget_prefix}_item_select_{i}", index=item_options.index(item_row.get("item_name", "")) if item_row.get("item_name") in item_options else 0)
             if selected_item != item_row.get("item_name", ""):
                 item_row["item_name"] = selected_item
                 match = next((it for it in store_items_master if it["name"] == selected_item), None)
@@ -9540,23 +9546,23 @@ def render_store_deduction_form(user_name, user_dept):
                         st.session_state[f"store_item_price_{i}"] = match["price"]
                 st.rerun()
         with c2:
-            item_row["quantity"] = st.number_input("Quantity", min_value=1, step=1, value=int(item_row.get("quantity", 1)), key=f"store_item_qty_{i}")
+            item_row["quantity"] = st.number_input("Quantity", min_value=1, step=1, value=int(item_row.get("quantity", 1)), key=f"{widget_prefix}_item_qty_{i}")
         with c3:
-            item_row["price"] = st.number_input("Price (£)", min_value=0.0, step=1.0, format="%.2f", value=float(item_row["price"]), key=f"store_item_price_{i}")
+            item_row["price"] = st.number_input("Price (£)", min_value=0.0, step=1.0, format="%.2f", value=float(item_row["price"]), key=f"{widget_prefix}_item_price_{i}")
         with c4:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🗑️", key=f"store_item_remove_{i}"):
+            if st.button("🗑️", key=f"{widget_prefix}_item_remove_{i}"):
                 st.session_state.store_form_items.pop(i)
                 st.rerun()
-    if st.button("➕ Add Another Item", key="store_add_item_btn"):
+    if st.button("➕ Add Another Item", key=f"{widget_prefix}_add_item_btn"):
         st.session_state.store_form_items.append({"item_name": "", "quantity": 1, "price": 0.0})
         st.rerun()
     total_deduction = sum(item.get("quantity", 1) * item.get("price", 0.0) for item in st.session_state.store_form_items)
     st.markdown(f"<h4 style='text-align: right; color: #ef4444;'>Total Employee Deduction: £{total_deduction:.2f}</h4>", unsafe_allow_html=True)
     st.divider()
-    with st.form("store_deduction_form", clear_on_submit=False):
-        files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="store_files")
-        desc = st.text_area("📝 Description / Justification", key="store_desc")
+    with st.form(f"store_deduction_form_{form_gen}", clear_on_submit=False):
+        files = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"{widget_prefix}_files")
+        desc = st.text_area("📝 Description / Justification", key=f"{widget_prefix}_desc")
         submitted = st.form_submit_button("📤 Send to Director", type="primary", width="stretch")
     if submitted:
         valid_items = [it for it in st.session_state.store_form_items if it.get("item_name") and it.get("quantity", 0) > 0 and it.get("price", 0) > 0]
@@ -9580,16 +9586,19 @@ def render_store_deduction_form(user_name, user_dept):
             save_all_store_deductions(all_deductions)
             log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
             st.session_state.store_form_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
+            st.session_state["store_deduction_form_generation"] = form_gen + 1
             st.success(f"✅ Store Department Deduction #{new_id} sent to Director for approval.")
             st.rerun()
 
 def render_store_return_form(user_name, user_dept):
     st.subheader("📦 New Request — Store Department Return (Addition)")
     st.caption("Process returned items to reverse a previous deduction, or add items not previously deducted.")
-    all_transactions = load_store_deductions()
+    # Force a fresh read so a Director's recent approval is visible immediately.
+    all_transactions = load_store_deductions(force=True)
     approved_deds = [
         d for d in all_transactions
-        if d["status"] == "approved" and d.get("type", "Deduction") == "Deduction"
+        if str(d.get("status", "")).strip().casefold() == "approved"
+        and str(d.get("type", "Deduction")).strip().casefold() == "deduction"
     ]
 
     # Store Returns must use the HR employee register as the source of truth.
@@ -9636,26 +9645,48 @@ def render_store_return_form(user_name, user_dept):
     if "store_return_items" not in st.session_state:
         st.session_state.store_return_items = [{"item_name": "", "quantity": 1, "price": 0.0}]
     store_items_master = load_store_items()
-    item_options = [""] + [it["name"] for it in store_items_master]
-    if selected_emp and selected_emp != "-- Manual Entry --":
+    master_item_names = [str(it.get("name", "")).strip() for it in store_items_master if str(it.get("name", "")).strip()]
+    item_options = [""] + master_item_names
+    if selected_emp:
         if st.button("🔄 Fetch Approved Deductions for this Employee", key="store_fetch_deds_btn"):
-            emp_deds = [d for d in approved_deds if d["emp_name"] == selected_emp]
+            selected_name_key = selected_emp.strip().casefold()
+            emp_deds = [
+                d for d in approved_deds
+                if str(d.get("emp_name", "")).strip().casefold() == selected_name_key
+            ]
             agg_items = {}
             for d in emp_deds:
-                for item in d.get("items", []):
-                    name = item.get("item_name")
-                    qty = int(item.get("quantity", 1))
-                    price = float(item.get("price", 0))
-                    if name in agg_items:
-                        agg_items[name]["quantity"] += qty
+                for item in (d.get("items", []) or []):
+                    name = str(item.get("item_name", "")).strip()
+                    if not name:
+                        continue
+                    try:
+                        qty = int(float(item.get("quantity", 1) or 1))
+                    except (TypeError, ValueError):
+                        qty = 1
+                    try:
+                        price = float(item.get("price", 0) or 0)
+                    except (TypeError, ValueError):
+                        price = 0.0
+                    if name.casefold() in {n.casefold() for n in agg_items}:
+                        existing_name = next(n for n in agg_items if n.casefold() == name.casefold())
+                        agg_items[existing_name]["quantity"] += qty
                     else:
                         agg_items[name] = {"item_name": name, "quantity": qty, "price": price}
             if agg_items:
+                # Include legacy deducted items even if they were removed from the current item master.
+                current_names = {name.casefold() for name in item_options}
+                for name in agg_items:
+                    if name.casefold() not in current_names:
+                        item_options.append(name)
                 st.session_state.store_return_items = list(agg_items.values())
-                st.success(f"Loaded {len(agg_items)} item(s) from previous deductions.")
+                st.success(f"Loaded {len(agg_items)} item(s) from {len(emp_deds)} approved deduction(s).")
                 st.rerun()
             else:
-                st.warning("No items found in previous deductions for this employee.")
+                st.warning(
+                    f"No approved Store Deduction items were found for {selected_emp}. "
+                    f"Approved deductions available: {len(approved_deds)}. Check that the Director approved the original request and that the employee name matches the HR employee record."
+                )
     for i, item_row in enumerate(st.session_state.store_return_items):
         c1, c2, c3, c4 = st.columns([3, 1.5, 2, 0.5])
         with c1:
