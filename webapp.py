@@ -5309,7 +5309,7 @@ def render_hr_portal(current_user_info=None):
 
     if is_hr and hr_reports_tab is not None:
         with hr_reports_tab:
-            st.info("HR Reports have moved to the top-level '🚪 Leavers, Clearance & Reports' tab.")
+            render_hr_download_reports()
 
     if not is_hr:
         pass
@@ -5579,35 +5579,14 @@ def render_hr_leave_approvals():
 
 
 def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
-    """HR department area with HR Portal, Leavers/Clearance/Reports, and Leave Settlement as sibling tabs."""
-    sub_portal_tab, sub_leavers_tab, sub_settlement_tab = st.tabs([
+    """HR department area. Department managers get requests only; HR Manager keeps the full direct-entry portal."""
+    sub_portal_tab, sub_settlement_tab = st.tabs([
         "🧑‍💼 HR Portal (Employee / Holiday / Leave)",
-        "🚪 Leavers, Clearance & Reports",
         "💷 HR Leave Settlement"
     ])
 
     with sub_portal_tab:
         render_hr_portal(current_user_info)
-
-    with sub_leavers_tab:
-        # These workflows use the same HR session data as the portal and are rendered
-        # here as a separate top-level section for easier navigation.
-        _hr_portal_init()
-        st.subheader("🚪 Leavers, Clearance & Reports")
-        leaving_tab, clearance_tab, leavers_tab, reports_tab = st.tabs([
-            "🚪 Employee Leaving",
-            "🔗 Leaver Clearance",
-            "📚 Leavers",
-            "📥 HR Reports"
-        ])
-        with leaving_tab:
-            st.info("Employee Leaving is available in HR Management in the HR Portal. Use that workflow to record the leaving date/reason and initiate the final holiday settlement.")
-        with clearance_tab:
-            render_leaver_clearance_hr()
-        with leavers_tab:
-            _hrp_render_leavers_tab()
-        with reports_tab:
-            render_hr_download_reports()
 
     with sub_settlement_tab:
         if is_super_admin:
