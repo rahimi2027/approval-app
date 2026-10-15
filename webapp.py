@@ -941,21 +941,51 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 if st.button("📤 Submit for Approval", type="primary",
                              use_container_width=True, key="payroll_submit",
                              disabled=not (state["status"] == "Draft" or (state["status"] == "Submitted" and flag_total > 0))):
-                    if state["status"] == "Submitted" and flag_total > 0:
-                        # Resubmission acknowledges the Director's amendment requests; clear old flags and approvals.
-                        _flags().get(week_key, {}).pop(dept, None)
+                    # Do not submit until every employee has a completed entry for
+                    # each weekday. A non-work status (Holiday, Sick, etc.) is a
+                    # completed day; Worked/Late/other time-entry statuses require
+                    # both clock-in and clock-out times.
+                    missing_days = []
+                    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+                    all_week_entries = _ts().get(week_key, {}).get(dept, {})
+                    for check_emp in employees:
+                        check_eid = check_emp.get("emp_id", "")
+                        check_days = all_week_entries.get(check_eid) or [None] * 5
+                        for day_idx in range(5):
+                            entry = check_days[day_idx] if day_idx < len(check_days) else None
+                            is_missing = not isinstance(entry, dict) or not entry.get("status")
+                            if not is_missing:
+                                entry_status = str(entry.get("status", "Worked")).strip()
+                                if entry_status in PAYROLL_TIME_ENTRY_STATUSES:
+                                    is_missing = not (entry.get("in") and entry.get("out"))
+                            if is_missing:
+                                missing_days.append(
+                                    f"{check_emp.get('name', check_eid)} — {weekday_names[day_idx]}"
+                                )
+
+                    if missing_days:
+                        st.error(
+                            "⚠️ Cannot submit this timesheet yet. Complete all five weekdays "
+                            "for every employee, including selecting a status for non-working days."
+                        )
+                        st.warning("Days still to complete: " + "; ".join(missing_days[:30]) +
+                                   (" … and more" if len(missing_days) > 30 else ""))
+                    else:
+                        if state["status"] == "Submitted" and flag_total > 0:
+                            # Resubmission acknowledges the Director's amendment requests; clear old flags and approvals.
+                            _flags().get(week_key, {}).pop(dept, None)
                         _flags_save()
                         _approvals().get(week_key, {}).pop(dept, None)
                         _approvals_save()
-                    state["status"] = "Submitted"
-                    state["submitted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    state["submitted_by"] = full_name
-                    state["approved_at"] = ""
-                    state["approved_by"] = ""
-                    _states_save()
-                    _ts_save()
-                    st.success("✅ Submitted to Director for approval.")
-                    st.rerun()
+                        state["status"] = "Submitted"
+                        state["submitted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        state["submitted_by"] = full_name
+                        state["approved_at"] = ""
+                        state["approved_by"] = ""
+                        _states_save()
+                        _ts_save()
+                        st.success("✅ Submitted to Director for approval.")
+                        st.rerun()
 
             with col_print:
                 if st.button("📄 Download as Excel", use_container_width=True,
