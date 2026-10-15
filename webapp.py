@@ -183,7 +183,10 @@ def _lunch_for(days):
         d = 0
     if d < 1:
         return 0
-    full_day_band = int(d + 0.999999)  # ceil without importing math
+    # Each whole-day band includes the following half day:
+    # 1.0/1.5 -> 30m, 2.0/2.5 -> 60m, etc.
+    # Do NOT use ceil here: ceil(1.5) would incorrectly deduct 60m.
+    full_day_band = int(d)  # floor for positive values
     return min(full_day_band, 5) * 30
 
 
