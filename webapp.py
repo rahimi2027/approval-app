@@ -537,7 +537,9 @@ def _calc_row(emp, week_key, dept):
                 # in Wk Extra and Exceptions rather than silently converting
                 # the day to a half-day based on elapsed time.
                 if status in PAYROLL_TIME_ENTRY_STATUSES:
-                    day_equivalents += 1.0
+                    # HD Holiday represents half a contracted day, even when
+                    # the original full-day in/out times remain in the entry.
+                    day_equivalents += 0.5 if status == "HD Holiday" else 1.0
         travel += (_t2m(d.get("travel")) or 0)
         away += (_t2m(d.get("away")) or 0)
 
@@ -987,7 +989,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 weekly_contract, days_contract = 2400, 5.0
             daily_contract = weekly_contract / max(days_contract, 1)
             recorded_work_days = sum(
-                1 for d in ts_days
+                (0.5 if str(d.get("status", "Worked")).strip() == "HD Holiday" else 1.0)
+                for d in ts_days
                 if d
                 and str(d.get("status", "Worked")).strip() in PAYROLL_TIME_ENTRY_STATUSES
                 and _t2m(d.get("in")) is not None
