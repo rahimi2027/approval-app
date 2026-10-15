@@ -667,6 +667,27 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
     week_obj = PAYROLL_WEEKS[week_key]
     state = _get_state(week_key, dept)
 
+    # ---------------- Director submission queue ----------------
+    # Show submitted weeks across departments so a submission is not hidden
+    # simply because the Director currently has another department/week selected.
+    if mode in ("director", "super_admin"):
+        submitted_queue = []
+        for q_week, by_dept in _states().items():
+            for q_dept, q_state in by_dept.items():
+                if q_state.get("status") == "Submitted":
+                    q_label = PAYROLL_WEEKS.get(q_week, {}).get("label", q_week)
+                    submitted_queue.append((q_week, q_dept, q_label, q_state.get("submitted_at", ""), q_state.get("submitted_by", "")))
+        if submitted_queue:
+            with st.expander(f"📥 Director submission queue ({len(submitted_queue)} submitted week(s))", expanded=True):
+                for q_week, q_dept, q_label, q_time, q_by in sorted(submitted_queue, key=lambda x: (x[0], x[1])):
+                    st.markdown(f"**{q_dept} — {q_label}** · Submitted {q_time or 'date not recorded'} by {q_by or 'manager'}")
+                    if q_week == week_key and q_dept == dept:
+                        st.caption("This submitted week is currently selected below.")
+                    else:
+                        st.caption(f"To review this submission, select Department **{q_dept}** and Week **{q_label}** in the selectors above.")
+        else:
+            st.info("📥 No submitted payroll weeks are currently waiting for Director review.")
+
     # ---------------- Title + status banner ----------------
     title = f"{dept} - {week_obj['label']} Payroll - {month_label}"
     st.markdown(f"### {title}")
@@ -722,19 +743,20 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         div[data-testid="stMarkdownContainer"] { overflow-wrap: anywhere; }
         div[data-testid="stMarkdownContainer"] p { margin-bottom: .15rem; font-size: .72rem; }
         div[data-testid="stHorizontalBlock"]:has(button[key^="pl_day_"]) { gap: .22rem; }
-        div[data-testid="stButton"] > button { min-height: 2rem; padding: .2rem .3rem; font-size: .72rem; line-height: 1.15; white-space: normal; }
+        div[data-testid="stButton"] > button { min-height: 3.15rem; height: auto; padding: .28rem .24rem; font-size: .70rem; line-height: 1.25; white-space: pre-wrap; overflow-wrap: anywhere; }
+        div[data-testid="stButton"] > button p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
         div[data-testid="stMarkdownContainer"] p { margin-bottom: .15rem; font-size: .78rem; }
         div[data-testid="stMarkdownContainer"] strong { font-weight: 700; }
         div[data-testid="stTabs"] button { font-size: .86rem; }
         </style>
         """, unsafe_allow_html=True)
-        editable = (mode == "manager") and (state["status"] == "Draft")
+        editable = (mode == "manager") and (state["status"] == "Draft" or (state["status"] == "Submitted" and flag_total > 0))
 
         # -------- Header row --------
         # All columns from the reference screenshot are present, including
         # Travel, Away, Balance, Check and Notes. A horizontal scroll may be
         # needed on smaller screens because this is a wide weekly report.
-        col_widths = [2.8, 1.15, 1.25, 1.25, 1.25, 1.25, 1.25,
+        col_widths = [2.8, 1.15, 1.48, 1.48, 1.48, 1.48, 1.48,
                       0.65, 0.9, 0.72, 0.72, 0.72, 0.9, 0.95,
                       0.9, 0.9, 0.8, 2.2]
         header = st.columns(col_widths)
@@ -774,10 +796,12 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
             flag_badge = (f"<br><span style='color:#dc2626; font-size:11px;'>"
                           f"⚠ {len(emp_flags)} flag(s)</span>") if emp_flags else ""
+            work_start = str(emp.get("work_start_time", "08:30") or "08:30")[:5]
+            work_end = str(emp.get("work_end_time", "16:30") or "16:30")[:5]
             row[0].markdown(
                 f"**{emp.get('name', '')}**<br>"
-                f"<span style='font-size:11px; color:#666;'>"
-                f"{eid} · {emp.get('job_title', '')}</span>{flag_badge}",
+                f"<span style='font-size:11px; color:#64748b;'>"
+                f"{work_start} – {work_end}</span>{flag_badge}",
                 unsafe_allow_html=True,
             )
             row[1].markdown(
@@ -797,7 +821,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     status = d.get("status", "Worked")
                     if status in PAYROLL_TIME_ENTRY_STATUSES \
                             and d.get("in") and d.get("out"):
-                        btn_label = f"{d['in']}→{d['out']}"
+                        # Put time range and status on separate lines so the
+                        # full entry remains visible inside the daily cell.
+                        time_label = f"{d['in']} → {d['out']}"
+                        btn_label = time_label + (f"\n{_short_status(status)}" if status not in ("Worked", "Late In", "Late Out") else "")
                     elif status != "Worked":
                         btn_label = _short_status(status)
                     else:
@@ -903,24 +930,32 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             with col_save:
                 if st.button("💾 Save Draft", use_container_width=True,
                              key="payroll_save_draft",
-                             disabled=(state["status"] != "Draft")):
+                             disabled=not (state["status"] == "Draft" or (state["status"] == "Submitted" and flag_total > 0))):
                     _ts_save()
-                    st.success("✅ Draft saved.")
+                    if state["status"] == "Submitted" and flag_total > 0:
+                        state["status"] = "Draft"
+                        _states_save()
+                    st.success("✅ Draft saved. You can resubmit when the amendments are complete.")
 
             with col_submit:
                 if st.button("📤 Submit for Approval", type="primary",
                              use_container_width=True, key="payroll_submit",
-                             disabled=(state["status"] != "Draft")):
-                    if flag_total > 0:
-                        st.error(f"Resolve {flag_total} flag(s) before resubmitting.")
-                    else:
-                        state["status"] = "Submitted"
-                        state["submitted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        state["submitted_by"] = full_name
-                        _states_save()
-                        _ts_save()
-                        st.success("✅ Submitted to Director for approval.")
-                        st.rerun()
+                             disabled=not (state["status"] == "Draft" or (state["status"] == "Submitted" and flag_total > 0))):
+                    if state["status"] == "Submitted" and flag_total > 0:
+                        # Resubmission acknowledges the Director's amendment requests; clear old flags and approvals.
+                        _flags().get(week_key, {}).pop(dept, None)
+                        _flags_save()
+                        _approvals().get(week_key, {}).pop(dept, None)
+                        _approvals_save()
+                    state["status"] = "Submitted"
+                    state["submitted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    state["submitted_by"] = full_name
+                    state["approved_at"] = ""
+                    state["approved_by"] = ""
+                    _states_save()
+                    _ts_save()
+                    st.success("✅ Submitted to Director for approval.")
+                    st.rerun()
 
             with col_print:
                 if st.button("📄 Download as Excel", use_container_width=True,
