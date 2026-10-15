@@ -5,7 +5,6 @@
 #    • NEW: Employee Items (Issue / Holdings / Leaver Check-in → auto Store Deduction)
 # ============================================================
 import streamlit as st
-import payroll_module as payroll
 import os
 import sys
 import json
@@ -25,6 +24,1442 @@ from datetime import datetime, date, timezone, timedelta
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
+
+"""
+payroll_module.py — Payroll Timesheet
+=====================================
+Drop-in module for Acoole Portal.
+
+Install:
+  1. Save this file next to webapp (46).py
+  2. In webapp (46).py, add near the top of your imports:
+         import payroll_module as payroll
+  3. After APP_FOLDER and helpers are defined, call:
+         payroll.init_payroll(
+             app_folder=APP_FOLDER,
+             safe_init_excel_fn=safe_init_excel,
+             read_excel_records_fn=_read_excel_records,
+             sync_to_drive_fn=sync_saved_file_to_drive,
+             employees_provider=lambda: _hrp_load_employees(),
+             invalidate_cache_fn=lambda *n: [st.session_state.pop(x, None) for x in n],
+         )
+  4. In any role portal, add a tab and call:
+         payroll.render_payroll_timesheet(user_info, mode="manager")
+         payroll.render_payroll_timesheet(user_info, mode="director")
+         payroll.render_payroll_timesheet(user_info, mode="payroll")
+"""
+
+from datetime import datetime, date, timedelta
+import pandas as pd
+import streamlit as st
+import os
+
+# ============================================================
+# CONSTANTS
+# ============================================================
+
+PAYROLL_MONTHS = [
+    ("2026-09", "September 2026"), ("2026-10", "October 2026"),
+    ("2026-11", "November 2026"),  ("2026-12", "December 2026"),
+    ("2027-01", "January 2027"),   ("2027-02", "February 2027"),
+    ("2027-03", "March 2027"),     ("2027-04", "April 2027"),
+    ("2027-05", "May 2027"),       ("2027-06", "June 2027"),
+    ("2027-07", "July 2027"),      ("2027-08", "August 2027"),
+    ("2027-09", "September 2027"), ("2027-10", "October 2027"),
+    ("2027-11", "November 2027"),  ("2027-12", "December 2027"),
+]
+
+PAYROLL_STATUS_OPTIONS = [
+    "Worked", "Late In", "Late Out", "Authorised Absence", "HD Holiday",
+    "Overtime Approved", "College", "Holiday", "Sick", "Maternity",
+    "Lay-off", "Unpaid Holiday", "Unpaid Absence", "Bank Holiday",
+    "AWOL", "N/A", "Leaver",
+]
+
+PAYROLL_TIME_ENTRY_STATUSES = {
+    "Worked", "Late In", "Late Out", "Authorised Absence",
+    "HD Holiday", "Overtime Approved", "College",
+}
+
+PAYROLL_TIMESHEETS_COLUMNS = [
+    "Week_Key", "Department", "Employee_ID", "Day_Index",
+    "Time_In", "Time_Out", "Travel", "Time_Away", "Status", "Note",
+]
+PAYROLL_WEEK_STATES_COLUMNS = [
+    "Week_Key", "Department", "Status",
+    "Submitted_At", "Submitted_By", "Approved_At", "Approved_By",
+]
+PAYROLL_FLAGS_COLUMNS = [
+    "Week_Key", "Department", "Employee_ID", "Day_Index",
+    "Comment", "Flagged_By", "Flagged_At",
+]
+PAYROLL_APPROVALS_COLUMNS = [
+    "Week_Key", "Department", "Employee_ID", "Approved_At", "Approved_By",
+]
+
+# ============================================================
+# INJECTED CONTEXT (filled by init_payroll)
+# ============================================================
+
+_ctx = {
+    "app_folder": None,
+    "safe_init_excel": None,
+    "read_excel": None,
+    "sync_to_drive": None,
+    "employees_provider": None,
+    "invalidate_cache": None,
+    "initialised": False,
+}
+
+
+def init_payroll(app_folder, safe_init_excel_fn, read_excel_records_fn,
+                 sync_to_drive_fn, employees_provider,
+                 invalidate_cache_fn=None):
+    """Call once from the main app after infrastructure is available."""
+    _ctx["app_folder"] = app_folder
+    _ctx["safe_init_excel"] = safe_init_excel_fn
+    _ctx["read_excel"] = read_excel_records_fn
+    _ctx["sync_to_drive"] = sync_to_drive_fn
+    _ctx["employees_provider"] = employees_provider
+    _ctx["invalidate_cache"] = invalidate_cache_fn
+    _ctx["initialised"] = True
+    _ensure_storage()
+
+
+# ============================================================
+# PATHS
+# ============================================================
+
+def _path(filename):
+    return os.path.join(_ctx["app_folder"], filename)
+
+
+def _p_timesheets(): return _path("payroll_timesheets.xlsx")
+def _p_week_states(): return _path("payroll_week_states.xlsx")
+def _p_flags():       return _path("payroll_flags.xlsx")
+def _p_approvals():   return _path("payroll_approvals.xlsx")
+
+
+def _ensure_storage():
+    if not _ctx["initialised"]:
+        return
+    _ctx["safe_init_excel"](_p_timesheets(), PAYROLL_TIMESHEETS_COLUMNS)
+    _ctx["safe_init_excel"](_p_week_states(), PAYROLL_WEEK_STATES_COLUMNS)
+    _ctx["safe_init_excel"](_p_flags(), PAYROLL_FLAGS_COLUMNS)
+    _ctx["safe_init_excel"](_p_approvals(), PAYROLL_APPROVALS_COLUMNS)
+
+
+def get_backup_filenames():
+    """Return {path: backup_name} so the caller can add them to DRIVE_BACKUP_FILENAMES."""
+    return {
+        _p_timesheets(): "BACKUP_payroll_timesheets.xlsx",
+        _p_week_states(): "BACKUP_payroll_week_states.xlsx",
+        _p_flags(): "BACKUP_payroll_flags.xlsx",
+        _p_approvals(): "BACKUP_payroll_approvals.xlsx",
+    }
+
+
+# ============================================================
+# TIME HELPERS
+# ============================================================
+
+def _t2m(s):
+    if not s or ":" not in str(s):
+        return None
+    try:
+        h, m = str(s).split(":")[:2]
+        return int(h) * 60 + int(m)
+    except Exception:
+        return None
+
+
+def _m2t(m):
+    if m is None:
+        return ""
+    neg = m < 0
+    m = abs(round(m))
+    h, mm = divmod(m, 60)
+    return f"{'-' if neg else ''}{h}:{mm:02d}"
+
+
+def _day_total(d):
+    i, o = _t2m(d.get("in")), _t2m(d.get("out"))
+    if i is None or o is None:
+        return None
+    return (o - i) - (_t2m(d.get("away")) or 0) + (_t2m(d.get("travel")) or 0)
+
+
+def _lunch_for(days):
+    d = int(days)
+    return {5: 150, 4: 120, 3: 90, 2: 60, 1: 30}.get(d, 150 if d > 5 else 0)
+
+
+# ============================================================
+# WEEK GENERATION
+# ============================================================
+
+def _generate_month_weeks(month_key):
+    y, m = map(int, month_key.split("-"))
+    first = date(y, m, 1)
+    offset = -first.weekday()
+    start = first + timedelta(days=offset - 7)
+    out = []
+    for i in range(8):
+        mon = start + timedelta(days=i * 7)
+        fri = mon + timedelta(days=4)
+        if fri.year == y and fri.month == m:
+            out.append({
+                "dates": [(mon + timedelta(days=d)).isoformat() for d in range(5)],
+                "range": f"{mon.strftime('%d %b')} – {fri.strftime('%d %b %Y')}",
+            })
+    return out
+
+
+def _build_weeks():
+    weeks = {}
+    for mk, _ in PAYROLL_MONTHS:
+        for i, w in enumerate(_generate_month_weeks(mk), start=1):
+            key = f"{mk}-w{i}"
+            weeks[key] = {
+                "month": mk,
+                "label": f"Week {i}",
+                "range": w["range"],
+                "dates": w["dates"],
+            }
+    return weeks
+
+
+PAYROLL_WEEKS = _build_weeks()
+PAYROLL_WEEK_ORDER = list(PAYROLL_WEEKS.keys())
+PAYROLL_MONTH_LABELS = dict(PAYROLL_MONTHS)
+
+
+# ============================================================
+# EMPLOYEES (delegated to app)
+# ============================================================
+
+def _get_employees(department=None):
+    if not _ctx["employees_provider"]:
+        return []
+    emps = _ctx["employees_provider"]() or []
+    out = []
+    for e in emps:
+        if str(e.get("status", "Active")).strip().casefold() == "left":
+            continue
+        if department and str(e.get("department", "")).strip() != department:
+            continue
+        out.append(e)
+    return sorted(out, key=lambda x: (str(x.get("name", "")).casefold(),
+                                       str(x.get("emp_id", "")).casefold()))
+
+
+def _get_departments():
+    if not _ctx["employees_provider"]:
+        return []
+    emps = _ctx["employees_provider"]() or []
+    return sorted({
+        str(e.get("department", "")).strip()
+        for e in emps if str(e.get("department", "")).strip()
+    })
+
+
+# ============================================================
+# TIMESHEETS
+# ============================================================
+
+def _ts():
+    if "payroll_ts" not in st.session_state:
+        _ts_load()
+    return st.session_state["payroll_ts"]
+
+
+def _ts_load():
+    _ensure_storage()
+    df = _ctx["read_excel"](_p_timesheets())
+    data = {}
+    for r in df.to_dict(orient="records"):
+        wk   = str(r.get("Week_Key", "")).strip()
+        dept = str(r.get("Department", "")).strip()
+        eid  = str(r.get("Employee_ID", "")).strip()
+        try:
+            di = int(r.get("Day_Index", -1))
+        except Exception:
+            continue
+        if not (wk and dept and eid and 0 <= di < 5):
+            continue
+        data.setdefault(wk, {}).setdefault(dept, {}).setdefault(eid, [None] * 5)
+        data[wk][dept][eid][di] = {
+            "in":     str(r.get("Time_In", "")).strip(),
+            "out":    str(r.get("Time_Out", "")).strip(),
+            "travel": str(r.get("Travel", "0:00")).strip() or "0:00",
+            "away":   str(r.get("Time_Away", "0:00")).strip() or "0:00",
+            "status": str(r.get("Status", "Worked")).strip() or "Worked",
+            "note":   str(r.get("Note", "")).strip(),
+        }
+    st.session_state["payroll_ts"] = data
+
+
+def _ts_save():
+    data = st.session_state.get("payroll_ts", {})
+    rows = []
+    for wk, by_dept in data.items():
+        for dept, by_emp in by_dept.items():
+            for eid, days in by_emp.items():
+                for i, d in enumerate(days):
+                    if d is None:
+                        continue
+                    rows.append({
+                        "Week_Key": wk, "Department": dept,
+                        "Employee_ID": eid, "Day_Index": i,
+                        "Time_In": d.get("in", ""),
+                        "Time_Out": d.get("out", ""),
+                        "Travel": d.get("travel", "0:00"),
+                        "Time_Away": d.get("away", "0:00"),
+                        "Status": d.get("status", "Worked"),
+                        "Note": d.get("note", ""),
+                    })
+    pd.DataFrame(rows, columns=PAYROLL_TIMESHEETS_COLUMNS).to_excel(
+        _p_timesheets(), index=False, engine="openpyxl")
+    _ctx["sync_to_drive"](_p_timesheets())
+
+
+# ============================================================
+# WEEK STATES
+# ============================================================
+
+def _states():
+    if "payroll_states" not in st.session_state:
+        _states_load()
+    return st.session_state["payroll_states"]
+
+
+def _states_load():
+    _ensure_storage()
+    df = _ctx["read_excel"](_p_week_states())
+    data = {}
+    for r in df.to_dict(orient="records"):
+        wk   = str(r.get("Week_Key", "")).strip()
+        dept = str(r.get("Department", "")).strip()
+        if not (wk and dept):
+            continue
+        data.setdefault(wk, {})[dept] = {
+            "status":       str(r.get("Status", "Draft")).strip() or "Draft",
+            "submitted_at": str(r.get("Submitted_At", "")).strip(),
+            "submitted_by": str(r.get("Submitted_By", "")).strip(),
+            "approved_at":  str(r.get("Approved_At", "")).strip(),
+            "approved_by":  str(r.get("Approved_By", "")).strip(),
+        }
+    st.session_state["payroll_states"] = data
+
+
+def _states_save():
+    data = st.session_state.get("payroll_states", {})
+    rows = []
+    for wk, by_dept in data.items():
+        for dept, s in by_dept.items():
+            rows.append({
+                "Week_Key": wk, "Department": dept,
+                "Status": s.get("status", "Draft"),
+                "Submitted_At": s.get("submitted_at", ""),
+                "Submitted_By": s.get("submitted_by", ""),
+                "Approved_At":  s.get("approved_at", ""),
+                "Approved_By":  s.get("approved_by", ""),
+            })
+    pd.DataFrame(rows, columns=PAYROLL_WEEK_STATES_COLUMNS).to_excel(
+        _p_week_states(), index=False, engine="openpyxl")
+    _ctx["sync_to_drive"](_p_week_states())
+
+
+def _get_state(week_key, dept):
+    return _states().setdefault(week_key, {}).setdefault(dept, {
+        "status": "Draft", "submitted_at": "", "submitted_by": "",
+        "approved_at": "", "approved_by": "",
+    })
+
+
+# ============================================================
+# FLAGS
+# ============================================================
+
+def _flags():
+    if "payroll_flags" not in st.session_state:
+        _flags_load()
+    return st.session_state["payroll_flags"]
+
+
+def _flags_load():
+    _ensure_storage()
+    df = _ctx["read_excel"](_p_flags())
+    data = {}
+    for r in df.to_dict(orient="records"):
+        wk   = str(r.get("Week_Key", "")).strip()
+        dept = str(r.get("Department", "")).strip()
+        eid  = str(r.get("Employee_ID", "")).strip()
+        try:
+            di = int(r.get("Day_Index", -1))
+        except Exception:
+            continue
+        if not (wk and dept and eid and 0 <= di < 5):
+            continue
+        data.setdefault(wk, {}).setdefault(dept, {}).setdefault(eid, {})[di] = {
+            "comment": str(r.get("Comment", "")).strip(),
+            "by":      str(r.get("Flagged_By", "")).strip(),
+            "at":      str(r.get("Flagged_At", "")).strip(),
+        }
+    st.session_state["payroll_flags"] = data
+
+
+def _flags_save():
+    data = st.session_state.get("payroll_flags", {})
+    rows = []
+    for wk, by_dept in data.items():
+        for dept, by_emp in by_dept.items():
+            for eid, by_day in by_emp.items():
+                for di, f in by_day.items():
+                    rows.append({
+                        "Week_Key": wk, "Department": dept,
+                        "Employee_ID": eid, "Day_Index": di,
+                        "Comment": f.get("comment", ""),
+                        "Flagged_By": f.get("by", ""),
+                        "Flagged_At": f.get("at", ""),
+                    })
+    pd.DataFrame(rows, columns=PAYROLL_FLAGS_COLUMNS).to_excel(
+        _p_flags(), index=False, engine="openpyxl")
+    _ctx["sync_to_drive"](_p_flags())
+
+
+def _get_flags(week_key, dept, emp_id):
+    return _flags().get(week_key, {}).get(dept, {}).get(emp_id, {})
+
+
+def _set_flag(week_key, dept, emp_id, day_idx, comment, by):
+    _flags().setdefault(week_key, {}).setdefault(dept, {}) \
+        .setdefault(emp_id, {})[day_idx] = {
+            "comment": comment, "by": by,
+            "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    _flags_save()
+
+
+def _clear_flag(week_key, dept, emp_id, day_idx):
+    by_dept = _flags().get(week_key, {}).get(dept, {})
+    if emp_id in by_dept and day_idx in by_dept[emp_id]:
+        del by_dept[emp_id][day_idx]
+        if not by_dept[emp_id]:
+            del by_dept[emp_id]
+        _flags_save()
+
+
+def _flag_count_for_week(week_key, dept):
+    return sum(len(_get_flags(week_key, dept, e.get("emp_id", "")))
+               for e in _get_employees(dept))
+
+
+# ============================================================
+# APPROVALS
+# ============================================================
+
+def _approvals():
+    if "payroll_approvals" not in st.session_state:
+        _approvals_load()
+    return st.session_state["payroll_approvals"]
+
+
+def _approvals_load():
+    _ensure_storage()
+    df = _ctx["read_excel"](_p_approvals())
+    data = {}
+    for r in df.to_dict(orient="records"):
+        wk   = str(r.get("Week_Key", "")).strip()
+        dept = str(r.get("Department", "")).strip()
+        eid  = str(r.get("Employee_ID", "")).strip()
+        if not (wk and dept and eid):
+            continue
+        data.setdefault(wk, {}).setdefault(dept, {})[eid] = {
+            "approved_at": str(r.get("Approved_At", "")).strip(),
+            "approved_by": str(r.get("Approved_By", "")).strip(),
+        }
+    st.session_state["payroll_approvals"] = data
+
+
+def _approvals_save():
+    data = st.session_state.get("payroll_approvals", {})
+    rows = []
+    for wk, by_dept in data.items():
+        for dept, by_emp in by_dept.items():
+            for eid, a in by_emp.items():
+                rows.append({
+                    "Week_Key": wk, "Department": dept, "Employee_ID": eid,
+                    "Approved_At": a.get("approved_at", ""),
+                    "Approved_By": a.get("approved_by", ""),
+                })
+    pd.DataFrame(rows, columns=PAYROLL_APPROVALS_COLUMNS).to_excel(
+        _p_approvals(), index=False, engine="openpyxl")
+    _ctx["sync_to_drive"](_p_approvals())
+
+
+def _is_approved(week_key, dept, emp_id):
+    return emp_id in _approvals().get(week_key, {}).get(dept, {})
+
+
+# ============================================================
+# CALCULATION ENGINE
+# ============================================================
+
+def _calc_row(emp, week_key, dept):
+    days = _ts().get(week_key, {}).get(dept, {}).get(emp.get("emp_id", "")) \
+        or [None] * 5
+
+    sub = travel = away = 0
+    for d in days:
+        if not d:
+            continue
+        t = _day_total(d)
+        if t is not None:
+            sub += t
+        travel += (_t2m(d.get("travel")) or 0)
+        away   += (_t2m(d.get("away")) or 0)
+
+    days_worked = sum(
+        1 for d in days
+        if d and _t2m(d.get("in")) is not None and _t2m(d.get("out")) is not None
+    )
+    lunch = _lunch_for(days_worked) if days_worked else 0
+    working = sub - lunch
+
+    try:
+        weekly = float(emp.get("contracted_hours_per_week", 40) or 40)
+    except Exception:
+        weekly = 40.0
+
+    contracted = (weekly * 60 / 5) * days_worked
+    week_extra = None if days_worked == 0 else working - contracted
+    check_ok = (working + away) >= contracted
+
+    return {
+        "sub_total": sub, "travel": travel, "away": away,
+        "days_worked": days_worked, "lunch": lunch,
+        "working": working, "contracted": contracted,
+        "week_extra": week_extra, "check_ok": check_ok,
+    }
+
+
+def _calc_balance(emp, week_key, dept):
+    idx = PAYROLL_WEEK_ORDER.index(week_key) if week_key in PAYROLL_WEEK_ORDER else -1
+    if idx < 0:
+        return {"prev": 0, "week_net": None, "balance": None}
+    prev = 0
+    for wk in PAYROLL_WEEK_ORDER[:idx]:
+        c = _calc_row(emp, wk, dept)
+        if c["days_worked"] > 0:
+            prev += c["week_extra"]
+    c = _calc_row(emp, week_key, dept)
+    week_net = c["week_extra"] if c["days_worked"] > 0 else None
+    if week_net is None and prev == 0:
+        return {"prev": 0, "week_net": None, "balance": None}
+    if week_net is None:
+        return {"prev": prev, "week_net": None, "balance": prev}
+    return {"prev": prev, "week_net": week_net, "balance": prev + week_net}
+
+
+# ============================================================
+# PERMISSION HOOKS
+# ============================================================
+
+def get_payroll_permission_defaults():
+    """Return {role: {permission: bool}} to merge into PERMISSION_DEFAULTS."""
+    return {
+        "Manager":     {"can_access_payroll_timesheet": True},
+        "Director":    {"can_access_payroll_timesheet": True},
+        "Payroll":     {"can_access_payroll_timesheet": True},
+        "Super Admin": {"can_access_payroll_timesheet": True},
+    }
+
+
+def get_payroll_permission_labels():
+    """Return {permission: label} to merge into PERMISSION_LABELS."""
+    return {
+        "can_access_payroll_timesheet": "📋 Payroll Timesheet",
+    }
+
+
+def get_payroll_user_db_column():
+    return "can_access_payroll_timesheet"
+# ============================================================
+# UI — MAIN ENTRY POINT
+# ============================================================
+
+def render_payroll_timesheet(current_user_info, mode="manager"):
+    """
+    mode: 'manager' | 'director' | 'payroll' | 'super_admin'
+    """
+    if not _ctx["initialised"]:
+        st.error("Payroll module not initialised. Call payroll.init_payroll(...) first.")
+        return
+
+    _ensure_storage()
+    _ts(); _states(); _flags(); _approvals()
+
+    full_name = str(current_user_info.get("full_name")
+                    or current_user_info.get("username") or "User").strip()
+    user_dept = str(current_user_info.get("dept", "")).strip()
+
+    st.subheader("📋 Payroll Timesheet")
+    st.caption("Week-by-week staff hours with Director approval workflow")
+
+    # ---------------- Selectors ----------------
+    c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
+
+    with c1:
+        if mode in ("director", "payroll", "super_admin"):
+            departments = _get_departments() or ["Store"]
+            default_idx = departments.index("Store") if "Store" in departments else 0
+            dept = st.selectbox("🏢 Department", departments,
+                                index=default_idx, key="payroll_dept")
+        else:
+            dept = user_dept or "Store"
+            st.text_input("🏢 Department", dept, disabled=True,
+                          key="payroll_dept_locked")
+
+    with c2:
+        month_labels = [lbl for _, lbl in PAYROLL_MONTHS]
+        month_keys   = [k for k, _ in PAYROLL_MONTHS]
+        default_idx  = month_keys.index("2026-10") if "2026-10" in month_keys else 0
+        month_label  = st.selectbox("📅 Month", month_labels,
+                                    index=default_idx, key="payroll_month")
+        month_key    = month_keys[month_labels.index(month_label)]
+
+    with c3:
+        weeks_in_month = [k for k in PAYROLL_WEEK_ORDER
+                          if PAYROLL_WEEKS[k]["month"] == month_key]
+        if not weeks_in_month:
+            st.warning("No weeks available for this month.")
+            return
+        week_labels = [PAYROLL_WEEKS[k]["label"] for k in weeks_in_month]
+        week_idx = st.selectbox(
+            "📆 Week", list(range(len(week_labels))),
+            format_func=lambda i: week_labels[i], key="payroll_week",
+        )
+        week_key = weeks_in_month[week_idx]
+
+    with c4:
+        search = st.text_input("🔎 Search employee",
+                               placeholder="Name or ACE-ID",
+                               key="payroll_search").strip().casefold()
+
+    week_obj = PAYROLL_WEEKS[week_key]
+    state = _get_state(week_key, dept)
+
+    # ---------------- Title + status banner ----------------
+    title = f"{dept} - {week_obj['label']} Payroll - {month_label}"
+    st.markdown(f"### {title}")
+    st.caption(f"📅 {week_obj['range']}")
+
+    flag_total = _flag_count_for_week(week_key, dept)
+
+    if state["status"] == "Approved":
+        when = state.get("approved_at", "")
+        st.success(f"✅ **{week_obj['label']} approved by Director** — {when}")
+        st.caption("The manager can now print this week for records.")
+    elif state["status"] == "Submitted":
+        if flag_total > 0:
+            st.error(f"⚠️ {flag_total} day(s) flagged for amendment — "
+                     "clear the flags or return to the manager.")
+        else:
+            st.info(f"⏳ **{week_obj['label']} submitted** — awaiting Director approval")
+    else:
+        if flag_total > 0:
+            st.error(f"⚠️ Director flagged **{flag_total}** day(s) — "
+                     "please amend the highlighted cells and resubmit.")
+        else:
+            st.info(f"📝 **{week_obj['label']} is in Draft** — "
+                    "fill in the days and submit for approval.")
+
+    # ---------------- Employees ----------------
+    employees = _get_employees(dept)
+    if search:
+        employees = [e for e in employees
+                     if search in (str(e.get("name", "")) + " "
+                                   + str(e.get("emp_id", ""))).casefold()]
+
+    if not employees:
+        st.warning(f"No active employees found in **{dept}**.")
+        st.caption("Add employees in 🏢 HR Department → HR Portal → Employee Directory first.")
+        return
+
+    # ---------------- Tabs ----------------
+    tab_ts, tab_sum, tab_exc, tab_appr = st.tabs([
+        "📋 Timesheet", "📊 Team Summary", "⚠ Exceptions", "✅ Approvals"
+    ])
+
+    # ========================================================
+    # TAB 1 — TIMESHEET
+    # ========================================================
+    with tab_ts:
+        editable = (mode == "manager") and (state["status"] == "Draft")
+
+        # -------- Header row --------
+        header = st.columns([3, 1.6, 1.6, 1.6, 1.6, 1.6, 1.6, 1, 1.4, 1.4, 1.4, 1.4, 1.6])
+        header[0].markdown("**Employee**")
+        header[1].markdown("**Contract (wk)**")
+        for i, iso in enumerate(week_obj["dates"]):
+            dt = datetime.fromisoformat(iso)
+            header[2 + i].markdown(
+                f"<div style='text-align:center; font-size:11px;'>"
+                f"<b>{dt.strftime('%a')}</b><br>"
+                f"<span style='color:#666;'>{dt.strftime('%d %b')}</span></div>",
+                unsafe_allow_html=True,
+            )
+        header[7].markdown("**Days**")
+        header[8].markdown("**Sub Total**")
+        header[9].markdown("**Lunch**")
+        header[10].markdown("**Working**")
+        header[11].markdown("**Contracted**")
+        header[12].markdown("**Wk Extra**")
+
+        st.markdown("<hr style='margin:4px 0;'>", unsafe_allow_html=True)
+
+        # -------- Employee rows --------
+        for emp in employees:
+            eid = emp.get("emp_id", "")
+            ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
+            emp_flags = _get_flags(week_key, dept, eid)
+            calc = _calc_row(emp, week_key, dept)
+            bal  = _calc_balance(emp, week_key, dept)
+
+            row = st.columns([3, 1.6, 1.6, 1.6, 1.6, 1.6, 1.6, 1, 1.4, 1.4, 1.4, 1.4, 1.6])
+
+            flag_badge = (f"<br><span style='color:#dc2626; font-size:11px;'>"
+                          f"⚠ {len(emp_flags)} flag(s)</span>") if emp_flags else ""
+            row[0].markdown(
+                f"**{emp.get('name', '')}**<br>"
+                f"<span style='font-size:11px; color:#666;'>"
+                f"{eid} · {emp.get('job_title', '')}</span>{flag_badge}",
+                unsafe_allow_html=True,
+            )
+            row[1].markdown(
+                f"<div style='text-align:center;'>{emp.get('contracted_hours_per_week', 40)}h</div>",
+                unsafe_allow_html=True,
+            )
+
+            # Day cells
+            for i in range(5):
+                d = ts_days[i]
+                cell = row[2 + i]
+                is_flagged = i in emp_flags
+
+                if d is None:
+                    btn_label = "➕ Add"
+                else:
+                    status = d.get("status", "Worked")
+                    if status in PAYROLL_TIME_ENTRY_STATUSES \
+                            and d.get("in") and d.get("out"):
+                        btn_label = f"{d['in']}→{d['out']}"
+                    elif status != "Worked":
+                        btn_label = _short_status(status)
+                    else:
+                        btn_label = "➕ Add"
+
+                if is_flagged:
+                    btn_label = "🔴 " + btn_label
+
+                btn_type = "primary" if is_flagged else "secondary"
+                if cell.button(btn_label, key=f"pl_day_{eid}_{i}",
+                               use_container_width=True,
+                               type=btn_type,
+                               help=emp_flags.get(i, {}).get("comment",
+                                     "Click to open day entry")):
+                    st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = True
+                    st.rerun()
+
+            # Computed columns
+            row[7].markdown(f"<div style='text-align:center;'><b>{calc['days_worked']}</b></div>",
+                            unsafe_allow_html=True)
+            row[8].markdown(f"<div style='text-align:center;'><b>{_m2t(calc['sub_total'])}</b></div>",
+                            unsafe_allow_html=True)
+            row[9].markdown(f"<div style='text-align:center;'>"
+                            f"{_m2t(calc['lunch']) if calc['days_worked'] else '—'}</div>",
+                            unsafe_allow_html=True)
+            row[10].markdown(
+                f"<div style='text-align:center;'><b>"
+                f"{_m2t(calc['working']) if calc['days_worked'] else '—'}</b></div>",
+                unsafe_allow_html=True,
+            )
+            row[11].markdown(f"<div style='text-align:center;'><b>{_m2t(calc['contracted'])}</b></div>",
+                             unsafe_allow_html=True)
+
+            we = bal["week_net"]
+            if we is None:
+                we_html = "<span style='color:#cbd5e1;'>—</span>"
+            else:
+                color = "#16a34a" if we >= 0 else "#dc2626"
+                sign = "+" if we >= 0 else ""
+                we_html = f"<span style='color:{color}; font-weight:700;'>{sign}{_m2t(we)}</span>"
+            row[12].markdown(f"<div style='text-align:center;'>{we_html}</div>",
+                             unsafe_allow_html=True)
+
+            # Balance sub-line
+            b = bal["balance"]
+            if b is not None:
+                color = "#16a34a" if b >= 0 else "#dc2626"
+                sign = "+" if b >= 0 else ""
+                st.markdown(
+                    f"<div style='text-align:right; font-size:11px; "
+                    f"color:{color}; padding-right:12px; margin-top:-6px;'>"
+                    f"Balance: <b>{sign}{_m2t(b)}</b></div>",
+                    unsafe_allow_html=True,
+                )
+
+            # Inline open day panel
+            for i in range(5):
+                open_key = f"payroll_open_{week_key}_{dept}_{eid}_{i}"
+                if st.session_state.get(open_key):
+                    st.markdown(
+                        f"<div style='background:#f8fafc; padding:12px; "
+                        f"border-left:4px solid #2563eb; border-radius:6px; "
+                        f"margin:8px 0;'>", unsafe_allow_html=True,
+                    )
+                    st.markdown(f"#### ✏️ {emp['name']} — "
+                                f"{_long_date(week_obj['dates'][i])}")
+                    _day_entry_panel(emp, week_key, dept, i,
+                                     editable=editable, mode=mode,
+                                     full_name=full_name)
+                    if st.button("Close", key=f"close_{open_key}"):
+                        st.session_state[open_key] = False
+                        st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # -------- Manager actions --------
+        if mode == "manager":
+            col_save, col_submit, col_print = st.columns([1, 1, 1])
+
+            with col_save:
+                if st.button("💾 Save Draft", use_container_width=True,
+                             key="payroll_save_draft",
+                             disabled=(state["status"] != "Draft")):
+                    _ts_save()
+                    st.success("✅ Draft saved.")
+
+            with col_submit:
+                if st.button("📤 Submit for Approval", type="primary",
+                             use_container_width=True, key="payroll_submit",
+                             disabled=(state["status"] != "Draft")):
+                    if flag_total > 0:
+                        st.error(f"Resolve {flag_total} flag(s) before resubmitting.")
+                    else:
+                        state["status"] = "Submitted"
+                        state["submitted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        state["submitted_by"] = full_name
+                        _states_save()
+                        _ts_save()
+                        st.success("✅ Submitted to Director for approval.")
+                        st.rerun()
+
+            with col_print:
+                if st.button("📄 Download as Excel", use_container_width=True,
+                             key="payroll_download_excel"):
+                    xlsx = _build_week_excel(week_key, dept)
+                    st.download_button(
+                        "⬇️ Download Week (Excel)",
+                        data=xlsx,
+                        file_name=f"Payroll_{dept}_{week_obj['label'].replace(' ','_')}_{month_label.replace(' ','_')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="payroll_dl_excel",
+                    )
+
+        # -------- Director / Payroll read-only info --------
+        elif mode == "director":
+            st.caption("👁 **Director review mode.** Click any day cell to flag it for amendment.")
+        elif mode == "payroll":
+            if state["status"] == "Approved":
+                st.success(f"✅ Approved by Director — ready for payroll processing.")
+            else:
+                st.info("Read-only. Awaiting Director approval.")
+
+    # ========================================================
+    # TAB 2 — TEAM SUMMARY
+    # ========================================================
+    with tab_sum:
+        tot_days = tot_working = tot_contract = tot_extra = tot_balance = 0
+        checks = 0
+        for emp in employees:
+            c = _calc_row(emp, week_key, dept)
+            b = _calc_balance(emp, week_key, dept)
+            tot_days += c["days_worked"]
+            tot_working += c["working"]
+            tot_contract += c["contracted"]
+            if b["week_net"] is not None:
+                tot_extra += b["week_net"]
+            if b["balance"] is not None:
+                tot_balance += b["balance"]
+            if c["days_worked"] and not c["check_ok"]:
+                checks += 1
+
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("Employees", len(employees))
+        m2.metric("Days Worked", tot_days)
+        m3.metric("Total Working", _m2t(tot_working))
+        m4.metric("Total Contracted", _m2t(tot_contract))
+        m5.metric("This Week Net",
+                  f"{'+' if tot_extra >= 0 else ''}{_m2t(tot_extra)}")
+        m6.metric("Balance",
+                  f"{'+' if tot_balance >= 0 else ''}{_m2t(tot_balance)}")
+
+        if checks:
+            st.warning(f"⚠️ {checks} employee(s) under contracted hours this week.")
+
+        st.markdown("---")
+
+        rows = []
+        for emp in employees:
+            c = _calc_row(emp, week_key, dept)
+            b = _calc_balance(emp, week_key, dept)
+
+            we = b["week_net"]
+            we_str = "—" if we is None else (("+" if we >= 0 else "") + _m2t(we))
+            b_str  = "—" if b["balance"] is None else (("+" if b["balance"] >= 0 else "") + _m2t(b["balance"]))
+
+            rows.append({
+                "Employee": emp.get("name", ""),
+                "Employee ID": emp.get("emp_id", ""),
+                "Days": c["days_worked"],
+                "Sub Total": _m2t(c["sub_total"]),
+                "Lunch": _m2t(c["lunch"]) if c["days_worked"] else "—",
+                "Working": _m2t(c["working"]) if c["days_worked"] else "—",
+                "Contracted": _m2t(c["contracted"]),
+                "Wk Extra": we_str,
+                "Balance": b_str,
+                "Check": "OK" if (c["check_ok"] or not c["days_worked"]) else "Check",
+            })
+
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    # ========================================================
+    # TAB 3 — EXCEPTIONS
+    # ========================================================
+    with tab_exc:
+        items = []
+        for emp in employees:
+            eid = emp.get("emp_id", "")
+            emp_flags = _get_flags(week_key, dept, eid)
+
+            for di, f in emp_flags.items():
+                items.append({
+                    "Type": "⚠ Flagged",
+                    "Employee": emp.get("name", ""),
+                    "Date": week_obj["dates"][di],
+                    "Detail": f.get("comment", ""),
+                })
+
+            c = _calc_row(emp, week_key, dept)
+            if c["days_worked"] and not c["check_ok"]:
+                items.append({
+                    "Type": "! Under Contract",
+                    "Employee": emp.get("name", ""),
+                    "Date": week_obj["range"],
+                    "Detail": f"Working {_m2t(c['working'])} vs "
+                              f"contracted {_m2t(c['contracted'])}",
+                })
+
+            b = _calc_balance(emp, week_key, dept)
+            if b["balance"] is not None and b["balance"] < 0:
+                items.append({
+                    "Type": "⚖ Negative Balance",
+                    "Employee": emp.get("name", ""),
+                    "Date": "Cumulative",
+                    "Detail": f"Owes {_m2t(abs(b['balance']))}",
+                })
+
+            # Missing time on time-entry days
+            ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
+            for i, d in enumerate(ts_days):
+                if not d:
+                    continue
+                if d.get("status") in PAYROLL_TIME_ENTRY_STATUSES:
+                    if not d.get("in") or not d.get("out"):
+                        items.append({
+                            "Type": "⌛ Missing Time",
+                            "Employee": emp.get("name", ""),
+                            "Date": week_obj["dates"][i],
+                            "Detail": f"Status '{d.get('status')}' needs time in/out",
+                        })
+
+        if not items:
+            st.success("✨ No exceptions this week. Everything looks good.")
+        else:
+            st.warning(f"{len(items)} exception(s) found.")
+            st.dataframe(pd.DataFrame(items), width="stretch", hide_index=True)
+
+    # ========================================================
+    # TAB 4 — APPROVALS
+    # ========================================================
+    with tab_appr:
+        if mode not in ("director", "super_admin"):
+            st.info("🔒 Approvals are available to the Director and Super Admin only.")
+            st.caption("Managers submit; Directors approve.")
+            return
+
+        working_emps = [e for e in employees
+                        if _calc_row(e, week_key, dept)["days_worked"] > 0]
+
+        if state["status"] == "Draft":
+            st.warning("📝 The manager has not submitted this week yet.")
+            return
+
+        if state["status"] == "Approved":
+            when = state.get("approved_at", "")
+            st.success(f"✅ **{week_obj['label']} approved by Director** — {when}")
+            st.caption("All employees approved. Manager can now print this week for records.")
+            return
+
+        if not working_emps:
+            st.info("No employees worked this week.")
+            return
+
+        approved_count = sum(1 for e in working_emps
+                             if _is_approved(week_key, dept, e.get("emp_id", "")))
+        flagged_count = sum(1 for e in working_emps
+                            if _get_flags(week_key, dept, e.get("emp_id", "")))
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("✅ Approved", f"{approved_count} / {len(working_emps)}")
+        c2.metric("⚠️ Flagged", flagged_count)
+        c3.metric("📅 Week", week_obj["label"])
+
+        st.markdown("---")
+
+        for emp in working_emps:
+            eid = emp.get("emp_id", "")
+            emp_flags = _get_flags(week_key, dept, eid)
+            approved = _is_approved(week_key, dept, eid)
+            c = _calc_row(emp, week_key, dept)
+            b = _calc_balance(emp, week_key, dept)
+
+            if approved:
+                card_bg = "#f0fdf4"
+                card_border = "#bbf7d0"
+            elif emp_flags:
+                card_bg = "#fef2f2"
+                card_border = "#fecaca"
+            else:
+                card_bg = "#ffffff"
+                card_border = "#e2e8f0"
+
+            st.markdown(
+                f"<div style='background:{card_bg}; border:1px solid {card_border}; "
+                f"border-radius:10px; padding:14px; margin-bottom:10px;'>",
+                unsafe_allow_html=True,
+            )
+
+            col1, col2, col3 = st.columns([5, 2, 2])
+
+            with col1:
+                balance_str = "—"
+                if b["balance"] is not None:
+                    sign = "+" if b["balance"] >= 0 else ""
+                    balance_str = f"{sign}{_m2t(b['balance'])}"
+                st.markdown(
+                    f"### {emp.get('name', '')}  "
+                    f"<span style='font-size:13px; color:#666;'>{eid}</span>"
+                )
+                st.caption(
+                    f"{c['days_worked']} days · {_m2t(c['working'])} working · "
+                    f"{_m2t(c['contracted'])} contracted · "
+                    f"**Balance: {balance_str}**"
+                )
+
+                for di, f in emp_flags.items():
+                    st.markdown(
+                        f"<div style='background:#fff; border:1px solid #fecaca; "
+                        f"border-radius:6px; padding:6px 10px; margin-top:4px; "
+                        f"font-size:12px;'>"
+                        f"<b>⚠ {week_obj['dates'][di]}:</b> {f.get('comment', '')}"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+            with col2:
+                if approved:
+                    st.success("✅ Approved")
+                elif emp_flags:
+                    st.error(f"⚠ {len(emp_flags)} flag(s)")
+                else:
+                    st.info("Pending")
+
+            with col3:
+                if not approved and not emp_flags:
+                    if st.button("✅ Approve", key=f"appr_{eid}",
+                                 use_container_width=True, type="primary"):
+                        _approvals().setdefault(week_key, {}).setdefault(dept, {})[eid] = {
+                            "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "approved_by": full_name,
+                        }
+                        _approvals_save()
+                        _maybe_finalize(week_key, dept, working_emps)
+                        st.rerun()
+
+                if approved and state["status"] == "Submitted":
+                    if st.button("↩ Undo", key=f"undo_{eid}",
+                                 use_container_width=True):
+                        _approvals().get(week_key, {}).get(dept, {}).pop(eid, None)
+                        _approvals_save()
+                        st.rerun()
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # Bulk actions
+        st.markdown("---")
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            can_approve_all = flagged_count == 0
+            if st.button("✅ Approve All Employees", type="primary",
+                         use_container_width=True, key="payroll_approve_all",
+                         disabled=not can_approve_all):
+                for e in working_emps:
+                    _approvals().setdefault(week_key, {}).setdefault(dept, {})[
+                        e["emp_id"]] = {
+                        "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "approved_by": full_name,
+                    }
+                _approvals_save()
+                _maybe_finalize(week_key, dept, working_emps)
+                st.rerun()
+
+            if not can_approve_all:
+                st.caption(f"⚠️ Clear {flagged_count} flag(s) first.")
+
+        with col_b:
+            if st.button("↩ Return Week to Manager", use_container_width=True,
+                         key="payroll_return_week"):
+                state["status"] = "Draft"
+                state["submitted_at"] = ""
+                state["submitted_by"] = ""
+                state["approved_at"] = ""
+                state["approved_by"] = ""
+                _states_save()
+                _approvals().get(week_key, {}).pop(dept, None)
+                _approvals_save()
+                st.success("Week returned to manager. Flags remain for amendment.")
+                st.rerun()
+
+
+# ============================================================
+# DAY ENTRY PANEL
+# ============================================================
+
+def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
+    """Inline entry / review panel for one day."""
+    week_obj = PAYROLL_WEEKS[week_key]
+    ts_days = _ts().setdefault(week_key, {}).setdefault(dept, {}) \
+        .setdefault(emp["emp_id"], [None] * 5)
+
+    current = ts_days[day_idx] or {
+        "in": "", "out": "", "travel": "0:00", "away": "0:00",
+        "status": "Worked", "note": "",
+    }
+    flags = _get_flags(week_key, dept, emp["emp_id"])
+    existing_flag = flags.get(day_idx)
+
+    if existing_flag:
+        st.error(f"⚠️ **Flagged by {existing_flag.get('by', 'Director')}**: "
+                 f"{existing_flag.get('comment', '')}")
+
+    k = f"payroll_day_{emp['emp_id']}_{day_idx}_{week_key}"
+
+    # Status
+    status = st.selectbox(
+        "Status", PAYROLL_STATUS_OPTIONS,
+        index=PAYROLL_STATUS_OPTIONS.index(current.get("status", "Worked")),
+        key=f"{k}_status",
+        disabled=not editable,
+    )
+
+    allows_time = status in PAYROLL_TIME_ENTRY_STATUSES
+
+    if allows_time:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            time_in = st.text_input("🕐 Time In (HH:MM)",
+                                    value=current.get("in", ""),
+                                    key=f"{k}_in", disabled=not editable)
+        with c2:
+            time_out = st.text_input("🕐 Time Out (HH:MM)",
+                                     value=current.get("out", ""),
+                                     key=f"{k}_out", disabled=not editable)
+        with c3:
+            travel = st.text_input("🚗 Travel (paid)",
+                                   value=current.get("travel", "0:00"),
+                                   key=f"{k}_travel", disabled=not editable)
+        with c4:
+            away = st.text_input("⏸ Time Away (unpaid)",
+                                 value=current.get("away", "0:00"),
+                                 key=f"{k}_away", disabled=not editable)
+
+        if time_in and time_out:
+            t = (_t2m(time_out) or 0) - (_t2m(time_in) or 0) \
+                - (_t2m(away) or 0) + (_t2m(travel) or 0)
+            st.caption(f"**Day total:** {_m2t(t)}  "
+                       f"(= Time Out − Time In − Away + Travel)")
+    else:
+        time_in = time_out = ""
+        travel = away = "0:00"
+        st.info(f"ℹ️ Full-day status **{status}** — no time entry required.")
+
+    note = st.text_input("📝 Note", value=current.get("note", ""),
+                         key=f"{k}_note", disabled=not editable)
+
+    # -------- Manager actions --------
+    if editable:
+        col_s, col_x, col_c = st.columns(3)
+        with col_s:
+            if st.button("💾 Save Day", type="primary",
+                         use_container_width=True, key=f"{k}_save"):
+                ts_days[day_idx] = {
+                    "in": time_in, "out": time_out,
+                    "travel": travel, "away": away,
+                    "status": status, "note": note,
+                }
+                # Clear flag on this day (manager amended it)
+                if existing_flag:
+                    _clear_flag(week_key, dept, emp["emp_id"], day_idx)
+                _ts_save()
+                st.success("✅ Day saved.")
+                st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+                st.rerun()
+
+        with col_x:
+            if st.button("🗑 Clear Day", use_container_width=True, key=f"{k}_clear"):
+                ts_days[day_idx] = None
+                _clear_flag(week_key, dept, emp["emp_id"], day_idx)
+                _ts_save()
+                st.rerun()
+
+        with col_c:
+            if st.button("❌ Close", use_container_width=True, key=f"{k}_close"):
+                st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+                st.rerun()
+
+    # -------- Director actions --------
+    elif mode == "director":
+        st.caption("👁 Director review mode. Flag this day if it needs fixing.")
+
+        with st.form(f"{k}_flag_form"):
+            flag_comment = st.text_area(
+                "Flag comment",
+                value=existing_flag.get("comment", "") if existing_flag else "",
+                placeholder="e.g. Please check Time In — should be 08:30 not 09:15.",
+                height=80,
+            )
+            flag_submit = st.form_submit_button(
+                "⚠ Flag for Amendment" if not existing_flag else "↻ Update Flag",
+                type="primary",
+                use_container_width=True,
+            )
+
+        if flag_submit:
+            if not flag_comment.strip():
+                st.error("Please describe the issue before flagging.")
+            else:
+                _set_flag(week_key, dept, emp["emp_id"], day_idx,
+                          flag_comment.strip(), full_name)
+                st.success("✅ Day flagged. The manager will see this comment.")
+                st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+                st.rerun()
+
+        if existing_flag:
+            col_unflag, col_close = st.columns(2)
+            with col_unflag:
+                if st.button("✕ Remove Flag", use_container_width=True,
+                             key=f"{k}_unflag"):
+                    _clear_flag(week_key, dept, emp["emp_id"], day_idx)
+                    st.success("Flag removed.")
+                    st.rerun()
+            with col_close:
+                if st.button("❌ Close", use_container_width=True, key=f"{k}_close_dir"):
+                    st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+                    st.rerun()
+        else:
+            if st.button("❌ Close", use_container_width=True, key=f"{k}_close_dir2"):
+                st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+                st.rerun()
+
+
+# ============================================================
+# AUTO-FINALIZE
+# ============================================================
+
+def _maybe_finalize(week_key, dept, working_emps):
+    """Mark week Approved once every working employee is approved and no flags remain."""
+    if any(_get_flags(week_key, dept, e.get("emp_id", "")) for e in working_emps):
+        return
+    for e in working_emps:
+        if not _is_approved(week_key, dept, e.get("emp_id", "")):
+            return
+    state = _get_state(week_key, dept)
+    state["status"] = "Approved"
+    state["approved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    state["approved_by"] = "Director"
+    _states_save()
+
+
+# ============================================================
+# EXCEL EXPORT (A3-friendly)
+# ============================================================
+
+def _build_week_excel(week_key, dept):
+    """Return an Excel workbook (bytes) laid out like the original A3 sheet."""
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    week_obj = PAYROLL_WEEKS[week_key]
+    employees = _get_employees(dept)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Timesheet"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A3
+
+    navy = PatternFill("solid", fgColor="1F4E78")
+    light = PatternFill("solid", fgColor="F3F6F9")
+    yellow = PatternFill("solid", fgColor="FEF9C3")
+    green = PatternFill("solid", fgColor="DCFCE7")
+    thin = Side(style="thin", color="D9E1F2")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    # Title row
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=14)
+    title = f"{dept} - {week_obj['label']} Payroll - {PAYROLL_MONTH_LABELS[week_obj['month']]}"
+    ws.cell(1, 1, title).font = Font(size=16, bold=True, color="FFFFFF")
+    ws.cell(1, 1).fill = navy
+    ws.cell(1, 1).alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    # Header row
+    headers = ["Employee", "Contract (wk)"]
+    for iso in week_obj["dates"]:
+        dt = datetime.fromisoformat(iso)
+        headers.append(f"{dt.strftime('%a %d %b')}")
+    headers += ["Days", "Sub Total", "Lunch", "Working", "Contracted",
+                "Wk Extra", "Balance"]
+
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(2, i, h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = navy
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = border
+    ws.row_dimensions[2].height = 26
+
+    # Employee rows
+    r = 3
+    for emp in employees:
+        eid = emp.get("emp_id", "")
+        ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
+        calc = _calc_row(emp, week_key, dept)
+        bal  = _calc_balance(emp, week_key, dept)
+        emp_flags = _get_flags(week_key, dept, eid)
+
+        ws.cell(r, 1, f"{emp.get('name', '')} ({eid})")
+        ws.cell(r, 2, f"{emp.get('contracted_hours_per_week', 40)}h")
+
+        for i in range(5):
+            d = ts_days[i]
+            if d is None:
+                txt = ""
+            elif d.get("status") in PAYROLL_TIME_ENTRY_STATUSES and d.get("in") and d.get("out"):
+                txt = f"{d['in']}→{d['out']}\n({_m2t(_day_total(d) or 0)})"
+            else:
+                txt = d.get("status", "")
+            cell = ws.cell(r, 3 + i, txt)
+            if i in emp_flags:
+                cell.fill = PatternFill("solid", fgColor="FEE2E2")
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        ws.cell(r, 8, calc["days_worked"])
+        ws.cell(r, 9, _m2t(calc["sub_total"]))
+        ws.cell(r, 10, _m2t(calc["lunch"]) if calc["days_worked"] else "—")
+        ws.cell(r, 11, _m2t(calc["working"]) if calc["days_worked"] else "—")
+        ws.cell(r, 12, _m2t(calc["contracted"]))
+        ws.cell(r, 13, "—" if bal["week_net"] is None
+                else (("+" if bal["week_net"] >= 0 else "") + _m2t(bal["week_net"])))
+        ws.cell(r, 14, "—" if bal["balance"] is None
+                else (("+" if bal["balance"] >= 0 else "") + _m2t(bal["balance"])))
+
+        # fill for computed
+        for col in (8, 9, 10, 11, 12):
+            ws.cell(r, col).fill = light
+        ws.cell(r, 13).fill = yellow
+        ws.cell(r, 14).fill = green
+
+        for col in range(1, 15):
+            ws.cell(r, col).border = border
+            ws.cell(r, col).alignment = Alignment(
+                horizontal="center" if col > 1 else "left",
+                vertical="center", wrap_text=True,
+            )
+
+        r += 1
+
+    # Column widths
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 12
+    for col_letter in "CDEFG":
+        ws.column_dimensions[col_letter].width = 16
+    for col_letter in "HIJKLMN":
+        ws.column_dimensions[col_letter].width = 12
+
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+# ============================================================
+# SMALL HELPERS
+# ============================================================
+
+def _short_status(status):
+    return {
+        "Late In": "Late In",
+        "Late Out": "Late Out",
+        "Authorised Absence": "AA",
+        "HD Holiday": "HD Hol",
+        "Overtime Approved": "OT",
+        "College": "College",
+        "Holiday": "Holiday",
+        "Sick": "Sick",
+        "Maternity": "Maternity",
+        "Lay-off": "Lay-off",
+        "Unpaid Holiday": "Unpaid Hol",
+        "Unpaid Absence": "Unpaid Abs",
+        "Bank Holiday": "Bank Hol",
+        "AWOL": "AWOL",
+        "N/A": "N/A",
+        "Leaver": "Leaver",
+    }.get(status, status)
+
+
+def _long_date(iso):
+    d = datetime.fromisoformat(iso)
+    return d.strftime("%A, %d %B %Y")
+
+
+
+# Payroll Timesheet is embedded in this file so Streamlit Cloud does not need
+# a separate payroll_module.py alongside webapp.py.
+import types as _payroll_types
+payroll = _payroll_types.SimpleNamespace(
+    init_payroll=init_payroll,
+    get_backup_filenames=get_backup_filenames,
+    get_payroll_permission_defaults=get_payroll_permission_defaults,
+    get_payroll_permission_labels=get_payroll_permission_labels,
+    get_payroll_user_db_column=get_payroll_user_db_column,
+    render_payroll_timesheet=render_payroll_timesheet,
+)
 
 st.markdown("""
     <style>
