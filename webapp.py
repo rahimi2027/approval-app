@@ -514,22 +514,30 @@ def _calc_row(emp, week_key, dept):
             weekly_mins = round(float(raw_weekly or 40) * 60)
     except (TypeError, ValueError):
         weekly_mins = 2400
-    daily_contract = weekly_mins / 5
+    try:
+        contracted_days = float(emp.get("days_per_week", 5) or 5)
+    except (TypeError, ValueError):
+        contracted_days = 5.0
+    daily_contract = weekly_mins / max(contracted_days, 1)
 
     sub = travel = away = 0
     day_equivalents = 0.0
     for d in days:
         if not d:
             continue
+        status = str(d.get("status", "Worked")).strip() or "Worked"
         t_in, t_out = _t2m(d.get("in")), _t2m(d.get("out"))
         if t_in is not None and t_out is not None:
             day_minutes = _day_total(d)
             if day_minutes is not None:
-                # A recorded shift up to half of the normal daily contract is
-                # treated as a half-day. Half-days receive no lunch deduction
-                # unless the employee's total week reaches a higher band.
-                day_equivalents += 0.5 if day_minutes <= (daily_contract / 2) else 1.0
                 sub += day_minutes
+                # Status drives the day fraction: a day marked Worked (or
+                # another paid working status) is a full contracted day even
+                # when the actual shift is short. The difference is reflected
+                # in Wk Extra and Exceptions rather than silently converting
+                # the day to a half-day based on elapsed time.
+                if status in PAYROLL_TIME_ENTRY_STATUSES:
+                    day_equivalents += 1.0
         travel += (_t2m(d.get("travel")) or 0)
         away += (_t2m(d.get("away")) or 0)
 
@@ -980,7 +988,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             daily_contract = weekly_contract / max(days_contract, 1)
             recorded_work_days = sum(
                 1 for d in ts_days
-                if d and _t2m(d.get("in")) is not None and _t2m(d.get("out")) is not None
+                if d
+                and str(d.get("status", "Worked")).strip() in PAYROLL_TIME_ENTRY_STATUSES
+                and _t2m(d.get("in")) is not None
+                and _t2m(d.get("out")) is not None
             )
             expected_minutes = daily_contract * recorded_work_days
             short_by = max(0, expected_minutes - (c["working"] + c["away"]))
@@ -988,7 +999,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             if recorded_work_days and short_by > 0:
                 items.append({
                     "icon": "❗",
-                    "headline": f"{emp.get('name', '')} — under contracted hours for recorded working days",
+                    "headline": f"{emp.get('name', '')} — under contracted hours on worked days",
                     "date": week_obj["range"],
                     "detail": (f"Working {_m2t(c['working'])} vs pro-rated contract "
                                f"{_m2t(expected_minutes)} (short by {_m2t(short_by)})"),
