@@ -713,6 +713,19 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
     # TAB 1 — TIMESHEET
     # ========================================================
     with tab_ts:
+        # Compact, screenshot-inspired weekly timesheet styling. This keeps the
+        # existing Streamlit controls, editing flow, flags and approval logic.
+        st.markdown("""
+        <style>
+        div[data-testid="stHorizontalBlock"] { gap: .28rem; }
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] { min-width: 0; }
+        div[data-testid="stHorizontalBlock"]:has(button[key^="pl_day_"]) { gap: .22rem; }
+        div[data-testid="stButton"] > button { min-height: 2rem; padding: .2rem .3rem; font-size: .72rem; line-height: 1.15; white-space: normal; }
+        div[data-testid="stMarkdownContainer"] p { margin-bottom: .15rem; font-size: .78rem; }
+        div[data-testid="stMarkdownContainer"] strong { font-weight: 700; }
+        div[data-testid="stTabs"] button { font-size: .86rem; }
+        </style>
+        """, unsafe_allow_html=True)
         editable = (mode == "manager") and (state["status"] == "Draft")
 
         # -------- Header row --------
@@ -781,11 +794,17 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     btn_label = "🔴 " + btn_label
 
                 btn_type = "primary" if is_flagged else "secondary"
+                day_hint = "Click to open day entry"
+                if d:
+                    status_hint = str(d.get("status", "Worked") or "Worked")
+                    note_hint = str(d.get("note", "") or "").strip()
+                    day_hint = status_hint + (f" — {note_hint}" if note_hint else "")
+                if i in emp_flags:
+                    day_hint = str(emp_flags[i].get("comment", "Flagged for amendment"))
                 if cell.button(btn_label, key=f"pl_day_{eid}_{i}",
                                use_container_width=True,
                                type=btn_type,
-                               help=emp_flags.get(i, {}).get("comment",
-                                     "Click to open day entry")):
+                               help=day_hint):
                     st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = True
                     st.rerun()
 
