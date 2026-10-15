@@ -15489,6 +15489,20 @@ elif role == "Super Admin":
             ("📥 Item Check-ins", ITEM_CHECKIN_PATH, "item_checkins", "backup_item_checkins"),
             ("📥 Leaver Clearance", LEAVER_CLEARANCE_PATH, "leaver_clearance", "backup_leaver_clearance"),
         ]
+        # Payroll / weekly timesheet workbooks are included in Super Admin backups too.
+        for _payroll_path, _payroll_backup_name in payroll.get_backup_filenames().items():
+            _payroll_stem = os.path.splitext(_payroll_backup_name.replace("BACKUP_", ""))[0]
+            backup_files.append((
+                "📥 " + {
+                    "payroll_timesheets": "Payroll Timesheets",
+                    "payroll_week_states": "Payroll Week States",
+                    "payroll_flags": "Payroll Exceptions / Flags",
+                    "payroll_approvals": "Payroll Approvals",
+                }.get(_payroll_stem, _payroll_stem.replace("_", " ").title()),
+                _payroll_path,
+                _payroll_stem,
+                "backup_" + _payroll_stem,
+            ))
         backup_cols = st.columns(3)
         for i, (label, path, stem, key) in enumerate(backup_files):
             with backup_cols[i % 3]:
