@@ -3401,6 +3401,29 @@ try:
 except Exception as e:
     print(f"Payroll timesheet initialisation skipped: {e}")
 
+# Register payroll backup files AFTER init_payroll injects APP_FOLDER.
+# The initial dictionary is created at import time, when payroll paths may still
+# point at the process working directory. Replace those entries with the actual
+# initialised paths so manual and hourly Drive sync target the real workbooks.
+try:
+    _payroll_backup_map = payroll.get_backup_filenames()
+    _payroll_backup_basenames = {
+        "payroll_timesheets.xlsx", "payroll_week_states.xlsx",
+        "payroll_flags.xlsx", "payroll_approvals.xlsx",
+    }
+    for _registered_path in list(DRIVE_BACKUP_FILENAMES):
+        if os.path.basename(os.path.normpath(str(_registered_path))) in _payroll_backup_basenames:
+            DRIVE_BACKUP_FILENAMES.pop(_registered_path, None)
+    DRIVE_BACKUP_FILENAMES.update(_payroll_backup_map)
+    # Queue the correctly located payroll workbooks for the next background pass.
+    for _payroll_path in _payroll_backup_map:
+        if os.path.exists(_payroll_path):
+            _mark_drive_file_dirty(_payroll_path, make_recovery_snapshot=False)
+    print("Payroll workbooks registered for automatic Google Drive backup:",
+          ", ".join(os.path.basename(p) for p in _payroll_backup_map))
+except Exception as e:
+    print(f"Payroll Drive backup registration failed: {e}")
+
 def init_user_db():
     safe_init_excel(USER_DB_PATH, USER_DB_COLUMNS)
     if _workbook_has_rows(USER_DB_PATH):
