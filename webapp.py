@@ -717,8 +717,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         # existing Streamlit controls, editing flow, flags and approval logic.
         st.markdown("""
         <style>
-        div[data-testid="stHorizontalBlock"] { gap: .28rem; }
+        div[data-testid="stHorizontalBlock"] { gap: .28rem; min-width: max-content; }
         div[data-testid="stHorizontalBlock"] > div[data-testid="column"] { min-width: 0; }
+        div[data-testid="stMarkdownContainer"] { overflow-wrap: anywhere; }
+        div[data-testid="stMarkdownContainer"] p { margin-bottom: .15rem; font-size: .72rem; }
         div[data-testid="stHorizontalBlock"]:has(button[key^="pl_day_"]) { gap: .22rem; }
         div[data-testid="stButton"] > button { min-height: 2rem; padding: .2rem .3rem; font-size: .72rem; line-height: 1.15; white-space: normal; }
         div[data-testid="stMarkdownContainer"] p { margin-bottom: .15rem; font-size: .78rem; }
@@ -729,7 +731,13 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         editable = (mode == "manager") and (state["status"] == "Draft")
 
         # -------- Header row --------
-        header = st.columns([3, 1.6, 1.6, 1.6, 1.6, 1.6, 1.6, 1, 1.4, 1.4, 1.4, 1.4, 1.6])
+        # All columns from the reference screenshot are present, including
+        # Travel, Away, Balance, Check and Notes. A horizontal scroll may be
+        # needed on smaller screens because this is a wide weekly report.
+        col_widths = [2.8, 1.15, 1.25, 1.25, 1.25, 1.25, 1.25,
+                      0.65, 0.9, 0.72, 0.72, 0.72, 0.9, 0.95,
+                      0.9, 0.9, 0.8, 2.2]
+        header = st.columns(col_widths)
         header[0].markdown("**Employee**")
         header[1].markdown("**Contract (wk)**")
         for i, iso in enumerate(week_obj["dates"]):
@@ -743,9 +751,14 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         header[7].markdown("**Days**")
         header[8].markdown("**Sub Total**")
         header[9].markdown("**Lunch**")
-        header[10].markdown("**Working**")
-        header[11].markdown("**Contracted**")
-        header[12].markdown("**Wk Extra**")
+        header[10].markdown("**Travel**")
+        header[11].markdown("**Away**")
+        header[12].markdown("**Working**")
+        header[13].markdown("**Contracted**")
+        header[14].markdown("**Wk Extra**")
+        header[15].markdown("**Balance**")
+        header[16].markdown("**Check**")
+        header[17].markdown("**Notes**")
 
         st.markdown("<hr style='margin:4px 0;'>", unsafe_allow_html=True)
 
@@ -757,7 +770,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             calc = _calc_row(emp, week_key, dept)
             bal  = _calc_balance(emp, week_key, dept)
 
-            row = st.columns([3, 1.6, 1.6, 1.6, 1.6, 1.6, 1.6, 1, 1.4, 1.4, 1.4, 1.4, 1.6])
+            row = st.columns(col_widths)
 
             flag_badge = (f"<br><span style='color:#dc2626; font-size:11px;'>"
                           f"⚠ {len(emp_flags)} flag(s)</span>") if emp_flags else ""
@@ -808,21 +821,19 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = True
                     st.rerun()
 
-            # Computed columns
-            row[7].markdown(f"<div style='text-align:center;'><b>{calc['days_worked']}</b></div>",
-                            unsafe_allow_html=True)
-            row[8].markdown(f"<div style='text-align:center;'><b>{_m2t(calc['sub_total'])}</b></div>",
-                            unsafe_allow_html=True)
-            row[9].markdown(f"<div style='text-align:center;'>"
-                            f"{_m2t(calc['lunch']) if calc['days_worked'] else '—'}</div>",
-                            unsafe_allow_html=True)
-            row[10].markdown(
-                f"<div style='text-align:center;'><b>"
-                f"{_m2t(calc['working']) if calc['days_worked'] else '—'}</b></div>",
-                unsafe_allow_html=True,
-            )
-            row[11].markdown(f"<div style='text-align:center;'><b>{_m2t(calc['contracted'])}</b></div>",
-                             unsafe_allow_html=True)
+            # Computed columns — kept in the same order as the screenshot.
+            def _cell_minutes(value, bold=False):
+                shown = _m2t(int(value or 0))
+                tag = "b" if bold else "span"
+                return f"<div style='text-align:center;'><{tag}>{shown}</{tag}></div>"
+
+            row[7].markdown(f"<div style='text-align:center;'><b>{calc['days_worked']:g}</b></div>", unsafe_allow_html=True)
+            row[8].markdown(_cell_minutes(calc['sub_total'], True), unsafe_allow_html=True)
+            row[9].markdown(f"<div style='text-align:center;'>{_m2t(calc['lunch']) if calc['days_worked'] else '—'}</div>", unsafe_allow_html=True)
+            row[10].markdown(_cell_minutes(calc['travel']), unsafe_allow_html=True)
+            row[11].markdown(_cell_minutes(calc['away']), unsafe_allow_html=True)
+            row[12].markdown(f"<div style='text-align:center;'><b>{_m2t(calc['working']) if calc['days_worked'] else '—'}</b></div>", unsafe_allow_html=True)
+            row[13].markdown(_cell_minutes(calc['contracted'], True), unsafe_allow_html=True)
 
             we = bal["week_net"]
             if we is None:
@@ -831,20 +842,38 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 color = "#16a34a" if we >= 0 else "#dc2626"
                 sign = "+" if we >= 0 else ""
                 we_html = f"<span style='color:{color}; font-weight:700;'>{sign}{_m2t(we)}</span>"
-            row[12].markdown(f"<div style='text-align:center;'>{we_html}</div>",
-                             unsafe_allow_html=True)
+            row[14].markdown(f"<div style='text-align:center;'>{we_html}</div>", unsafe_allow_html=True)
 
-            # Balance sub-line
             b = bal["balance"]
-            if b is not None:
+            if b is None:
+                balance_html = "<span style='color:#94a3b8;'>—</span>"
+            else:
                 color = "#16a34a" if b >= 0 else "#dc2626"
                 sign = "+" if b >= 0 else ""
-                st.markdown(
-                    f"<div style='text-align:right; font-size:11px; "
-                    f"color:{color}; padding-right:12px; margin-top:-6px;'>"
-                    f"Balance: <b>{sign}{_m2t(b)}</b></div>",
-                    unsafe_allow_html=True,
-                )
+                balance_html = f"<span style='color:{color}; font-weight:700;'>{sign}{_m2t(b)}</span>"
+            row[15].markdown(f"<div style='text-align:center;'>{balance_html}</div>", unsafe_allow_html=True)
+
+            if calc['days_worked'] == 0:
+                check_html = "<span style='background:#f1f5f9;color:#64748b;padding:3px 7px;border-radius:12px;'>N/A</span>"
+            elif calc['check_ok']:
+                check_html = "<span style='background:#dcfce7;color:#166534;padding:3px 7px;border-radius:12px;'>✓ OK</span>"
+            else:
+                check_html = "<span style='background:#fef3c7;color:#92400e;padding:3px 7px;border-radius:12px;'>! Check</span>"
+            if emp_flags:
+                check_html = "<span style='background:#fee2e2;color:#991b1b;padding:3px 7px;border-radius:12px;'>⚠ Flagged</span>"
+            row[16].markdown(f"<div style='text-align:center;'>{check_html}</div>", unsafe_allow_html=True)
+
+            note_items = []
+            for note_day, day_entry in enumerate(ts_days):
+                if day_entry:
+                    note_text = str(day_entry.get('note', '') or '').strip()
+                    status_text = str(day_entry.get('status', '') or '').strip()
+                    if note_text and note_text not in note_items:
+                        note_items.append(note_text)
+                    elif status_text and status_text not in ('Worked', 'Late In', 'Late Out') and status_text not in note_items:
+                        note_items.append(status_text)
+            notes_text = " · ".join(note_items) if note_items else "—"
+            row[17].markdown(f"<div style='font-size:11px;white-space:normal;overflow-wrap:anywhere;'>{notes_text}</div>", unsafe_allow_html=True)
 
             # Inline open day panel
             for i in range(5):
