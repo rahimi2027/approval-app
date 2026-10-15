@@ -25,29 +25,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
 from google.oauth2 import service_account
 
-"""
-payroll_module.py — Payroll Timesheet
-=====================================
-Drop-in module for Acoole Portal.
 
-Install:
-  1. Save this file next to webapp (46).py
-  2. In webapp (46).py, add near the top of your imports:
-         import payroll_module as payroll
-  3. After APP_FOLDER and helpers are defined, call:
-         payroll.init_payroll(
-             app_folder=APP_FOLDER,
-             safe_init_excel_fn=safe_init_excel,
-             read_excel_records_fn=_read_excel_records,
-             sync_to_drive_fn=sync_saved_file_to_drive,
-             employees_provider=lambda: _hrp_load_employees(),
-             invalidate_cache_fn=lambda *n: [st.session_state.pop(x, None) for x in n],
-         )
-  4. In any role portal, add a tab and call:
-         payroll.render_payroll_timesheet(user_info, mode="manager")
-         payroll.render_payroll_timesheet(user_info, mode="director")
-         payroll.render_payroll_timesheet(user_info, mode="payroll")
-"""
 
 from datetime import datetime, date, timedelta
 import pandas as pd
@@ -5781,6 +5759,18 @@ def render_hr_portal(current_user_info=None):
                                 value=date.today(),
                                 key=f"hrp_new_start_{new_form_version}",
                             )
+                            new_work_start = st.time_input(
+                                "Working Day Start Time",
+                                value=datetime.strptime("08:30", "%H:%M").time(),
+                                key=f"hrp_new_work_start_{new_form_version}",
+                                help="The employee's usual daily start time, shown on the weekly timesheet.",
+                            )
+                            new_work_end = st.time_input(
+                                "Working Day End Time",
+                                value=datetime.strptime("16:30", "%H:%M").time(),
+                                key=f"hrp_new_work_end_{new_form_version}",
+                                help="The employee's usual daily finish time, shown on the weekly timesheet.",
+                            )
 
                         with col2:
                             new_agreement = st.selectbox(
@@ -5823,6 +5813,8 @@ def render_hr_portal(current_user_info=None):
                                 "emp_id": result,
                                 "name": new_name.strip(),
                                 "start_date": new_start_date,
+                                "work_start_time": new_work_start.strftime("%H:%M"),
+                                "work_end_time": new_work_end.strftime("%H:%M"),
                                 "department": new_department,
                                 "work_type": new_work_type,
                                 "job_title": new_work_type,
