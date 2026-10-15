@@ -5,6 +5,7 @@
 #    • NEW: Employee Items (Issue / Holdings / Leaver Check-in → auto Store Deduction)
 # ============================================================
 import streamlit as st
+import payroll_module as payroll
 import os
 import sys
 import json
@@ -19,260 +20,6 @@ import threading
 import queue
 import time
 import textwrap
-
-# ============================================================
-# Employee Weekly Timesheet module embedded in this single file.
-# Uses a separate workbook and does not write to payroll.
-# ============================================================
-import json
-import os
-import uuid
-from datetime import date, datetime, time, timedelta
-from typing import Callable, Iterable
-
-import pandas as pd
-import streamlit as st
-
-COLUMNS = [
-    "Timesheet_ID", "Week_Start", "Week_End", "Department", "Employee_ID", "Employee_Name",
-    "Job_Title", "Days_JSON", "Worked_Hours", "Contracted_Hours", "Travel_Hours", "Away_Hours",
-    "Net_Balance_Hours", "Status", "Submitted_By", "Submitted_At", "Approved_By", "Approved_At",
-    "Director_Comments", "Flagged_Days_JSON", "Updated_At"
-]
-
-
-def _ensure_workbook(path: str) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
-        pd.DataFrame(columns=COLUMNS).to_excel(path, index=False, engine="openpyxl")
-    else:
-        try:
-            df = pd.read_excel(path, engine="openpyxl")
-            changed = False
-            for col in COLUMNS:
-                if col not in df.columns:
-                    df[col] = ""
-                    changed = True
-            if changed:
-                tmp = path + ".repair.tmp.xlsx"
-                df.to_excel(tmp, index=False, engine="openpyxl")
-                os.replace(tmp, path)
-        except Exception as exc:
-            raise RuntimeError(f"Cannot read timesheet workbook safely: {exc}") from exc
-
-
-def _load(path: str) -> pd.DataFrame:
-    _ensure_workbook(path)
-    return pd.read_excel(path, engine="openpyxl").fillna("")
-
-
-def _save(path: str, df: pd.DataFrame, sync_callback=None) -> None:
-    tmp = path + ".write.tmp.xlsx"
-    df.reindex(columns=COLUMNS).to_excel(tmp, index=False, engine="openpyxl")
-    os.replace(tmp, path)
-    if callable(sync_callback):
-        try:
-            sync_callback(path)
-        except Exception as exc:
-            # Local workbook remains saved; the host app's sync monitor can retry.
-            print(f"Timesheet Google Drive sync queued/failed: {exc}")
-
-
-def _week_days(week_start: date):
-    return [week_start + timedelta(days=i) for i in range(7)]
-
-
-def _float(value, default=0.0):
-    try:
-        x = float(value)
-        return x if x >= 0 else default
-    except (TypeError, ValueError):
-        return default
-
-
-def _day_hours(day: dict) -> float:
-    if day.get("away_type") in {"Holiday", "Sick", "Other absence"}:
-        return 0.0
-    start, end = str(day.get("start", "")).strip(), str(day.get("end", "")).strip()
-    if not start or not end:
-        return 0.0
-    try:
-        a = datetime.strptime(start, "%H:%M")
-        b = datetime.strptime(end, "%H:%M")
-        minutes = (b - a).total_seconds() / 60
-        if minutes < 0:
-            minutes += 24 * 60  # supports overnight shifts
-        minutes -= min(max(int(day.get("break_minutes", 0) or 0), 0), 24 * 60)
-        return max(0.0, minutes / 60)
-    except (ValueError, TypeError):
-        return 0.0
-
-
-def _normalise_days(raw) -> dict:
-    try:
-        days = json.loads(raw) if isinstance(raw, str) and raw else raw
-        return days if isinstance(days, dict) else {}
-    except Exception:
-        return {}
-
-
-def render_employee_weekly_timesheet(*, user_info: dict, workbook_path: str,
-        load_employees: Callable[[], Iterable[dict]], sync_callback=None, audit_callback=None) -> None:
-    """Render the manager submitter or director approval view for current role."""
-    role = str(user_info.get("role", "")).strip().casefold()
-    is_director = role == "director"
-    is_manager = role == "manager"
-    if not (is_director or is_manager):
-        return
-    st.markdown("""
-    <style>
-    .ts-hero{padding:18px 22px;border-radius:14px;background:linear-gradient(115deg,#10233f,#1e4d79);color:#fff;margin:4px 0 18px 0}
-    .ts-hero h2{margin:0;color:#fff;font-size:25px}.ts-hero p{margin:6px 0 0 0;color:#dbeafe;font-size:13px}
-    .ts-note{padding:10px 14px;border-left:4px solid #2563eb;background:#eff6ff;border-radius:6px;margin:8px 0 14px}
-    </style>
-    <div class="ts-hero"><h2>Employee Weekly Timesheet</h2><p>Department time records · Manager submission · Director approval · Approved reports only</p></div>
-    """, unsafe_allow_html=True)
-    st.markdown('<div class="ts-note">Timesheet totals are for review and reporting only. They do not update payroll or employee pay.</div>', unsafe_allow_html=True)
-    try:
-        df = _load(workbook_path)
-    except Exception as exc:
-        st.error(str(exc)); return
-
-    today = date.today()
-    default_start = today - timedelta(days=today.weekday())
-    week_start = st.date_input("Week commencing (Monday)", value=default_start, key="ts_week_start")
-    if week_start.weekday() != 0:
-        st.warning("Choose a Monday so weekly reports stay consistent.")
-        return
-    week_end = week_start + timedelta(days=6)
-    week_key = week_start.isoformat()
-    dept = str(user_info.get("dept", "")).strip()
-    current_name = str(user_info.get("full_name", user_info.get("username", "Unknown"))).strip()
-    week_mask = (df["Week_Start"].astype(str) == week_key)
-    if not is_director:
-        week_mask &= df["Department"].astype(str).str.casefold() == dept.casefold()
-    week_df = df.loc[week_mask].copy()
-
-    if is_manager:
-        st.subheader(f"Department: {dept or 'Not set'} · {week_start:%d %b} – {week_end:%d %b %Y}")
-        employees = []
-        if not dept:
-            st.error("Your account has no department assigned. Ask the portal administrator to correct it before entering timesheets.")
-            return
-        try:
-            employees = [e for e in load_employees() if str(e.get("status", "Active")).strip().casefold() == "active" and str(e.get("name", "")).strip()]
-        except Exception as exc:
-            st.warning(f"Could not load the HR employee directory: {exc}")
-        employees = [e for e in employees if str(e.get("department", "")).strip().casefold() == dept.casefold()]
-        employees = sorted(employees, key=lambda e: str(e.get("name", "")).casefold())
-        if not employees:
-            st.info("No active employees found. Add employees in HR → Employee Directory first.")
-            return
-        existing = {str(r.get("Employee_ID", "")): r for _, r in week_df.iterrows()}
-        labels = [f"{e.get('name','')} · {e.get('emp_id','') or 'No ID'}" for e in employees]
-        by_label = {label: e for label, e in zip(labels, employees)}
-        selected = st.selectbox("Employee", labels, key="ts_employee_select")
-        emp = by_label[selected]
-        emp_id = str(emp.get("emp_id", "")).strip() or str(emp.get("name", "")).strip()
-        old = existing.get(emp_id)
-        if old is not None and str(old.get("Status", "Draft")) in {"Submitted", "Approved"}:
-            status = str(old.get("Status"))
-            st.info(f"This employee's week is **{status}**. Submitted/approved records are locked. Director approval is required before the report is final.")
-        else:
-            old_days = _normalise_days(old.get("Days_JSON", "")) if old is not None else {}
-            st.caption("Enter start/end times in 24-hour HH:MM format. Leave both blank for a non-working day.")
-            daily = {}
-            day_cols = st.columns(2)
-            for idx, day_date in enumerate(_week_days(week_start)):
-                k = day_date.isoformat(); prior = old_days.get(k, {})
-                with day_cols[idx % 2]:
-                    with st.container(border=True):
-                        st.markdown(f"**{day_date:%A · %d %b}**")
-                        away = st.selectbox("Day type", ["Working", "Holiday", "Sick", "Other absence"], index=["Working", "Holiday", "Sick", "Other absence"].index(prior.get("away_type", "Working")) if prior.get("away_type", "Working") in ["Working", "Holiday", "Sick", "Other absence"] else 0, key=f"ts_away_{emp_id}_{k}")
-                        c1, c2 = st.columns(2)
-                        with c1: start = st.text_input("Start (HH:MM)", value=str(prior.get("start", "")), placeholder="08:30", key=f"ts_start_{emp_id}_{k}")
-                        with c2: end = st.text_input("Finish (HH:MM)", value=str(prior.get("end", "")), placeholder="17:00", key=f"ts_end_{emp_id}_{k}")
-                        c3, c4 = st.columns(2)
-                        with c3: brk = st.number_input("Break (minutes)", min_value=0, max_value=1440, value=int(_float(prior.get("break_minutes", 30))), step=15, key=f"ts_break_{emp_id}_{k}")
-                        with c4: travel = st.number_input("Travel (hours)", min_value=0.0, max_value=24.0, value=_float(prior.get("travel_hours", 0)), step=0.25, key=f"ts_travel_{emp_id}_{k}")
-                        away_hours = st.number_input("Other away time (hours)", min_value=0.0, max_value=24.0, value=_float(prior.get("away_hours", 0)), step=0.25, key=f"ts_awayhrs_{emp_id}_{k}")
-                        note = st.text_input("Note (optional)", value=str(prior.get("note", "")), key=f"ts_note_{emp_id}_{k}")
-                        daily[k] = {"start": start.strip(), "end": end.strip(), "break_minutes": int(brk), "travel_hours": float(travel), "away_hours": float(away_hours), "away_type": away, "note": note.strip()}
-                        if start.strip() or end.strip():
-                            try:
-                                datetime.strptime(start.strip(), "%H:%M"); datetime.strptime(end.strip(), "%H:%M")
-                            except ValueError:
-                                st.error("Use valid 24-hour times, for example 08:30 and 17:00.")
-                        st.caption(f"Calculated worked: {_day_hours(daily[k]):.2f} h")
-            contracted = st.number_input("Contracted weekly hours", min_value=0.0, max_value=168.0, value=_float(old.get("Contracted_Hours", 0)) if old is not None else 37.5, step=0.5, key=f"ts_contracted_{emp_id}_{week_key}")
-            worked = sum(_day_hours(d) for d in daily.values())
-            travel_total = sum(_float(d.get("travel_hours")) for d in daily.values())
-            away_total = sum(_float(d.get("away_hours")) for d in daily.values())
-            st.subheader("Weekly summary")
-            m1,m2,m3,m4 = st.columns(4)
-            m1.metric("Worked", f"{worked:.2f} h"); m2.metric("Contracted", f"{contracted:.2f} h"); m3.metric("Travel", f"{travel_total:.2f} h"); m4.metric("Balance", f"{worked-contracted:+.2f} h")
-            with st.form(f"ts_form_{emp_id}_{week_key}"):
-                action = st.radio("Action", ["Save Draft", "Submit to Director"], horizontal=True, key=f"ts_action_{emp_id}_{week_key}")
-                confirm = st.form_submit_button("Save timesheet", type="primary")
-            if confirm:
-                errors = []
-                for k,d in daily.items():
-                    if bool(d["start"]) != bool(d["end"]): errors.append(f"{k}: enter both start and finish, or leave both blank")
-                    if d["start"] and d["end"]:
-                        try: datetime.strptime(d["start"], "%H:%M"); datetime.strptime(d["end"], "%H:%M")
-                        except ValueError: errors.append(f"{k}: invalid time format")
-                if action == "Submit to Director" and not any(_day_hours(d)>0 or d.get("away_type") != "Working" for d in daily.values()): errors.append("Add working times or an absence before submitting")
-                if errors:
-                    for error in errors: st.error(error)
-                else:
-                    status = "Submitted" if action == "Submit to Director" else "Draft"
-                    record = {"Timesheet_ID": str(old.get("Timesheet_ID")) if old is not None else str(uuid.uuid4()), "Week_Start": week_key, "Week_End": week_end.isoformat(), "Department": str(emp.get("department", dept)).strip() or dept, "Employee_ID": emp_id, "Employee_Name": str(emp.get("name", "")).strip(), "Job_Title": str(emp.get("job_title", "")).strip(), "Days_JSON": json.dumps(daily), "Worked_Hours": round(worked,2), "Contracted_Hours": round(float(contracted),2), "Travel_Hours": round(travel_total,2), "Away_Hours": round(away_total,2), "Net_Balance_Hours": round(worked-float(contracted),2), "Status": status, "Submitted_By": current_name if status == "Submitted" else (str(old.get("Submitted_By", "")) if old is not None else ""), "Submitted_At": datetime.now().isoformat(timespec="seconds") if status == "Submitted" else (str(old.get("Submitted_At", "")) if old is not None else ""), "Approved_By": "", "Approved_At": "", "Director_Comments": "", "Flagged_Days_JSON": "{}", "Updated_At": datetime.now().isoformat(timespec="seconds")}
-                    if old is None:
-                        df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
-                    else:
-                        mask = (df["Week_Start"].astype(str) == week_key) & (df["Employee_ID"].astype(str) == emp_id) & (df["Department"].astype(str).str.casefold() == str(record["Department"]).casefold())
-                        for col,val in record.items(): df.loc[mask, col] = val
-                    _save(workbook_path, df, sync_callback)
-                    if callable(audit_callback):
-                        audit_callback("TIMESHEET_" + status.upper(), record["Timesheet_ID"])
-                    st.success("Timesheet saved as " + status + "." + (" Payroll was not changed." if status == "Submitted" else "")); st.rerun()
-
-    if is_director:
-        st.subheader("Director review queue")
-        pending = df[(df["Status"].astype(str) == "Submitted") & (df["Week_Start"].astype(str) == week_key)].copy()
-        if pending.empty:
-            st.info("No submitted timesheets for this week.")
-        else:
-            for idx, row in pending.iterrows():
-                with st.expander(f"{row.get('Employee_Name')} · {row.get('Department')} · {row.get('Worked_Hours')} h worked"):
-                    st.write(f"Week: {row.get('Week_Start')} – {row.get('Week_End')} · Submitted by {row.get('Submitted_By')} at {row.get('Submitted_At')}")
-                    st.write(f"Contracted: {_float(row.get('Contracted_Hours')):.2f} h · Travel: {_float(row.get('Travel_Hours')):.2f} h · Away: {_float(row.get('Away_Hours')):.2f} h · Balance: {_float(row.get('Net_Balance_Hours')):+.2f} h")
-                    days = _normalise_days(row.get("Days_JSON", ""))
-                    st.dataframe(pd.DataFrame([{"Date": k, "Start": v.get("start", ""), "Finish": v.get("end", ""), "Break min": v.get("break_minutes", 0), "Worked h": round(_day_hours(v),2), "Travel h": v.get("travel_hours",0), "Away": v.get("away_type", "Working"), "Note": v.get("note","")} for k,v in sorted(days.items())]), hide_index=True, use_container_width=True)
-                    comments = st.text_area("Director comments / return reason", key=f"ts_director_comments_{row.get('Timesheet_ID')}")
-                    c1,c2 = st.columns(2)
-                    with c1:
-                        if st.button("✅ Approve", key=f"ts_approve_{row.get('Timesheet_ID')}", type="primary"):
-                            df.loc[idx, "Status"] = "Approved"; df.loc[idx, "Approved_By"] = current_name; df.loc[idx, "Approved_At"] = datetime.now().isoformat(timespec="seconds"); df.loc[idx, "Director_Comments"] = comments.strip(); df.loc[idx, "Updated_At"] = datetime.now().isoformat(timespec="seconds")
-                            _save(workbook_path, df, sync_callback)
-                            if callable(audit_callback): audit_callback("TIMESHEET_APPROVED", row.get("Timesheet_ID"))
-                            st.success("Approved report saved. No payroll data was changed."); st.rerun()
-                    with c2:
-                        if st.button("↩ Return to manager", key=f"ts_return_{row.get('Timesheet_ID')}"):
-                            df.loc[idx, "Status"] = "Returned"; df.loc[idx, "Director_Comments"] = comments.strip() or "Please review and amend this timesheet."; df.loc[idx, "Updated_At"] = datetime.now().isoformat(timespec="seconds")
-                            _save(workbook_path, df, sync_callback)
-                            if callable(audit_callback): audit_callback("TIMESHEET_RETURNED", row.get("Timesheet_ID"))
-                            st.warning("Returned to manager for correction."); st.rerun()
-        st.subheader("Approved reports and totals")
-        approved = df[(df["Status"].astype(str) == "Approved") & (df["Week_Start"].astype(str) == week_key)].copy()
-        if approved.empty:
-            st.info("No approved reports for this week.")
-        else:
-            a,b,c,d = st.columns(4)
-            a.metric("Approved employees", len(approved)); b.metric("Worked hours", f"{pd.to_numeric(approved['Worked_Hours'], errors='coerce').fillna(0).sum():.2f}"); c.metric("Travel hours", f"{pd.to_numeric(approved['Travel_Hours'], errors='coerce').fillna(0).sum():.2f}"); d.metric("Net balance", f"{pd.to_numeric(approved['Net_Balance_Hours'], errors='coerce').fillna(0).sum():+.2f}")
-            st.dataframe(approved[["Department","Employee_Name","Week_Start","Worked_Hours","Contracted_Hours","Travel_Hours","Away_Hours","Net_Balance_Hours","Approved_By","Approved_At"]], hide_index=True, use_container_width=True)
-            st.download_button("Download approved weekly report (CSV)", approved[["Department","Employee_ID","Employee_Name","Week_Start","Week_End","Worked_Hours","Contracted_Hours","Travel_Hours","Away_Hours","Net_Balance_Hours","Status","Approved_By","Approved_At"]].to_csv(index=False).encode("utf-8-sig"), file_name=f"approved_timesheets_{week_key}.csv", mime="text/csv", key=f"ts_download_{week_key}")
-
 from datetime import datetime, date, timezone, timedelta
 
 from googleapiclient.discovery import build
@@ -442,7 +189,7 @@ USER_DB_COLUMNS = [
     "can_access_holiday_calendar", "can_access_hr_reports", "can_access_employee_overview",
     "can_access_holiday_calculator", "can_access_employee_directory",
     "employee_id", "can_access_store_deduction", "can_access_employee_items",
-    "can_access_training_help", "can_access_employee_weekly_timesheet", "is_active"
+    "can_access_training_help", "can_access_payroll_timesheet", "is_active"
 ]
 
 ONEDRIVE_CLIENT_ID = ""
@@ -891,6 +638,7 @@ DRIVE_BACKUP_FILENAMES = {
     EMPLOYEE_ITEMS_PATH: "BACKUP_employee_items.xlsx",
     ITEM_CHECKIN_PATH:   "BACKUP_item_checkins.xlsx",
     LEAVER_CLEARANCE_PATH: "BACKUP_employee_leaver_clearance.xlsx",
+    **payroll.get_backup_filenames(),
 }
 
 
@@ -1393,7 +1141,6 @@ PERMISSION_DEFAULTS = {
 }
 
 _HR_REPORT_PERMISSION_DEFAULTS = {
-    "can_access_employee_weekly_timesheet": False,
     "can_access_holiday_calendar": False,
     "can_access_hr_reports": False,
     "can_access_employee_overview": False,
@@ -1402,6 +1149,8 @@ _HR_REPORT_PERMISSION_DEFAULTS = {
 }
 for _role_name in PERMISSION_DEFAULTS:
     PERMISSION_DEFAULTS[_role_name].update(_HR_REPORT_PERMISSION_DEFAULTS)
+
+PERMISSION_DEFAULTS.update(payroll.get_payroll_permission_defaults())
 
 PERMISSION_LABELS = {
     "can_view_all_dept": "👁️ View All Department Requests",
@@ -1421,9 +1170,9 @@ PERMISSION_LABELS = {
     "can_access_holiday_calculator": "🧮 Holiday Calculator (View Only)",
     "can_access_employee_directory": "👥 Employee Directory (View Only)",
     "can_access_store_deduction": "📦 Store Department Deduction",
+    **payroll.get_payroll_permission_labels(),
     "can_access_employee_items": "🧰 Employee Items / Holdings",
-    "can_access_training_help": "📚 Training & Help Centre",
-    "can_access_employee_weekly_timesheet": "🕒 Employee Weekly Timesheet (Manager Submission)"
+    "can_access_training_help": "📚 Training & Help Centre"
 }
 
 
@@ -1958,6 +1707,18 @@ try:
 except Exception as e:
     print(f"Drive storage initialisation skipped: {e}")
 
+try:
+    payroll.init_payroll(
+        app_folder=APP_FOLDER,
+        safe_init_excel_fn=safe_init_excel,
+        read_excel_records_fn=_read_excel_records,
+        sync_to_drive_fn=sync_saved_file_to_drive,
+        employees_provider=lambda: _hrp_load_employees(),
+        invalidate_cache_fn=_invalidate_data_cache,
+    )
+except Exception as e:
+    print(f"Payroll timesheet initialisation skipped: {e}")
+
 def init_user_db():
     safe_init_excel(USER_DB_PATH, USER_DB_COLUMNS)
     if _workbook_has_rows(USER_DB_PATH):
@@ -2024,7 +1785,7 @@ def save_users(users_dict):
             "can_access_store_deduction": u.get("can_access_store_deduction", False),
             "can_access_employee_items": u.get("can_access_employee_items", False),
             "can_access_training_help": u.get("can_access_training_help", False),
-            "can_access_employee_weekly_timesheet": u.get("can_access_employee_weekly_timesheet", False),
+            "can_access_payroll_timesheet": u.get("can_access_payroll_timesheet", False),
             "is_active": u.get("is_active", True)
         })
 
@@ -2122,7 +1883,7 @@ def load_users(force=False):
                 "can_access_store_deduction": _flag_or_default(r.get("can_access_store_deduction", ""), user_role, "can_access_store_deduction"),
                 "can_access_employee_items": _flag_or_default(r.get("can_access_employee_items", ""), user_role, "can_access_employee_items"),
                 "can_access_training_help": _flag_or_default(r.get("can_access_training_help", ""), user_role, "can_access_training_help"),
-                "can_access_employee_weekly_timesheet": _flag_or_default(r.get("can_access_employee_weekly_timesheet", ""), user_role, "can_access_employee_weekly_timesheet"),
+                "can_access_payroll_timesheet": _flag_or_default(r.get("can_access_payroll_timesheet", ""), user_role, "can_access_payroll_timesheet"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
             if user_role == "Super Admin":
@@ -11790,12 +11551,6 @@ def user_management_panel():
             perm_approve = col2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=defaults.get("can_approve_requests", False))
             st.markdown("### 🧩 Module Access")
             st.caption("Grant access to individual software modules. Training & Help is controlled separately here.")
-            perm_employee_weekly_timesheet = st.checkbox(
-                PERMISSION_LABELS["can_access_employee_weekly_timesheet"],
-                value=defaults.get("can_access_employee_weekly_timesheet", False),
-                key="create_employee_weekly_timesheet_permission",
-                help="Allow this department manager to submit weekly employee timesheets for Director approval."
-            )
             perm_training_help = st.checkbox(
                 "📚 Training & Help Centre",
                 value=defaults.get("can_access_training_help", False),
@@ -11817,6 +11572,7 @@ def user_management_panel():
             perm_holiday_calculator = rcol2.checkbox(PERMISSION_LABELS["can_access_holiday_calculator"], value=defaults.get("can_access_holiday_calculator", False))
             perm_employee_directory = rcol1.checkbox(PERMISSION_LABELS["can_access_employee_directory"], value=defaults.get("can_access_employee_directory", False))
             perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
+            perm_payroll = st.checkbox(PERMISSION_LABELS["can_access_payroll_timesheet"], value=defaults.get("can_access_payroll_timesheet", False), key="create_payroll_timesheet_permission")
             perm_employee_items = st.checkbox(PERMISSION_LABELS["can_access_employee_items"], value=defaults.get("can_access_employee_items", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
@@ -11828,7 +11584,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_access_employee_weekly_timesheet": perm_employee_weekly_timesheet, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "is_active": new_active}
                     # Manager accounts receive the requested baseline at save time;
                     # the creation form itself still opens with every checkbox unticked.
                     if new_role == "Manager":
@@ -11873,7 +11629,6 @@ def user_management_panel():
                 curr_perm_holiday_calculator = bool(curr.get("can_access_holiday_calculator", False))
                 curr_perm_employee_directory = bool(curr.get("can_access_employee_directory", False))
                 curr_perm_training_help = bool(curr.get("can_access_training_help", False))
-                curr_perm_employee_weekly_timesheet = bool(curr.get("can_access_employee_weekly_timesheet", False))
                 curr_perm_store = bool(curr.get("can_access_store_deduction", False))
                 curr_perm_employee_items = bool(curr.get("can_access_employee_items", False))
                 curr_perm_training_help = bool(curr.get("can_access_training_help", False))
@@ -11884,12 +11639,6 @@ def user_management_panel():
                 edit_app = ecol2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=curr_perm_app)
                 st.markdown("### 🧩 Module Access")
                 st.caption("Grant access to individual software modules. Training & Help is controlled separately here.")
-                edit_employee_weekly_timesheet = st.checkbox(
-                    PERMISSION_LABELS["can_access_employee_weekly_timesheet"],
-                    value=curr_perm_employee_weekly_timesheet,
-                    key=f"edit_employee_weekly_timesheet_{edit_user_sel}",
-                    help="Allow this department manager to submit weekly employee timesheets for Director approval."
-                )
                 edit_training_help = st.checkbox(
                     "📚 Training & Help Centre",
                     value=curr_perm_training_help,
@@ -11911,6 +11660,8 @@ def user_management_panel():
                 edit_holiday_calculator = ercol2.checkbox(PERMISSION_LABELS["can_access_holiday_calculator"], value=curr_perm_holiday_calculator)
                 edit_employee_directory = ercol1.checkbox(PERMISSION_LABELS["can_access_employee_directory"], value=curr_perm_employee_directory)
                 edit_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=curr_perm_store)
+                curr_perm_payroll = bool(curr.get("can_access_payroll_timesheet", False))
+                edit_payroll = st.checkbox(PERMISSION_LABELS["can_access_payroll_timesheet"], value=curr_perm_payroll, key="edit_payroll_timesheet_permission")
                 edit_employee_items = st.checkbox(PERMISSION_LABELS["can_access_employee_items"], value=curr_perm_employee_items)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
@@ -11918,7 +11669,7 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_access_employee_weekly_timesheet": edit_employee_weekly_timesheet, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -11943,9 +11694,9 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_employee_directory"] = edit_employee_directory
                         USERS[edit_user_sel]["employee_id"] = edit_employee_id
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
+                        USERS[edit_user_sel]["can_access_payroll_timesheet"] = edit_payroll
                         USERS[edit_user_sel]["can_access_employee_items"] = edit_employee_items
                         USERS[edit_user_sel]["can_access_training_help"] = edit_training_help
-                        USERS[edit_user_sel]["can_access_employee_weekly_timesheet"] = edit_employee_weekly_timesheet
                         USERS[edit_user_sel]["is_active"] = edit_active
                     saved_username = upd_username_new
                     apply_department_permission_preset(USERS[saved_username], upd_dept)
@@ -13369,6 +13120,8 @@ elif role == "Payroll":
         "🧾 Leaver Clearance", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"
     ]
     if user_info.get("can_access_training_help", False): payroll_tab_labels.append("📚 Training & Help")
+    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False))
+    if has_payroll_timesheet: payroll_tab_labels.append("📋 Payroll Timesheet")
     payroll_tabs = st.tabs(payroll_tab_labels)
     tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = payroll_tabs[:7]
     tab_training_help = payroll_tabs[7] if len(payroll_tabs) > 7 else None
@@ -13427,6 +13180,9 @@ elif role == "Payroll":
     if tab_training_help is not None:
         with tab_training_help:
             render_training_help(user_info)
+    if has_payroll_timesheet:
+        with payroll_tabs[-1]:
+            payroll.render_payroll_timesheet(user_info, mode="payroll")
 
 elif role == "Work Order Manager":
     dept_name = dept
@@ -13638,6 +13394,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if has_work_orders: labels.append("🛠️ Work Orders")
         if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
         if user_info.get("can_access_training_help", False): labels.append("📚 Training & Help")
+        has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False))
+        if has_payroll_timesheet: labels.append("📋 Payroll Timesheet")
         if not labels:
             st.subheader("🔐 Access Restricted")
             st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
@@ -13856,6 +13614,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 with tabs[tab_idx]:
                     render_training_help(user_info)
                 tab_idx += 1
+            if has_payroll_timesheet:
+                with tabs[tab_idx]:
+                    payroll.render_payroll_timesheet(user_info, mode="manager")
+                tab_idx += 1
 
 
 elif role == "Director":
@@ -13925,6 +13687,7 @@ elif role == "Director":
         director_tab_labels.insert(1, "📊 HR Reports & Calendar")
     if user_info.get("can_access_training_help", False):
         director_tab_labels.append("📚 Training & Help")
+    director_tab_labels.append("📋 Payroll Timesheet")
     director_tabs = st.tabs(director_tab_labels)
     director_addition_tab = director_tabs[0]
     if director_hr_access_enabled:
@@ -14103,6 +13866,8 @@ elif role == "Director":
     if director_training_tab is not None:
         with director_training_tab:
             render_training_help(user_info)
+    with director_tabs[-1]:
+        payroll.render_payroll_timesheet(user_info, mode="director")
 
 elif role == "Super Admin":
     super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab = st.tabs([
@@ -14412,25 +14177,3 @@ else:
 # ✅ END OF FILE — NOTHING AFTER THIS!
 # ============================================================
 
-
-
-# ============================================================
-# Employee Weekly Timesheet — separate workbook, no live payroll writes
-# ============================================================
-try:
-    _timesheet_role = str(st.session_state.get("user_info", {}).get("role", "")).strip().casefold()
-    _timesheet_user = st.session_state.get("user_info", {})
-    _timesheet_manager_granted = bool(_timesheet_user.get("can_access_employee_weekly_timesheet", False))
-    if st.session_state.get("logged_in") and (
-        _timesheet_role == "director" or (_timesheet_role == "manager" and _timesheet_manager_granted)
-    ):
-        st.divider()
-        render_employee_weekly_timesheet(
-            user_info=st.session_state.get("user_info", {}),
-            workbook_path=os.path.join(APP_FOLDER, "employee_weekly_timesheets.xlsx"),
-            load_employees=_hrp_load_employees,
-            sync_callback=sync_saved_file_to_drive,
-            audit_callback=lambda action, record_id: log_action(action, record_id),
-        )
-except Exception as _timesheet_render_error:
-    st.error(f"Employee Weekly Timesheet could not be loaded: {_timesheet_render_error}")
