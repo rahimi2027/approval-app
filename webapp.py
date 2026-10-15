@@ -1264,10 +1264,12 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 if b["balance"] is not None:
                     sign = "+" if b["balance"] >= 0 else ""
                     balance_str = f"{sign}{_m2t(b['balance'])}"
-                st.markdown(
-                    f"### {emp.get('name', '')}  "
-                    f"<span style='font-size:13px; color:#666;'>{eid}</span>"
-                )
+                # Render the employee name as plain text, then show the HR-configured
+                # working-day times underneath. Do not include literal HTML in Markdown.
+                st.markdown(f"### {emp.get('name', '')}")
+                work_start = str(emp.get("work_start_time", "08:30") or "08:30")[:5]
+                work_end = str(emp.get("work_end_time", "16:30") or "16:30")[:5]
+                st.caption(f"Working hours: {work_start} – {work_end}")
                 st.caption(
                     f"{c['days_worked']} days · {_m2t(c['working'])} working · "
                     f"{_m2t(c['contracted'])} contracted · "
