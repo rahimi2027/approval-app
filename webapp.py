@@ -699,6 +699,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         when = state.get("approved_at", "")
         st.success(f"✅ **{week_obj['label']} approved by Director** — {when}")
         st.caption("The manager can now print this week for records.")
+    elif state["status"] == "Returned":
+        st.warning(f"↩️ **{week_obj['label']} returned by Director** — amend the timesheet and resubmit for approval.")
     elif state["status"] == "Submitted":
         if flag_total > 0:
             st.error(f"⚠️ {flag_total} day(s) flagged for amendment — "
@@ -750,7 +752,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         div[data-testid="stTabs"] button { font-size: .86rem; }
         </style>
         """, unsafe_allow_html=True)
-        editable = (mode == "manager") and (state["status"] == "Draft" or (state["status"] == "Submitted" and flag_total > 0))
+        editable = (mode == "manager") and (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))
 
         # -------- Header row --------
         # All columns from the reference screenshot are present, including
@@ -930,17 +932,19 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             with col_save:
                 if st.button("💾 Save Draft", use_container_width=True,
                              key="payroll_save_draft",
-                             disabled=not (state["status"] == "Draft" or (state["status"] == "Submitted" and flag_total > 0))):
+                             disabled=not (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))):
                     _ts_save()
-                    if state["status"] == "Submitted" and flag_total > 0:
+                    if state["status"] in ("Submitted", "Returned") and (flag_total > 0 or state["status"] == "Returned"):
                         state["status"] = "Draft"
+                        state["submitted_at"] = ""
+                        state["submitted_by"] = ""
                         _states_save()
                     st.success("✅ Draft saved. You can resubmit when the amendments are complete.")
 
             with col_submit:
                 if st.button("📤 Submit for Approval", type="primary",
                              use_container_width=True, key="payroll_submit",
-                             disabled=not (state["status"] == "Draft" or (state["status"] == "Submitted" and flag_total > 0))):
+                             disabled=not (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))):
                     # Do not submit until every employee has a completed entry for
                     # each weekday. A non-work status (Holiday, Sick, etc.) is a
                     # completed day; Worked/Late/other time-entry statuses require
@@ -971,8 +975,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         st.warning("Days still to complete: " + "; ".join(missing_days[:30]) +
                                    (" … and more" if len(missing_days) > 30 else ""))
                     else:
-                        if state["status"] == "Submitted" and flag_total > 0:
-                            # Resubmission acknowledges the Director's amendment requests; clear old flags and approvals.
+                        if state["status"] in ("Submitted", "Returned") and (flag_total > 0 or state["status"] == "Returned"):
+                            # Resubmission acknowledges the Director's return; clear old flags and approvals.
                             _flags().get(week_key, {}).pop(dept, None)
                         _flags_save()
                         _approvals().get(week_key, {}).pop(dept, None)
@@ -1340,7 +1344,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         with col_b:
             if st.button("↩ Return Week to Manager", use_container_width=True,
                          key="payroll_return_week"):
-                state["status"] = "Draft"
+                state["status"] = "Returned"
                 state["submitted_at"] = ""
                 state["submitted_by"] = ""
                 state["approved_at"] = ""
