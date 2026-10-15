@@ -131,7 +131,10 @@ def init_payroll(app_folder, safe_init_excel_fn, read_excel_records_fn,
 # ============================================================
 
 def _path(filename):
-    return os.path.join(_ctx["app_folder"], filename)
+    # DRIVE_BACKUP_FILENAMES is constructed at import time, before init_payroll().
+    # Use the Streamlit repository working directory until APP_FOLDER is injected.
+    folder = _ctx.get("app_folder") or os.getcwd()
+    return os.path.join(folder, filename)
 
 
 def _p_timesheets(): return _path("payroll_timesheets.xlsx")
