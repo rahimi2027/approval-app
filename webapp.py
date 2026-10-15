@@ -922,56 +922,111 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
     # ========================================================
     with tab_exc:
         items = []
+        leave_statuses = {
+            "Authorised Absence", "HD Holiday", "Holiday", "Sick", "Maternity",
+            "Lay-off", "Unpaid Holiday", "Unpaid Absence", "Bank Holiday",
+            "College", "AWOL", "N/A", "Leaver",
+        }
         for emp in employees:
             eid = emp.get("emp_id", "")
             emp_flags = _get_flags(week_key, dept, eid)
+            ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
 
             for di, f in emp_flags.items():
                 items.append({
-                    "Type": "⚠ Flagged",
-                    "Employee": emp.get("name", ""),
-                    "Date": week_obj["dates"][di],
-                    "Detail": f.get("comment", ""),
+                    "icon": "⚠️", "headline": f"{emp.get('name', '')} — flagged for amendment",
+                    "date": _long_date(week_obj["dates"][di]),
+                    "detail": f.get("comment", ""),
                 })
 
             c = _calc_row(emp, week_key, dept)
-            if c["days_worked"] and not c["check_ok"]:
+            b = _calc_balance(emp, week_key, dept)
+
+            # Work out expected hours for the scheduled week, then reduce the
+            # expectation for recorded full-day leave/absence entries.
+            try:
+                weekly_contract = float(emp.get("contracted_hours_per_week", 40) or 40) * 60
+                days_contract = float(emp.get("days_per_week", 5) or 5)
+            except Exception:
+                weekly_contract, days_contract = 2400.0, 5.0
+            daily_contract = weekly_contract / max(days_contract, 1)
+            expected_minutes = weekly_contract
+            for d in ts_days:
+                if d and str(d.get("status", "")).strip() in leave_statuses:
+                    expected_minutes -= daily_contract
+            expected_minutes = max(0, expected_minutes)
+
+            if c["working"] < expected_minutes and any(
+                d is not None for d in ts_days
+            ):
+                short_by = expected_minutes - c["working"]
                 items.append({
-                    "Type": "! Under Contract",
-                    "Employee": emp.get("name", ""),
-                    "Date": week_obj["range"],
-                    "Detail": f"Working {_m2t(c['working'])} vs "
-                              f"contracted {_m2t(c['contracted'])}",
+                    "icon": "❗",
+                    "headline": f"{emp.get('name', '')} — under contracted hours this week",
+                    "date": week_obj["range"],
+                    "detail": f"Working {_m2t(c['working'])} vs contracted {_m2t(expected_minutes)} (short by {_m2t(short_by)})",
                 })
 
-            b = _calc_balance(emp, week_key, dept)
             if b["balance"] is not None and b["balance"] < 0:
                 items.append({
-                    "Type": "⚖ Negative Balance",
-                    "Employee": emp.get("name", ""),
-                    "Date": "Cumulative",
-                    "Detail": f"Owes {_m2t(abs(b['balance']))}",
+                    "icon": "⚖️",
+                    "headline": f"{emp.get('name', '')} — negative balance (owes {_m2t(abs(b['balance']))})",
+                    "date": "Running balance carried forward",
+                    "detail": _m2t(b["balance"]),
                 })
 
-            # Missing time on time-entry days
-            ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
             for i, d in enumerate(ts_days):
-                if not d:
+                day_label = _long_date(week_obj["dates"][i])
+                if d is None:
+                    items.append({
+                        "icon": "⌛",
+                        "headline": f"{emp.get('name', '')} — missing timesheet entry on {day_label}",
+                        "date": day_label,
+                        "detail": "No status or Time In / Time Out has been recorded for this day.",
+                    })
                     continue
-                if d.get("status") in PAYROLL_TIME_ENTRY_STATUSES:
-                    if not d.get("in") or not d.get("out"):
-                        items.append({
-                            "Type": "⌛ Missing Time",
-                            "Employee": emp.get("name", ""),
-                            "Date": week_obj["dates"][i],
-                            "Detail": f"Status '{d.get('status')}' needs time in/out",
-                        })
+
+                status = str(d.get("status", "Worked")).strip() or "Worked"
+                if status in PAYROLL_TIME_ENTRY_STATUSES and (not d.get("in") or not d.get("out")):
+                    items.append({
+                        "icon": "⌛",
+                        "headline": f"{emp.get('name', '')} — missing time on {day_label}",
+                        "date": day_label,
+                        "detail": f'Status "{status}" needs Time In / Time Out recorded.',
+                    })
+
+                if status in leave_statuses:
+                    items.append({
+                        "icon": "📌",
+                        "headline": f"{emp.get('name', '')} — {status} on {day_label}",
+                        "date": day_label,
+                        "detail": "Non-working day / leave recorded.",
+                    })
+
+                note = str(d.get("note", "") or "").strip()
+                if note:
+                    items.append({
+                        "icon": "💬",
+                        "headline": f"{emp.get('name', '')} — note on {day_label}",
+                        "date": day_label,
+                        "detail": note,
+                    })
 
         if not items:
             st.success("✨ No exceptions this week. Everything looks good.")
         else:
-            st.warning(f"{len(items)} exception(s) found.")
-            st.dataframe(pd.DataFrame(items), width="stretch", hide_index=True)
+            st.warning(f"⚠ Exceptions ({len(items)})")
+            for item in items:
+                st.markdown(
+                    f"<div style='display:flex; gap:10px; align-items:flex-start; "
+                    f"padding:10px 12px; margin:7px 0; border:1px solid #e5e7eb; "
+                    f"border-radius:8px; background:#fff;'>"
+                    f"<div style='font-size:20px; min-width:26px;'>{item['icon']}</div>"
+                    f"<div><div style='font-weight:700;'>{item['headline']}</div>"
+                    f"<div style='color:#555; font-size:13px; margin-top:3px;'>{item['detail']}</div>"
+                    f"</div></div>",
+                    unsafe_allow_html=True,
+                )
 
     # ========================================================
     # TAB 4 — APPROVALS
@@ -5879,6 +5934,18 @@ def render_hr_portal(current_user_info=None):
                             edit_id = st.text_input("Employee ID", value=edit_emp["emp_id"], help="Must be ACE-ID followed by numbers, e.g. ACE-ID001.")
                             edit_name = st.text_input("Full Name", value=edit_emp["name"])
                             edit_start = st.date_input("Start Date", value=edit_emp["start_date"])
+                            _default_start = str(edit_emp.get("work_start_time", "08:30") or "08:30")
+                            _default_end = str(edit_emp.get("work_end_time", "16:30") or "16:30")
+                            try:
+                                _start_time_value = datetime.strptime(_default_start[:5], "%H:%M").time()
+                            except Exception:
+                                _start_time_value = datetime.strptime("08:30", "%H:%M").time()
+                            try:
+                                _end_time_value = datetime.strptime(_default_end[:5], "%H:%M").time()
+                            except Exception:
+                                _end_time_value = datetime.strptime("16:30", "%H:%M").time()
+                            edit_work_start = st.time_input("Working Day Start Time", value=_start_time_value)
+                            edit_work_end = st.time_input("Working Day End Time", value=_end_time_value)
                             edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
                         with ec2:
                             hr_software_departments = load_departments()
@@ -5935,6 +6002,8 @@ def render_hr_portal(current_user_info=None):
                             edit_emp["emp_id"] = validated_id
                             edit_emp["name"] = edit_name.strip()
                             edit_emp["start_date"] = edit_start
+                            edit_emp["work_start_time"] = edit_work_start.strftime("%H:%M")
+                            edit_emp["work_end_time"] = edit_work_end.strftime("%H:%M")
                             edit_emp["job_title"] = edit_position.strip()
                             edit_emp["department"] = edit_dept
                             edit_emp["agreement_type"] = edit_agreement
