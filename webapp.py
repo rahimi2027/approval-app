@@ -171,8 +171,20 @@ def _day_total(d):
 
 
 def _lunch_for(days):
-    d = int(days)
-    return {5: 150, 4: 120, 3: 90, 2: 60, 1: 30}.get(d, 150 if d > 5 else 0)
+    """Lunch deduction by worked-day equivalents.
+
+    Half a day alone has no lunch deduction. Once work reaches one day,
+    deductions increase by 30 minutes per started full-day equivalent:
+    1/1.5=30m, 2/2.5=60m, 3/3.5=90m, 4/4.5=120m, 5+=150m.
+    """
+    try:
+        d = float(days or 0)
+    except (TypeError, ValueError):
+        d = 0
+    if d < 1:
+        return 0
+    full_day_band = int(d + 0.999999)  # ceil without importing math
+    return min(full_day_band, 5) * 30
 
 
 # ============================================================
@@ -491,29 +503,40 @@ def _calc_row(emp, week_key, dept):
     days = _ts().get(week_key, {}).get(dept, {}).get(emp.get("emp_id", "")) \
         or [None] * 5
 
+    # Contract is stored as decimal hours (e.g. 37.50 = 37 hours 30 minutes).
+    # Also accept an HH:MM value for older/manual employee records.
+    raw_weekly = emp.get("contracted_hours_per_week", 40)
+    try:
+        if isinstance(raw_weekly, str) and ":" in raw_weekly:
+            weekly_mins = _t2m(raw_weekly)
+            weekly_mins = weekly_mins if weekly_mins is not None else 2400
+        else:
+            weekly_mins = round(float(raw_weekly or 40) * 60)
+    except (TypeError, ValueError):
+        weekly_mins = 2400
+    daily_contract = weekly_mins / 5
+
     sub = travel = away = 0
+    day_equivalents = 0.0
     for d in days:
         if not d:
             continue
-        t = _day_total(d)
-        if t is not None:
-            sub += t
+        t_in, t_out = _t2m(d.get("in")), _t2m(d.get("out"))
+        if t_in is not None and t_out is not None:
+            day_minutes = _day_total(d)
+            if day_minutes is not None:
+                # A recorded shift up to half of the normal daily contract is
+                # treated as a half-day. Half-days receive no lunch deduction
+                # unless the employee's total week reaches a higher band.
+                day_equivalents += 0.5 if day_minutes <= (daily_contract / 2) else 1.0
+                sub += day_minutes
         travel += (_t2m(d.get("travel")) or 0)
-        away   += (_t2m(d.get("away")) or 0)
+        away += (_t2m(d.get("away")) or 0)
 
-    days_worked = sum(
-        1 for d in days
-        if d and _t2m(d.get("in")) is not None and _t2m(d.get("out")) is not None
-    )
+    days_worked = day_equivalents
     lunch = _lunch_for(days_worked) if days_worked else 0
     working = sub - lunch
-
-    try:
-        weekly = float(emp.get("contracted_hours_per_week", 40) or 40)
-    except Exception:
-        weekly = 40.0
-
-    contracted = (weekly * 60 / 5) * days_worked
+    contracted = daily_contract * days_worked
     week_extra = None if days_worked == 0 else working - contracted
     check_ok = (working + away) >= contracted
 
@@ -942,29 +965,42 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             c = _calc_row(emp, week_key, dept)
             b = _calc_balance(emp, week_key, dept)
 
-            # Work out expected hours for the scheduled week, then reduce the
-            # expectation for recorded full-day leave/absence entries.
+            # Compare only against the contract for days with recorded work.
+            # Missing weekdays are flagged separately; do not compare one
+            # recorded day against the full weekly contract.
             try:
-                weekly_contract = float(emp.get("contracted_hours_per_week", 40) or 40) * 60
+                raw_weekly = emp.get("contracted_hours_per_week", 40)
+                if isinstance(raw_weekly, str) and ":" in raw_weekly:
+                    weekly_contract = _t2m(raw_weekly) or 2400
+                else:
+                    weekly_contract = round(float(raw_weekly or 40) * 60)
                 days_contract = float(emp.get("days_per_week", 5) or 5)
-            except Exception:
-                weekly_contract, days_contract = 2400.0, 5.0
+            except (TypeError, ValueError):
+                weekly_contract, days_contract = 2400, 5.0
             daily_contract = weekly_contract / max(days_contract, 1)
-            expected_minutes = weekly_contract
-            for d in ts_days:
-                if d and str(d.get("status", "")).strip() in leave_statuses:
-                    expected_minutes -= daily_contract
-            expected_minutes = max(0, expected_minutes)
+            recorded_work_days = sum(
+                1 for d in ts_days
+                if d and _t2m(d.get("in")) is not None and _t2m(d.get("out")) is not None
+            )
+            expected_minutes = daily_contract * recorded_work_days
+            short_by = max(0, expected_minutes - (c["working"] + c["away"]))
 
-            if c["working"] < expected_minutes and any(
-                d is not None for d in ts_days
-            ):
-                short_by = expected_minutes - c["working"]
+            if recorded_work_days and short_by > 0:
                 items.append({
                     "icon": "❗",
-                    "headline": f"{emp.get('name', '')} — under contracted hours this week",
+                    "headline": f"{emp.get('name', '')} — under contracted hours for recorded working days",
                     "date": week_obj["range"],
-                    "detail": f"Working {_m2t(c['working'])} vs contracted {_m2t(expected_minutes)} (short by {_m2t(short_by)})",
+                    "detail": (f"Working {_m2t(c['working'])} vs pro-rated contract "
+                               f"{_m2t(expected_minutes)} (short by {_m2t(short_by)})"),
+                })
+            elif recorded_work_days and c["working"] + c["away"] > expected_minutes:
+                extra = c["working"] + c["away"] - expected_minutes
+                items.append({
+                    "icon": "➕",
+                    "headline": f"{emp.get('name', '')} — extra hours this week",
+                    "date": week_obj["range"],
+                    "detail": (f"Working {_m2t(c['working'])} vs pro-rated contract "
+                               f"{_m2t(expected_minutes)} (extra {_m2t(extra)})"),
                 })
 
             if b["balance"] is not None and b["balance"] < 0:
@@ -1037,8 +1073,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             st.caption("Managers submit; Directors approve.")
             return
 
-        working_emps = [e for e in employees
-                        if _calc_row(e, week_key, dept)["days_worked"] > 0]
+        # The submitted week itself is the approval queue. Include active
+        # employees even when their day is leave/missing-time, so the director
+        # can see and review the submitted week rather than an empty tab.
+        working_emps = list(employees)
 
         if state["status"] == "Draft":
             st.warning("📝 The manager has not submitted this week yet.")
@@ -1051,7 +1089,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             return
 
         if not working_emps:
-            st.info("No employees worked this week.")
+            st.info("No active employees are assigned to this department. Check the department selection and HR employee records.")
             return
 
         approved_count = sum(1 for e in working_emps
