@@ -1740,7 +1740,7 @@ os.makedirs(HR_LEAVE_PDF_DIR, exist_ok=True)
 
 HR_EMPLOYEE_COLUMNS = [
     "Employee ID", "Full Name", "Start Date", "Position / Job Title", "Department", "Work Type / Sub-department",
-    "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Contracted Hours Per Week", "Holiday Entitlement Override", "Entitlement Adjustment Note", "Leaving Date", "Leaving Reason"
+    "Agreement Type", "Status", "Working Pattern", "Days Worked Per Week", "Contracted Hours Per Week", "Working Day Start Time", "Working Day End Time", "Holiday Entitlement Override", "Entitlement Adjustment Note", "Leaving Date", "Leaving Reason"
 ]
 HR_PORTAL_LEAVE_COLUMNS = [
     "Leave ID", "Employee ID", "Date From", "Date To", "Leave Type", "Days",
@@ -3737,6 +3737,8 @@ def _hrp_load_employees():
                 "start_date": start_date,
                 "department": str(r.get("Department", "")).strip() or "Other",
                 "job_title": str(r.get("Position / Job Title", "")).strip(),
+                "work_start_time": str(r.get("Working Day Start Time", "08:30") or "08:30")[:5],
+                "work_end_time": str(r.get("Working Day End Time", "16:30") or "16:30")[:5],
                 "work_type": _hrp_normalize_work_type(str(r.get("Department", "")).strip() or "Other", r.get("Work Type / Sub-department", ""), r.get("Position / Job Title", "")),
                 "agreement_type": str(r.get("Agreement Type", "")).strip() or "Permanent",
                 "status": str(r.get("Status", "Active")).strip() or "Active",
@@ -3769,6 +3771,8 @@ def _hrp_save_employees():
             "Working Pattern": e.get("working_pattern", "Regular hours"),
             "Days Worked Per Week": e.get("days_per_week", 5),
             "Contracted Hours Per Week": e.get("contracted_hours_per_week", 40),
+            "Working Day Start Time": str(e.get("work_start_time", "08:30") or "08:30")[:5],
+            "Working Day End Time": str(e.get("work_end_time", "16:30") or "16:30")[:5],
             "Holiday Entitlement Override": e.get("entitlement_override", "") if e.get("entitlement_override") is not None else "",
             "Entitlement Adjustment Note": e.get("adjustment_note", ""),
             "Leaving Date": e.get("leaving_date", "") or "",
@@ -11080,7 +11084,7 @@ def _super_admin_transaction_control():
                     emp["leaving_date"] = None
                     emp["leaving_reason"] = ""
                     pd.DataFrame([{
-                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Contracted Hours Per Week":x.get("contracted_hours_per_week",40),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Contracted Hours Per Week":x.get("contracted_hours_per_week",40),"Working Day Start Time":str(x.get("work_start_time","08:30") or "08:30")[:5],"Working Day End Time":str(x.get("work_end_time","16:30") or "16:30")[:5],"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
                     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
                     st.session_state.hrp_employees = employees
@@ -11114,7 +11118,7 @@ def _super_admin_transaction_control():
                         st.session_state["hrp_leave_records"]=portal
                         _hrp_save_leave_records()
                     pd.DataFrame([{
-                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Contracted Hours Per Week":x.get("contracted_hours_per_week",40),"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
+                        "Employee ID":x.get("emp_id",""),"Full Name":x.get("name",""),"Start Date":x.get("start_date",""),"Position / Job Title":x.get("job_title",""),"Department":x.get("department",""),"Work Type / Sub-department":x.get("work_type", _hrp_normalize_work_type(x.get("department",""), "", x.get("job_title",""))),"Agreement Type":x.get("agreement_type",""),"Status":x.get("status","Active"),"Working Pattern":x.get("working_pattern","Regular hours"),"Days Worked Per Week":x.get("days_per_week",5),"Contracted Hours Per Week":x.get("contracted_hours_per_week",40),"Working Day Start Time":str(x.get("work_start_time","08:30") or "08:30")[:5],"Working Day End Time":str(x.get("work_end_time","16:30") or "16:30")[:5],"Holiday Entitlement Override":x.get("entitlement_override","") if x.get("entitlement_override") is not None else "","Entitlement Adjustment Note":x.get("adjustment_note",""),"Leaving Date":x.get("leaving_date","") or "","Leaving Reason":x.get("leaving_reason","")
                     } for x in employees], columns=HR_EMPLOYEE_COLUMNS).to_excel(HR_EMPLOYEES_PATH,index=False,engine="openpyxl")
                     sync_saved_file_to_drive(HR_EMPLOYEES_PATH)
                     st.session_state.hrp_employees=employees
