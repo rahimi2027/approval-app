@@ -442,7 +442,7 @@ USER_DB_COLUMNS = [
     "can_access_holiday_calendar", "can_access_hr_reports", "can_access_employee_overview",
     "can_access_holiday_calculator", "can_access_employee_directory",
     "employee_id", "can_access_store_deduction", "can_access_employee_items",
-    "can_access_training_help", "is_active"
+    "can_access_training_help", "can_access_employee_weekly_timesheet", "is_active"
 ]
 
 ONEDRIVE_CLIENT_ID = ""
@@ -1393,6 +1393,7 @@ PERMISSION_DEFAULTS = {
 }
 
 _HR_REPORT_PERMISSION_DEFAULTS = {
+    "can_access_employee_weekly_timesheet": False,
     "can_access_holiday_calendar": False,
     "can_access_hr_reports": False,
     "can_access_employee_overview": False,
@@ -1421,7 +1422,8 @@ PERMISSION_LABELS = {
     "can_access_employee_directory": "👥 Employee Directory (View Only)",
     "can_access_store_deduction": "📦 Store Department Deduction",
     "can_access_employee_items": "🧰 Employee Items / Holdings",
-    "can_access_training_help": "📚 Training & Help Centre"
+    "can_access_training_help": "📚 Training & Help Centre",
+    "can_access_employee_weekly_timesheet": "🕒 Employee Weekly Timesheet (Manager Submission)"
 }
 
 
@@ -2022,6 +2024,7 @@ def save_users(users_dict):
             "can_access_store_deduction": u.get("can_access_store_deduction", False),
             "can_access_employee_items": u.get("can_access_employee_items", False),
             "can_access_training_help": u.get("can_access_training_help", False),
+            "can_access_employee_weekly_timesheet": u.get("can_access_employee_weekly_timesheet", False),
             "is_active": u.get("is_active", True)
         })
 
@@ -2119,6 +2122,7 @@ def load_users(force=False):
                 "can_access_store_deduction": _flag_or_default(r.get("can_access_store_deduction", ""), user_role, "can_access_store_deduction"),
                 "can_access_employee_items": _flag_or_default(r.get("can_access_employee_items", ""), user_role, "can_access_employee_items"),
                 "can_access_training_help": _flag_or_default(r.get("can_access_training_help", ""), user_role, "can_access_training_help"),
+                "can_access_employee_weekly_timesheet": _flag_or_default(r.get("can_access_employee_weekly_timesheet", ""), user_role, "can_access_employee_weekly_timesheet"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
             if user_role == "Super Admin":
@@ -11786,6 +11790,12 @@ def user_management_panel():
             perm_approve = col2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=defaults.get("can_approve_requests", False))
             st.markdown("### 🧩 Module Access")
             st.caption("Grant access to individual software modules. Training & Help is controlled separately here.")
+            perm_employee_weekly_timesheet = st.checkbox(
+                PERMISSION_LABELS["can_access_employee_weekly_timesheet"],
+                value=defaults.get("can_access_employee_weekly_timesheet", False),
+                key="create_employee_weekly_timesheet_permission",
+                help="Allow this department manager to submit weekly employee timesheets for Director approval."
+            )
             perm_training_help = st.checkbox(
                 "📚 Training & Help Centre",
                 value=defaults.get("can_access_training_help", False),
@@ -11818,7 +11828,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_access_employee_weekly_timesheet": perm_employee_weekly_timesheet, "is_active": new_active}
                     # Manager accounts receive the requested baseline at save time;
                     # the creation form itself still opens with every checkbox unticked.
                     if new_role == "Manager":
@@ -11863,6 +11873,7 @@ def user_management_panel():
                 curr_perm_holiday_calculator = bool(curr.get("can_access_holiday_calculator", False))
                 curr_perm_employee_directory = bool(curr.get("can_access_employee_directory", False))
                 curr_perm_training_help = bool(curr.get("can_access_training_help", False))
+                curr_perm_employee_weekly_timesheet = bool(curr.get("can_access_employee_weekly_timesheet", False))
                 curr_perm_store = bool(curr.get("can_access_store_deduction", False))
                 curr_perm_employee_items = bool(curr.get("can_access_employee_items", False))
                 curr_perm_training_help = bool(curr.get("can_access_training_help", False))
@@ -11873,6 +11884,12 @@ def user_management_panel():
                 edit_app = ecol2.checkbox(PERMISSION_LABELS["can_approve_requests"], value=curr_perm_app)
                 st.markdown("### 🧩 Module Access")
                 st.caption("Grant access to individual software modules. Training & Help is controlled separately here.")
+                edit_employee_weekly_timesheet = st.checkbox(
+                    PERMISSION_LABELS["can_access_employee_weekly_timesheet"],
+                    value=curr_perm_employee_weekly_timesheet,
+                    key=f"edit_employee_weekly_timesheet_{edit_user_sel}",
+                    help="Allow this department manager to submit weekly employee timesheets for Director approval."
+                )
                 edit_training_help = st.checkbox(
                     "📚 Training & Help Centre",
                     value=curr_perm_training_help,
@@ -11901,7 +11918,7 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_access_employee_weekly_timesheet": edit_employee_weekly_timesheet, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -11928,6 +11945,7 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["can_access_employee_items"] = edit_employee_items
                         USERS[edit_user_sel]["can_access_training_help"] = edit_training_help
+                        USERS[edit_user_sel]["can_access_employee_weekly_timesheet"] = edit_employee_weekly_timesheet
                         USERS[edit_user_sel]["is_active"] = edit_active
                     saved_username = upd_username_new
                     apply_department_permission_preset(USERS[saved_username], upd_dept)
@@ -14401,7 +14419,11 @@ else:
 # ============================================================
 try:
     _timesheet_role = str(st.session_state.get("user_info", {}).get("role", "")).strip().casefold()
-    if st.session_state.get("logged_in") and _timesheet_role in {"manager", "director"}:
+    _timesheet_user = st.session_state.get("user_info", {})
+    _timesheet_manager_granted = bool(_timesheet_user.get("can_access_employee_weekly_timesheet", False))
+    if st.session_state.get("logged_in") and (
+        _timesheet_role == "director" or (_timesheet_role == "manager" and _timesheet_manager_granted)
+    ):
         st.divider()
         render_employee_weekly_timesheet(
             user_info=st.session_state.get("user_info", {}),
