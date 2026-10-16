@@ -300,6 +300,43 @@ def _get_payroll_department_options():
     return options
 
 
+def _get_subdepartment_access_options():
+    """Return stable main-department::sub-department keys for Module Access checkboxes."""
+    options = []
+    try:
+        mapping = load_department_subdepartments()
+    except Exception:
+        mapping = {}
+    for main, subs in (mapping or {}).items():
+        main = str(main).strip()
+        if not main:
+            continue
+        for sub in (subs or []):
+            sub = str(sub).strip()
+            if sub and sub.casefold() != "office staff":
+                options.append((f"{main}::{sub}", f"{main} — {sub}"))
+    # Include sub-departments currently present on active employee records as a fallback.
+    for key in _get_payroll_department_options():
+        main, sub = _department_parts(key)
+        if sub:
+            value = f"{main}::{sub}"
+            if not any(existing == value for existing, _ in options):
+                options.append((value, f"{main} — {sub}"))
+    return sorted(options, key=lambda item: item[1].casefold())
+
+
+def _normalise_subdepartment_permissions(value):
+    """Read sub-department permissions from either a list or JSON stored in Excel."""
+    if isinstance(value, (list, tuple, set)):
+        raw = value
+    else:
+        try:
+            raw = json.loads(str(value or "[]"))
+        except Exception:
+            raw = []
+    return sorted({str(item).strip() for item in raw if str(item).strip()}) if isinstance(raw, (list, tuple, set)) else []
+
+
 # ============================================================
 # TIMESHEETS
 # ============================================================
@@ -670,8 +707,20 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
     c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
 
     with c1:
-        if mode in ("director", "payroll", "super_admin"):
+        if mode in ("director", "payroll", "super_admin") or _normalise_subdepartment_permissions(current_user_info.get("can_access_subdepartment_timesheets", [])):
             departments = _get_payroll_department_options() or ["Store"]
+            has_all_dept_access = bool(current_user_info.get("can_access_all_departments_timesheet", False)) or mode in ("director", "super_admin")
+            if not has_all_dept_access:
+                user_main_dept = str(current_user_info.get("dept", "")).strip()
+                allowed_subdepts = set(_normalise_subdepartment_permissions(current_user_info.get("can_access_subdepartment_timesheets", [])))
+                allowed = []
+                for option in departments:
+                    main, sub = _department_parts(option)
+                    if not sub and main == user_main_dept:
+                        allowed.append(option)
+                    elif sub and f"{main}::{sub}" in allowed:
+                        allowed.append(option)
+                departments = allowed or ([user_main_dept] if user_main_dept else ["Store"])
             default_idx = departments.index("Store") if "Store" in departments else 0
             dept = st.selectbox(
                 "🏢 Department / Sub-department", departments,
@@ -1961,7 +2010,7 @@ USER_DB_COLUMNS = [
     "can_access_holiday_calculator", "can_access_employee_directory",
     "employee_id", "can_access_store_deduction", "can_access_employee_items",
     "can_access_training_help", "can_access_payroll_timesheet", "can_access_all_departments_timesheet",
-    "can_backup_google_drive", "is_active"
+    "can_access_subdepartment_timesheets", "can_backup_google_drive", "is_active"
 ]
 
 ONEDRIVE_CLIENT_ID = ""
@@ -3572,6 +3621,7 @@ def save_users(users_dict):
             "can_access_training_help": u.get("can_access_training_help", False),
             "can_access_payroll_timesheet": u.get("can_access_payroll_timesheet", False),
             "can_access_all_departments_timesheet": u.get("can_access_all_departments_timesheet", False),
+            "can_access_subdepartment_timesheets": json.dumps(_normalise_subdepartment_permissions(u.get("can_access_subdepartment_timesheets", []))),
             "can_backup_google_drive": u.get("can_backup_google_drive", False),
             "is_active": u.get("is_active", True)
         })
@@ -3672,6 +3722,7 @@ def load_users(force=False):
                 "can_access_training_help": _flag_or_default(r.get("can_access_training_help", ""), user_role, "can_access_training_help"),
                 "can_access_payroll_timesheet": _flag_or_default(r.get("can_access_payroll_timesheet", ""), user_role, "can_access_payroll_timesheet"),
                 "can_access_all_departments_timesheet": _flag_or_default(r.get("can_access_all_departments_timesheet", ""), user_role, "can_access_all_departments_timesheet"),
+                "can_access_subdepartment_timesheets": _normalise_subdepartment_permissions(r.get("can_access_subdepartment_timesheets", "[]")),
                 "can_backup_google_drive": _flag_or_default(r.get("can_backup_google_drive", ""), user_role, "can_backup_google_drive"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
@@ -13401,6 +13452,12 @@ def user_management_panel():
             perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
             perm_payroll = st.checkbox(PERMISSION_LABELS["can_access_payroll_timesheet"], value=defaults.get("can_access_payroll_timesheet", False), key="create_payroll_timesheet_permission")
             perm_all_dept_ts = st.checkbox(PERMISSION_LABELS["can_access_all_departments_timesheet"], value=defaults.get("can_access_all_departments_timesheet", False), key="create_all_dept_timesheet_permission")
+            st.markdown("**🧩 Sub-department Timesheet Access**")
+            st.caption("Select only the sub-department timesheets this user may view, edit and save. All-departments access overrides these individual selections.")
+            create_subdept_permissions = []
+            for _i, (_subkey, _sublabel) in enumerate(_get_subdepartment_access_options()):
+                if st.checkbox(_sublabel, value=False, key=f"create_subdept_ts_{_i}_{_subkey}"):
+                    create_subdept_permissions.append(_subkey)
             perm_employee_items = st.checkbox(PERMISSION_LABELS["can_access_employee_items"], value=defaults.get("can_access_employee_items", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
@@ -13412,7 +13469,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_all_departments_timesheet": perm_all_dept_ts, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_all_departments_timesheet": perm_all_dept_ts, "can_access_subdepartment_timesheets": create_subdept_permissions, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
                     # Manager accounts receive the requested baseline at save time;
                     # the creation form itself still opens with every checkbox unticked.
                     if new_role == "Manager":
@@ -13496,6 +13553,13 @@ def user_management_panel():
                 curr_perm_payroll = bool(curr.get("can_access_payroll_timesheet", False))
                 edit_payroll = st.checkbox(PERMISSION_LABELS["can_access_payroll_timesheet"], value=curr_perm_payroll, key="edit_payroll_timesheet_permission")
                 edit_all_dept_ts = st.checkbox(PERMISSION_LABELS["can_access_all_departments_timesheet"], value=bool(curr.get("can_access_all_departments_timesheet", False)), key=f"edit_all_dept_timesheet_{edit_user_sel}")
+                st.markdown("**🧩 Sub-department Timesheet Access**")
+                st.caption("Select the individual sub-department timesheets this user may view, edit and save. All-departments access overrides these selections.")
+                current_subdept_permissions = set(_normalise_subdepartment_permissions(curr.get("can_access_subdepartment_timesheets", [])))
+                edit_subdept_permissions = []
+                for _i, (_subkey, _sublabel) in enumerate(_get_subdepartment_access_options()):
+                    if st.checkbox(_sublabel, value=_subkey in current_subdept_permissions, key=f"edit_subdept_ts_{edit_user_sel}_{_i}_{_subkey}"):
+                        edit_subdept_permissions.append(_subkey)
                 edit_employee_items = st.checkbox(PERMISSION_LABELS["can_access_employee_items"], value=curr_perm_employee_items)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
@@ -13503,7 +13567,7 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_all_departments_timesheet": edit_all_dept_ts, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_backup_google_drive": edit_backup_drive, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_all_departments_timesheet": edit_all_dept_ts, "can_access_subdepartment_timesheets": edit_subdept_permissions, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_backup_google_drive": edit_backup_drive, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -13530,6 +13594,7 @@ def user_management_panel():
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["can_access_payroll_timesheet"] = edit_payroll
                         USERS[edit_user_sel]["can_access_all_departments_timesheet"] = edit_all_dept_ts
+                        USERS[edit_user_sel]["can_access_subdepartment_timesheets"] = edit_subdept_permissions
                         USERS[edit_user_sel]["can_access_employee_items"] = edit_employee_items
                         USERS[edit_user_sel]["can_access_training_help"] = edit_training_help
                         USERS[edit_user_sel]["can_backup_google_drive"] = edit_backup_drive
@@ -14952,7 +15017,7 @@ elif role == "Payroll":
     st.divider()
     outer_labels = ["🧾 Payroll"]
     has_training_help = bool(user_info.get("can_access_training_help", False))
-    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False))
+    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False) or _normalise_subdepartment_permissions(user_info.get("can_access_subdepartment_timesheets", [])))
     if has_training_help:
         outer_labels.append("📚 Training & Help Centre")
     if has_payroll_timesheet:
@@ -15240,7 +15305,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if has_work_orders: labels.append("🛠️ Work Orders")
         if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
         if user_info.get("can_access_training_help", False): labels.append("📚 Training & Help")
-        has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False))
+        has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False) or _normalise_subdepartment_permissions(user_info.get("can_access_subdepartment_timesheets", [])))
         if has_payroll_timesheet: labels.append("📋 Payroll Timesheet")
         if not labels:
             st.subheader("🔐 Access Restricted")
