@@ -586,10 +586,10 @@ def _calc_balance(emp, week_key, dept):
 def get_payroll_permission_defaults():
     """Return {role: {permission: bool}} to merge into PERMISSION_DEFAULTS."""
     return {
-        "Manager":     {"can_access_payroll_timesheet": True},
-        "Director":    {"can_access_payroll_timesheet": True},
-        "Payroll":     {"can_access_payroll_timesheet": True},
-        "Super Admin": {"can_access_payroll_timesheet": True},
+        "Manager":     {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": False},
+        "Director":    {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True},
+        "Payroll":     {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True},
+        "Super Admin": {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True},
     }
 
 
@@ -597,6 +597,7 @@ def get_payroll_permission_labels():
     """Return {permission: label} to merge into PERMISSION_LABELS."""
     return {
         "can_access_payroll_timesheet": "📋 Payroll Timesheet",
+        "can_access_all_departments_timesheet": "🏢 All Departments Timesheet Access (view, edit and save)",
     }
 
 
@@ -1911,7 +1912,7 @@ USER_DB_COLUMNS = [
     "can_access_holiday_calendar", "can_access_hr_reports", "can_access_employee_overview",
     "can_access_holiday_calculator", "can_access_employee_directory",
     "employee_id", "can_access_store_deduction", "can_access_employee_items",
-    "can_access_training_help", "can_access_payroll_timesheet",
+    "can_access_training_help", "can_access_payroll_timesheet", "can_access_all_departments_timesheet",
     "can_backup_google_drive", "is_active"
 ]
 
@@ -3522,6 +3523,7 @@ def save_users(users_dict):
             "can_access_employee_items": u.get("can_access_employee_items", False),
             "can_access_training_help": u.get("can_access_training_help", False),
             "can_access_payroll_timesheet": u.get("can_access_payroll_timesheet", False),
+            "can_access_all_departments_timesheet": u.get("can_access_all_departments_timesheet", False),
             "can_backup_google_drive": u.get("can_backup_google_drive", False),
             "is_active": u.get("is_active", True)
         })
@@ -3621,6 +3623,7 @@ def load_users(force=False):
                 "can_access_employee_items": _flag_or_default(r.get("can_access_employee_items", ""), user_role, "can_access_employee_items"),
                 "can_access_training_help": _flag_or_default(r.get("can_access_training_help", ""), user_role, "can_access_training_help"),
                 "can_access_payroll_timesheet": _flag_or_default(r.get("can_access_payroll_timesheet", ""), user_role, "can_access_payroll_timesheet"),
+                "can_access_all_departments_timesheet": _flag_or_default(r.get("can_access_all_departments_timesheet", ""), user_role, "can_access_all_departments_timesheet"),
                 "can_backup_google_drive": _flag_or_default(r.get("can_backup_google_drive", ""), user_role, "can_backup_google_drive"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
@@ -13349,6 +13352,7 @@ def user_management_panel():
             perm_employee_directory = rcol1.checkbox(PERMISSION_LABELS["can_access_employee_directory"], value=defaults.get("can_access_employee_directory", False))
             perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
             perm_payroll = st.checkbox(PERMISSION_LABELS["can_access_payroll_timesheet"], value=defaults.get("can_access_payroll_timesheet", False), key="create_payroll_timesheet_permission")
+            perm_all_dept_ts = st.checkbox(PERMISSION_LABELS["can_access_all_departments_timesheet"], value=defaults.get("can_access_all_departments_timesheet", False), key="create_all_dept_timesheet_permission")
             perm_employee_items = st.checkbox(PERMISSION_LABELS["can_access_employee_items"], value=defaults.get("can_access_employee_items", False))
             perm_inspector = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=defaults.get("can_access_inspector_bonus", False))
             new_dept = st.selectbox("🏢 Department", load_departments())
@@ -13360,7 +13364,7 @@ def user_management_panel():
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_all_departments_timesheet": perm_all_dept_ts, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
                     # Manager accounts receive the requested baseline at save time;
                     # the creation form itself still opens with every checkbox unticked.
                     if new_role == "Manager":
@@ -13443,6 +13447,7 @@ def user_management_panel():
                 edit_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=curr_perm_store)
                 curr_perm_payroll = bool(curr.get("can_access_payroll_timesheet", False))
                 edit_payroll = st.checkbox(PERMISSION_LABELS["can_access_payroll_timesheet"], value=curr_perm_payroll, key="edit_payroll_timesheet_permission")
+                edit_all_dept_ts = st.checkbox(PERMISSION_LABELS["can_access_all_departments_timesheet"], value=bool(curr.get("can_access_all_departments_timesheet", False)), key=f"edit_all_dept_timesheet_{edit_user_sel}")
                 edit_employee_items = st.checkbox(PERMISSION_LABELS["can_access_employee_items"], value=curr_perm_employee_items)
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
@@ -13450,7 +13455,7 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_backup_google_drive": edit_backup_drive, "is_active": edit_active}
+                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_all_departments_timesheet": edit_all_dept_ts, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_backup_google_drive": edit_backup_drive, "is_active": edit_active}
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
@@ -13476,6 +13481,7 @@ def user_management_panel():
                         USERS[edit_user_sel]["employee_id"] = edit_employee_id
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["can_access_payroll_timesheet"] = edit_payroll
+                        USERS[edit_user_sel]["can_access_all_departments_timesheet"] = edit_all_dept_ts
                         USERS[edit_user_sel]["can_access_employee_items"] = edit_employee_items
                         USERS[edit_user_sel]["can_access_training_help"] = edit_training_help
                         USERS[edit_user_sel]["can_backup_google_drive"] = edit_backup_drive
@@ -14902,7 +14908,7 @@ elif role == "Payroll":
         "🧾 Leaver Clearance", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"
     ]
     if user_info.get("can_access_training_help", False): payroll_tab_labels.append("📚 Training & Help")
-    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False))
+    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False))
     if has_payroll_timesheet: payroll_tab_labels.append("📋 Payroll Timesheet")
     payroll_tabs = st.tabs(payroll_tab_labels)
     tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = payroll_tabs[:7]
@@ -15176,7 +15182,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if has_work_orders: labels.append("🛠️ Work Orders")
         if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
         if user_info.get("can_access_training_help", False): labels.append("📚 Training & Help")
-        has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False))
+        has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False))
         if has_payroll_timesheet: labels.append("📋 Payroll Timesheet")
         if not labels:
             st.subheader("🔐 Access Restricted")
@@ -15398,7 +15404,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 tab_idx += 1
             if has_payroll_timesheet:
                 with tabs[tab_idx]:
-                    payroll.render_payroll_timesheet(user_info, mode="manager")
+                    payroll.render_payroll_timesheet(user_info, mode="payroll" if user_info.get("can_access_all_departments_timesheet", False) else "manager")
                 tab_idx += 1
 
 
