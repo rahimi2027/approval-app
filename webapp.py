@@ -1890,15 +1890,23 @@ def _build_week_excel(week_key, dept):
     ws.cell(signature_start, 1).alignment = Alignment(vertical="center")
     ws.cell(signature_start + 1, 1, f"Date of Submission: {prepared_at or '—'}")
     ws.cell(signature_start + 1, 1).alignment = Alignment(vertical="center")
-    ws.cell(signature_start + 2, 1, "Signature: __________________________________")
-    ws.cell(signature_start + 2, 1).alignment = Alignment(vertical="center")
-    ws.cell(signature_start + 3, 1, f"Approved By: {approved_by}")
-    ws.cell(signature_start + 3, 1).font = Font(bold=True, size=11)
-    ws.cell(signature_start + 3, 1).alignment = Alignment(vertical="center")
-    ws.cell(signature_start + 4, 1, f"Date of Approval: {approved_at or '—'}")
-    ws.cell(signature_start + 4, 1).alignment = Alignment(vertical="center")
-    ws.cell(signature_start + 5, 1, "Signature: __________________________________")
-    ws.cell(signature_start + 5, 1).alignment = Alignment(vertical="center")
+    # Give each signer a larger, easy-to-use signature area in the exported workbook.
+    prepared_signature_row = signature_start + 2
+    ws.cell(prepared_signature_row, 1, "Signature: " + "_" * 65)
+    ws.cell(prepared_signature_row, 1).alignment = Alignment(vertical="center")
+    ws.row_dimensions[prepared_signature_row].height = 42
+
+    # Leave two clear rows between the preparer's and director's sign-off sections.
+    approved_name_row = signature_start + 5
+    ws.cell(approved_name_row, 1, f"Approved By: {approved_by}")
+    ws.cell(approved_name_row, 1).font = Font(bold=True, size=11)
+    ws.cell(approved_name_row, 1).alignment = Alignment(vertical="center")
+    ws.cell(approved_name_row + 1, 1, f"Date of Approval: {approved_at or '—'}")
+    ws.cell(approved_name_row + 1, 1).alignment = Alignment(vertical="center")
+    director_signature_row = approved_name_row + 2
+    ws.cell(director_signature_row, 1, "Signature: " + "_" * 65)
+    ws.cell(director_signature_row, 1).alignment = Alignment(vertical="center")
+    ws.row_dimensions[director_signature_row].height = 42
 
     out = BytesIO()
     wb.save(out)
