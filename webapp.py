@@ -14904,7 +14904,7 @@ elif role == "Payroll":
     st.divider()
     outer_labels = ["🧾 Payroll"]
     has_training_help = bool(user_info.get("can_access_training_help", False))
-    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False))
+    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False))
     if has_training_help:
         outer_labels.append("📚 Training & Help Centre")
     if has_payroll_timesheet:
@@ -14920,10 +14920,9 @@ elif role == "Payroll":
             "📦 Store Deductions", "📦 Store Returns (Additions)",
             "🧾 Leaver Clearance", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"
         ]
-        has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False))
-        if has_payroll_timesheet: payroll_tab_labels.append("📋 Payroll Timesheet")
+        # Timesheet is a separate top-level tab, not an empty nested Payroll tab.
         payroll_tabs = st.tabs(payroll_tab_labels)
-        tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = payroll_tabs[:7]
+        tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = payroll_tabs
         with tab_add_ded:
             tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
             with tab_pending:
