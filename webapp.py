@@ -1358,6 +1358,11 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 })
 
             for i, d in enumerate(ts_days):
+                # Dates outside the selected month are disabled in the timesheet
+                # grid, so they must not generate missing-entry or other daily
+                # exceptions for this selected month/week view.
+                if i >= len(valid_month_dates) or not valid_month_dates[i]:
+                    continue
                 day_label = _long_date(week_obj["dates"][i])
                 if d is None:
                     items.append({
