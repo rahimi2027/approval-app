@@ -2445,6 +2445,17 @@ def _sync_saved_file_to_drive_now_once(local_path):
         _save_drive_sync_state()
         return False
 
+    # SAFETY CHECK: Do not overwrite a non-empty Drive file with an empty local file
+    if not _workbook_has_rows(local_path):
+        backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
+        remote = _drive_find_file(filename)
+        if not remote and backup_name:
+            remote = _drive_find_file(backup_name)
+        if remote and _drive_remote_workbook_has_rows(remote["id"]):
+            print(f"SAFETY BLOCK: Local {filename} is empty, but Drive version has data. Skipping upload to prevent data loss.")
+            DRIVE_LAST_SYNC_ERROR[filename] = "Local file is empty, but Drive has data. Upload skipped to prevent data loss."
+            return False
+
     with _DRIVE_SYNC_LOCK:
         live_ok = False
         backup_ok = False
@@ -2454,8 +2465,6 @@ def _sync_saved_file_to_drive_now_once(local_path):
         try:
             live_id = _drive_upload_path(local_path, filename)
             if live_id:
-                # For the user database, prove the uploaded bytes are identical before
-                # reporting success. This prevents a false "saved" state.
                 if local_path == USER_DB_PATH:
                     if _drive_verify_file_matches_local(local_path, live_id):
                         live_ok = True
@@ -2477,7 +2486,6 @@ def _sync_saved_file_to_drive_now_once(local_path):
             try:
                 backup_id = _drive_upload_path(local_path, backup_name)
                 if backup_id:
-                    # Verify that the exact Option A Drive file can be found after the update.
                     verified_remote = _drive_find_file(backup_name)
                     if verified_remote and verified_remote.get("id") == backup_id:
                         backup_ok = True
@@ -2506,8 +2514,6 @@ def _sync_saved_file_to_drive_now_once(local_path):
                 _DRIVE_SYNC_FINGERPRINTS[local_path] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
             except Exception:
                 pass
-            # A user DB is considered fully synced only when its live Drive copy was
-            # verified. A backup-only success is not enough for this critical file.
             if local_path == USER_DB_PATH and not live_ok:
                 DRIVE_PENDING_SYNC.add(local_path)
                 _save_drive_sync_state()
