@@ -714,13 +714,25 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 user_main_dept = str(current_user_info.get("dept", "")).strip()
                 allowed_subdepts = set(_normalise_subdepartment_permissions(current_user_info.get("can_access_subdepartment_timesheets", [])))
                 allowed = []
-                for option in departments:
-                    main, sub = _department_parts(option)
-                    if not sub and main == user_main_dept:
-                        allowed.append(option)
-                    elif sub and f"{main}::{sub}" in allowed:
-                        allowed.append(option)
-                departments = allowed or ([user_main_dept] if user_main_dept else ["Store"])
+                if allowed_subdepts:
+                    # Explicit sub-department grants are restrictive: show only the
+                    # selected sub-department timesheets, never the parent department
+                    # timesheet (which contains main-department / Office Staff employees).
+                    for option in departments:
+                        main, sub = _department_parts(option)
+                        if sub and f"{main}::{sub}" in allowed_subdepts:
+                            allowed.append(option)
+                else:
+                    # Without specific sub-department grants, preserve ordinary
+                    # own-department timesheet access.
+                    for option in departments:
+                        main, sub = _department_parts(option)
+                        if not sub and main == user_main_dept:
+                            allowed.append(option)
+                departments = allowed or ([user_main_dept] if user_main_dept and not allowed_subdepts else [])
+                if not departments:
+                    st.warning("No timesheet departments are assigned to your account. Please contact Super Admin.")
+                    return
             default_idx = departments.index("Store") if "Store" in departments else 0
             dept = st.selectbox(
                 "🏢 Department / Sub-department", departments,
