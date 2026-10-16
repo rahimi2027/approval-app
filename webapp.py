@@ -841,8 +841,30 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     else:
                         btn_label = "➕ Add"
 
-                if is_flagged:
-                    btn_label = "🔴 " + btn_label
+                # Render day details as normal HTML/text (not inside a Streamlit
+                # button label, which can collapse line breaks on some versions).
+                # This keeps the time range and duration visible in the app itself.
+                if d is not None and d.get("status") in PAYROLL_TIME_ENTRY_STATUSES and d.get("in") and d.get("out"):
+                    duration_text = _m2t(_day_total(d) or 0)
+                    status_text = str(d.get("status", "Worked") or "Worked")
+                    status_line = (f"<div style='font-size:10px;color:#64748b;'>{_short_status(status_text)}</div>"
+                                   if status_text not in ("Worked", "Late In", "Late Out") else "")
+                    cell.markdown(
+                        f"<div style='text-align:center;line-height:1.35;min-height:34px;'>"
+                        f"<div style='font-size:11px;font-weight:600;white-space:nowrap;'>"
+                        f"{d['in']} → {d['out']}</div>"
+                        f"<div style='font-size:10px;color:#64748b;'>{duration_text}</div>"
+                        f"{status_line}</div>", unsafe_allow_html=True,
+                    )
+                    btn_label = "🔴 Edit" if is_flagged else "Edit"
+                elif d is None:
+                    btn_label = "➕ Add"
+                elif d.get("status"):
+                    cell.markdown(
+                        f"<div style='text-align:center;font-size:11px;min-height:34px;'>"
+                        f"{_short_status(str(d.get('status', '')))}</div>", unsafe_allow_html=True,
+                    )
+                    btn_label = "🔴 Edit" if is_flagged else "Edit"
 
                 btn_type = "primary" if is_flagged else "secondary"
                 day_hint = "Click to open day entry"
@@ -1604,9 +1626,21 @@ def _build_week_excel(week_key, dept):
             if d is None:
                 txt = ""
             elif d.get("status") in PAYROLL_TIME_ENTRY_STATUSES and d.get("in") and d.get("out"):
-                txt = f"{d['in']}→{d['out']}\n({_m2t(_day_total(d) or 0)})"
+                # Export the complete day detail, not just the time range:
+                # status, duration, travel, time away and note are included.
+                details = [f"{d['in']} → {d['out']}", f"Duration: {_m2t(_day_total(d) or 0)}"]
+                if d.get("status"):
+                    details.append(f"Status: {d.get('status')}")
+                details.append(f"Travel: {d.get('travel', '0:00') or '0:00'}")
+                details.append(f"Time Away: {d.get('away', '0:00') or '0:00'}")
+                if str(d.get("note", "") or "").strip():
+                    details.append(f"Note: {str(d.get('note')).strip()}")
+                txt = "\n".join(details)
             else:
-                txt = d.get("status", "")
+                details = [str(d.get("status", "") or "")]
+                if str(d.get("note", "") or "").strip():
+                    details.append(f"Note: {str(d.get('note')).strip()}")
+                txt = "\n".join(x for x in details if x)
 
             cell = ws.cell(r, 3 + i, txt)
             if i in emp_flags:
@@ -1659,7 +1693,9 @@ def _build_week_excel(week_key, dept):
                 horizontal="center" if col > 1 else "left",
                 vertical="center", wrap_text=True,
             )
-        ws.row_dimensions[r].height = 32
+        # Allow multi-line daily details to be readable in Excel.
+        max_lines = max([len(str(ws.cell(r, c).value or "").splitlines()) for c in range(3, 8)] + [1])
+        ws.row_dimensions[r].height = max(42, min(100, 15 * max_lines))
         r += 1
 
     # Practical widths for all 18 columns.
