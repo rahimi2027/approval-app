@@ -1626,21 +1626,14 @@ def _build_week_excel(week_key, dept):
             if d is None:
                 txt = ""
             elif d.get("status") in PAYROLL_TIME_ENTRY_STATUSES and d.get("in") and d.get("out"):
-                # Export the complete day detail, not just the time range:
-                # status, duration, travel, time away and note are included.
-                details = [f"{d['in']} → {d['out']}", f"Duration: {_m2t(_day_total(d) or 0)}"]
-                if d.get("status"):
-                    details.append(f"Status: {d.get('status')}")
-                details.append(f"Travel: {d.get('travel', '0:00') or '0:00'}")
-                details.append(f"Time Away: {d.get('away', '0:00') or '0:00'}")
-                if str(d.get("note", "") or "").strip():
-                    details.append(f"Note: {str(d.get('note')).strip()}")
+                # Compact Excel layout requested: time range on line one,
+                # duration on line two. Extra day details remain in the Notes
+                # summary column rather than making each weekday column huge.
+                details = [f"{d['in']}→{d['out']}", f"({_m2t(_day_total(d) or 0)})"]
                 txt = "\n".join(details)
             else:
-                details = [str(d.get("status", "") or "")]
-                if str(d.get("note", "") or "").strip():
-                    details.append(f"Note: {str(d.get('note')).strip()}")
-                txt = "\n".join(x for x in details if x)
+                # Non-working days show their status (e.g. Holiday, Sick).
+                txt = str(d.get("status", "") or "")
 
             cell = ws.cell(r, 3 + i, txt)
             if i in emp_flags:
@@ -1693,9 +1686,9 @@ def _build_week_excel(week_key, dept):
                 horizontal="center" if col > 1 else "left",
                 vertical="center", wrap_text=True,
             )
-        # Allow multi-line daily details to be readable in Excel.
+        # Compact row height for the requested two-line day display.
         max_lines = max([len(str(ws.cell(r, c).value or "").splitlines()) for c in range(3, 8)] + [1])
-        ws.row_dimensions[r].height = max(42, min(100, 15 * max_lines))
+        ws.row_dimensions[r].height = max(32, min(48, 16 * max_lines))
         r += 1
 
     # Practical widths for all 18 columns.
