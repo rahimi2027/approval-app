@@ -15422,13 +15422,36 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                         registered = dept_filtered
                                     registered = sorted(registered, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
                                     if registered:
-                                        labels = [f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}" for e in registered]
+                                        # Show employee name and their effective department only.
+                                        # For employees assigned to a sub-department/work type,
+                                        # use that sub-department name rather than the parent department.
+                                        def _addition_deduction_employee_department(emp):
+                                            main_department = str(emp.get("department", "")).strip()
+                                            sub_department = str(emp.get("work_type", emp.get("sub_department", emp.get("working_as", "")))).strip()
+                                            if sub_department and sub_department.casefold() != "office staff":
+                                                return sub_department
+                                            return main_department or dept_name
+
+                                        labels = [
+                                            f"{str(e.get('name', '')).strip()} — {_addition_deduction_employee_department(e)}"
+                                            for e in registered
+                                        ]
+                                        # Keep labels unique when two employees share the same name and department,
+                                        # without exposing their ID in the visible dropdown label.
+                                        label_counts = {}
+                                        for label in labels:
+                                            label_counts[label] = label_counts.get(label, 0) + 1
+                                        if any(count > 1 for count in label_counts.values()):
+                                            seen_labels = {}
+                                            unique_labels = []
+                                            for label in labels:
+                                                seen_labels[label] = seen_labels.get(label, 0) + 1
+                                                unique_labels.append(f"{label} ({seen_labels[label]})" if label_counts[label] > 1 else label)
+                                            labels = unique_labels
                                         selected_label = st.selectbox("Registered Employee", labels, key=f"registered_emp_v{form_version}")
                                         registered_employee = {label: emp for label, emp in zip(labels, registered)}.get(selected_label)
                                         en = str((registered_employee or {}).get("name", "")).strip()
-                                        request_dept = str((registered_employee or {}).get("department", dept_name)).strip() or dept_name
-                                        if registered_employee:
-                                            st.caption(f"Employee ID: {registered_employee.get('emp_id', '-')} · Department: {request_dept}")
+                                        request_dept = _addition_deduction_employee_department(registered_employee or {})
                                     else:
                                         st.warning("No active registered employees found for this department. You can use Manual Employee instead.")
                                         en = ""
