@@ -234,15 +234,39 @@ PAYROLL_MONTH_LABELS = dict(PAYROLL_MONTHS)
 # EMPLOYEES (delegated to app)
 # ============================================================
 
-def _get_employees(department=None):
+_SUBDEPT_KEY_PREFIX = "__SUBDEPT__::"
+
+
+def _department_parts(department_key):
+    """Return (main department, sub-department) for a virtual timesheet list entry."""
+    key = str(department_key or "").strip()
+    if key.startswith(_SUBDEPT_KEY_PREFIX):
+        parts = key[len(_SUBDEPT_KEY_PREFIX):].split("::", 1)
+        if len(parts) == 2:
+            return parts[0], parts[1]
+    return key, ""
+
+
+def _department_label(department_key):
+    main_dept, sub_dept = _department_parts(department_key)
+    return sub_dept or main_dept
+
+
+def _get_employees(department=None, separate_subdepartments=False):
     if not _ctx["employees_provider"]:
         return []
     emps = _ctx["employees_provider"]() or []
+    main_dept, sub_dept = _department_parts(department)
     out = []
     for e in emps:
         if str(e.get("status", "Active")).strip().casefold() == "left":
             continue
-        if department and str(e.get("department", "")).strip() != department:
+        if department and str(e.get("department", "")).strip() != main_dept:
+            continue
+        employee_subdept = str(e.get("work_type", e.get("sub_department", e.get("working_as", "Office Staff")))).strip() or "Office Staff"
+        if sub_dept and employee_subdept != sub_dept:
+            continue
+        if separate_subdepartments and not sub_dept and employee_subdept.casefold() != "office staff":
             continue
         out.append(e)
     return sorted(out, key=lambda x: (str(x.get("name", "")).casefold(),
@@ -257,6 +281,23 @@ def _get_departments():
         str(e.get("department", "")).strip()
         for e in emps if str(e.get("department", "")).strip()
     })
+
+
+def _get_payroll_department_options():
+    """Main departments plus separately selectable sub-departments that have active staff."""
+    emps = _ctx["employees_provider"]() if _ctx.get("employees_provider") else []
+    emps = [e for e in (emps or []) if str(e.get("status", "Active")).strip().casefold() != "left"]
+    options = list(_get_departments())
+    seen = set(options)
+    for e in emps:
+        main = str(e.get("department", "")).strip()
+        sub = str(e.get("work_type", e.get("sub_department", e.get("working_as", "")))).strip()
+        if main and sub and sub.casefold() != "office staff":
+            key = f"{_SUBDEPT_KEY_PREFIX}{main}::{sub}"
+            if key not in seen:
+                options.append(key)
+                seen.add(key)
+    return options
 
 
 # ============================================================
@@ -630,10 +671,13 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
     with c1:
         if mode in ("director", "payroll", "super_admin"):
-            departments = _get_departments() or ["Store"]
+            departments = _get_payroll_department_options() or ["Store"]
             default_idx = departments.index("Store") if "Store" in departments else 0
-            dept = st.selectbox("🏢 Department", departments,
-                                index=default_idx, key="payroll_dept")
+            dept = st.selectbox(
+                "🏢 Department / Sub-department", departments,
+                index=default_idx, key="payroll_dept",
+                format_func=_department_label,
+            )
         else:
             dept = user_dept or "Store"
             st.text_input("🏢 Department", dept, disabled=True,
@@ -690,7 +734,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             st.info("📥 No submitted payroll weeks are currently waiting for Director review.")
 
     # ---------------- Title + status banner ----------------
-    title = f"{dept} - {week_obj['label']} Payroll - {month_label}"
+    dept_label = _department_label(dept)
+    title = f"{dept_label} - {week_obj['label']} Payroll - {month_label}"
     st.markdown(f"### {title}")
     st.caption(f"📅 {week_obj['range']}")
 
@@ -717,14 +762,17 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     "fill in the days and submit for approval.")
 
     # ---------------- Employees ----------------
-    employees = _get_employees(dept)
+    employees = _get_employees(
+        dept,
+        separate_subdepartments=(mode in ("payroll", "director", "super_admin")),
+    )
     if search:
         employees = [e for e in employees
                      if search in (str(e.get("name", "")) + " "
                                    + str(e.get("emp_id", ""))).casefold()]
 
     if not employees:
-        st.warning(f"No active employees found in **{dept}**.")
+        st.warning(f"No active employees found in **{dept_label}**.")
         st.caption("Add employees in 🏢 HR Department → HR Portal → Employee Directory first.")
         return
 
@@ -1051,7 +1099,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     st.download_button(
                         "⬇️ Download Week (Excel)",
                         data=xlsx,
-                        file_name=f"Payroll_{dept}_{week_obj['label'].replace(' ','_')}_{month_label.replace(' ','_')}.xlsx",
+                        file_name=f"Payroll_{_department_label(dept).replace(' ','_')}_{week_obj['label'].replace(' ','_')}_{month_label.replace(' ','_')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="payroll_dl_excel",
                     )
@@ -1580,7 +1628,7 @@ def _build_week_excel(week_key, dept):
 
     # Title row spans all 18 columns, matching the on-screen timesheet.
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=18)
-    title = f"{dept} - {week_obj['label']} Payroll - {PAYROLL_MONTH_LABELS[week_obj['month']]}"
+    title = f"{_department_label(dept)} - {week_obj['label']} Payroll - {PAYROLL_MONTH_LABELS[week_obj['month']]}"
     ws.cell(1, 1, title).font = Font(size=16, bold=True, color="FFFFFF")
     ws.cell(1, 1).fill = navy
     ws.cell(1, 1).alignment = Alignment(horizontal="center", vertical="center")
