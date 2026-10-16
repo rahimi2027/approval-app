@@ -885,7 +885,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             if calc['days_worked'] == 0:
                 check_html = "<span style='background:#f1f5f9;color:#64748b;padding:3px 7px;border-radius:12px;'>N/A</span>"
             elif calc['check_ok']:
-                check_html = "<span style='background:#dcfce7;color:#166534;padding:3px 7px;border-radius:12px;'>✓ OK</span>"
+                check_html = "<span style='background:#dcfce7;color:#166534;padding:3px 7px;border-radius:12px;'>OK</span>"
             else:
                 check_html = "<span style='background:#fef3c7;color:#92400e;padding:3px 7px;border-radius:12px;'>! Check</span>"
             if emp_flags:
