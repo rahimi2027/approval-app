@@ -1408,25 +1408,14 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
     # TAB 4 — APPROVALS
     # ========================================================
     with tab_appr:
-        if mode not in ("director", "super_admin"):
-            st.info("🔒 Approvals are available to the Director and Super Admin only.")
-            st.caption("Managers submit; Directors approve.")
-            return
-
-        # The submitted week itself is the approval queue. Include active
-        # employees even when their day is leave/missing-time, so the director
-        # can see and review the submitted week rather than an empty tab.
-        working_emps = list(employees)
-
-        if state["status"] == "Draft":
-            st.warning("📝 The manager has not submitted this week yet.")
-            return
-
+        # Once a week is approved, allow all users who can access this
+        # department's timesheet to see the approval confirmation and download
+        # the finalized workbook. Approval controls remain director-only.
         if state["status"] == "Approved":
             when = state.get("approved_at", "")
             approver = state.get("approved_by", "") or "Director"
             st.success(f"✅ **{week_obj['label']} Approved by {approver}** — {when}")
-            st.caption("All employees are approved. Download the final Excel timesheet here.")
+            st.caption("This week has been approved. Download the final Excel timesheet below.")
             xlsx = _build_week_excel(week_key, dept)
             st.download_button(
                 f"⬇️ Download {week_obj['label']} Excel",
@@ -1436,6 +1425,21 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 key=f"payroll_approved_dl_{week_key}_{dept}",
                 type="primary",
             )
+            if mode not in ("director", "super_admin"):
+                return
+
+        if mode not in ("director", "super_admin"):
+            st.info("🔒 Approval actions are available to the Director and Super Admin only.")
+            st.caption("Managers can submit timesheets and download the Excel file after director approval.")
+            return
+
+        # The submitted week itself is the approval queue. Include active
+        # employees even when their day is leave/missing-time, so the director
+        # can see and review the submitted week rather than an empty tab.
+        working_emps = list(employees)
+
+        if state["status"] == "Draft":
+            st.warning("📝 The manager has not submitted this week yet.")
             return
 
         if not working_emps:
