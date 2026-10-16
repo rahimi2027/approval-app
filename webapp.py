@@ -2436,7 +2436,12 @@ def sync_backup_file_to_drive(local_path):
 
 
 def _sync_saved_file_to_drive_now_once(local_path):
-    """Perform one upload/verification attempt for a persistent workbook."""
+    """Perform one upload/verification attempt for a persistent workbook.
+
+    IMPORTANT: If the local file is empty, this function will NEVER upload it.
+    Instead, it will attempt to download the latest version from Google Drive,
+    preventing empty local files from overwriting real backups.
+    """
     local_path = os.path.abspath(local_path)
     filename = os.path.basename(local_path)
     if drive_service is None or not os.path.exists(local_path):
@@ -2445,17 +2450,45 @@ def _sync_saved_file_to_drive_now_once(local_path):
         _save_drive_sync_state()
         return False
 
-    # SAFETY CHECK: Do not overwrite a non-empty Drive file with an empty local file
+    # ----------------------------------------------------------------
+    # CRITICAL SAFETY: If local file is empty, do NOT upload. Download instead.
+    # ----------------------------------------------------------------
     if not _workbook_has_rows(local_path):
         backup_name = DRIVE_BACKUP_FILENAMES.get(local_path)
-        remote = _drive_find_file(filename)
-        if not remote and backup_name:
-            remote = _drive_find_file(backup_name)
-        if remote and _drive_remote_workbook_has_rows(remote["id"]):
-            print(f"SAFETY BLOCK: Local {filename} is empty, but Drive version has data. Skipping upload to prevent data loss.")
-            DRIVE_LAST_SYNC_ERROR[filename] = "Local file is empty, but Drive has data. Upload skipped to prevent data loss."
-            return False
+        remote_live = _drive_find_file(filename)
+        remote_backup = _drive_find_file(backup_name) if backup_name else None
 
+        # Prefer the backup file if it has rows; otherwise the live file.
+        source_remote = None
+        if remote_backup and _drive_remote_workbook_has_rows(remote_backup["id"]):
+            source_remote = remote_backup
+        elif remote_live and _drive_remote_workbook_has_rows(remote_live["id"]):
+            source_remote = remote_live
+
+        if source_remote:
+            print(f"AUTO-RECOVER: Local {filename} is empty. Downloading non-empty version from Google Drive ({source_remote.get('name')}).")
+            if _drive_download_file(source_remote["id"], local_path) and _workbook_has_rows(local_path):
+                DRIVE_LAST_SYNC[filename] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                DRIVE_LAST_SYNC_ERROR.pop(filename, None)
+                DRIVE_PENDING_SYNC.discard(local_path)
+                _save_drive_sync_state()
+                return True
+            else:
+                DRIVE_LAST_SYNC_ERROR[filename] = "Local file is empty. Attempted recovery from Drive but download failed."
+                DRIVE_PENDING_SYNC.add(local_path)
+                _save_drive_sync_state()
+                return False
+        else:
+            # Both local and Drive are empty. Nothing to recover, nothing to overwrite.
+            print(f"Local {filename} is empty and Drive has no non-empty version. Skipping sync.")
+            DRIVE_LAST_SYNC_ERROR[filename] = "Local and Drive versions are both empty."
+            DRIVE_PENDING_SYNC.discard(local_path)
+            _save_drive_sync_state()
+            return True
+
+    # ----------------------------------------------------------------
+    # Local file has data. Proceed with the normal upload/verify flow.
+    # ----------------------------------------------------------------
     with _DRIVE_SYNC_LOCK:
         live_ok = False
         backup_ok = False
@@ -2521,6 +2554,11 @@ def _sync_saved_file_to_drive_now_once(local_path):
             DRIVE_PENDING_SYNC.discard(local_path)
             _save_drive_sync_state()
             return True
+
+        DRIVE_PENDING_SYNC.add(local_path)
+        _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
+        _save_drive_sync_state()
+        return False
 
         DRIVE_PENDING_SYNC.add(local_path)
         _DRIVE_SYNC_FINGERPRINTS.pop(local_path, None)
@@ -2600,36 +2638,53 @@ def _drive_background_worker():
     """Process-local daemon. It never touches Streamlit session state/UI."""
     while True:
         try:
-            # Wake on a new save, but do not upload immediately. The hourly interval is the
-            # normal schedule; a wake simply lets the worker notice pending work.
             _DRIVE_WORKER_WAKE.wait(timeout=60)
             _DRIVE_WORKER_WAKE.clear()
             if drive_service is None:
                 continue
-            last_run = getattr(_drive_background_worker, "last_run", 0.0)
-            now = time.time()
-            if now - last_run < DRIVE_AUTO_SYNC_INTERVAL_SECONDS:
-                continue
-            _drive_background_worker.last_run = now
-            # Every hour back up ALL existing persistent workbooks, not only files
-            # that happened to be changed. This keeps the Drive copy current even
-            # after a quiet hour. Pending files are naturally included in this pass.
-            targets = [path for path in DRIVE_BACKUP_FILENAMES if os.path.exists(path)]
-            targets = sorted(set(targets) | set(DRIVE_PENDING_SYNC))
-            if not targets:
-                _save_drive_sync_state()
-                continue
 
-            print(f"Automatic Drive backup starting for {len(targets)} file(s).")
-            for local_path in targets:
-                try:
+            # 1. ALWAYS process any PENDING files immediately (user has changed them).
+            if DRIVE_PENDING_SYNC:
+                print(f"Background worker processing {len(DRIVE_PENDING_SYNC)} pending file(s).")
+                for local_path in list(DRIVE_PENDING_SYNC):
                     if os.path.exists(local_path):
                         _sync_saved_file_to_drive_now(local_path)
                     else:
                         DRIVE_PENDING_SYNC.discard(local_path)
+                _save_drive_sync_state()
+                continue
+
+            # 2. Hourly safety-net sweep, but ONLY for files that currently have data.
+            # This avoids the worker trying to "sync" empty auto-created files.
+            last_run = getattr(_drive_background_worker, "last_run", 0.0)
+            now_ts = time.time()
+            if now_ts - last_run < DRIVE_AUTO_SYNC_INTERVAL_SECONDS:
+                continue
+            _drive_background_worker.last_run = now_ts
+
+            # Only sweep files that actually have rows in them.
+            targets = []
+            for path in DRIVE_BACKUP_FILENAMES:
+                if not os.path.exists(path):
+                    continue
+                try:
+                    if _workbook_has_rows(path):
+                        targets.append(path)
+                except Exception:
+                    pass
+
+            if not targets:
+                print("No non-empty files to back up on this sweep.")
+                _save_drive_sync_state()
+                continue
+
+            print(f"Hourly safety-net backup starting for {len(targets)} non-empty file(s).")
+            for local_path in targets:
+                try:
+                    _sync_saved_file_to_drive_now(local_path)
                 except Exception as e:
                     DRIVE_LAST_SYNC_ERROR[os.path.basename(local_path)] = f"{type(e).__name__}: {e}"
-                    print(f"Automatic Drive backup failed for {local_path}: {e}")
+                    print(f"Hourly backup failed for {local_path}: {e}")
             _save_drive_sync_state()
         except Exception as e:
             print(f"Drive background worker error: {type(e).__name__}: {e}")
