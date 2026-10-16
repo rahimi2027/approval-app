@@ -1139,7 +1139,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         if failed:
                             st.warning("Timesheet saved locally, but these Google Drive timesheet files could not be updated: " + ", ".join(failed))
                         elif backup_results:
-                            st.success("✅ Timesheet saved locally and its timesheet-related files were updated in Google Drive. Other application data was not backed up.")
+                            st.success("✅ Timesheet saved locally and its timesheet-related files were updated successfully in Google Drive.")
                         else:
                             st.warning("Timesheet saved locally, but no timesheet files were available to upload to Google Drive.")
                     elif may_backup and drive_service is None:
