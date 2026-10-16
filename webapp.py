@@ -202,10 +202,13 @@ def _generate_month_weeks(month_key):
     out = []
     for i in range(8):
         mon = start + timedelta(days=i * 7)
-        fri = mon + timedelta(days=4)
-        if fri.year == y and fri.month == m:
+        weekdays = [mon + timedelta(days=d) for d in range(5)]
+        # Include every Monday-Friday week that contains at least one date
+        # in the selected month. Boundary dates remain visible but disabled.
+        if any(day.year == y and day.month == m for day in weekdays):
+            fri = weekdays[-1]
             out.append({
-                "dates": [(mon + timedelta(days=d)).isoformat() for d in range(5)],
+                "dates": [day.isoformat() for day in weekdays],
                 "range": f"{mon.strftime('%d %b')} – {fri.strftime('%d %b %Y')}",
             })
     return out
@@ -874,12 +877,17 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         header = st.columns(col_widths)
         header[0].markdown("**Employee**")
         header[1].markdown("**Contract (wk)**")
+        selected_year, selected_month = map(int, month_key.split("-"))
+        valid_month_dates = []
         for i, iso in enumerate(week_obj["dates"]):
             dt = datetime.fromisoformat(iso)
+            is_in_month = dt.year == selected_year and dt.month == selected_month
+            valid_month_dates.append(is_in_month)
+            date_colour = "#64748b" if is_in_month else "#b8bec7"
             header[2 + i].markdown(
-                f"<div style='text-align:center; font-size:11px;'>"
+                f"<div style='text-align:center; font-size:11px; color:{date_colour};'>"
                 f"<b>{dt.strftime('%a')}</b><br>"
-                f"<span style='color:#666;'>{dt.strftime('%d %b')}</span></div>",
+                f"<span>{dt.strftime('%d %b')}</span></div>",
                 unsafe_allow_html=True,
             )
         header[7].markdown("**Days**")
@@ -921,11 +929,24 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 unsafe_allow_html=True,
             )
 
-            # Day cells
+            # Day cells: only weekdays belonging to the selected month can
+            # be entered. Previous/next-month weekdays are visible but disabled.
             for i in range(5):
                 d = ts_days[i]
                 cell = row[2 + i]
                 is_flagged = i in emp_flags
+                if not valid_month_dates[i]:
+                    cell.markdown(
+                        "<div style='text-align:center; min-height:34px; padding-top:8px; color:#b8bec7; font-size:11px;'>Not in month</div>",
+                        unsafe_allow_html=True,
+                    )
+                    cell.button(
+                        "—", key=f"pl_day_{eid}_{i}", use_container_width=True,
+                        disabled=True, help="This date belongs to another month.",
+                    )
+                    # Ensure an old open-panel state cannot expose an out-of-month date.
+                    st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = False
+                    continue
 
                 if d is None:
                     btn_label = "➕ Add"
@@ -1118,6 +1139,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         check_eid = check_emp.get("emp_id", "")
                         check_days = all_week_entries.get(check_eid) or [None] * 5
                         for day_idx in range(5):
+                            if day_idx >= len(valid_month_dates) or not valid_month_dates[day_idx]:
+                                continue
                             entry = check_days[day_idx] if day_idx < len(check_days) else None
                             is_missing = not isinstance(entry, dict) or not entry.get("status")
                             if not is_missing:
@@ -1131,7 +1154,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
                     if missing_days:
                         st.error(
-                            "⚠️ Cannot submit this timesheet yet. Complete all five weekdays "
+                            "⚠️ Cannot submit this timesheet yet. Complete every weekday within the selected month "
                             "for every employee, including selecting a status for non-working days."
                         )
                         st.warning("Days still to complete: " + "; ".join(missing_days[:30]) +
