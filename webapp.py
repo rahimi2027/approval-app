@@ -865,7 +865,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         div[data-testid="stTabs"] button { font-size: .86rem; }
         </style>
         """, unsafe_allow_html=True)
-        editable = (mode == "manager") and (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))
+        has_all_department_edit_access = bool(current_user_info.get("can_access_all_departments_timesheet", False))
+        st.session_state["payroll_all_department_edit_access"] = has_all_department_edit_access
+        can_edit_timesheet = (mode == "manager") or has_all_department_edit_access
+        editable = can_edit_timesheet and (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))
 
         # -------- Header row --------
         # All columns from the reference screenshot are present, including
@@ -1089,7 +1092,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         st.markdown("---")
 
         # -------- Manager actions --------
-        if mode == "manager":
+        if mode == "manager" or has_all_department_edit_access:
             col_save, col_submit, col_print = st.columns([1, 1, 1])
 
             with col_save:
@@ -1139,7 +1142,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         if failed:
                             st.warning("Timesheet saved locally, but these Google Drive timesheet files could not be updated: " + ", ".join(failed))
                         elif backup_results:
-                            st.success("✅ Timesheet saved locally and its timesheet-related files were updated successfully in Google Drive.")
+                            st.success("✅ Timesheet saved locally and its timesheet-related files were updated in Google Drive. Other application data was not backed up.")
                         else:
                             st.warning("Timesheet saved locally, but no timesheet files were available to upload to Google Drive.")
                     elif may_backup and drive_service is None:
@@ -1588,7 +1591,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                  f"{existing_flag.get('comment', '')}")
 
     k = f"payroll_day_{emp['emp_id']}_{day_idx}_{week_key}"
-    if editable and mode == "manager":
+    if editable and (mode == "manager" or bool(st.session_state.get("payroll_all_department_edit_access", False))):
         with st.form(f"{k}_entry_form", clear_on_submit=False):
             status = st.selectbox(
                 "Status", PAYROLL_STATUS_OPTIONS,
