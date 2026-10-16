@@ -14902,74 +14902,85 @@ elif role == "Payroll":
     st.subheader("🧾 Payroll Portal")
     st.info("✅ View all requests and Download PDFs.")
     st.divider()
-    payroll_tab_labels = [
-        "➕ Addition & Deduction", "👥 HR Leave Settlement",
-        "📦 Store Deductions", "📦 Store Returns (Additions)",
-        "🧾 Leaver Clearance", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"
-    ]
-    if user_info.get("can_access_training_help", False): payroll_tab_labels.append("📚 Training & Help")
-    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False))
-    if has_payroll_timesheet: payroll_tab_labels.append("📋 Payroll Timesheet")
-    payroll_tabs = st.tabs(payroll_tab_labels)
-    tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = payroll_tabs[:7]
-    tab_training_help = payroll_tabs[7] if len(payroll_tabs) > 7 else None
-    with tab_add_ded:
-        tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
-        with tab_pending:
-            pending = [r for r in all_live_requests if r.get("status") == "pending"]
-            if not pending: st.success("✅ No pending requests!")
-            else:
-                st.metric("⏳ Pending", len(pending)); st.divider()
-                for req in reversed(pending):
-                    with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
-                        st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
-                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                        st.write(f"👔 **Line Manager:** {req.get('manager')}")
-                        submitted_by = get_submitted_by(req)
-                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                        st.write(f"📅 **Date:** {req.get('date')}")
-                        st.info(f"📝 **Description:** {req.get('desc')}")
-                        display_attachments(req)
-                        st.divider(); display_pdf_button(req, can_generate=True)
-        with tab_approved:
-            approved = [r for r in all_live_requests if r.get("status") == "approved"]
-            if not approved: st.info("📋 No approved requests.")
-            else:
-                st.metric("✅ Approved", len(approved)); st.divider()
-                for req in reversed(approved):
-                    dec_by = req.get('decision_by', 'Director')
-                    with st.expander(f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')}")
-                        submitted_by = get_submitted_by(req)
-                        if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
-                        st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
-                        st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
-                        display_attachments(req)
-                        st.divider(); display_pdf_button(req, can_generate=True)
-        with tab_rejected:
-            rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
-            if not rejected: st.success("✅ No rejected requests!")
-            else:
-                st.metric("❌ Rejected", len(rejected)); st.divider()
-                for req in reversed(rejected):
-                    with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
-                        st.write(f"👤 Employee: {req.get('emp_name')}")
-                        st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
-                        st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
-                        display_attachments(req)
-                        st.divider(); display_pdf_button(req, can_generate=True)
-    with tab_hr_leave: render_hr_leave_payroll_portal()
-    with tab_store_ded: render_store_payroll_portal(type_filter="Deduction")
-    with tab_store_ret: render_store_payroll_portal(type_filter="Addition")
-    with tab_leaver: render_leaver_clearance_payroll(full_name)
-    with tab_work_orders: render_work_order_payroll_portal(full_name)
-    with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
-    if tab_training_help is not None:
-        with tab_training_help:
-            render_training_help(user_info)
+    outer_labels = ["🧾 Payroll"]
+    has_training_help = bool(user_info.get("can_access_training_help", False))
+    has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False))
+    if has_training_help:
+        outer_labels.append("📚 Training & Help Centre")
     if has_payroll_timesheet:
-        with payroll_tabs[-1]:
+        outer_labels.append("📋 Timesheet")
+    outer_tabs = st.tabs(outer_labels)
+    payroll_main_tab = outer_tabs[0]
+    training_main_tab = outer_tabs[1] if has_training_help else None
+    timesheet_main_tab = outer_tabs[-1] if has_payroll_timesheet else None
+
+    with payroll_main_tab:
+        payroll_tab_labels = [
+            "➕ Addition & Deduction", "👥 HR Leave Settlement",
+            "📦 Store Deductions", "📦 Store Returns (Additions)",
+            "🧾 Leaver Clearance", "🛠️ Work Orders", "💰 National Grid Inspector Bonus"
+        ]
+        has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False))
+        if has_payroll_timesheet: payroll_tab_labels.append("📋 Payroll Timesheet")
+        payroll_tabs = st.tabs(payroll_tab_labels)
+        tab_add_ded, tab_hr_leave, tab_store_ded, tab_store_ret, tab_leaver, tab_work_orders, tab_inspector_bonus = payroll_tabs[:7]
+        with tab_add_ded:
+            tab_pending, tab_approved, tab_rejected = st.tabs(["⏳ Pending Requests", "✅ Approved Requests", "❌ Rejected Requests"])
+            with tab_pending:
+                pending = [r for r in all_live_requests if r.get("status") == "pending"]
+                if not pending: st.success("✅ No pending requests!")
+                else:
+                    st.metric("⏳ Pending", len(pending)); st.divider()
+                    for req in reversed(pending):
+                        with st.expander(f"🟡 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | {req.get('dept')}"):
+                            st.write(f"👤 Employee: {req.get('emp_name')} | 🏢 Department: {req.get('dept')}")
+                            st.write(f"🔄 Type: {req.get('type')} | 🏷️ Category: {req.get('category')}")
+                            st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                            st.write(f"👔 **Line Manager:** {req.get('manager')}")
+                            submitted_by = get_submitted_by(req)
+                            if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                            st.write(f"📅 **Date:** {req.get('date')}")
+                            st.info(f"📝 **Description:** {req.get('desc')}")
+                            display_attachments(req)
+                            st.divider(); display_pdf_button(req, can_generate=True)
+            with tab_approved:
+                approved = [r for r in all_live_requests if r.get("status") == "approved"]
+                if not approved: st.info("📋 No approved requests.")
+                else:
+                    st.metric("✅ Approved", len(approved)); st.divider()
+                    for req in reversed(approved):
+                        dec_by = req.get('decision_by', 'Director')
+                        with st.expander(f"🟢 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f} | ✅ {dec_by}"):
+                            st.write(f"👤 Employee: {req.get('emp_name')}")
+                            submitted_by = get_submitted_by(req)
+                            if submitted_by: st.write(f"📝 **Submitted by:** {submitted_by}")
+                            st.write(f"💷 Amount: £{float(req.get('amount',0)):.2f}")
+                            st.info(f"💬 Comments: {req.get('director_comments', 'None')}")
+                            display_attachments(req)
+                            st.divider(); display_pdf_button(req, can_generate=True)
+            with tab_rejected:
+                rejected = [r for r in all_live_requests if r.get("status") == "rejected"]
+                if not rejected: st.success("✅ No rejected requests!")
+                else:
+                    st.metric("❌ Rejected", len(rejected)); st.divider()
+                    for req in reversed(rejected):
+                        with st.expander(f"🔴 ID #{req.get('id')} | {req.get('emp_name')} | £{float(req.get('amount',0)):.2f}"):
+                            st.write(f"👤 Employee: {req.get('emp_name')}")
+                            st.error(f"❌ Rejected By: {req.get('decision_by', '—')} on {format_date(req.get('decision_date', ''))}")
+                            st.error(f"💬 Reason: {req.get('director_comments', 'None')}")
+                            display_attachments(req)
+                            st.divider(); display_pdf_button(req, can_generate=True)
+        with tab_hr_leave: render_hr_leave_payroll_portal()
+        with tab_store_ded: render_store_payroll_portal(type_filter="Deduction")
+        with tab_store_ret: render_store_payroll_portal(type_filter="Addition")
+        with tab_leaver: render_leaver_clearance_payroll(full_name)
+        with tab_work_orders: render_work_order_payroll_portal(full_name)
+        with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
+    if training_main_tab is not None:
+        with training_main_tab:
+            render_training_help(user_info)
+    if timesheet_main_tab is not None:
+        with timesheet_main_tab:
             payroll.render_payroll_timesheet(user_info, mode="payroll")
 
 elif role == "Work Order Manager":
