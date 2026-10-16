@@ -1111,18 +1111,42 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     may_backup = (user_role in {"Super Admin", "Director"}
                                   or bool(user_info.get("can_backup_google_drive", False)))
                     if may_backup and drive_service is not None:
-                        with st.spinner("Saving timesheet and backing up all data to Google Drive..."):
-                            backup_results = _force_sync_all_drive_files()
+                        # Timesheet Save uploads ONLY the payroll-timesheet-related
+                        # workbooks to their existing BACKUP_* files in Google Drive.
+                        # It deliberately does not run the all-application backup.
+                        timesheet_backup_names = {
+                            "BACKUP_payroll_timesheets.xlsx",
+                            "BACKUP_payroll_week_states.xlsx",
+                            "BACKUP_payroll_flags.xlsx",
+                            "BACKUP_payroll_approvals.xlsx",
+                        }
+                        backup_results = []
+                        with st.spinner("Saving timesheet and updating timesheet files in Google Drive..."):
+                            for local_path, backup_name in DRIVE_BACKUP_FILENAMES.items():
+                                if backup_name not in timesheet_backup_names:
+                                    continue
+                                if not os.path.exists(local_path):
+                                    continue
+                                try:
+                                    uploaded = _drive_upload_path(local_path, backup_name)
+                                    verified = _drive_find_file(backup_name)
+                                    ok = bool(uploaded and verified and verified.get("id"))
+                                except Exception as e:
+                                    print(f"Timesheet-only Drive upload failed for {backup_name}: {e}")
+                                    ok = False
+                                backup_results.append((backup_name, ok))
                         failed = [name for name, ok in backup_results if not ok]
                         if failed:
-                            st.warning("Timesheet saved locally, but some Google Drive uploads failed: " + ", ".join(failed))
+                            st.warning("Timesheet saved locally, but these Google Drive timesheet files could not be updated: " + ", ".join(failed))
+                        elif backup_results:
+                            st.success("✅ Timesheet saved locally and its timesheet-related files were updated in Google Drive. Other application data was not backed up.")
                         else:
-                            st.success("✅ Saved. All registered data files were backed up to Google Drive.")
+                            st.warning("Timesheet saved locally, but no timesheet files were available to upload to Google Drive.")
                     elif may_backup and drive_service is None:
-                        st.warning("Timesheet saved locally, but Google Drive is not connected. No Drive backup was made.")
+                        st.warning("Timesheet saved locally, but Google Drive is not connected. No Drive upload was made.")
                     else:
-                        st.success("✅ Saved locally.")
-                        st.info("To back up to Google Drive from here, ask an administrator to enable ‘Save All Data to Google Drive’ in your Module Access permissions.")
+                        st.success("✅ Timesheet saved locally.")
+                        st.info("To update its Google Drive files from here, ask an administrator to enable ‘Save All Data to Google Drive’ in your Module Access permissions.")
 
             with col_submit:
                 if st.button("📤 Submit for Approval", type="primary",
