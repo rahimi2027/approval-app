@@ -1871,7 +1871,8 @@ USER_DB_COLUMNS = [
     "can_access_holiday_calendar", "can_access_hr_reports", "can_access_employee_overview",
     "can_access_holiday_calculator", "can_access_employee_directory",
     "employee_id", "can_access_store_deduction", "can_access_employee_items",
-    "can_access_training_help", "can_access_payroll_timesheet", "is_active"
+    "can_access_training_help", "can_access_payroll_timesheet",
+    "can_backup_google_drive", "is_active"
 ]
 
 ONEDRIVE_CLIENT_ID = ""
@@ -3481,6 +3482,7 @@ def save_users(users_dict):
             "can_access_employee_items": u.get("can_access_employee_items", False),
             "can_access_training_help": u.get("can_access_training_help", False),
             "can_access_payroll_timesheet": u.get("can_access_payroll_timesheet", False),
+            "can_backup_google_drive": u.get("can_backup_google_drive", False),
             "is_active": u.get("is_active", True)
         })
 
@@ -3579,6 +3581,7 @@ def load_users(force=False):
                 "can_access_employee_items": _flag_or_default(r.get("can_access_employee_items", ""), user_role, "can_access_employee_items"),
                 "can_access_training_help": _flag_or_default(r.get("can_access_training_help", ""), user_role, "can_access_training_help"),
                 "can_access_payroll_timesheet": _flag_or_default(r.get("can_access_payroll_timesheet", ""), user_role, "can_access_payroll_timesheet"),
+                "can_backup_google_drive": _flag_or_default(r.get("can_backup_google_drive", ""), user_role, "can_backup_google_drive"),
                 "is_active": _active_or_default(r.get("is_active", ""))
             }
             if user_role == "Super Admin":
@@ -13381,7 +13384,6 @@ def user_management_panel():
                 edit_backup_drive = st.checkbox(
                     PERMISSION_LABELS["can_backup_google_drive"],
                     value=bool(curr.get("can_backup_google_drive", False)),
-                    key=f"edit_google_drive_backup_permission_{edit_user_sel}",
                     help="Allow this user to upload all current local data files to the configured Google Drive backup."
                 )
                 mcol1, mcol2 = st.columns(2)
