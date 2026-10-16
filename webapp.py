@@ -1527,7 +1527,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                             "approved_by": full_name,
                         }
                         _approvals_save()
-                        _maybe_finalize(week_key, dept, working_emps)
+                        _maybe_finalize(week_key, dept, working_emps, approver_name=full_name)
                         st.rerun()
 
                 if approved and state["status"] == "Submitted":
@@ -1555,7 +1555,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         "approved_by": full_name,
                     }
                 _approvals_save()
-                _maybe_finalize(week_key, dept, working_emps)
+                _maybe_finalize(week_key, dept, working_emps, approver_name=full_name)
                 st.rerun()
 
             if not can_approve_all:
@@ -1699,7 +1699,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
 # AUTO-FINALIZE
 # ============================================================
 
-def _maybe_finalize(week_key, dept, working_emps):
+def _maybe_finalize(week_key, dept, working_emps, approver_name=""):
     """Mark week Approved once every working employee is approved and no flags remain."""
     if any(_get_flags(week_key, dept, e.get("emp_id", "")) for e in working_emps):
         return
@@ -1712,7 +1712,9 @@ def _maybe_finalize(week_key, dept, working_emps):
     approval_records = _approvals().get(week_key, {}).get(dept, {})
     approver_names = [str(v.get("approved_by", "")).strip() for v in approval_records.values()
                       if isinstance(v, dict) and str(v.get("approved_by", "")).strip()]
-    state["approved_by"] = approver_names[-1] if approver_names else "Director"
+    # Prefer the authenticated director who completed the approval action.
+    # Fall back to the names stored on employee-level approval records.
+    state["approved_by"] = str(approver_name or "").strip() or (approver_names[-1] if approver_names else "Director")
     _states_save()
 
 
@@ -1876,7 +1878,12 @@ def _build_week_excel(week_key, dept):
     signature_start = r + 3
     prepared_by = str(state.get("submitted_by", "") or "Unknown")
     prepared_at = str(state.get("submitted_at", "") or "")
-    approved_by = str(state.get("approved_by", "") or "Director")
+    approved_by = str(state.get("approved_by", "") or "").strip()
+    approval_records = _approvals().get(week_key, {}).get(dept, {})
+    recorded_names = [str(v.get("approved_by", "")).strip() for v in approval_records.values()
+                      if isinstance(v, dict) and str(v.get("approved_by", "")).strip()]
+    if not approved_by or approved_by.casefold() in {"director", "approved by director"}:
+        approved_by = recorded_names[-1] if recorded_names else (approved_by or "Director")
     approved_at = str(state.get("approved_at", "") or "")
     ws.cell(signature_start, 1, f"Prepared By: {prepared_by}")
     ws.cell(signature_start, 1).font = Font(bold=True, size=11)
