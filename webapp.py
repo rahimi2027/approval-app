@@ -823,10 +823,19 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     status = d.get("status", "Worked")
                     if status in PAYROLL_TIME_ENTRY_STATUSES \
                             and d.get("in") and d.get("out"):
-                        # Put time range and status on separate lines so the
-                        # full entry remains visible inside the daily cell.
-                        time_label = f"{d['in']} → {d['out']}"
-                        btn_label = time_label + (f"\n{_short_status(status)}" if status not in ("Worked", "Late In", "Late Out") else "")
+                        # Show the time range and worked duration on separate
+                        # lines, matching the compact weekly calendar layout.
+                        time_in_minutes = _t2m(d.get("in", "")) or 0
+                        time_out_minutes = _t2m(d.get("out", "")) or 0
+                        duration_minutes = time_out_minutes - time_in_minutes
+                        if duration_minutes < 0:
+                            duration_minutes += 24 * 60
+                        duration_minutes = max(0, duration_minutes - (_t2m(d.get("away", "0:00")) or 0)
+                                               + (_t2m(d.get("travel", "0:00")) or 0))
+                        time_label = f"{d['in']} → {d['out']}\n{_m2t(duration_minutes)}"
+                        if status not in ("Worked", "Late In", "Late Out"):
+                            time_label += f"\n{_short_status(status)}"
+                        btn_label = time_label
                     elif status != "Worked":
                         btn_label = _short_status(status)
                     else:
@@ -886,7 +895,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             if calc['days_worked'] == 0:
                 check_html = "<span style='background:#f1f5f9;color:#64748b;padding:3px 7px;border-radius:12px;'>N/A</span>"
             elif calc['check_ok']:
-                check_html = "<span style='background:#dcfce7;color:#166534;padding:3px 7px;border-radius:12px;'>✓ OK</span>"
+                check_html = "<span style='background:#dcfce7;color:#166534;padding:3px 7px;border-radius:12px;'>OK</span>"
             else:
                 check_html = "<span style='background:#fef3c7;color:#92400e;padding:3px 7px;border-radius:12px;'>! Check</span>"
             if emp_flags:
