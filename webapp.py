@@ -847,8 +847,9 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                                use_container_width=True,
                                type=btn_type,
                                help=day_hint):
+                    # Streamlit reruns automatically after a button click; avoid
+                    # calling st.rerun() again so opening the editor costs one rerun.
                     st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = True
-                    st.rerun()
 
             # Computed columns — kept in the same order as the screenshot.
             def _cell_minutes(value, bold=False):
@@ -885,7 +886,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             if calc['days_worked'] == 0:
                 check_html = "<span style='background:#f1f5f9;color:#64748b;padding:3px 7px;border-radius:12px;'>N/A</span>"
             elif calc['check_ok']:
-                check_html = "<span style='background:#dcfce7;color:#166534;padding:3px 7px;border-radius:12px;'>OK</span>"
+                check_html = "<span style='background:#dcfce7;color:#166534;padding:3px 7px;border-radius:12px;'>✓ OK</span>"
             else:
                 check_html = "<span style='background:#fef3c7;color:#92400e;padding:3px 7px;border-radius:12px;'>! Check</span>"
             if emp_flags:
@@ -930,16 +931,36 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             col_save, col_submit, col_print = st.columns([1, 1, 1])
 
             with col_save:
-                if st.button("💾 Save Draft", use_container_width=True,
+                if st.button("💾 Save", use_container_width=True,
                              key="payroll_save_draft",
                              disabled=not (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))):
+                    # Save all timesheet data locally first; local saves remain fast.
                     _ts_save()
                     if state["status"] in ("Submitted", "Returned") and (flag_total > 0 or state["status"] == "Returned"):
                         state["status"] = "Draft"
                         state["submitted_at"] = ""
                         state["submitted_by"] = ""
                         _states_save()
-                    st.success("✅ Draft saved. You can resubmit when the amendments are complete.")
+
+                    # Only users explicitly authorised for manual Drive backups may
+                    # initiate the upload from this screen.
+                    user_info = current_user_info if isinstance(current_user_info, dict) else {}
+                    user_role = str(user_info.get("role", "")).strip()
+                    may_backup = (user_role in {"Super Admin", "Director"}
+                                  or bool(user_info.get("can_backup_google_drive", False)))
+                    if may_backup and drive_service is not None:
+                        with st.spinner("Saving timesheet and backing up all data to Google Drive..."):
+                            backup_results = _force_sync_all_drive_files()
+                        failed = [name for name, ok in backup_results if not ok]
+                        if failed:
+                            st.warning("Timesheet saved locally, but some Google Drive uploads failed: " + ", ".join(failed))
+                        else:
+                            st.success("✅ Saved. All registered data files were backed up to Google Drive.")
+                    elif may_backup and drive_service is None:
+                        st.warning("Timesheet saved locally, but Google Drive is not connected. No Drive backup was made.")
+                    else:
+                        st.success("✅ Saved locally.")
+                        st.info("To back up to Google Drive from here, ask an administrator to enable ‘Save All Data to Google Drive’ in your Module Access permissions.")
 
             with col_submit:
                 if st.button("📤 Submit for Approval", type="primary",
@@ -1361,7 +1382,9 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 # ============================================================
 
 def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
-    """Inline entry / review panel for one day."""
+    """Inline entry/review panel. Manager inputs are grouped in a form to avoid
+    a full Streamlit rerun for every keystroke; actions run when the form is submitted.
+    """
     week_obj = PAYROLL_WEEKS[week_key]
     ts_days = _ts().setdefault(week_key, {}).setdefault(dept, {}) \
         .setdefault(emp["emp_id"], [None] * 5)
@@ -1372,129 +1395,105 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
     }
     flags = _get_flags(week_key, dept, emp["emp_id"])
     existing_flag = flags.get(day_idx)
-
     if existing_flag:
         st.error(f"⚠️ **Flagged by {existing_flag.get('by', 'Director')}**: "
                  f"{existing_flag.get('comment', '')}")
 
     k = f"payroll_day_{emp['emp_id']}_{day_idx}_{week_key}"
+    if editable and mode == "manager":
+        with st.form(f"{k}_entry_form", clear_on_submit=False):
+            status = st.selectbox(
+                "Status", PAYROLL_STATUS_OPTIONS,
+                index=(PAYROLL_STATUS_OPTIONS.index(current.get("status", "Worked"))
+                       if current.get("status", "Worked") in PAYROLL_STATUS_OPTIONS else 0),
+                key=f"{k}_status", disabled=not editable,
+            )
+            allows_time = status in PAYROLL_TIME_ENTRY_STATUSES
+            if allows_time:
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    time_in = st.text_input("🕐 Time In (HH:MM)", value=current.get("in", ""), key=f"{k}_in")
+                with c2:
+                    time_out = st.text_input("🕐 Time Out (HH:MM)", value=current.get("out", ""), key=f"{k}_out")
+                with c3:
+                    travel = st.text_input("🚗 Travel (paid)", value=current.get("travel", "0:00"), key=f"{k}_travel")
+                with c4:
+                    away = st.text_input("⏸ Time Away (unpaid)", value=current.get("away", "0:00"), key=f"{k}_away")
+                if time_in and time_out:
+                    t = (_t2m(time_out) or 0) - (_t2m(time_in) or 0) - (_t2m(away) or 0) + (_t2m(travel) or 0)
+                    st.caption(f"**Day total:** {_m2t(t)}  (= Time Out − Time In − Away + Travel)")
+            else:
+                time_in = time_out = ""
+                travel = away = "0:00"
+                st.info(f"ℹ️ Full-day status **{status}** — no time entry required.")
 
-    # Status
-    status = st.selectbox(
-        "Status", PAYROLL_STATUS_OPTIONS,
-        index=PAYROLL_STATUS_OPTIONS.index(current.get("status", "Worked")),
-        key=f"{k}_status",
-        disabled=not editable,
-    )
+            note = st.text_input("📝 Note", value=current.get("note", ""), key=f"{k}_note")
+            col_s, col_x, col_c = st.columns(3)
+            with col_s:
+                save_day = st.form_submit_button("💾 Save Day", type="primary", use_container_width=True)
+            with col_x:
+                clear_day = st.form_submit_button("🗑 Clear Day", use_container_width=True)
+            with col_c:
+                close_day = st.form_submit_button("❌ Close", use_container_width=True)
 
-    allows_time = status in PAYROLL_TIME_ENTRY_STATUSES
-
-    if allows_time:
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            time_in = st.text_input("🕐 Time In (HH:MM)",
-                                    value=current.get("in", ""),
-                                    key=f"{k}_in", disabled=not editable)
-        with c2:
-            time_out = st.text_input("🕐 Time Out (HH:MM)",
-                                     value=current.get("out", ""),
-                                     key=f"{k}_out", disabled=not editable)
-        with c3:
-            travel = st.text_input("🚗 Travel (paid)",
-                                   value=current.get("travel", "0:00"),
-                                   key=f"{k}_travel", disabled=not editable)
-        with c4:
-            away = st.text_input("⏸ Time Away (unpaid)",
-                                 value=current.get("away", "0:00"),
-                                 key=f"{k}_away", disabled=not editable)
-
-        if time_in and time_out:
-            t = (_t2m(time_out) or 0) - (_t2m(time_in) or 0) \
-                - (_t2m(away) or 0) + (_t2m(travel) or 0)
-            st.caption(f"**Day total:** {_m2t(t)}  "
-                       f"(= Time Out − Time In − Away + Travel)")
-    else:
-        time_in = time_out = ""
-        travel = away = "0:00"
-        st.info(f"ℹ️ Full-day status **{status}** — no time entry required.")
-
-    note = st.text_input("📝 Note", value=current.get("note", ""),
-                         key=f"{k}_note", disabled=not editable)
-
-    # -------- Manager actions --------
-    if editable:
-        col_s, col_x, col_c = st.columns(3)
-        with col_s:
-            if st.button("💾 Save Day", type="primary",
-                         use_container_width=True, key=f"{k}_save"):
-                ts_days[day_idx] = {
-                    "in": time_in, "out": time_out,
-                    "travel": travel, "away": away,
-                    "status": status, "note": note,
-                }
-                # Clear flag on this day (manager amended it)
-                if existing_flag:
-                    _clear_flag(week_key, dept, emp["emp_id"], day_idx)
-                _ts_save()
-                st.success("✅ Day saved.")
-                st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
-                st.rerun()
-
-        with col_x:
-            if st.button("🗑 Clear Day", use_container_width=True, key=f"{k}_clear"):
-                ts_days[day_idx] = None
+        if save_day:
+            ts_days[day_idx] = {
+                "in": time_in, "out": time_out, "travel": travel, "away": away,
+                "status": status, "note": note,
+            }
+            if existing_flag:
                 _clear_flag(week_key, dept, emp["emp_id"], day_idx)
-                _ts_save()
-                st.rerun()
+            _ts_save()  # local-only, intentionally fast
+            st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+            st.success("✅ Day saved locally.")
+            st.rerun()
+        elif clear_day:
+            ts_days[day_idx] = None
+            _clear_flag(week_key, dept, emp["emp_id"], day_idx)
+            _ts_save()
+            st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+            st.rerun()
+        elif close_day:
+            st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+            st.rerun()
 
-        with col_c:
-            if st.button("❌ Close", use_container_width=True, key=f"{k}_close"):
-                st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
-                st.rerun()
-
-    # -------- Director actions --------
     elif mode == "director":
-        st.caption("👁 Director review mode. Flag this day if it needs fixing.")
-
         with st.form(f"{k}_flag_form"):
             flag_comment = st.text_area(
-                "Flag comment",
-                value=existing_flag.get("comment", "") if existing_flag else "",
-                placeholder="e.g. Please check Time In — should be 08:30 not 09:15.",
-                height=80,
+                "Flag comment", value=existing_flag.get("comment", "") if existing_flag else "",
+                placeholder="e.g. Please check Time In — should be 08:30 not 09:15.", height=80,
             )
             flag_submit = st.form_submit_button(
                 "⚠ Flag for Amendment" if not existing_flag else "↻ Update Flag",
-                type="primary",
-                use_container_width=True,
+                type="primary", use_container_width=True,
             )
-
         if flag_submit:
             if not flag_comment.strip():
                 st.error("Please describe the issue before flagging.")
             else:
-                _set_flag(week_key, dept, emp["emp_id"], day_idx,
-                          flag_comment.strip(), full_name)
-                st.success("✅ Day flagged. The manager will see this comment.")
+                _set_flag(week_key, dept, emp["emp_id"], day_idx, flag_comment.strip(), full_name)
                 st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
                 st.rerun()
-
         if existing_flag:
             col_unflag, col_close = st.columns(2)
             with col_unflag:
-                if st.button("✕ Remove Flag", use_container_width=True,
-                             key=f"{k}_unflag"):
+                if st.button("✕ Remove Flag", use_container_width=True, key=f"{k}_unflag"):
                     _clear_flag(week_key, dept, emp["emp_id"], day_idx)
-                    st.success("Flag removed.")
                     st.rerun()
             with col_close:
                 if st.button("❌ Close", use_container_width=True, key=f"{k}_close_dir"):
                     st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
                     st.rerun()
-        else:
-            if st.button("❌ Close", use_container_width=True, key=f"{k}_close_dir2"):
-                st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
-                st.rerun()
+        elif st.button("❌ Close", use_container_width=True, key=f"{k}_close_dir2"):
+            st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
+            st.rerun()
+    else:
+        status = current.get("status", "Worked")
+        st.write(f"**Status:** {status}")
+        if status in PAYROLL_TIME_ENTRY_STATUSES:
+            st.write(f"**Time In:** {current.get('in', '')}  **Time Out:** {current.get('out', '')}")
+        if current.get("note"):
+            st.caption(f"Note: {current['note']}")
 
 
 # ============================================================
@@ -1584,7 +1583,10 @@ def _build_week_excel(week_key, dept):
         bal = _calc_balance(emp, week_key, dept)
         emp_flags = _get_flags(week_key, dept, eid)
 
-        ws.cell(r, 1, f"{emp.get('name', '')} ({eid})")
+        export_name = str(emp.get("name", "") or "").strip()
+        work_start = str(emp.get("work_start_time", "08:30") or "08:30")[:5]
+        work_end = str(emp.get("work_end_time", "16:30") or "16:30")[:5]
+        ws.cell(r, 1, f"{export_name}\n{work_start} – {work_end}")
         ws.cell(r, 2, f"{emp.get('contracted_hours_per_week', 40)}h")
 
         note_items = []
