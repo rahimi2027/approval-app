@@ -1203,17 +1203,6 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         st.success("✅ Submitted to Director for approval.")
                         st.rerun()
 
-            with col_print:
-                if st.button("📄 Download as Excel", use_container_width=True,
-                             key="payroll_download_excel"):
-                    xlsx = _build_week_excel(week_key, dept)
-                    st.download_button(
-                        "⬇️ Download Week (Excel)",
-                        data=xlsx,
-                        file_name=f"Payroll_{_department_label(dept).replace(' ','_')}_{week_obj['label'].replace(' ','_')}_{month_label.replace(' ','_')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="payroll_dl_excel",
-                    )
 
         # -------- Director / Payroll read-only info --------
         elif mode == "director":
@@ -1435,8 +1424,18 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
         if state["status"] == "Approved":
             when = state.get("approved_at", "")
-            st.success(f"✅ **{week_obj['label']} approved by Director** — {when}")
-            st.caption("All employees approved. Manager can now print this week for records.")
+            approver = state.get("approved_by", "") or "Director"
+            st.success(f"✅ **{week_obj['label']} Approved by {approver}** — {when}")
+            st.caption("All employees are approved. Download the final Excel timesheet here.")
+            xlsx = _build_week_excel(week_key, dept)
+            st.download_button(
+                f"⬇️ Download {week_obj['label']} Excel",
+                data=xlsx,
+                file_name=f"Payroll_{_department_label(dept).replace(' ','_')}_{week_obj['label'].replace(' ','_')}_{PAYROLL_MONTH_LABELS[week_obj['month']].replace(' ','_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"payroll_approved_dl_{week_key}_{dept}",
+                type="primary",
+            )
             return
 
         if not working_emps:
@@ -1706,7 +1705,10 @@ def _maybe_finalize(week_key, dept, working_emps):
     state = _get_state(week_key, dept)
     state["status"] = "Approved"
     state["approved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    state["approved_by"] = "Director"
+    approval_records = _approvals().get(week_key, {}).get(dept, {})
+    approver_names = [str(v.get("approved_by", "")).strip() for v in approval_records.values()
+                      if isinstance(v, dict) and str(v.get("approved_by", "")).strip()]
+    state["approved_by"] = approver_names[-1] if approver_names else "Director"
     _states_save()
 
 
@@ -1864,6 +1866,24 @@ def _build_week_excel(week_key, dept):
     }
     for letter, width in widths.items():
         ws.column_dimensions[letter].width = width
+
+    # Signature / audit block, separated from the employee table by three rows.
+    state = _get_state(week_key, dept)
+    signature_start = r + 3
+    prepared_by = str(state.get("submitted_by", "") or "Unknown")
+    prepared_at = str(state.get("submitted_at", "") or "")
+    approved_by = str(state.get("approved_by", "") or "Director")
+    approved_at = str(state.get("approved_at", "") or "")
+    ws.cell(signature_start, 1, f"Prepared By: {prepared_by}")
+    ws.cell(signature_start, 1).font = Font(bold=True, size=11)
+    ws.cell(signature_start, 1).alignment = Alignment(vertical="center")
+    ws.cell(signature_start + 1, 1, f"Date of Submission: {prepared_at or '—'}")
+    ws.cell(signature_start + 1, 1).alignment = Alignment(vertical="center")
+    ws.cell(signature_start + 3, 1, f"Approved By: {approved_by}")
+    ws.cell(signature_start + 3, 1).font = Font(bold=True, size=11)
+    ws.cell(signature_start + 3, 1).alignment = Alignment(vertical="center")
+    ws.cell(signature_start + 4, 1, f"Date of Approval: {approved_at or '—'}")
+    ws.cell(signature_start + 4, 1).alignment = Alignment(vertical="center")
 
     out = BytesIO()
     wb.save(out)
