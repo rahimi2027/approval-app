@@ -866,9 +866,19 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         </style>
         """, unsafe_allow_html=True)
         has_all_department_edit_access = bool(current_user_info.get("can_access_all_departments_timesheet", False))
-        st.session_state["payroll_all_department_edit_access"] = has_all_department_edit_access
-        can_edit_timesheet = (mode == "manager") or has_all_department_edit_access
-        editable = can_edit_timesheet and (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))
+        # Director is a reviewer: never grant time-entry editing from the broad
+        # all-departments permission. Keep this role read-only for timesheet data.
+        st.session_state["payroll_all_department_edit_access"] = (
+            has_all_department_edit_access and mode != "director"
+        )
+        can_edit_timesheet = (
+            mode != "director"
+            and ((mode == "manager") or has_all_department_edit_access)
+        )
+        editable = can_edit_timesheet and (
+            state["status"] in ("Draft", "Returned")
+            or (state["status"] == "Submitted" and flag_total > 0)
+        )
 
         # -------- Header row --------
         # All columns from the reference screenshot are present, including
@@ -1092,7 +1102,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         st.markdown("---")
 
         # -------- Manager actions --------
-        if mode == "manager" or has_all_department_edit_access:
+        if mode != "director" and (mode == "manager" or has_all_department_edit_access):
             col_save, col_submit, col_print = st.columns([1, 1, 1])
 
             with col_save:
@@ -1206,7 +1216,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
         # -------- Director / Payroll read-only info --------
         elif mode == "director":
-            st.caption("👁 **Director review mode.** Click any day cell to flag it for amendment.")
+            st.caption("👁 **Director read-only review mode.** Timesheet entries cannot be changed here. Click a day only to flag it for amendment; use the Approvals tab to approve or return the timesheet.")
         elif mode == "payroll":
             if state["status"] == "Approved":
                 st.success(f"✅ Approved by Director — ready for payroll processing.")
@@ -1599,7 +1609,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                  f"{existing_flag.get('comment', '')}")
 
     k = f"payroll_day_{emp['emp_id']}_{day_idx}_{week_key}"
-    if editable and (mode == "manager" or bool(st.session_state.get("payroll_all_department_edit_access", False))):
+    if mode != "director" and editable and (mode == "manager" or bool(st.session_state.get("payroll_all_department_edit_access", False))):
         with st.form(f"{k}_entry_form", clear_on_submit=False):
             status = st.selectbox(
                 "Status", PAYROLL_STATUS_OPTIONS,
