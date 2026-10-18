@@ -6411,126 +6411,126 @@ def render_hr_portal(current_user_info=None):
                     edit_emp = None
 
                 if edit_emp:
-                    with st.form(f"hrp_edit_employee_form_{edit_emp_id}"):
-                        ec1, ec2 = st.columns(2)
-                        with ec1:
-                            edit_id = st.text_input("Employee ID", value=edit_emp["emp_id"], help="Must be ACE-ID followed by numbers, e.g. ACE-ID001.")
-                            edit_name = st.text_input("Full Name", value=edit_emp["name"])
-                            edit_start = st.date_input("Start Date", value=edit_emp["start_date"])
-                            _default_start = str(edit_emp.get("work_start_time", "08:30") or "08:30")
-                            _default_end = str(edit_emp.get("work_end_time", "16:30") or "16:30")
-                            try:
-                                _start_time_value = datetime.strptime(_default_start[:5], "%H:%M").time()
-                            except Exception:
-                                _start_time_value = datetime.strptime("08:30", "%H:%M").time()
-                            try:
-                                _end_time_value = datetime.strptime(_default_end[:5], "%H:%M").time()
-                            except Exception:
-                                _end_time_value = datetime.strptime("16:30", "%H:%M").time()
-                            edit_work_start = st.time_input("Working Day Start Time", value=_start_time_value)
-                            edit_work_end = st.time_input("Working Day End Time", value=_end_time_value)
-                            edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
-                        with ec2:
-                            hr_software_departments = load_departments()
-                            edit_dept = st.selectbox(
-                                "Department",
-                                hr_software_departments,
-                                index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0,
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        edit_id = st.text_input("Employee ID", value=edit_emp["emp_id"], help="Must be ACE-ID followed by numbers, e.g. ACE-ID001.")
+                        edit_name = st.text_input("Full Name", value=edit_emp["name"])
+                        edit_start = st.date_input("Start Date", value=edit_emp["start_date"])
+                        _default_start = str(edit_emp.get("work_start_time", "08:30") or "08:30")
+                        _default_end = str(edit_emp.get("work_end_time", "16:30") or "16:30")
+                        try:
+                            _start_time_value = datetime.strptime(_default_start[:5], "%H:%M").time()
+                        except Exception:
+                            _start_time_value = datetime.strptime("08:30", "%H:%M").time()
+                        try:
+                            _end_time_value = datetime.strptime(_default_end[:5], "%H:%M").time()
+                        except Exception:
+                            _end_time_value = datetime.strptime("16:30", "%H:%M").time()
+                        edit_work_start = st.time_input("Working Day Start Time", value=_start_time_value)
+                        edit_work_end = st.time_input("Working Day End Time", value=_end_time_value)
+                        edit_position = st.text_input("Position / Job Title", value=edit_emp["job_title"])
+                    with ec2:
+                        hr_software_departments = load_departments()
+                        edit_dept = st.selectbox(
+                            "Department",
+                            hr_software_departments,
+                            index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0,
+                        )
+                        # Allow HR to correct an employee's sub-department after registration.
+                        edit_work_options = _hrp_work_type_options(edit_dept)
+                        current_work_type = _hrp_normalize_work_type(
+                            edit_dept,
+                            edit_emp.get("work_type", ""),
+                            edit_emp.get("job_title", ""),
+                        )
+                        edit_work_type = st.selectbox(
+                            "Working As / Sub-department",
+                            edit_work_options,
+                            index=edit_work_options.index(current_work_type) if current_work_type in edit_work_options else 0,
+                            key=f"hrp_edit_work_type_{edit_emp_id}_{edit_dept}",
+                            help="Correct the employee's sub-department if it was selected incorrectly during registration.",
+                        )
+                        edit_agreement = st.selectbox(
+                            "Agreement Type",
+                            HR_PORTAL_AGREEMENT_TYPES,
+                            index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0,
+                        )
+                        edit_pattern_options = ["Regular hours", "Irregular / Part-Year"]
+                        edit_pattern = st.selectbox(
+                            "Working Pattern",
+                            edit_pattern_options,
+                            index=edit_pattern_options.index(edit_emp.get("working_pattern", "Regular hours")) if edit_emp.get("working_pattern", "Regular hours") in edit_pattern_options else 0,
+                        )
+                        edit_days = st.number_input(
+                            "Contracted Days Per Week",
+                            min_value=0.5,
+                            max_value=7.0,
+                            value=float(edit_emp.get("days_per_week", 5) or 5),
+                            step=0.5,
+                        )
+                        contracted_hour_options = [37.5, 40.0, 42.0]
+                        current_hours = float(edit_emp.get("contracted_hours_per_week", 40) or 40)
+                        edit_hours = st.selectbox(
+                            "Contracted Hours Per Week",
+                            contracted_hour_options,
+                            format_func=lambda h: f"{h:g} hours",
+                            index=contracted_hour_options.index(current_hours) if current_hours in contracted_hour_options else 1,
+                        )
+                        if edit_emp.get("status") == "Left":
+                            edit_status = "Left"
+                        else:
+                            edit_status = st.selectbox(
+                                "Status",
+                                ["Active", "Inactive"],
+                                index=0 if edit_emp.get("status", "Active") == "Active" else 1,
                             )
-                            # Allow HR to correct an employee's sub-department after registration.
-                            edit_work_options = _hrp_work_type_options(edit_dept)
-                            current_work_type = _hrp_normalize_work_type(
-                                edit_dept,
-                                edit_emp.get("work_type", ""),
-                                edit_emp.get("job_title", ""),
-                            )
-                            edit_work_type = st.selectbox(
-                                "Working As / Sub-department",
-                                edit_work_options,
-                                index=edit_work_options.index(current_work_type) if current_work_type in edit_work_options else 0,
-                                help="Correct the employee's sub-department if it was selected incorrectly during registration.",
-                            )
-                            edit_agreement = st.selectbox(
-                                "Agreement Type",
-                                HR_PORTAL_AGREEMENT_TYPES,
-                                index=HR_PORTAL_AGREEMENT_TYPES.index(edit_emp["agreement_type"]) if edit_emp["agreement_type"] in HR_PORTAL_AGREEMENT_TYPES else 0,
-                            )
-                            edit_pattern_options = ["Regular hours", "Irregular / Part-Year"]
-                            edit_pattern = st.selectbox(
-                                "Working Pattern",
-                                edit_pattern_options,
-                                index=edit_pattern_options.index(edit_emp.get("working_pattern", "Regular hours")) if edit_emp.get("working_pattern", "Regular hours") in edit_pattern_options else 0,
-                            )
-                            edit_days = st.number_input(
-                                "Contracted Days Per Week",
-                                min_value=0.5,
-                                max_value=7.0,
-                                value=float(edit_emp.get("days_per_week", 5) or 5),
-                                step=0.5,
-                            )
-                            contracted_hour_options = [37.5, 40.0, 42.0]
-                            current_hours = float(edit_emp.get("contracted_hours_per_week", 40) or 40)
-                            edit_hours = st.selectbox(
-                                "Contracted Hours Per Week",
-                                contracted_hour_options,
-                                format_func=lambda h: f"{h:g} hours",
-                                index=contracted_hour_options.index(current_hours) if current_hours in contracted_hour_options else 1,
-                            )
-                            if edit_emp.get("status") == "Left":
-                                edit_status = "Left"
-                            else:
-                                edit_status = st.selectbox(
-                                    "Status",
-                                    ["Active", "Inactive"],
-                                    index=0 if edit_emp.get("status", "Active") == "Active" else 1,
-                                )
-                            edit_leaving_date = edit_emp.get("leaving_date")
-                            edit_leaving_reason = edit_emp.get("leaving_reason", "")
-                            if edit_emp.get("status") == "Left":
-                                st.caption("This employee is recorded as Left. Use Employee Leaving to manage the leaving date and final holiday settlement.")
-                        if st.form_submit_button("💾 Save Employee Changes", type="primary"):
-                            old_id = str(edit_emp.get("emp_id", "")).strip()
-                            valid_id, validated_id = _hrp_validate_employee_id(edit_id, exclude_id=old_id)
-                            if not valid_id:
-                                st.error(validated_id)
-                                st.stop()
-                            old_data = dict(edit_emp)
-                            edit_emp["emp_id"] = validated_id
-                            edit_emp["name"] = edit_name.strip()
-                            edit_emp["start_date"] = edit_start
-                            edit_emp["work_start_time"] = edit_work_start.strftime("%H:%M")
-                            edit_emp["work_end_time"] = edit_work_end.strftime("%H:%M")
-                            edit_emp["job_title"] = edit_position.strip()
-                            edit_emp["department"] = edit_dept
-                            edit_emp["work_type"] = edit_work_type
-                            edit_emp["agreement_type"] = edit_agreement
-                            edit_emp["working_pattern"] = edit_pattern
-                            edit_emp["days_per_week"] = edit_days
-                            edit_emp["contracted_hours_per_week"] = edit_hours
-                            if edit_emp.get("status") != "Left":
-                                edit_emp["status"] = edit_status
-                            if validated_id != old_id:
-                                users = load_users()
-                                for u in users.values():
-                                    if str(u.get("employee_id", "")).strip().casefold() == old_id.casefold():
-                                        u["employee_id"] = validated_id
-                                save_users(users)
-                                hr_leave = load_hr_leave(force=True)
-                                for r in hr_leave:
-                                    if str(r.get("employee_id", "")).strip().casefold() == old_id.casefold():
-                                        r["employee_id"] = validated_id
-                                save_all_hr_leave(hr_leave)
-                                portal_leave = _hrp_load_leave_records()
-                                for r in portal_leave:
-                                    if str(r.get("employee_id", "")).strip().casefold() == old_id.casefold():
-                                        r["employee_id"] = validated_id
-                                st.session_state.hrp_leave_records = portal_leave
-                                _hrp_save_leave_records()
-                            _hrp_save_employees()
-                            st.session_state.hrp_current_emp_id = validated_id
-                            log_action("HR_EMPLOYEE_EDITED", validated_id, old_data=old_data, new_data=dict(edit_emp))
-                            st.success(f"Employee {validated_id} updated successfully.")
-                            st.rerun()
+                        edit_leaving_date = edit_emp.get("leaving_date")
+                        edit_leaving_reason = edit_emp.get("leaving_reason", "")
+                        if edit_emp.get("status") == "Left":
+                            st.caption("This employee is recorded as Left. Use Employee Leaving to manage the leaving date and final holiday settlement.")
+                    if st.button("💾 Save Employee Changes", type="primary", key=f"hrp_save_employee_changes_{edit_emp_id}"):
+                        old_id = str(edit_emp.get("emp_id", "")).strip()
+                        valid_id, validated_id = _hrp_validate_employee_id(edit_id, exclude_id=old_id)
+                        if not valid_id:
+                            st.error(validated_id)
+                            st.stop()
+                        old_data = dict(edit_emp)
+                        edit_emp["emp_id"] = validated_id
+                        edit_emp["name"] = edit_name.strip()
+                        edit_emp["start_date"] = edit_start
+                        edit_emp["work_start_time"] = edit_work_start.strftime("%H:%M")
+                        edit_emp["work_end_time"] = edit_work_end.strftime("%H:%M")
+                        edit_emp["job_title"] = edit_position.strip()
+                        edit_emp["department"] = edit_dept
+                        edit_emp["work_type"] = edit_work_type
+                        edit_emp["agreement_type"] = edit_agreement
+                        edit_emp["working_pattern"] = edit_pattern
+                        edit_emp["days_per_week"] = edit_days
+                        edit_emp["contracted_hours_per_week"] = edit_hours
+                        if edit_emp.get("status") != "Left":
+                            edit_emp["status"] = edit_status
+                        if validated_id != old_id:
+                            users = load_users()
+                            for u in users.values():
+                                if str(u.get("employee_id", "")).strip().casefold() == old_id.casefold():
+                                    u["employee_id"] = validated_id
+                            save_users(users)
+                            hr_leave = load_hr_leave(force=True)
+                            for r in hr_leave:
+                                if str(r.get("employee_id", "")).strip().casefold() == old_id.casefold():
+                                    r["employee_id"] = validated_id
+                            save_all_hr_leave(hr_leave)
+                            portal_leave = _hrp_load_leave_records()
+                            for r in portal_leave:
+                                if str(r.get("employee_id", "")).strip().casefold() == old_id.casefold():
+                                    r["employee_id"] = validated_id
+                            st.session_state.hrp_leave_records = portal_leave
+                            _hrp_save_leave_records()
+                        _hrp_save_employees()
+                        st.session_state.hrp_current_emp_id = validated_id
+                        log_action("HR_EMPLOYEE_EDITED", validated_id, old_data=old_data, new_data=dict(edit_emp))
+                        st.success(f"Employee {validated_id} updated successfully.")
+                        st.rerun()
 
                 st.markdown("### 🗑️ Employee Record")
                 st.caption("Use Active / Inactive here for normal employee management. Use Employee Leaving when an employee has actually left the company.")
