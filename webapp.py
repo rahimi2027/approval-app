@@ -32,18 +32,6 @@ import pandas as pd
 import streamlit as st
 import os
 
-# Page configuration for the redesigned Acoole operations portal.
-try:
-    st.set_page_config(
-        page_title="Acoole Electrical Ltd | Operations Portal",
-        page_icon="⚡",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-except Exception:
-    # Streamlit raises if a host wrapper has already configured the page.
-    pass
-
 # ============================================================
 # CONSTANTS
 # ============================================================
@@ -13315,128 +13303,13 @@ if "editing_inspector_bonus_id" not in st.session_state: st.session_state.editin
 if "editing_work_order_id" not in st.session_state: st.session_state.editing_work_order_id = None
 if "editing_work_order_id_emp" not in st.session_state: st.session_state.editing_work_order_id_emp = None
 
-def _apply_acoo_portal_theme():
-    """Apply the Acoole teal/amber design system consistently across Streamlit pages."""
-    st.markdown("""
-    <style>
-      :root {
-        --acoo-teal: #193f43;
-        --acoo-teal-deep: #14363a;
-        --acoo-amber: #e5aa53;
-        --acoo-amber-dark: #c9852d;
-        --acoo-cream: #f3f5f0;
-        --acoo-card: #fffefa;
-        --acoo-ink: #28484b;
-        --acoo-muted: #718581;
-        --acoo-border: #dce5dd;
-      }
-      .stApp { background: var(--acoo-cream); color: var(--acoo-ink); }
-      [data-testid="stHeader"] { background: rgba(243,245,240,.94); }
-      [data-testid="stToolbar"] { right: 1rem; }
-      .block-container { padding-top: 1.35rem; padding-bottom: 2.5rem; max-width: 1600px; }
-      [data-testid="stSidebar"] { background: var(--acoo-teal); border-right: 1px solid rgba(255,255,255,.10); }
-      [data-testid="stSidebar"] > div:first-child { background: var(--acoo-teal); }
-      [data-testid="stSidebar"] * { color: #e9f0e9; }
-      [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.16); }
-      [data-testid="stSidebar"] [data-testid="stExpander"] { border-color: rgba(255,255,255,.18); }
-      [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #c0d0cb; }
-      h1, h2, h3, h4 { color: var(--acoo-ink); letter-spacing: -.025em; }
-      h1 { font-weight: 750; }
-      h2, h3 { font-weight: 700; }
-      p, label, [data-testid="stCaptionContainer"] { color: #637a76; }
-      [data-testid="stMetric"] { background: var(--acoo-card); border: 1px solid var(--acoo-border); border-radius: 15px; padding: 1rem 1.1rem; box-shadow: 0 3px 12px rgba(25,63,67,.035); }
-      [data-testid="stMetricLabel"] { color: #728681; font-weight: 650; }
-      [data-testid="stMetricValue"] { color: var(--acoo-teal); font-weight: 750; }
-      [data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--acoo-border) !important; border-radius: 15px !important; }
-      [data-testid="stTabs"] [role="tablist"] { gap: .3rem; border-bottom: 1px solid var(--acoo-border); }
-      [data-testid="stTabs"] button[role="tab"] { border-radius: 9px 9px 0 0; padding: .65rem .9rem; font-weight: 650; }
-      [data-testid="stTabs"] button[role="tab"][aria-selected="true"] { color: var(--acoo-teal); border-bottom-color: var(--acoo-amber); }
-      .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] > button {
-        border-radius: 10px; border: 1px solid #d8e1d9; font-weight: 650; min-height: 2.55rem;
-        transition: transform .12s ease, box-shadow .12s ease;
-      }
-      .stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(25,63,67,.10); border-color: var(--acoo-amber); }
-      .stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] > button[kind="primary"] { background: var(--acoo-amber); color: #203e40; border-color: var(--acoo-amber); }
-      .stButton > button[kind="primary"]:hover, [data-testid="stFormSubmitButton"] > button[kind="primary"]:hover { background: #edb65f; border-color: #edb65f; }
-      input, textarea, [data-baseweb="select"] > div { border-radius: 9px !important; }
-      [data-testid="stDataFrame"], [data-testid="stTable"] { border: 1px solid var(--acoo-border); border-radius: 12px; overflow: hidden; }
-      [data-testid="stAlert"] { border-radius: 12px; }
-      [data-testid="stExpander"] { background: rgba(255,254,250,.72); border: 1px solid var(--acoo-border); border-radius: 12px; }
-      hr { border-color: var(--acoo-border); }
-      .acoo-brand { display:flex; align-items:center; gap:12px; padding: 8px 4px 16px; border-bottom: 1px solid rgba(255,255,255,.16); margin-bottom: 14px; }
-      .acoo-logo-mark { width:40px; height:40px; border:1px solid rgba(229,170,83,.65); background:rgba(229,170,83,.12); color:#f0bc6c; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; }
-      .acoo-brand-name { color:#f4f2e9; font-size:16px; font-weight:800; letter-spacing:.04em; line-height:1.15; }
-      .acoo-brand-sub { color:#b5c8c2; font-size:10px; letter-spacing:.13em; font-weight:700; margin-top:4px; }
-      .acoo-topline { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin:0 0 1rem; color:#70827e; font-size:12px; }
-      .acoo-hero { position:relative; overflow:hidden; background:var(--acoo-teal); color:#f7f4e9; border-radius:18px; padding:28px 30px 26px; margin: .25rem 0 1.25rem; box-shadow:0 8px 24px rgba(25,63,67,.08); }
-      .acoo-hero:after { content:""; position:absolute; width:210px; height:210px; right:-40px; top:-80px; border:1px solid rgba(255,255,255,.12); border-radius:50%; box-shadow:0 0 0 20px rgba(255,255,255,.025),0 0 0 42px rgba(255,255,255,.02); pointer-events:none; }
-      .acoo-eyebrow { color:#f0bc6c; text-transform:uppercase; font-size:11px; letter-spacing:.15em; font-weight:800; margin-bottom:12px; }
-      .acoo-hero h1 { color:#f7f4e9; font-family: Georgia, 'Times New Roman', serif; font-size:clamp(28px,3.2vw,39px); margin:0 0 10px; line-height:1.12; }
-      .acoo-hero p { color:#d5e1dc; max-width:700px; font-size:14px; line-height:1.65; margin:0; }
-      .acoo-user-chip { display:inline-flex; align-items:center; gap:8px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.12); padding:8px 11px; border-radius:10px; color:#f5f2e8; font-size:12px; margin-top:16px; }
-      .acoo-section-kicker { font-size:11px; text-transform:uppercase; letter-spacing:.12em; font-weight:800; color:#81928d; }
-      @media (max-width: 800px) {
-        .block-container { padding-left: 1rem; padding-right: 1rem; }
-        .acoo-hero { padding:22px 20px; }
-        .acoo-hero h1 { font-size:28px; }
-      }
-    </style>
-    """, unsafe_allow_html=True)
-
-
 def display_company_header():
-    """Use a compact brand header for authenticated pages and a centred login header."""
-    logged_in = bool(st.session_state.get("logged_in"))
-    if logged_in:
-        user = st.session_state.get("user_info", {}) or {}
-        with st.sidebar:
-            st.markdown(
-                '<div class="acoo-brand"><div class="acoo-logo-mark">A</div>'
-                '<div><div class="acoo-brand-name">ACOOLE</div>'
-                '<div class="acoo-brand-sub">ELECTRICAL LTD · OPERATIONS</div></div></div>',
-                unsafe_allow_html=True,
-            )
-            st.caption("OPERATIONS PORTAL")
-            st.markdown("---")
-            st.markdown(
-                f"**{str(user.get('full_name') or user.get('username') or 'User')}**  \n"
-                f"{str(user.get('dept') or 'Department not set')} · {str(user.get('role') or 'User')}",
-            )
-            st.caption("Navigation and available modules follow your assigned permissions.")
-        st.markdown(
-            '<div class="acoo-topline"><span>Acoole Operations&nbsp;&nbsp; › &nbsp;&nbsp;Your operations workspace</span>'
-            '<span>SECURE OPERATIONS PORTAL</span></div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown('<div style="max-width:700px;margin:2rem auto 1rem;text-align:center;">', unsafe_allow_html=True)
-        c1, c2, c3 = st.columns([1, 2, 1])
-        with c2:
-            if os.path.exists(LOGO_PATH):
-                st.image(LOGO_PATH, width=250)
-            else:
-                st.title("⚡ ACOOLE ELECTRICAL LTD")
-            st.caption("Acoole Operations & Authorisation Portal")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-def render_portal_welcome_banner(user_info):
-    """Render a role-aware welcome banner without changing any module workflows."""
-    name = str((user_info or {}).get("full_name") or (user_info or {}).get("username") or "there").strip()
-    first_name = name.split()[0] if name else "there"
-    role_name = str((user_info or {}).get("role") or "User").strip()
-    department = str((user_info or {}).get("dept") or "Acoole Electrical Ltd").strip()
-    now = datetime.now()
-    date_label = now.strftime("%A, %d %B %Y").upper()
-    hour = now.hour
-    greeting = "Good morning" if hour < 12 else ("Good afternoon" if hour < 18 else "Good evening")
-    st.markdown(
-        f'<section class="acoo-hero"><div class="acoo-eyebrow">{date_label} · ACOOLE ELECTRICAL LTD</div>'
-        f'<h1>{greeting}, {first_name}.</h1>'
-        '<p>A clear workspace for your requests, team activity and the actions that need your attention.</p>'
-        f'<div class="acoo-user-chip">✦ &nbsp; {department} &nbsp;·&nbsp; {role_name}</div></section>',
-        unsafe_allow_html=True,
-    )
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        if os.path.exists(LOGO_PATH): st.image(LOGO_PATH, width=300)
+        else: st.title("⚡ ACOOLE ELECTRICAL LTD")
+        st.caption("Acoole Operations & Authorisation Portal")
+        st.divider()
 
 def change_my_password_form():
     if not st.session_state.get("logged_in") or not st.session_state.get("user_info"): return
@@ -13880,7 +13753,6 @@ def user_management_panel():
 # ============================================================
 # 🔐 LOGIN
 # ============================================================
-_apply_acoo_portal_theme()
 if not st.session_state.logged_in:
     display_company_header()
     with st.form("login_form", border=True):
@@ -13919,7 +13791,7 @@ full_name = user_info.get("full_name", user_info.get("username", "User"))
 dept = user_info.get("dept", "")
 role = user_info.get("role", "")
 
-render_portal_welcome_banner(user_info)
+st.info(f"👤 Welcome: {full_name} | {dept} | {role}")
 
 change_my_password_form()
 
