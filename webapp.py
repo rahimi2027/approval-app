@@ -6437,6 +6437,19 @@ def render_hr_portal(current_user_info=None):
                                 hr_software_departments,
                                 index=hr_software_departments.index(edit_emp["department"]) if edit_emp["department"] in hr_software_departments else 0,
                             )
+                            # Allow HR to correct an employee's sub-department after registration.
+                            edit_work_options = _hrp_work_type_options(edit_dept)
+                            current_work_type = _hrp_normalize_work_type(
+                                edit_dept,
+                                edit_emp.get("work_type", ""),
+                                edit_emp.get("job_title", ""),
+                            )
+                            edit_work_type = st.selectbox(
+                                "Working As / Sub-department",
+                                edit_work_options,
+                                index=edit_work_options.index(current_work_type) if current_work_type in edit_work_options else 0,
+                                help="Correct the employee's sub-department if it was selected incorrectly during registration.",
+                            )
                             edit_agreement = st.selectbox(
                                 "Agreement Type",
                                 HR_PORTAL_AGREEMENT_TYPES,
@@ -6489,6 +6502,7 @@ def render_hr_portal(current_user_info=None):
                             edit_emp["work_end_time"] = edit_work_end.strftime("%H:%M")
                             edit_emp["job_title"] = edit_position.strip()
                             edit_emp["department"] = edit_dept
+                            edit_emp["work_type"] = edit_work_type
                             edit_emp["agreement_type"] = edit_agreement
                             edit_emp["working_pattern"] = edit_pattern
                             edit_emp["days_per_week"] = edit_days
