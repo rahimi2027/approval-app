@@ -1217,7 +1217,11 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                             is_missing = not isinstance(entry, dict) or not entry.get("status")
                             if not is_missing:
                                 entry_status = str(entry.get("status", "Worked")).strip()
-                                if entry_status in PAYROLL_TIME_ENTRY_STATUSES:
+                                # Authorised Absence may be either unpaid full-day
+                                # absence (no times) or a partially worked day (times supplied).
+                                # All other time-entry statuses still require both times.
+                                if (entry_status in PAYROLL_TIME_ENTRY_STATUSES
+                                        and entry_status != "Authorised Absence"):
                                     is_missing = not (entry.get("in") and entry.get("out"))
                             if is_missing:
                                 missing_days.append(
@@ -1408,7 +1412,9 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     continue
 
                 status = str(d.get("status", "Worked")).strip() or "Worked"
-                if status in PAYROLL_TIME_ENTRY_STATUSES and (not d.get("in") or not d.get("out")):
+                if (status in PAYROLL_TIME_ENTRY_STATUSES
+                        and status != "Authorised Absence"
+                        and (not d.get("in") or not d.get("out"))):
                     items.append({
                         "icon": "⌛",
                         "headline": f"{emp.get('name', '')} — missing time on {day_label}",
