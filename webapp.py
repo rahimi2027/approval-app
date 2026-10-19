@@ -717,16 +717,26 @@ def _calc_row(emp, week_key, dept):
 
 
 def _calc_balance(emp, week_key, dept):
+    """Return the current week's difference and cumulative carry-forward balance.
+
+    Every employee uses the same carry-forward rule: each earlier payroll week
+    with recorded worked-day equivalents contributes its weekly surplus/shortfall.
+    A negative balance is informational and can be made up in later weeks; it is
+    not itself a timesheet flag and does not prevent Director approval.
+    """
     idx = PAYROLL_WEEK_ORDER.index(week_key) if week_key in PAYROLL_WEEK_ORDER else -1
     if idx < 0:
         return {"prev": 0, "week_net": None, "balance": None}
+
     prev = 0
     for wk in PAYROLL_WEEK_ORDER[:idx]:
-        c = _calc_row(emp, wk, dept)
-        if c["days_worked"] > 0:
-            prev += c["week_extra"]
-    c = _calc_row(emp, week_key, dept)
-    week_net = c["week_extra"] if c["days_worked"] > 0 else None
+        prior = _calc_row(emp, wk, dept)
+        prior_net = prior.get("week_extra")
+        if prior_net is not None:
+            prev += prior_net
+
+    current = _calc_row(emp, week_key, dept)
+    week_net = current.get("week_extra")
     if week_net is None and prev == 0:
         return {"prev": 0, "week_net": None, "balance": None}
     if week_net is None:
@@ -1140,7 +1150,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             elif calc['check_ok']:
                 check_html = "<span style='background:#dcfce7;color:#166534;padding:3px 7px;border-radius:12px;'>OK</span>"
             else:
-                check_html = "<span style='background:#fef3c7;color:#92400e;padding:3px 7px;border-radius:12px;'>! Check</span>"
+                check_html = "<span title='Hours are below the contracted amount for recorded days. This is informational; it is not a flag.' style='background:#fef3c7;color:#92400e;padding:3px 7px;border-radius:12px;'>Hours short</span>"
             if emp_flags:
                 check_html = "<span style='background:#fee2e2;color:#991b1b;padding:3px 7px;border-radius:12px;'>⚠ Flagged</span>"
             row[16].markdown(f"<div style='text-align:center;'>{check_html}</div>", unsafe_allow_html=True)
@@ -1306,12 +1316,65 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
         # -------- Director / Payroll read-only info --------
         elif mode == "director":
-            st.caption("👁 **Director read-only review mode.** Timesheet entries cannot be changed here. Click a day only to flag it for amendment; use the Approvals tab to approve or return the timesheet.")
+            st.caption("👁 **Director review mode.** Timesheet entries are read-only. Click a day to flag a genuine correction issue. A negative hours balance is informational and is not a reason to flag the timesheet.")
         elif mode == "payroll":
             if state["status"] == "Approved":
                 st.success(f"✅ Approved by Director — ready for payroll processing.")
             else:
                 st.info("Read-only. Awaiting Director approval.")
+
+        # Director decision controls live on the Timesheet tab beside the records
+        # being reviewed. Hours shortfalls alone do not block approval; only genuine
+        # unresolved day flags do.
+        if mode in ("director", "super_admin"):
+            st.markdown("---")
+            if state["status"] == "Approved":
+                st.success(
+                    f"✅ This timesheet was approved by {state.get('approved_by', 'Director')} "
+                    f"on {state.get('approved_at', 'date not recorded')}."
+                )
+            elif state["status"] == "Submitted":
+                review_col, return_col = st.columns(2)
+                can_approve_week = flag_total == 0 and bool(employees)
+                with review_col:
+                    if st.button(
+                        "✅ Approve Timesheet", type="primary", use_container_width=True,
+                        key=f"payroll_approve_timesheet_{week_key}_{dept}",
+                        disabled=not can_approve_week,
+                        help=("Resolve all flagged day corrections before approval. A negative hours balance alone does not block approval."),
+                    ):
+                        approval_bucket = _approvals().setdefault(week_key, {}).setdefault(dept, {})
+                        approved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        for employee in employees:
+                            approval_bucket[employee.get("emp_id", "")] = {
+                                "approved_at": approved_at,
+                                "approved_by": full_name,
+                            }
+                        _approvals_save()
+                        _maybe_finalize(week_key, dept, employees, approver_name=full_name)
+                        st.rerun()
+                with return_col:
+                    if st.button(
+                        "↩ Return Week to Manager", use_container_width=True,
+                        key=f"payroll_return_week_ts_{week_key}_{dept}",
+                    ):
+                        state["status"] = "Returned"
+                        state["submitted_at"] = ""
+                        state["submitted_by"] = ""
+                        state["approved_at"] = ""
+                        state["approved_by"] = ""
+                        _states_save()
+                        _approvals().get(week_key, {}).pop(dept, None)
+                        _approvals_save()
+                        st.info("Week returned to the manager. Existing day flags remain visible for correction.")
+                        st.rerun()
+                if not can_approve_week:
+                    if flag_total:
+                        st.warning(f"Resolve the {flag_total} outstanding day flag(s) before approving.")
+                    else:
+                        st.caption("No employees are available to approve in this department.")
+            else:
+                st.caption("The Director's approval controls appear here after the manager submits the timesheet.")
 
     # ========================================================
     # TAB 2 — TEAM SUMMARY
@@ -1343,7 +1406,11 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                   f"{'+' if tot_balance >= 0 else ''}{_m2t(tot_balance)}")
 
         if checks:
-            st.warning(f"⚠️ {checks} employee(s) under contracted hours this week.")
+            st.info(
+                f"ℹ️ {checks} employee(s) are below contracted hours for the days recorded this week. "
+                "This is an informational difference, not a timesheet error or flag. "
+                "The balance carries forward so additional hours in later weeks can offset it."
+            )
 
         st.markdown("---")
 
@@ -1366,7 +1433,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 "Contracted": _m2t(c["contracted"]),
                 "Wk Extra": we_str,
                 "Balance": b_str,
-                "Check": "OK" if (c["check_ok"] or not c["days_worked"]) else "Check",
+                "Check": "N/A" if not c["days_worked"] else ("OK" if c["check_ok"] else "Hours short"),
             })
 
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
@@ -1507,17 +1574,23 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 )
 
     # ========================================================
-    # TAB 4 — APPROVALS
+    # TAB 4 — APPROVALS (final approval record only)
     # ========================================================
     with tab_appr:
-        # Once a week is approved, allow all users who can access this
-        # department's timesheet to see the approval confirmation and download
-        # the finalized workbook. Approval controls remain director-only.
         if state["status"] == "Approved":
-            when = state.get("approved_at", "")
+            when = state.get("approved_at", "") or "Date not recorded"
             approver = state.get("approved_by", "") or "Director"
-            st.success(f"✅ **{week_obj['label']} Approved by {approver}** — {when}")
+            st.success(f"✅ **{week_obj['label']} approved by {approver}** — {when}")
             st.caption("This week has been approved. Download the final Excel timesheet below.")
+
+            approved_count = sum(
+                1 for employee in employees
+                if _is_approved(week_key, dept, employee.get("emp_id", ""))
+            )
+            flagged_count = sum(
+                1 for employee in employees
+                if _get_flags(week_key, dept, employee.get("emp_id", ""))
+            )
             xlsx = _build_week_excel(week_key, dept)
             st.download_button(
                 f"⬇️ Download {week_obj['label']} Excel",
@@ -1527,155 +1600,31 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 key=f"payroll_approved_dl_{week_key}_{dept}",
                 type="primary",
             )
-            if mode not in ("director", "super_admin"):
-                return
-
-        if mode not in ("director", "super_admin"):
-            st.info("🔒 Approval actions are available to the Director and Super Admin only.")
-            st.caption("Managers can submit timesheets and download the Excel file after director approval.")
-            return
-
-        # The submitted week itself is the approval queue. Include active
-        # employees even when their day is leave/missing-time, so the director
-        # can see and review the submitted week rather than an empty tab.
-        working_emps = list(employees)
-
-        if state["status"] == "Draft":
-            st.warning("📝 The manager has not submitted this week yet.")
-            return
-
-        if not working_emps:
-            st.info("No active employees are assigned to this department. Check the department selection and HR employee records.")
-            return
-
-        approved_count = sum(1 for e in working_emps
-                             if _is_approved(week_key, dept, e.get("emp_id", "")))
-        flagged_count = sum(1 for e in working_emps
-                            if _get_flags(week_key, dept, e.get("emp_id", "")))
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("✅ Approved", f"{approved_count} / {len(working_emps)}")
-        c2.metric("⚠️ Flagged", flagged_count)
-        c3.metric("📅 Week", week_obj["label"])
-
-        st.markdown("---")
-
-        for emp in working_emps:
-            eid = emp.get("emp_id", "")
-            emp_flags = _get_flags(week_key, dept, eid)
-            approved = _is_approved(week_key, dept, eid)
-            c = _calc_row(emp, week_key, dept)
-            b = _calc_balance(emp, week_key, dept)
-
-            if approved:
-                card_bg = "#f0fdf4"
-                card_border = "#bbf7d0"
-            elif emp_flags:
-                card_bg = "#fef2f2"
-                card_border = "#fecaca"
-            else:
-                card_bg = "#ffffff"
-                card_border = "#e2e8f0"
-
-            st.markdown(
-                f"<div style='background:{card_bg}; border:1px solid {card_border}; "
-                f"border-radius:10px; padding:14px; margin-bottom:10px;'>",
-                unsafe_allow_html=True,
+            st.markdown("---")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("✅ Approved", f"{approved_count} / {len(employees)}")
+            c2.metric("⚠️ Flagged", flagged_count)
+            c3.metric("📅 Week", week_obj["label"])
+        else:
+            st.info("No final approval record yet.")
+            st.caption(
+                "The Director reviews the timesheet, flags any genuine day-level corrections, "
+                "and approves the week from the Timesheet tab. A negative hours balance is "
+                "informational and does not by itself prevent approval."
             )
-
-            col1, col2, col3 = st.columns([5, 2, 2])
-
-            with col1:
-                balance_str = "—"
-                if b["balance"] is not None:
-                    sign = "+" if b["balance"] >= 0 else ""
-                    balance_str = f"{sign}{_m2t(b['balance'])}"
-                # Render the employee name as plain text, then show the HR-configured
-                # working-day times underneath. Do not include literal HTML in Markdown.
-                st.markdown(f"### {emp.get('name', '')}")
-                work_start = str(emp.get("work_start_time", "08:30") or "08:30")[:5]
-                work_end = str(emp.get("work_end_time", "16:30") or "16:30")[:5]
-                st.caption(f"Working hours: {work_start} – {work_end}")
-                st.caption(
-                    f"{c['days_worked']} days · {_m2t(c['working'])} working · "
-                    f"{_m2t(c['contracted'])} contracted · "
-                    f"**Balance: {balance_str}**"
+            if state["status"] == "Submitted":
+                approved_count = sum(
+                    1 for employee in employees
+                    if _is_approved(week_key, dept, employee.get("emp_id", ""))
                 )
-
-                for di, f in emp_flags.items():
-                    st.markdown(
-                        f"<div style='background:#fff; border:1px solid #fecaca; "
-                        f"border-radius:6px; padding:6px 10px; margin-top:4px; "
-                        f"font-size:12px;'>"
-                        f"<b>⚠ {week_obj['dates'][di]}:</b> {f.get('comment', '')}"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-
-            with col2:
-                if approved:
-                    st.success("✅ Approved")
-                elif emp_flags:
-                    st.error(f"⚠ {len(emp_flags)} flag(s)")
-                else:
-                    st.info("Pending")
-
-            with col3:
-                if not approved and not emp_flags:
-                    if st.button("✅ Approve", key=f"appr_{eid}",
-                                 use_container_width=True, type="primary"):
-                        _approvals().setdefault(week_key, {}).setdefault(dept, {})[eid] = {
-                            "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "approved_by": full_name,
-                        }
-                        _approvals_save()
-                        _maybe_finalize(week_key, dept, working_emps, approver_name=full_name)
-                        st.rerun()
-
-                if approved and state["status"] == "Submitted":
-                    if st.button("↩ Undo", key=f"undo_{eid}",
-                                 use_container_width=True):
-                        _approvals().get(week_key, {}).get(dept, {}).pop(eid, None)
-                        _approvals_save()
-                        st.rerun()
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # Bulk actions
-        st.markdown("---")
-        col_a, col_b = st.columns(2)
-
-        with col_a:
-            can_approve_all = flagged_count == 0
-            if st.button("✅ Approve All Employees", type="primary",
-                         use_container_width=True, key="payroll_approve_all",
-                         disabled=not can_approve_all):
-                for e in working_emps:
-                    _approvals().setdefault(week_key, {}).setdefault(dept, {})[
-                        e["emp_id"]] = {
-                        "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "approved_by": full_name,
-                    }
-                _approvals_save()
-                _maybe_finalize(week_key, dept, working_emps, approver_name=full_name)
-                st.rerun()
-
-            if not can_approve_all:
-                st.caption(f"⚠️ Clear {flagged_count} flag(s) first.")
-
-        with col_b:
-            if st.button("↩ Return Week to Manager", use_container_width=True,
-                         key="payroll_return_week"):
-                state["status"] = "Returned"
-                state["submitted_at"] = ""
-                state["submitted_by"] = ""
-                state["approved_at"] = ""
-                state["approved_by"] = ""
-                _states_save()
-                _approvals().get(week_key, {}).pop(dept, None)
-                _approvals_save()
-                st.success("Week returned to manager. Flags remain for amendment.")
-                st.rerun()
+                flagged_count = sum(
+                    1 for employee in employees
+                    if _get_flags(week_key, dept, employee.get("emp_id", ""))
+                )
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Approved", f"{approved_count} / {len(employees)}")
+                c2.metric("Flagged", flagged_count)
+                c3.metric("Week", week_obj["label"])
 
 
 # ============================================================
@@ -1951,7 +1900,7 @@ def _build_week_excel(week_key, dept):
         elif calc["check_ok"]:
             check_text = "OK"
         else:
-            check_text = "Check"
+            check_text = "Hours short"
         if emp_flags:
             check_text = "Flagged"
         ws.cell(r, 17, check_text)
