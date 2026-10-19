@@ -145,12 +145,36 @@ def get_backup_filenames():
 # ============================================================
 
 def _t2m(s):
-    if not s or ":" not in str(s):
+    """Convert HH:MM or 12-hour times such as '7:58 AM' to minutes after midnight.
+
+    Older timesheet entries may have been saved with AM/PM suffixes. Accepting
+    those values prevents otherwise valid shifts from being silently omitted
+    from totals and the Days calculation.
+    """
+    if s is None:
+        return None
+    value = str(s).strip()
+    if not value or ":" not in value:
         return None
     try:
-        h, m = str(s).split(":")[:2]
-        return int(h) * 60 + int(m)
-    except Exception:
+        match = re.fullmatch(r"(\d{1,2}):(\d{2})\s*([AaPp][Mm])?", value)
+        if not match:
+            return None
+        hour, minute = int(match.group(1)), int(match.group(2))
+        suffix = (match.group(3) or "").upper()
+        if minute < 0 or minute > 59:
+            return None
+        if suffix:
+            if hour < 1 or hour > 12:
+                return None
+            if suffix == "AM":
+                hour = 0 if hour == 12 else hour
+            else:  # PM
+                hour = 12 if hour == 12 else hour + 12
+        elif hour < 0 or hour > 23:
+            return None
+        return hour * 60 + minute
+    except (TypeError, ValueError):
         return None
 
 
@@ -1072,14 +1096,23 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
             note_items = []
             for note_day, day_entry in enumerate(ts_days):
-                if day_entry:
-                    note_text = str(day_entry.get('note', '') or '').strip()
-                    status_text = str(day_entry.get('status', '') or '').strip()
-                    if note_text and note_text not in note_items:
-                        note_items.append(note_text)
-                    elif status_text and status_text not in ('Worked', 'Late In', 'Early Out') and status_text not in note_items:
-                        note_items.append(status_text)
-            notes_text = " · ".join(note_items) if note_items else "—"
+                if not day_entry:
+                    continue
+                note_text = str(day_entry.get('note', '') or '').strip()
+                status_text = str(day_entry.get('status', '') or '').strip()
+                date_label = _ordinal_day(week_obj["dates"][note_day])
+                if status_text and status_text not in ('Worked', 'Late In', 'Early Out'):
+                    display_status = 'Half Day Holiday' if status_text == 'HD Holiday' else status_text
+                    item = f"{date_label} {display_status}"
+                    if note_text:
+                        item += f" — {note_text}"
+                    if item not in note_items:
+                        note_items.append(item)
+                elif note_text:
+                    item = f"{date_label} {note_text}"
+                    if item not in note_items:
+                        note_items.append(item)
+            notes_text = " / ".join(note_items) if note_items else "—"
             row[17].markdown(f"<div style='font-size:11px;white-space:normal;overflow-wrap:anywhere;'>{notes_text}</div>", unsafe_allow_html=True)
 
             # Inline open day panel
@@ -1828,10 +1861,18 @@ def _build_week_excel(week_key, dept):
             if d:
                 note_text = str(d.get("note", "") or "").strip()
                 status_text = str(d.get("status", "") or "").strip()
-                if note_text and note_text not in note_items:
-                    note_items.append(note_text)
-                elif status_text and status_text not in ("Worked", "Late In", "Early Out") and status_text not in note_items:
-                    note_items.append(status_text)
+                date_label = _ordinal_day(week_obj["dates"][i])
+                if status_text and status_text not in ("Worked", "Late In", "Early Out"):
+                    display_status = "Half Day Holiday" if status_text == "HD Holiday" else status_text
+                    item = f"{date_label} {display_status}"
+                    if note_text:
+                        item += f" — {note_text}"
+                    if item not in note_items:
+                        note_items.append(item)
+                elif note_text:
+                    item = f"{date_label} {note_text}"
+                    if item not in note_items:
+                        note_items.append(item)
 
         # Columns 8–18 mirror the UI: Days, Sub Total, Lunch, Travel, Away,
         # Working, Contracted, Wk Extra, Balance, Check, Notes.
@@ -1948,6 +1989,16 @@ def _short_status(status):
         "N/A": "N/A",
         "Leaver": "Leaver",
     }.get(status, status)
+
+
+def _ordinal_day(iso):
+    """Return a compact ordinal date label such as '15th'."""
+    day = datetime.fromisoformat(iso).day
+    if 10 <= day % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
 
 
 def _long_date(iso):
