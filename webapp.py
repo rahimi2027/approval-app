@@ -54,6 +54,17 @@ PAYROLL_STATUS_OPTIONS = [
     "AWOL", "N/A", "Leaver",
 ]
 
+# Coloured markers shown in the payroll Status dropdown. The stored status values
+# remain unchanged, so payroll calculations and existing saved records are unaffected.
+PAYROLL_STATUS_MARKERS = {
+    "Worked": "🟩", "Late In": "🟨", "Early Out": "🟨",
+    "Sick": "⬜", "College": "🟦", "Holiday": "🩷",
+    "Unpaid Holiday": "🟪", "HD Holiday": "🟧", "Bank Holiday": "🟨",
+    "Authorised Absence": "🟩", "Overtime Approved": "🟩",
+    "Maternity": "🩵", "Lay-off": "🟪", "Leaver": "🟥",
+    "N/A": "🟨", "Unpaid Absence": "🟦", "AWOL": "⬛",
+}
+
 PAYROLL_TIME_ENTRY_STATUSES = {
     "Worked", "Late In", "Early Out", "Authorised Absence",
     "HD Holiday", "Overtime Approved", "College",
@@ -1656,6 +1667,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                 "Status", PAYROLL_STATUS_OPTIONS,
                 index=(PAYROLL_STATUS_OPTIONS.index(current.get("status", "Worked"))
                        if current.get("status", "Worked") in PAYROLL_STATUS_OPTIONS else 0),
+                format_func=lambda option: f"{PAYROLL_STATUS_MARKERS.get(option, '🔹')} {option}",
                 key=f"{k}_status", disabled=not editable,
             )
             allows_time = status in PAYROLL_TIME_ENTRY_STATUSES
