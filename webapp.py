@@ -1529,8 +1529,25 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     })
                     continue
 
-                status = str(d.get("status", "Worked")).strip() or "Worked"
-                if (status in PAYROLL_TIME_ENTRY_STATUSES
+                # Do not infer "Worked" for an explicitly non-working day.
+                # N/A means the employee was unavailable and did not work, so
+                # it never requires clock-in / clock-out times. Handle common
+                # legacy spellings as the same no-time status.
+                raw_status = d.get("status", "")
+                status = str(raw_status or "").strip()
+                status_key = status.casefold().replace(" ", "").replace("/", "")
+                is_not_available = status_key in {"n/a", "na", "notavailable", "notavailablethatday"}
+                if not status:
+                    # An entry with no status is incomplete, but should not be
+                    # incorrectly reported as a Worked day with missing times.
+                    items.append({
+                        "icon": "⌛",
+                        "headline": f"{emp.get('name', '')} — missing status on {day_label}",
+                        "date": day_label,
+                        "detail": "Choose a status for this day. N/A is valid for a non-working day and requires no times.",
+                    })
+                elif (not is_not_available
+                        and status in PAYROLL_TIME_ENTRY_STATUSES
                         and status != "Authorised Absence"
                         and (not d.get("in") or not d.get("out"))):
                     items.append({
