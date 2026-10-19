@@ -48,14 +48,14 @@ PAYROLL_MONTHS = [
 ]
 
 PAYROLL_STATUS_OPTIONS = [
-    "Worked", "Late In", "Late Out", "Authorised Absence", "HD Holiday",
+    "Worked", "Late In", "Early Out", "Authorised Absence", "HD Holiday",
     "Overtime Approved", "College", "Holiday", "Sick", "Maternity",
     "Lay-off", "Unpaid Holiday", "Unpaid Absence", "Bank Holiday",
     "AWOL", "N/A", "Leaver",
 ]
 
 PAYROLL_TIME_ENTRY_STATUSES = {
-    "Worked", "Late In", "Late Out", "Authorised Absence",
+    "Worked", "Late In", "Early Out", "Authorised Absence",
     "HD Holiday", "Overtime Approved", "College",
 }
 
@@ -977,7 +977,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         duration_minutes = max(0, duration_minutes - (_t2m(d.get("away", "0:00")) or 0)
                                                + (_t2m(d.get("travel", "0:00")) or 0))
                         time_label = f"{d['in']} → {d['out']}\n{_m2t(duration_minutes)}"
-                        if status not in ("Worked", "Late In", "Late Out"):
+                        if status not in ("Worked", "Late In", "Early Out"):
                             time_label += f"\n{_short_status(status)}"
                         btn_label = time_label
                     elif status != "Worked":
@@ -992,7 +992,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     duration_text = _m2t(_day_total(d) or 0)
                     status_text = str(d.get("status", "Worked") or "Worked")
                     status_line = (f"<div style='font-size:10px;color:#64748b;'>{_short_status(status_text)}</div>"
-                                   if status_text not in ("Worked", "Late In", "Late Out") else "")
+                                   if status_text not in ("Worked", "Late In", "Early Out") else "")
                     cell.markdown(
                         f"<div style='text-align:center;line-height:1.35;min-height:34px;'>"
                         f"<div style='font-size:11px;font-weight:600;white-space:nowrap;'>"
@@ -1075,7 +1075,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     status_text = str(day_entry.get('status', '') or '').strip()
                     if note_text and note_text not in note_items:
                         note_items.append(note_text)
-                    elif status_text and status_text not in ('Worked', 'Late In', 'Late Out') and status_text not in note_items:
+                    elif status_text and status_text not in ('Worked', 'Late In', 'Early Out') and status_text not in note_items:
                         note_items.append(status_text)
             notes_text = " · ".join(note_items) if note_items else "—"
             row[17].markdown(f"<div style='font-size:11px;white-space:normal;overflow-wrap:anywhere;'>{notes_text}</div>", unsafe_allow_html=True)
@@ -1828,7 +1828,7 @@ def _build_week_excel(week_key, dept):
                 status_text = str(d.get("status", "") or "").strip()
                 if note_text and note_text not in note_items:
                     note_items.append(note_text)
-                elif status_text and status_text not in ("Worked", "Late In", "Late Out") and status_text not in note_items:
+                elif status_text and status_text not in ("Worked", "Late In", "Early Out") and status_text not in note_items:
                     note_items.append(status_text)
 
         # Columns 8–18 mirror the UI: Days, Sub Total, Lunch, Travel, Away,
@@ -1930,7 +1930,7 @@ def _build_week_excel(week_key, dept):
 def _short_status(status):
     return {
         "Late In": "Late In",
-        "Late Out": "Late Out",
+        "Early Out": "Early Out",
         "Authorised Absence": "AA",
         "HD Holiday": "HD Hol",
         "Overtime Approved": "OT",
