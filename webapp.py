@@ -65,6 +65,34 @@ PAYROLL_STATUS_MARKERS = {
     "N/A": "🟨", "Unpaid Absence": "🟦", "AWOL": "⬛",
 }
 
+# Background colours for the saved day tile in the weekly timesheet. These match
+# the user's status legend; colours affect display only, not payroll calculations.
+PAYROLL_STATUS_COLOURS = {
+    "Worked": ("#D9EAD3", "#17351B"),
+    "Late In": ("#FFF200", "#222222"),
+    "Early Out": ("#FFF200", "#222222"),
+    "Sick": ("#BFBFBF", "#222222"),
+    "College": ("#00B7E5", "#111111"),
+    "Holiday": ("#F4C7E8", "#222222"),
+    "Unpaid Holiday": ("#7030A0", "#FFFFFF"),
+    "HD Holiday": ("#F4A000", "#222222"),
+    "Bank Holiday": ("#FFE699", "#222222"),
+    "Authorised Absence": ("#A9D18E", "#222222"),
+    "Overtime Approved": ("#70AD47", "#14210D"),
+    "Maternity": ("#9DC3E6", "#222222"),
+    "Lay-off": ("#D9D9D9", "#222222"),
+    "Leaver": ("#FF0000", "#FFFFFF"),
+    "N/A": ("#FFE699", "#222222"),
+    "Unpaid Absence": ("#00FFFF", "#222222"),
+    "AWOL": ("#000000", "#FFFFFF"),
+}
+
+def _payroll_status_tile_style(status):
+    """Inline CSS for a status-coloured timesheet day tile."""
+    bg, fg = PAYROLL_STATUS_COLOURS.get(str(status or ""), ("#F3F4F6", "#222222"))
+    return (f"background-color:{bg};color:{fg};padding:4px 2px;"
+            "border-radius:4px;text-align:center;line-height:1.35;min-height:34px;")
+
 PAYROLL_TIME_ENTRY_STATUSES = {
     "Worked", "Late In", "Early Out", "Authorised Absence",
     "HD Holiday", "Overtime Approved", "College",
@@ -1030,20 +1058,23 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     status_text = str(d.get("status", "Worked") or "Worked")
                     status_line = (f"<div style='font-size:10px;color:#64748b;'>{_short_status(status_text)}</div>"
                                    if status_text not in ("Worked", "Late In", "Early Out") else "")
+                    tile_style = _payroll_status_tile_style(status_text)
                     cell.markdown(
-                        f"<div style='text-align:center;line-height:1.35;min-height:34px;'>"
+                        f"<div style='{tile_style}'>"
                         f"<div style='font-size:11px;font-weight:600;white-space:nowrap;'>"
                         f"{d['in']} → {d['out']}</div>"
-                        f"<div style='font-size:10px;color:#64748b;'>{duration_text}</div>"
+                        f"<div style='font-size:10px;'>{duration_text}</div>"
                         f"{status_line}</div>", unsafe_allow_html=True,
                     )
                     btn_label = "🔴 Edit" if is_flagged else "Edit"
                 elif d is None:
                     btn_label = "➕ Add"
                 elif d.get("status"):
+                    status_text = str(d.get("status", "") or "")
+                    tile_style = _payroll_status_tile_style(status_text)
                     cell.markdown(
-                        f"<div style='text-align:center;font-size:11px;min-height:34px;'>"
-                        f"{_short_status(str(d.get('status', '')))}</div>", unsafe_allow_html=True,
+                        f"<div style='{tile_style};font-size:11px;'>"
+                        f"{_short_status(status_text)}</div>", unsafe_allow_html=True,
                     )
                     btn_label = "🔴 Edit" if is_flagged else "Edit"
 
