@@ -615,15 +615,17 @@ def _calc_row(emp, week_key, dept):
             day_minutes = _day_total(d)
             if day_minutes is not None:
                 sub += day_minutes
-                # Status drives the day fraction: a day marked Worked (or
-                # another paid working status) is a full contracted day even
-                # when the actual shift is short. The difference is reflected
-                # in Wk Extra and Exceptions rather than silently converting
-                # the day to a half-day based on elapsed time.
+                # Payroll policy: classify a working day by clock-out time,
+                # not by the total elapsed shift duration. Leaving before
+                # 12:30 counts as half a contracted day; leaving at or after
+                # 12:30 counts as a full day because lunch may have been taken.
+                # Actual paid hours remain based on the clock times and the
+                # existing lunch deduction is applied separately below.
                 if status in PAYROLL_TIME_ENTRY_STATUSES:
-                    # HD Holiday represents half a contracted day, even when
-                    # the original full-day in/out times remain in the entry.
-                    day_equivalents += 0.5 if status == "HD Holiday" else 1.0
+                    if status == "HD Holiday":
+                        day_equivalents += 0.5
+                    else:
+                        day_equivalents += 0.5 if t_out < (12 * 60 + 30) else 1.0
         travel += (_t2m(d.get("travel")) or 0)
         away += (_t2m(d.get("away")) or 0)
 
