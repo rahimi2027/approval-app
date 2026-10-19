@@ -88,10 +88,19 @@ PAYROLL_STATUS_COLOURS = {
 }
 
 def _payroll_status_tile_style(status):
-    """Inline CSS for a status-coloured timesheet day tile."""
-    bg, fg = PAYROLL_STATUS_COLOURS.get(str(status or ""), ("#F3F4F6", "#222222"))
-    return (f"background-color:{bg};color:{fg};padding:4px 2px;"
-            "border-radius:4px;text-align:center;line-height:1.35;min-height:34px;")
+    """Inline CSS for a status-coloured timesheet day tile.
+
+    Worked days keep the normal, uncoloured timesheet appearance. Other
+    statuses use the matching colour from the status legend.
+    """
+    status = str(status or "").strip()
+    base = "padding:4px 2px;border-radius:4px;text-align:center;line-height:1.35;min-height:34px;"
+    if status == "Worked":
+        return base
+    bg, fg = PAYROLL_STATUS_COLOURS.get(status, ("", "#222222"))
+    if not bg:
+        return base
+    return f"background-color:{bg};color:{fg};{base}"
 
 PAYROLL_TIME_ENTRY_STATUSES = {
     "Worked", "Late In", "Early Out", "Authorised Absence",
