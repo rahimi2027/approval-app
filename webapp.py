@@ -2772,24 +2772,9 @@ def sync_backup_file_to_drive(local_path):
 
 
 def _sync_saved_file_to_drive_now_once(local_path):
-    """Perform one upload/verification attempt for a persistent workbook.
-
-    Fail closed when the local workbook is empty but its Drive backup contains
-    rows. The bulk-sync guard normally restores it first, but this protects all
-    other callers of this function as well.
-    """
+    """Perform one upload/verification attempt for a persistent workbook."""
     local_path = os.path.abspath(local_path)
     filename = os.path.basename(local_path)
-    if drive_service is not None and os.path.exists(local_path) and not _workbook_has_rows(local_path):
-        backup_name_guard = _drive_backup_name_for_path(local_path)
-        remote_guard = _drive_find_file(backup_name_guard) if backup_name_guard else None
-        if remote_guard and _drive_remote_workbook_has_rows(remote_guard.get("id")):
-            DRIVE_LAST_SYNC_ERROR[filename] = (
-                f"Upload blocked: local workbook is empty while Drive backup "
-                f"{backup_name_guard} contains data. Restore the backup before syncing."
-            )
-            _save_drive_sync_state()
-            return False
     if drive_service is None or not os.path.exists(local_path):
         msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
         DRIVE_LAST_SYNC_ERROR[filename] = msg
@@ -2988,50 +2973,12 @@ def _start_drive_background_worker():
 
 
 def _force_sync_all_drive_files():
-    """Explicit backup action, with a last-resort guard against empty overwrites.
-
-    If a local workbook has only headers (or no usable rows) while its named
-    Google Drive backup has data, restore the remote backup locally first.
-    Never upload an empty local workbook over a non-empty Drive backup.
-    """
+    """Explicit Super Admin/Director action: upload every existing workbook immediately."""
     results = []
-    for local_path, backup_name in DRIVE_BACKUP_FILENAMES.items():
+    for local_path in DRIVE_BACKUP_FILENAMES:
         local_path = os.path.abspath(os.path.normpath(local_path))
         if not os.path.exists(local_path):
             continue
-
-        # Last line of defence: protect Drive from header-only local workbooks.
-        if not _workbook_has_rows(local_path) and drive_service is not None:
-            remote_backup = _drive_find_file(backup_name)
-            restored = False
-            if remote_backup and _drive_remote_workbook_has_rows(remote_backup.get("id")):
-                temp_path = local_path + ".restore_guard.tmp.xlsx"
-                try:
-                    if _drive_download_file(remote_backup["id"], temp_path):
-                        if _workbook_has_rows(temp_path):
-                            os.replace(temp_path, local_path)
-                            restored = True
-                            print(
-                                f"Recovered empty local {os.path.basename(local_path)} "
-                                f"from {backup_name}; proceeding with protected sync."
-                            )
-                except Exception as e:
-                    print(f"Empty-workbook restore guard failed for {backup_name}: {e}")
-                finally:
-                    try:
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
-                    except OSError:
-                        pass
-            if not restored:
-                # Do not attempt an upload if local data is empty and recovery failed.
-                results.append((os.path.basename(local_path), False))
-                DRIVE_LAST_SYNC_ERROR[os.path.basename(local_path)] = (
-                    f"Upload blocked: local workbook is empty and a non-empty "
-                    f"Drive backup could not be restored ({backup_name})."
-                )
-                continue
-
         ok = _sync_saved_file_to_drive_now(local_path)
         results.append((os.path.basename(local_path), ok))
     return results
@@ -3103,53 +3050,82 @@ def render_google_drive_status():
         )
 
 @st.cache_resource(show_spinner=False)
-def _initialise_drive_storage_once():
+def _initialise_drive_storage_once(workday_key=None):
+    """Restore the latest valid Excel workbooks from Drive once per workday.
+
+    The date argument intentionally keys Streamlit's process-wide resource cache:
+    ordinary reruns and additional user logins on the same day do not repeat the
+    Drive downloads. Local edits are kept during the day; the next day's first
+    initialisation refreshes the local working copies from the latest valid Drive
+    live/backup workbook. Never replace a local workbook with an empty/corrupt file.
+    """
     if drive_service is None:
+        print("Google Drive unavailable; keeping existing local working files.")
         return False
     os.makedirs(APP_FOLDER, exist_ok=True)
-    critical = [
-        (EXCEL_PATH, EXCEL_COLUMNS),
-        (USER_DB_PATH, USER_DB_COLUMNS),
-        (SETTINGS_PATH, ["setting", "value"]),
-        (HR_EMPLOYEES_PATH, HR_EMPLOYEE_COLUMNS),
-        (HR_PORTAL_LEAVE_PATH, HR_PORTAL_LEAVE_COLUMNS),
-    ]
-    # Restore all registered workbooks BEFORE modules initialise empty local files.
-    # Existing non-empty local files remain authoritative; missing/empty local files
-    # are recovered from the live Drive file or its named BACKUP_ copy.
-    critical_by_path = {os.path.abspath(path): columns for path, columns in critical}
-    for path in list(DRIVE_BACKUP_FILENAMES):
+    restored = 0
+    failed = []
+    for registered_path, backup_name in list(DRIVE_BACKUP_FILENAMES.items()):
+        path = os.path.abspath(os.path.normpath(registered_path))
+        live_name = os.path.basename(path)
         try:
-            path = os.path.abspath(os.path.normpath(path))
-            # An .xlsx file can exist and have a non-zero size while containing
-            # ONLY headers. Treat that as empty data and attempt recovery from
-            # the live Drive file / named BACKUP_ workbook before the app starts.
-            # This was the main startup gap: the old check only tested file size.
-            local_has_rows = _workbook_has_rows(path)
-            if not local_has_rows:
-                recovered = False
+            # Find both copies, then try the most recently modified valid, populated
+            # workbook first. This avoids restoring an empty live file over a good backup.
+            candidates = []
+            for remote_name in (live_name, backup_name):
+                if not remote_name:
+                    continue
+                remote = _drive_find_file(remote_name)
+                if remote and remote.get("id"):
+                    candidates.append(remote)
+            candidates.sort(key=lambda item: str(item.get("modifiedTime", "")), reverse=True)
+            chosen = None
+            for remote in candidates:
+                if _drive_remote_workbook_has_rows(remote["id"]):
+                    chosen = remote
+                    break
+            if chosen is None:
+                # Do not manufacture an empty workbook over an existing file and do
+                # not overwrite any local data when Drive has no usable data copy.
+                if not os.path.exists(path):
+                    sync_persistent_file(path)
+                if candidates:
+                    failed.append(f"{live_name}: no valid non-empty Drive workbook")
+                continue
+
+            temp_path = path + ".drive_refresh.tmp.xlsx"
+            try:
+                if not _drive_download_file(chosen["id"], temp_path):
+                    raise RuntimeError("download failed")
+                # Validate the Excel container and ensure it has real records before
+                # atomically replacing the working copy.
+                check_df = pd.read_excel(temp_path, engine="openpyxl")
+                if check_df.empty:
+                    raise ValueError("downloaded workbook contains no data rows")
+                os.makedirs(os.path.dirname(path) or APP_FOLDER, exist_ok=True)
+                shutil.copy2(path, path + ".before_drive_refresh.bak") if os.path.exists(path) else None
+                os.replace(temp_path, path)
+                restored += 1
+                _invalidate_data_cache("_settings_cache")
+            finally:
                 try:
-                    sync_persistent_file(path, critical_by_path.get(path))
-                    recovered = _workbook_has_rows(path)
-                except Exception as recovery_error:
-                    print(
-                        f"Drive recovery attempt failed for "
-                        f"{os.path.basename(path)}: {recovery_error}"
-                    )
-                if not recovered:
-                    print(
-                        f"WARNING: {os.path.basename(path)} is still empty after "
-                        "Drive recovery. Manual Drive backup is guarded against "
-                        "overwriting a non-empty remote backup."
-                    )
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                except Exception:
+                    pass
         except Exception as e:
-            print(f"Drive initialisation/recovery failed for {os.path.basename(path)}: {e}")
-    print("Drive workbook recovery completed; automatic uploads are disabled.")
+            failed.append(f"{live_name}: {type(e).__name__}: {e}")
+            print(f"Drive workday refresh failed for {live_name}: {e}")
     _restore_drive_sync_state()
-    return True
+    print(f"Drive workday refresh complete: {restored} workbook(s) restored; {len(failed)} issue(s).")
+    if failed:
+        print("Drive workday refresh issues: " + " | ".join(failed))
+    return not failed
 
 def initialise_drive_storage():
-    return _initialise_drive_storage_once()
+    # Called after payroll registers its actual workbook paths. The date key means
+    # one refresh per process/workday, not a Drive check on every login/rerun.
+    return _initialise_drive_storage_once(datetime.now().strftime("%Y-%m-%d"))
 
 def get_onedrive_token():
     if not ONEDRIVE_CLIENT_ID or not ONEDRIVE_CLIENT_SECRET: return None
@@ -3781,11 +3757,8 @@ def save_hr_categories(cats):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
-try:
-    initialise_drive_storage()
-except Exception as e:
-    print(f"Drive storage initialisation skipped: {e}")
-
+# Drive restoration is deliberately called AFTER payroll.init_payroll registers
+# the real workbook paths, so payroll workbooks are included in the daily restore.
 try:
     payroll.init_payroll(
         app_folder=APP_FOLDER,
@@ -3816,10 +3789,15 @@ try:
     for _payroll_path in _payroll_backup_map:
         if os.path.exists(_payroll_path):
             _mark_drive_file_dirty(_payroll_path, make_recovery_snapshot=False)
-    print("Payroll workbooks registered for automatic Google Drive backup:",
+    print("Payroll workbooks registered for Google Drive backup:",
           ", ".join(os.path.basename(p) for p in _payroll_backup_map))
 except Exception as e:
     print(f"Payroll Drive backup registration failed: {e}")
+
+try:
+    initialise_drive_storage()
+except Exception as e:
+    print(f"Drive storage initialisation skipped: {e}")
 
 def init_user_db():
     safe_init_excel(USER_DB_PATH, USER_DB_COLUMNS)
@@ -13898,95 +13876,6 @@ def user_management_panel():
                 log_action("USER_DELETED", old_data={"username": del_user_sel, "full_name": del_name})
                 st.success(f"✅ User **{del_name}** deleted!"); st.rerun()
 
-def _refresh_registered_data_from_google_drive():
-    """Refresh local registered workbooks from Google Drive before a user logs in.
-
-    Google Drive is treated as the source of truth for login-time reads. A remote
-    workbook is downloaded to a temporary file and validated before replacing the
-    local copy. If the live file is missing/empty, its BACKUP_ copy is tried.
-    """
-    if drive_service is None:
-        print("Login refresh skipped: Google Drive is not connected. " + str(DRIVE_CONNECTION_ERROR or ""))
-        return {"ok": False, "refreshed": [], "errors": ["Google Drive is not connected."]}
-
-    refreshed, errors = [], []
-    os.makedirs(APP_FOLDER, exist_ok=True)
-    # Clear cached Drive lookups so this login does not reuse an old file ID/result.
-    _DRIVE_FIND_CACHE.clear()
-    _DRIVE_ID_CACHE.clear()
-
-    for registered_path, backup_name in list(DRIVE_BACKUP_FILENAMES.items()):
-        local_path = os.path.abspath(os.path.normpath(registered_path))
-        live_name = os.path.basename(local_path)
-        candidates = []
-        try:
-            live = _drive_find_file(live_name)
-            if live:
-                candidates.append(live)
-            if backup_name:
-                backup = _drive_find_file(backup_name)
-                if backup and all(x.get("id") != backup.get("id") for x in candidates):
-                    candidates.append(backup)
-
-            chosen = None
-            for remote in candidates:
-                # Do not replace a valid local workbook with an empty remote workbook.
-                if _drive_remote_workbook_has_rows(remote.get("id")):
-                    chosen = remote
-                    break
-            if not chosen:
-                # For intentionally empty configuration files, still allow a valid
-                # live workbook with headers; for business data, retain local data.
-                if live:
-                    temp = local_path + ".login_refresh_check.xlsx"
-                    try:
-                        if _drive_download_file(live["id"], temp):
-                            pd.read_excel(temp, engine="openpyxl")
-                            chosen = live
-                    finally:
-                        try:
-                            if os.path.exists(temp): os.remove(temp)
-                        except Exception: pass
-            if not chosen:
-                if not candidates:
-                    errors.append(f"{live_name}: no matching live or backup file found in the configured Drive folder")
-                else:
-                    errors.append(f"{live_name}: matching Drive files were empty or could not be validated")
-                continue
-
-            os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
-            temp_path = local_path + ".login_refresh.tmp.xlsx"
-            try:
-                if not _drive_download_file(chosen["id"], temp_path):
-                    raise RuntimeError("Google Drive download failed")
-                # Validate Excel structure before replacing the local file.
-                pd.read_excel(temp_path, engine="openpyxl")
-                if os.path.exists(local_path):
-                    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    os.makedirs(LOCAL_RECOVERY_DIR, exist_ok=True)
-                    shutil.copy2(local_path, os.path.join(LOCAL_RECOVERY_DIR, f"{live_name}.pre_login_refresh.{stamp}.bak"))
-                os.replace(temp_path, local_path)
-                refreshed.append(live_name + (f" (source: {chosen.get('name', live_name)})" if chosen.get("name") != live_name else ""))
-            finally:
-                try:
-                    if os.path.exists(temp_path): os.remove(temp_path)
-                except Exception: pass
-        except Exception as exc:
-            message = f"{live_name}: {type(exc).__name__}: {exc}"
-            errors.append(message)
-            print("Google Drive login refresh failed: " + message)
-
-    # Clear session-scoped data caches so page loaders read the newly downloaded files.
-    try:
-        for key in list(st.session_state.keys()):
-            if "cache" in str(key).lower() or str(key).startswith("payroll_"):
-                st.session_state.pop(key, None)
-    except Exception:
-        pass
-    print(f"Google Drive login refresh complete: {len(refreshed)} workbook(s) refreshed; {len(errors)} issue(s).")
-    return {"ok": not errors, "refreshed": refreshed, "errors": errors}
-
-
 # ============================================================
 # 🔐 LOGIN
 # ============================================================
@@ -13998,10 +13887,6 @@ if not st.session_state.logged_in:
         username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
         password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
         if st.form_submit_button("🔐 Authenticate Portal", type="primary", width="stretch"):
-            # Pull the latest user database and registered application workbooks from
-            # Drive before validating credentials or showing any portal data.
-            with st.spinner("Refreshing the latest data from Google Drive..."):
-                _login_drive_refresh_result = _refresh_registered_data_from_google_drive()
             USERS = load_users(force=True)
             if username in USERS and USERS[username]["password"] == password:
                 if not USERS[username].get("is_active", True):
@@ -14011,8 +13896,6 @@ if not st.session_state.logged_in:
                     st.session_state.user_info = {**USERS[username], "username": username}
                     st.rerun()
             else: st.error("❌ Invalid Username or Password. Please try again.")
-            if _login_drive_refresh_result.get("errors"):
-                st.warning("Some Google Drive files could not be refreshed. Check the Google Drive status/error log. First issue: " + _login_drive_refresh_result["errors"][0])
     st.stop()
 
 # Always refresh the authenticated user's role/permissions from USER_DB_PATH before
