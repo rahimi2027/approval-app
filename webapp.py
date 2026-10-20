@@ -2150,16 +2150,16 @@ st.markdown("""
         width: 0 !important;
         overflow: hidden !important;
     }
-    /* Hide auto-linked recovery snapshot paths if Streamlit renders them as links.
-       This affects presentation only; the backup files remain untouched. */
-    a[href*="before_drive_refresh.bak"],
-    a[href*="before_drive_refresh%2Ebak"],
-    p:has(a[href*="before_drive_refresh.bak"]),
-    li:has(a[href*="before_drive_refresh.bak"]),
-    div:has(> p > a[href*="before_drive_refresh.bak"]) {
-        display: none !important;
-        visibility: hidden !important;
-    }
+#    /* Hide auto-linked recovery snapshot paths if Streamlit renders them as links.
+#       This affects presentation only; the backup files remain untouched. */
+#    a[href*="before_drive_refresh.bak"],
+#    a[href*="before_drive_refresh%2Ebak"],
+#    p:has(a[href*="before_drive_refresh.bak"]),
+#    li:has(a[href*="before_drive_refresh.bak"]),
+#    div:has(> p > a[href*="before_drive_refresh.bak"]) {
+#        display: none !important;
+#        visibility: hidden !important;
+#    }
     .block-container {
         padding-top: 2rem !important;
         padding-left: 0.3rem !important;
