@@ -13898,6 +13898,95 @@ def user_management_panel():
                 log_action("USER_DELETED", old_data={"username": del_user_sel, "full_name": del_name})
                 st.success(f"✅ User **{del_name}** deleted!"); st.rerun()
 
+def _refresh_registered_data_from_google_drive():
+    """Refresh local registered workbooks from Google Drive before a user logs in.
+
+    Google Drive is treated as the source of truth for login-time reads. A remote
+    workbook is downloaded to a temporary file and validated before replacing the
+    local copy. If the live file is missing/empty, its BACKUP_ copy is tried.
+    """
+    if drive_service is None:
+        print("Login refresh skipped: Google Drive is not connected. " + str(DRIVE_CONNECTION_ERROR or ""))
+        return {"ok": False, "refreshed": [], "errors": ["Google Drive is not connected."]}
+
+    refreshed, errors = [], []
+    os.makedirs(APP_FOLDER, exist_ok=True)
+    # Clear cached Drive lookups so this login does not reuse an old file ID/result.
+    _DRIVE_FIND_CACHE.clear()
+    _DRIVE_ID_CACHE.clear()
+
+    for registered_path, backup_name in list(DRIVE_BACKUP_FILENAMES.items()):
+        local_path = os.path.abspath(os.path.normpath(registered_path))
+        live_name = os.path.basename(local_path)
+        candidates = []
+        try:
+            live = _drive_find_file(live_name)
+            if live:
+                candidates.append(live)
+            if backup_name:
+                backup = _drive_find_file(backup_name)
+                if backup and all(x.get("id") != backup.get("id") for x in candidates):
+                    candidates.append(backup)
+
+            chosen = None
+            for remote in candidates:
+                # Do not replace a valid local workbook with an empty remote workbook.
+                if _drive_remote_workbook_has_rows(remote.get("id")):
+                    chosen = remote
+                    break
+            if not chosen:
+                # For intentionally empty configuration files, still allow a valid
+                # live workbook with headers; for business data, retain local data.
+                if live:
+                    temp = local_path + ".login_refresh_check.xlsx"
+                    try:
+                        if _drive_download_file(live["id"], temp):
+                            pd.read_excel(temp, engine="openpyxl")
+                            chosen = live
+                    finally:
+                        try:
+                            if os.path.exists(temp): os.remove(temp)
+                        except Exception: pass
+            if not chosen:
+                if not candidates:
+                    errors.append(f"{live_name}: no matching live or backup file found in the configured Drive folder")
+                else:
+                    errors.append(f"{live_name}: matching Drive files were empty or could not be validated")
+                continue
+
+            os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+            temp_path = local_path + ".login_refresh.tmp.xlsx"
+            try:
+                if not _drive_download_file(chosen["id"], temp_path):
+                    raise RuntimeError("Google Drive download failed")
+                # Validate Excel structure before replacing the local file.
+                pd.read_excel(temp_path, engine="openpyxl")
+                if os.path.exists(local_path):
+                    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    os.makedirs(LOCAL_RECOVERY_DIR, exist_ok=True)
+                    shutil.copy2(local_path, os.path.join(LOCAL_RECOVERY_DIR, f"{live_name}.pre_login_refresh.{stamp}.bak"))
+                os.replace(temp_path, local_path)
+                refreshed.append(live_name + (f" (source: {chosen.get('name', live_name)})" if chosen.get("name") != live_name else ""))
+            finally:
+                try:
+                    if os.path.exists(temp_path): os.remove(temp_path)
+                except Exception: pass
+        except Exception as exc:
+            message = f"{live_name}: {type(exc).__name__}: {exc}"
+            errors.append(message)
+            print("Google Drive login refresh failed: " + message)
+
+    # Clear session-scoped data caches so page loaders read the newly downloaded files.
+    try:
+        for key in list(st.session_state.keys()):
+            if "cache" in str(key).lower() or str(key).startswith("payroll_"):
+                st.session_state.pop(key, None)
+    except Exception:
+        pass
+    print(f"Google Drive login refresh complete: {len(refreshed)} workbook(s) refreshed; {len(errors)} issue(s).")
+    return {"ok": not errors, "refreshed": refreshed, "errors": errors}
+
+
 # ============================================================
 # 🔐 LOGIN
 # ============================================================
@@ -13909,6 +13998,10 @@ if not st.session_state.logged_in:
         username = st.text_input("🔐 Username", placeholder="e.g. andy, payroll, wais").lower().strip()
         password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
         if st.form_submit_button("🔐 Authenticate Portal", type="primary", width="stretch"):
+            # Pull the latest user database and registered application workbooks from
+            # Drive before validating credentials or showing any portal data.
+            with st.spinner("Refreshing the latest data from Google Drive..."):
+                _login_drive_refresh_result = _refresh_registered_data_from_google_drive()
             USERS = load_users(force=True)
             if username in USERS and USERS[username]["password"] == password:
                 if not USERS[username].get("is_active", True):
@@ -13918,6 +14011,8 @@ if not st.session_state.logged_in:
                     st.session_state.user_info = {**USERS[username], "username": username}
                     st.rerun()
             else: st.error("❌ Invalid Username or Password. Please try again.")
+            if _login_drive_refresh_result.get("errors"):
+                st.warning("Some Google Drive files could not be refreshed. Check the Google Drive status/error log. First issue: " + _login_drive_refresh_result["errors"][0])
     st.stop()
 
 # Always refresh the authenticated user's role/permissions from USER_DB_PATH before
