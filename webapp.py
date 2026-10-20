@@ -2772,9 +2772,24 @@ def sync_backup_file_to_drive(local_path):
 
 
 def _sync_saved_file_to_drive_now_once(local_path):
-    """Perform one upload/verification attempt for a persistent workbook."""
+    """Perform one upload/verification attempt for a persistent workbook.
+
+    Fail closed when the local workbook is empty but its Drive backup contains
+    rows. The bulk-sync guard normally restores it first, but this protects all
+    other callers of this function as well.
+    """
     local_path = os.path.abspath(local_path)
     filename = os.path.basename(local_path)
+    if drive_service is not None and os.path.exists(local_path) and not _workbook_has_rows(local_path):
+        backup_name_guard = _drive_backup_name_for_path(local_path)
+        remote_guard = _drive_find_file(backup_name_guard) if backup_name_guard else None
+        if remote_guard and _drive_remote_workbook_has_rows(remote_guard.get("id")):
+            DRIVE_LAST_SYNC_ERROR[filename] = (
+                f"Upload blocked: local workbook is empty while Drive backup "
+                f"{backup_name_guard} contains data. Restore the backup before syncing."
+            )
+            _save_drive_sync_state()
+            return False
     if drive_service is None or not os.path.exists(local_path):
         msg = "Google Drive service is not connected." if drive_service is None else "Local file does not exist."
         DRIVE_LAST_SYNC_ERROR[filename] = msg
@@ -2973,12 +2988,50 @@ def _start_drive_background_worker():
 
 
 def _force_sync_all_drive_files():
-    """Explicit Super Admin/Director action: upload every existing workbook immediately."""
+    """Explicit backup action, with a last-resort guard against empty overwrites.
+
+    If a local workbook has only headers (or no usable rows) while its named
+    Google Drive backup has data, restore the remote backup locally first.
+    Never upload an empty local workbook over a non-empty Drive backup.
+    """
     results = []
-    for local_path in DRIVE_BACKUP_FILENAMES:
+    for local_path, backup_name in DRIVE_BACKUP_FILENAMES.items():
         local_path = os.path.abspath(os.path.normpath(local_path))
         if not os.path.exists(local_path):
             continue
+
+        # Last line of defence: protect Drive from header-only local workbooks.
+        if not _workbook_has_rows(local_path) and drive_service is not None:
+            remote_backup = _drive_find_file(backup_name)
+            restored = False
+            if remote_backup and _drive_remote_workbook_has_rows(remote_backup.get("id")):
+                temp_path = local_path + ".restore_guard.tmp.xlsx"
+                try:
+                    if _drive_download_file(remote_backup["id"], temp_path):
+                        if _workbook_has_rows(temp_path):
+                            os.replace(temp_path, local_path)
+                            restored = True
+                            print(
+                                f"Recovered empty local {os.path.basename(local_path)} "
+                                f"from {backup_name}; proceeding with protected sync."
+                            )
+                except Exception as e:
+                    print(f"Empty-workbook restore guard failed for {backup_name}: {e}")
+                finally:
+                    try:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    except OSError:
+                        pass
+            if not restored:
+                # Do not attempt an upload if local data is empty and recovery failed.
+                results.append((os.path.basename(local_path), False))
+                DRIVE_LAST_SYNC_ERROR[os.path.basename(local_path)] = (
+                    f"Upload blocked: local workbook is empty and a non-empty "
+                    f"Drive backup could not be restored ({backup_name})."
+                )
+                continue
+
         ok = _sync_saved_file_to_drive_now(local_path)
         results.append((os.path.basename(local_path), ok))
     return results
@@ -3068,9 +3121,27 @@ def _initialise_drive_storage_once():
     for path in list(DRIVE_BACKUP_FILENAMES):
         try:
             path = os.path.abspath(os.path.normpath(path))
-            missing_or_empty = not os.path.exists(path) or os.path.getsize(path) == 0
-            if missing_or_empty:
-                sync_persistent_file(path, critical_by_path.get(path))
+            # An .xlsx file can exist and have a non-zero size while containing
+            # ONLY headers. Treat that as empty data and attempt recovery from
+            # the live Drive file / named BACKUP_ workbook before the app starts.
+            # This was the main startup gap: the old check only tested file size.
+            local_has_rows = _workbook_has_rows(path)
+            if not local_has_rows:
+                recovered = False
+                try:
+                    sync_persistent_file(path, critical_by_path.get(path))
+                    recovered = _workbook_has_rows(path)
+                except Exception as recovery_error:
+                    print(
+                        f"Drive recovery attempt failed for "
+                        f"{os.path.basename(path)}: {recovery_error}"
+                    )
+                if not recovered:
+                    print(
+                        f"WARNING: {os.path.basename(path)} is still empty after "
+                        "Drive recovery. Manual Drive backup is guarded against "
+                        "overwriting a non-empty remote backup."
+                    )
         except Exception as e:
             print(f"Drive initialisation/recovery failed for {os.path.basename(path)}: {e}")
     print("Drive workbook recovery completed; automatic uploads are disabled.")
