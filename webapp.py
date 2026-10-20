@@ -114,6 +114,8 @@ PAYROLL_TIMESHEETS_COLUMNS = [
 PAYROLL_WEEK_STATES_COLUMNS = [
     "Week_Key", "Department", "Status",
     "Submitted_At", "Submitted_By", "Approved_At", "Approved_By",
+    "Edit_Request_Status", "Edit_Request_By", "Edit_Request_At",
+    "Edit_Request_Reason", "Edit_Unlocked_By", "Edit_Unlocked_At",
 ]
 PAYROLL_FLAGS_COLUMNS = [
     "Week_Key", "Department", "Employee_ID", "Day_Index",
@@ -497,6 +499,12 @@ def _states_load():
             "submitted_by": str(r.get("Submitted_By", "")).strip(),
             "approved_at":  str(r.get("Approved_At", "")).strip(),
             "approved_by":  str(r.get("Approved_By", "")).strip(),
+            "edit_request_status": (str(r.get("Edit_Request_Status", "")).strip() if pd.notna(r.get("Edit_Request_Status", "")) else ""),
+            "edit_request_by": (str(r.get("Edit_Request_By", "")).strip() if pd.notna(r.get("Edit_Request_By", "")) else ""),
+            "edit_request_at": (str(r.get("Edit_Request_At", "")).strip() if pd.notna(r.get("Edit_Request_At", "")) else ""),
+            "edit_request_reason": (str(r.get("Edit_Request_Reason", "")).strip() if pd.notna(r.get("Edit_Request_Reason", "")) else ""),
+            "edit_unlocked_by": (str(r.get("Edit_Unlocked_By", "")).strip() if pd.notna(r.get("Edit_Unlocked_By", "")) else ""),
+            "edit_unlocked_at": (str(r.get("Edit_Unlocked_At", "")).strip() if pd.notna(r.get("Edit_Unlocked_At", "")) else ""),
         }
     st.session_state["payroll_states"] = data
 
@@ -513,6 +521,12 @@ def _states_save():
                 "Submitted_By": s.get("submitted_by", ""),
                 "Approved_At":  s.get("approved_at", ""),
                 "Approved_By":  s.get("approved_by", ""),
+                "Edit_Request_Status": s.get("edit_request_status", ""),
+                "Edit_Request_By": s.get("edit_request_by", ""),
+                "Edit_Request_At": s.get("edit_request_at", ""),
+                "Edit_Request_Reason": s.get("edit_request_reason", ""),
+                "Edit_Unlocked_By": s.get("edit_unlocked_by", ""),
+                "Edit_Unlocked_At": s.get("edit_unlocked_at", ""),
             })
     pd.DataFrame(rows, columns=PAYROLL_WEEK_STATES_COLUMNS).to_excel(
         _p_week_states(), index=False, engine="openpyxl")
@@ -523,6 +537,8 @@ def _get_state(week_key, dept):
     return _states().setdefault(week_key, {}).setdefault(dept, {
         "status": "Draft", "submitted_at": "", "submitted_by": "",
         "approved_at": "", "approved_by": "",
+        "edit_request_status": "", "edit_request_by": "", "edit_request_at": "",
+        "edit_request_reason": "", "edit_unlocked_by": "", "edit_unlocked_at": "",
     })
 
 
@@ -860,6 +876,44 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
     week_obj = PAYROLL_WEEKS[week_key]
     state = _get_state(week_key, dept)
 
+    # ---------------- Super Admin timesheet edit-request queue ----------------
+    if mode == "super_admin":
+        edit_requests = []
+        for q_week, by_dept in _states().items():
+            for q_dept, q_state in by_dept.items():
+                if str(q_state.get("edit_request_status", "")).strip().casefold() == "pending":
+                    edit_requests.append((q_week, q_dept, q_state))
+        with st.expander(f"🛡️ Super Admin — Timesheet edit requests ({len(edit_requests)} pending)", expanded=bool(edit_requests)):
+            if not edit_requests:
+                st.success("No timesheet edit requests are waiting for review.")
+            else:
+                for q_week, q_dept, q_state in sorted(edit_requests, key=lambda x: (x[0], x[1])):
+                    q_week_obj = PAYROLL_WEEKS.get(q_week, {})
+                    q_range = q_week_obj.get("range", q_week)
+                    st.markdown(f"**{_department_label(q_dept)} — {q_week_obj.get('label', q_week)}** ({q_range})")
+                    st.write(f"Requested by: {q_state.get('edit_request_by', 'User')} · {q_state.get('edit_request_at', '')}")
+                    st.write(f"Reason: {q_state.get('edit_request_reason', '') or 'No reason provided'}")
+                    grant_col, keep_col = st.columns(2)
+                    with grant_col:
+                        if st.button("🔓 Grant edit access", key=f"payroll_grant_edit_{q_week}_{q_dept}", type="primary", use_container_width=True):
+                            target = _get_state(q_week, q_dept)
+                            target["status"] = "Returned"
+                            target["edit_request_status"] = "Granted"
+                            target["edit_unlocked_by"] = full_name
+                            target["edit_unlocked_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            _states_save()
+                            st.success("Edit access granted. The manager can now amend and resubmit this timesheet.")
+                            st.rerun()
+                    with keep_col:
+                        if st.button("❌ Decline request", key=f"payroll_decline_edit_{q_week}_{q_dept}", use_container_width=True):
+                            target = _get_state(q_week, q_dept)
+                            target["edit_request_status"] = "Declined"
+                            target["edit_unlocked_by"] = full_name
+                            target["edit_unlocked_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            _states_save()
+                            st.rerun()
+                    st.divider()
+
     # ---------------- Director submission queue ----------------
     # Show submitted weeks across departments so a submission is not hidden
     # simply because the Director currently has another department/week selected.
@@ -949,7 +1003,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         div[data-testid="stTabs"] button { font-size: .86rem; }
         </style>
         """, unsafe_allow_html=True)
-        has_all_department_edit_access = bool(current_user_info.get("can_access_all_departments_timesheet", False))
+        has_all_department_edit_access = (
+            bool(current_user_info.get("can_access_all_departments_timesheet", False))
+            or mode == "super_admin"
+        )
         # Director is a reviewer: never grant time-entry editing from the broad
         # all-departments permission. Keep this role read-only for timesheet data.
         st.session_state["payroll_all_department_edit_access"] = (
@@ -1598,7 +1655,42 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             when = state.get("approved_at", "") or "Date not recorded"
             approver = state.get("approved_by", "") or "Director"
             st.success(f"✅ **{week_obj['label']} approved by {approver}** — {when}")
-            st.caption("This week has been approved. Download the final Excel timesheet below.")
+            st.caption("This week has been approved. The same final Excel download is available to the manager and Director in this Approvals tab.")
+
+            request_status = str(state.get("edit_request_status", "") or "").strip()
+            if mode in ("manager", "director"):
+                if request_status.casefold() == "pending":
+                    st.warning(
+                        f"🔒 Edit request pending Super Admin review — requested by "
+                        f"{state.get('edit_request_by', 'User')} on {state.get('edit_request_at', '')}."
+                    )
+                    if state.get("edit_request_reason"):
+                        st.caption(f"Reason: {state.get('edit_request_reason')}")
+                else:
+                    with st.expander("🔐 Request an amendment to this approved timesheet", expanded=False):
+                        edit_reason = st.text_area(
+                            "Why does this approved timesheet need to be amended?",
+                            key=f"payroll_edit_reason_{week_key}_{dept}",
+                            placeholder="Explain the correction needed.",
+                        )
+                        if st.button(
+                            "📨 Send edit request to Super Admin",
+                            key=f"payroll_request_edit_{week_key}_{dept}_{mode}",
+                            type="primary",
+                            disabled=not edit_reason.strip(),
+                        ):
+                            state["edit_request_status"] = "Pending"
+                            state["edit_request_by"] = full_name
+                            state["edit_request_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            state["edit_request_reason"] = edit_reason.strip()
+                            _states_save()
+                            st.success("Edit request sent to Super Admin.")
+                            st.rerun()
+            elif mode == "super_admin" and request_status:
+                st.caption(
+                    f"Edit request status: {request_status}"
+                    + (f" · last action by {state.get('edit_unlocked_by')}" if state.get("edit_unlocked_by") else "")
+                )
 
             approved_count = sum(
                 1 for employee in employees
@@ -2045,6 +2137,9 @@ payroll = _payroll_types.SimpleNamespace(
 
 st.markdown("""
     <style>
+    /* Compact the app header by hiding Streamlit's standard skip link only.
+       This does not remove or alter application content or accessibility APIs. */
+    a[href="#stMain"] { display: none !important; }
     .block-container {
         padding-top: 2rem !important;
         padding-left: 0.3rem !important;
@@ -16064,7 +16159,7 @@ elif role == "Director":
         payroll.render_payroll_timesheet(user_info, mode="director")
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab = st.tabs([
+    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab, super_payroll_tab = st.tabs([
         "➕ Addition & Deduction",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
@@ -16073,7 +16168,8 @@ elif role == "Super Admin":
         "💰 National Grid Inspector Bonus",
         "🛡️ Data Control",
         "🔧 System Management",
-        "📚 Training & Help"
+        "📚 Training & Help",
+        "📋 Payroll Timesheet"
     ])
     with super_add_ded_tab:
         st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
@@ -16375,6 +16471,9 @@ elif role == "Super Admin":
             render_training_help(user_info)
         else:
             st.info("Training & Help Centre is not enabled for this account. Please enable the module if required.")
+
+    with super_payroll_tab:
+        payroll.render_payroll_timesheet(user_info, mode="super_admin")
 
 else:
     st.subheader("🔐 Access Restricted")
