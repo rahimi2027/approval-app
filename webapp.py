@@ -1655,10 +1655,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             when = state.get("approved_at", "") or "Date not recorded"
             approver = state.get("approved_by", "") or "Director"
             st.success(f"✅ **{week_obj['label']} approved by {approver}** — {when}")
-            st.caption("This week has been approved. The same final Excel download is available to the manager and Director in this Approvals tab.")
+            st.caption("This final Excel download is available to the Manager/payroll user and Director in this Approvals tab.")
 
             request_status = str(state.get("edit_request_status", "") or "").strip()
-            if mode in ("manager", "director"):
+            if mode in ("manager", "director", "payroll"):
                 if request_status.casefold() == "pending":
                     st.warning(
                         f"🔒 Edit request pending Super Admin review — requested by "
@@ -2139,7 +2139,17 @@ st.markdown("""
     <style>
     /* Compact the app header by hiding Streamlit's standard skip link only.
        This does not remove or alter application content or accessibility APIs. */
-    a[href="#stMain"] { display: none !important; }
+    a[href="#stMain"],
+    a[href="#stAppViewContainer"],
+    a[href="#stMainBlockContainer"],
+    a[data-testid="stSkipLink"],
+    [data-testid="stSkipLink"] {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        width: 0 !important;
+        overflow: hidden !important;
+    }
     .block-container {
         padding-top: 2rem !important;
         padding-left: 0.3rem !important;
@@ -3103,9 +3113,26 @@ def _drive_status_rows():
             "Local": "OK" if local_exists else "Missing",
             "Drive Status": "Pending" if pending else ("Synced" if DRIVE_LAST_SYNC.get(live) else "Not yet synced"),
             "Last Sync": DRIVE_LAST_SYNC.get(live, "-"),
-            "Error": err or "",
+            "Error": _user_facing_drive_message(err or ""),
         })
     return rows
+
+
+def _user_facing_drive_message(value):
+    """Keep internal recovery snapshot filenames out of visible status messages.
+
+    This only sanitises displayed text; it does not rename, remove, or disable backups.
+    """
+    try:
+        message = str(value or "")
+        message = re.sub(
+            r"(?i)(?:[A-Za-z]:[\\/]|/)?[^\s\"']+\.before_drive_refresh\.bak",
+            "[recovery backup]",
+            message,
+        )
+        return message
+    except Exception:
+        return "Drive status details are unavailable."
 
 
 def render_google_drive_status():
@@ -3119,7 +3146,7 @@ def render_google_drive_status():
     with st.sidebar.expander("☁️ Google Drive Backup Status", expanded=False):
         if drive_service is None:
             st.error("Google Drive is NOT connected. Local data is still being saved.")
-            st.code(DRIVE_CONNECTION_ERROR or "No connection error was captured.")
+            st.code(_user_facing_drive_message(DRIVE_CONNECTION_ERROR or "No connection error was captured."))
             st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
         else:
             st.success("Google Drive backup is connected.")
