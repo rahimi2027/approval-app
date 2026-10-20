@@ -3235,7 +3235,10 @@ def _initialise_drive_storage_once(workday_key=None):
                 if check_df.empty:
                     raise ValueError("downloaded workbook contains no data rows")
                 os.makedirs(os.path.dirname(path) or APP_FOLDER, exist_ok=True)
-                shutil.copy2(path, path + ".before_drive_refresh.bak") if os.path.exists(path) else None
+                backup_dir = os.path.join(APP_FOLDER, "drive_refresh_backups")
+                os.makedirs(backup_dir, exist_ok=True)
+                if os.path.exists(path):
+                shutil.copy2(path, os.path.join(backup_dir, os.path.basename(path) + ".before_drive_refresh.bak"))
                 os.replace(temp_path, path)
                 restored += 1
                 _invalidate_data_cache("_settings_cache")
