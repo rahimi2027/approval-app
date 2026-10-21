@@ -15346,7 +15346,130 @@ def render_training_help(current_user_info=None):
 # ============================================================
 # 📋 ROLE-BASED PORTALS
 # ============================================================
-def render_new_store_department_layout(full_name, dept_name, can_manage_store_items=False):
+def render_store_addition_deduction_module(full_name, dept_name):
+    """Addition & Deduction module for Store users with explicit permission.
+
+    Uses the same records workbook and save function as the standard module, so
+    Director approval continues through the existing workflow.
+    """
+    st.subheader("➕ Addition & Deduction")
+    st.caption("General employee Addition & Deduction requests. This is separate from Store Deduction and Store Return requests.")
+    request_tab, history_tab = st.tabs(["📤 New Request", "📋 Department Requests"])
+
+    with request_tab:
+        form_version = st.session_state.get("store_ad_form_version", 0)
+        employee_source = st.radio(
+            "👤 Employee Source",
+            ["Registered Employee", "Manual Employee"],
+            horizontal=True,
+            key=f"store_ad_employee_source_v{form_version}",
+        )
+        registered_employee = None
+        request_dept = dept_name
+        employee_name = ""
+        manual_mode = employee_source == "Manual Employee"
+        if employee_source == "Registered Employee":
+            registered = [
+                e for e in _hrp_load_employees()
+                if str(e.get("status", "Active")).strip().casefold() == "active"
+                and str(e.get("name", "")).strip()
+            ]
+            dept_filtered = [
+                e for e in registered
+                if str(e.get("department", "")).strip().casefold() == str(dept_name).strip().casefold()
+            ]
+            if dept_filtered:
+                registered = dept_filtered
+            registered = sorted(registered, key=lambda e: str(e.get("name", "")).casefold())
+            if registered:
+                labels = [
+                    f"{str(e.get('name', '')).strip()} — {str(e.get('work_type', e.get('sub_department', e.get('department', dept_name))) or dept_name).strip()}"
+                    for e in registered
+                ]
+                selected_label = st.selectbox("Registered Employee", labels, key=f"store_ad_registered_emp_v{form_version}")
+                registered_employee = {label: emp for label, emp in zip(labels, registered)}.get(selected_label)
+                employee_name = str((registered_employee or {}).get("name", "")).strip()
+                request_dept = str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", (registered_employee or {}).get("department", dept_name))) or dept_name).strip()
+            else:
+                st.warning("No active registered employees found. Enter the employee name manually below.")
+                manual_mode = True
+        with st.form(f"store_ad_new_request_v{form_version}", clear_on_submit=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                if manual_mode:
+                    employee_name = st.text_input("👤 Employee Name", key=f"store_ad_manual_name_v{form_version}")
+                request_type = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"store_ad_type_v{form_version}")
+                category = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"store_ad_category_v{form_version}")
+                amount = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, key=f"store_ad_amount_v{form_version}")
+            with c2:
+                from datetime import datetime as dt
+                request_date = st.date_input("📅 Date", value=dt.today(), key=f"store_ad_date_v{form_version}")
+                manager = st.text_input("👔 Line Manager", key=f"store_ad_manager_v{form_version}")
+                attachments = st.file_uploader("📎 Attachments", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"store_ad_files_v{form_version}")
+                description = st.text_area("📝 Description / Justification", key=f"store_ad_desc_v{form_version}")
+            if st.form_submit_button("📤 Send to Director", type="primary"):
+                if employee_name.strip() and manager.strip() and description.strip():
+                    records = load_records_from_excel(force=True)
+                    request_id = get_next_id(records)
+                    attachment_names = []
+                    if attachments:
+                        for i, uploaded in enumerate(attachments, 1):
+                            filename = f"ID_{request_id}_F{i}_{uploaded.name}"
+                            file_path = os.path.join(UPLOAD_DIR, filename)
+                            with open(file_path, "wb") as out:
+                                out.write(uploaded.getbuffer())
+                            attachment_names.append(filename)
+                            _upload_to_drive_bg(file_path, filename)
+                    payload = {
+                        "id": request_id,
+                        "emp_name": employee_name.strip(),
+                        "dept": request_dept,
+                        "type": request_type,
+                        "category": category,
+                        "date": str(request_date),
+                        "amount": float(amount),
+                        "manager": manager.strip(),
+                        "desc": description.strip(),
+                        "attachment_name": ", ".join(attachment_names) or "None",
+                        "status": "pending",
+                        "director_comments": "",
+                        "decision_date": "",
+                        "decision_by": "",
+                        "submitted_by": full_name,
+                        "pdf_path": "",
+                        "edited_from_id": "",
+                        "old_data": "",
+                    }
+                    save_record_to_excel(payload)
+                    log_action("CREATED", request_id)
+                    st.session_state["store_ad_form_version"] = form_version + 1
+                    st.success(f"✅ Request #{request_id} sent for approval!")
+                    st.rerun()
+                else:
+                    st.error("Please fill in Employee Name, Line Manager, and Description.")
+
+    with history_tab:
+        records = load_records_from_excel(force=True)
+        department_records = [r for r in records if str(r.get("dept", "")).strip().casefold() == str(dept_name).strip().casefold()]
+        if not department_records:
+            st.info("No Addition & Deduction requests have been recorded for this department yet.")
+        else:
+            for req in reversed(department_records):
+                status = str(req.get("status", "pending")).strip().lower()
+                icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴" if status == "rejected" else "⚪")
+                with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount', 0) or 0):.2f}"):
+                    st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Line Manager: {req.get('manager')}")
+                    st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')} | 📅 {req.get('date')}")
+                    st.write(f"💷 Amount: £{float(req.get('amount', 0) or 0):.2f}")
+                    st.info(f"📝 {req.get('desc', '')}")
+                    if req.get("director_comments"):
+                        st.write(f"💬 Director comments: {req.get('director_comments')}")
+                    display_attachments(req)
+                    if status == "approved":
+                        display_pdf_button(req, can_generate=True)
+
+
+def render_new_store_department_layout(full_name, dept_name, can_manage_store_items=False, can_access_addition_deduction=False):
     """Render the Store department using the requested grouped navigation layout.
 
     Store Department Managers can manage the Store Items & Prices master list;
@@ -15355,12 +15478,12 @@ def render_new_store_department_layout(full_name, dept_name, can_manage_store_it
     st.subheader("📦 Store Department")
     st.caption("Store requests, employee holdings, and leaver clearance.")
 
-    store_requests_tab, store_items_tab, store_clearance_tab, store_reports_tab = st.tabs([
-        "📦 Store Requests",
-        "🧰 Issue Items & Employee Holdings",
-        "🔗 Leaver Item Check-in & Clearance",
-        "📊 Reports",
-    ])
+    store_tab_labels = ["📦 Store Requests", "🧰 Issue Items & Employee Holdings", "🔗 Leaver Item Check-in & Clearance", "📊 Reports"]
+    if can_access_addition_deduction:
+        store_tab_labels.append("➕ Addition & Deduction")
+    store_tabs = st.tabs(store_tab_labels)
+    store_requests_tab, store_items_tab, store_clearance_tab, store_reports_tab = store_tabs[:4]
+    store_addition_deduction_tab = store_tabs[4] if can_access_addition_deduction else None
 
     with store_requests_tab:
         request_tab, return_tab, submitted_tab = st.tabs([
@@ -15406,6 +15529,10 @@ def render_new_store_department_layout(full_name, dept_name, can_manage_store_it
 
     with store_reports_tab:
         render_store_reports_tab(full_name, dept_name)
+
+    if can_access_addition_deduction and store_addition_deduction_tab is not None:
+        with store_addition_deduction_tab:
+            render_store_addition_deduction_module(full_name, dept_name)
 
 
 if role == "Employee":
@@ -15731,11 +15858,11 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if user_info.get("can_access_training_help", False):
             store_portal_tab, training_help_tab = st.tabs(["📦 Store Department", "📚 Training & Help"])
             with store_portal_tab:
-                render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager)
+                render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager, can_access_addition_deduction=bool(has_addition_deduction))
             with training_help_tab:
                 render_training_help(user_info)
         else:
-            render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager)
+            render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager, can_access_addition_deduction=bool(has_addition_deduction))
     else:
         labels = []
         if has_addition_deduction: labels.append("➕ Addition & Deduction")
