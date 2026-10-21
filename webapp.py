@@ -184,12 +184,35 @@ def _p_approvals():   return _path("payroll_approvals.xlsx")
 
 
 def _ensure_storage():
-    if not _ctx["initialised"]:
+    if not _ctx.get("initialised"):
         return
-    _ctx["safe_init_excel"](_p_timesheets(), PAYROLL_TIMESHEETS_COLUMNS)
-    _ctx["safe_init_excel"](_p_week_states(), PAYROLL_WEEK_STATES_COLUMNS)
-    _ctx["safe_init_excel"](_p_flags(), PAYROLL_FLAGS_COLUMNS)
-    _ctx["safe_init_excel"](_p_approvals(), PAYROLL_APPROVALS_COLUMNS)
+
+    # Validate injected callbacks before calling them. A malformed or overwritten
+    # callback must not cause the whole Streamlit app to fail with
+    # TypeError: 'str' object is not callable.
+    safe_init = _ctx.get("safe_init_excel")
+    if not callable(safe_init):
+        message = (
+            "Payroll storage initialisation skipped: safe_init_excel callback "
+            f"is not callable (type={type(safe_init).__name__}, value={safe_init!r})."
+        )
+        print("WARNING: " + message)
+        raise TypeError(message)
+
+    for path, columns in (
+        (_p_timesheets(), PAYROLL_TIMESHEETS_COLUMNS),
+        (_p_week_states(), PAYROLL_WEEK_STATES_COLUMNS),
+        (_p_flags(), PAYROLL_FLAGS_COLUMNS),
+        (_p_approvals(), PAYROLL_APPROVALS_COLUMNS),
+    ):
+        try:
+            safe_init(path, columns)
+        except TypeError as exc:
+            print(
+                "ERROR: payroll storage initialisation failed for "
+                f"{path!r}: {type(exc).__name__}: {exc}"
+            )
+            raise
 
 
 def get_backup_filenames():
@@ -808,7 +831,18 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         st.error("Payroll module not initialised. Call payroll.init_payroll(...) first.")
         return
 
-    _ensure_storage()
+    try:
+        _ensure_storage()
+    except TypeError as storage_error:
+        st.error(
+            "Payroll could not initialise its storage. The rest of the portal can "
+            "continue; please check the Streamlit Cloud logs for the detailed cause."
+        )
+        print(
+            "ERROR: render_payroll_timesheet stopped during storage initialisation: "
+            f"{type(storage_error).__name__}: {storage_error}"
+        )
+        return
     _ts(); _states(); _flags(); _approvals()
 
     full_name = str(current_user_info.get("full_name")
@@ -4161,7 +4195,7 @@ def render_global_tab_order_settings():
 # Ensure the injected app folder is a usable path before payroll initialisation.
 if not isinstance(APP_FOLDER, str) or not APP_FOLDER.strip():
     APP_FOLDER = os.path.join(os.getcwd(), "Acoole_App_Uploads")
-    os.makedirs(APP_FOLDER, exist_ok=True)
+os.makedirs(APP_FOLDER, exist_ok=True)
 
 try:
     payroll.init_payroll(
