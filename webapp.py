@@ -15303,8 +15303,34 @@ def render_training_help(current_user_info=None):
     department_name = str(user.get("dept", user.get("department", ""))).strip()
     role_key = _training_role_key(role_name, department_name)
     content = TRAINING_ROLE_CONTENT.get(role_key)
+    # Shared guidance aligned with the supplied Acoole v4.30 department training deck.
+    # Add it to each role's searchable topic list without replacing role-specific instructions.
+    if content:
+        content = dict(content)
+        content["topics"] = list(content.get("topics", [])) + [
+            ("🔐 Portal access & navigation (v4.30)", [
+                "Open the official Acoole Operations & Authorisation Portal: https://acooleelectrical.streamlit.app/",
+                "Enter the username (lowercase) and password supplied by your Super Admin, then select Authenticate Portal.",
+                "If the account is deactivated or access is missing, contact your Super Admin. The tabs available to you depend on your assigned role and permissions.",
+                "Use Change My Password after your first login. Never share your password, and always use Secure Logout on shared computers."
+            ]),
+            ("🔄 Refresh, saving & Google Drive (v4.30)", [
+                "Use Refresh Data to request the latest available portal workbooks and status information.",
+                "Completed saves are intended to sync immediately to Google Drive when the Drive connection and permissions allow it. If a sync error is shown, report it rather than assuming the Drive copy updated.",
+                "The Google Drive Backup Status panel is restricted to authorised users. The manual Save All Data to Google Drive Now action is a full backup, separate from ordinary module saves.",
+                "For timesheets, Save and Submit for Approval are different actions: Save records the week, while Submit sends it into the Director approval workflow.",
+                "If a status appears out of date, use Refresh Data and check the correct Pending, Approved, Rejected/Returned or Approvals view for that module."
+            ]),
+            ("📚 Finding help & contacting the trainer (v4.30)", [
+                "Use Search your training to find role-specific topics; only training configured for your signed-in role is shown.",
+                "Open a topic to read the step-by-step instructions. If your screen or available action differs, check your assigned permissions with Super Admin.",
+                "Use the private Training & Help chat to send a question to Wais Rahimi. The trainer replies through the Training Support Inbox.",
+                "When reporting a problem, include your username, module and tab/sub-tab, request ID if available, a screenshot, and the exact error message.",
+                "Portal: https://acooleelectrical.streamlit.app/"
+            ])
+        ]
     st.subheader("📚 Training & Help Centre")
-    st.caption(f"Training is restricted to your signed-in role: **{role_name or 'User'}**")
+    st.caption(f"Role-specific training aligned with the Acoole Electrical Ltd Department Training Deck v4.30 (October 2026). Signed-in role: **{role_name or 'User'}**")
     st.info(f"💡 If you do not understand a step, cannot find a function, or need a walkthrough, please contact **{TRAINING_SUPPORT_CONTACT}**.")
     if not content:
         st.warning("No role-specific training has been configured for this account yet.")
