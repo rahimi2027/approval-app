@@ -3945,6 +3945,140 @@ def save_hr_categories(cats):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
+# ============================================================
+# 🌐 GLOBAL TOP-LEVEL TAB ORDER (Super Admin controlled)
+# ============================================================
+GLOBAL_TAB_ORDER_DEFAULTS = [
+    "➕ Addition & Deduction",
+    "🏢 HR Department",
+    "📝 Leave Request",
+    "👤 My HR Report",
+    "📦 Store Department",
+    "📦 Store Deduction",
+    "📦 Store Deductions",
+    "📦 Store Return (Addition)",
+    "📦 Store Returns (Additions)",
+    "📋 My Submitted Store Requests",
+    "🧰 Issue Items",
+    "🧰 Employee Items",
+    "🧰 Employee Items (View)",
+    "📊 Employee Holdings",
+    "📋 Leaver Item Check-in",
+    "🔗 Leaver Clearance",
+    "📚 Check-in History",
+    "🛠️ Work Orders",
+    "💰 National Grid Inspector Bonus",
+    "🧾 Payroll",
+    "👥 HR Leave Settlement",
+    "🧾 Leaver Payroll",
+    "📊 HR Reports & Calendar",
+    "🛡️ Data Control",
+    "🔧 System Management",
+    "📚 Training & Help",
+    "📚 Training & Help Centre",
+    "📋 Payroll Timesheet",
+    "📋 Timesheet",
+    "↕️ Tab Order",
+]
+
+
+def load_global_tab_order():
+    """Load the saved cross-role top-level tab sequence from settings.xlsx."""
+    saved = _load_setting_value("global_tab_order", GLOBAL_TAB_ORDER_DEFAULTS)
+    # Remove any duplicates from older/manual settings, preserving their order.
+    saved = list(dict.fromkeys(saved))
+    # Retain newly introduced labels when an older configuration is loaded.
+    for label in GLOBAL_TAB_ORDER_DEFAULTS:
+        if label not in saved:
+            saved.append(label)
+    return saved
+
+
+def save_global_tab_order(order):
+    """Persist Super Admin's global tab order and immediately sync settings to Drive."""
+    init_settings()
+    df = _read_excel_records(SETTINGS_PATH)
+    found = False
+    serialised = "|".join(str(label) for label in order)
+    for idx, row in df.iterrows():
+        if str(row.get("setting", "")).strip() == "global_tab_order":
+            df.at[idx, "value"] = serialised
+            found = True
+    if not found:
+        df = pd.concat([df, pd.DataFrame([{"setting": "global_tab_order", "value": serialised}])], ignore_index=True)
+    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
+    _invalidate_data_cache("_settings_cache")
+    sync_saved_file_to_drive(SETTINGS_PATH)
+
+
+def global_ordered_tabs(labels):
+    """Create tabs in the configured visual order while preserving callers' original index mapping."""
+    original = list(labels)
+    if len(original) < 2:
+        return st.tabs(original)
+    order = load_global_tab_order()
+
+    def sort_key(item):
+        idx, label = item
+        text_label = str(label).strip()
+        rank = len(order) + idx
+        for rank_idx, preferred in enumerate(order):
+            # Prefix matching handles labels that include dynamic pending counts.
+            if text_label == preferred or text_label.startswith(preferred + " ") or text_label.startswith(preferred + " ·") or text_label.startswith(preferred + " ("):
+                rank = rank_idx
+                break
+        return (rank, idx)
+
+    sorted_indexed = sorted(enumerate(original), key=sort_key)
+    sorted_tabs = st.tabs([label for _, label in sorted_indexed])
+    tabs_by_original_index = [None] * len(original)
+    for visual_idx, (original_idx, _) in enumerate(sorted_indexed):
+        tabs_by_original_index[original_idx] = sorted_tabs[visual_idx]
+    return tabs_by_original_index
+
+
+def render_global_tab_order_settings():
+    """Super Admin editor for one global tab order shared by all roles."""
+    st.subheader("↕️ Global Tab Order & Navigation")
+    st.caption("Choose one portal-wide sequence. Each user will see only the tabs they are permitted to access, arranged in this order. Changing the order does not grant permissions.")
+    current = st.session_state.get("global_tab_order_editor")
+    if not current:
+        current = load_global_tab_order()
+        st.session_state["global_tab_order_editor"] = list(current)
+    current = list(st.session_state["global_tab_order_editor"])
+    if not current:
+        current = list(GLOBAL_TAB_ORDER_DEFAULTS)
+        st.session_state["global_tab_order_editor"] = list(current)
+
+    chosen = st.selectbox("Tab to move", current, key="global_tab_order_chosen")
+    move_col, save_col, reset_col = st.columns(3)
+    with move_col:
+        if st.button("⬆️ Move earlier", key="global_tab_order_up", disabled=current.index(chosen) == 0):
+            pos = current.index(chosen)
+            current[pos - 1], current[pos] = current[pos], current[pos - 1]
+            st.session_state["global_tab_order_editor"] = current
+            st.rerun()
+        if st.button("⬇️ Move later", key="global_tab_order_down", disabled=current.index(chosen) == len(current) - 1):
+            pos = current.index(chosen)
+            current[pos + 1], current[pos] = current[pos], current[pos + 1]
+            st.session_state["global_tab_order_editor"] = current
+            st.rerun()
+    with save_col:
+        if st.button("💾 Save global order", type="primary", key="global_tab_order_save"):
+            save_global_tab_order(current)
+            st.session_state["global_tab_order_editor"] = list(current)
+            st.success("Global tab order saved. It will apply to users' top-level tabs on their next rerun or login.")
+    with reset_col:
+        if st.button("↩️ Reset default order", key="global_tab_order_reset"):
+            st.session_state["global_tab_order_editor"] = list(GLOBAL_TAB_ORDER_DEFAULTS)
+            st.rerun()
+
+    st.markdown("**Current sequence**")
+    for index, label in enumerate(current, start=1):
+        st.write(f"{index}. {label}")
+    st.info("Some specialist roles have a smaller set of tabs. Tabs not listed in this sequence remain after the configured items in their existing relative order.")
+
+
 # Drive restoration is deliberately called AFTER payroll.init_payroll registers
 # the real workbook paths, so payroll workbooks are included in the daily restore.
 try:
@@ -15561,7 +15695,7 @@ if role == "Employee":
     has_training_help = bool(user_info.get("can_access_training_help", False))
     has_employee_items = bool(user_info.get("can_access_employee_items", False))
     if has_training_help and has_employee_items:
-        training_tab, items_tab = st.tabs(["📚 Training & Help", "🧰 My Employee Items"])
+        training_tab, items_tab = global_ordered_tabs(["📚 Training & Help", "🧰 My Employee Items"])
         with training_tab:
             render_training_help(user_info)
         with items_tab:
@@ -15605,7 +15739,7 @@ if role == "Employee":
 
 elif role == "Work Order Employee":
     if user_info.get("can_access_training_help", False):
-        training_tab, portal_tab = st.tabs(["📚 Training & Help", "🛠️ Work Orders"])
+        training_tab, portal_tab = global_ordered_tabs(["📚 Training & Help", "🛠️ Work Orders"])
         with training_tab: render_training_help(user_info)
         with portal_tab: render_work_order_employee_portal(full_name, dept)
     else:
@@ -15622,7 +15756,7 @@ elif role == "Payroll":
         outer_labels.append("📚 Training & Help Centre")
     if has_payroll_timesheet:
         outer_labels.append("📋 Timesheet")
-    outer_tabs = st.tabs(outer_labels)
+    outer_tabs = global_ordered_tabs(outer_labels)
     payroll_main_tab = outer_tabs[0]
     training_main_tab = outer_tabs[1] if has_training_help else None
     timesheet_main_tab = outer_tabs[-1] if has_payroll_timesheet else None
@@ -15699,7 +15833,7 @@ elif role == "Work Order Manager":
     dept_name = dept
     wo_mgr_tab_labels = ["➕ Addition & Deduction", "🛠️ Work Orders"]
     if user_info.get("can_access_training_help", False): wo_mgr_tab_labels.append("📚 Training & Help")
-    wo_mgr_tabs = st.tabs(wo_mgr_tab_labels)
+    wo_mgr_tabs = global_ordered_tabs(wo_mgr_tab_labels)
     request_tab, work_order_tab = wo_mgr_tabs[0], wo_mgr_tabs[1]
     training_help_tab = wo_mgr_tabs[2] if len(wo_mgr_tabs) > 2 else None
     with request_tab:
@@ -15885,7 +16019,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
         store_top_level_labels.append("📦 Store Department")
         if user_info.get("can_access_training_help", False):
             store_top_level_labels.append("📚 Training & Help")
-        store_top_level_tabs = st.tabs(store_top_level_labels)
+        store_top_level_tabs = global_ordered_tabs(store_top_level_labels)
         store_top_level_idx = 0
         if has_addition_deduction:
             with store_top_level_tabs[store_top_level_idx]:
@@ -15923,7 +16057,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
             st.subheader("🔐 Access Restricted")
             st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
         else:
-            tabs = st.tabs(labels)
+            tabs = global_ordered_tabs(labels)
             tab_idx = 0
             if has_addition_deduction:
                 with tabs[tab_idx]:
@@ -16234,7 +16368,7 @@ elif role == "Director":
     if user_info.get("can_access_training_help", False):
         director_tab_labels.append("📚 Training & Help")
     director_tab_labels.append("📋 Payroll Timesheet")
-    director_tabs = st.tabs(director_tab_labels)
+    director_tabs = global_ordered_tabs(director_tab_labels)
     director_addition_tab = director_tabs[0]
     if director_hr_access_enabled:
         director_hr_access_tab = director_tabs[1]
@@ -16416,7 +16550,7 @@ elif role == "Director":
         payroll.render_payroll_timesheet(user_info, mode="director")
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab, super_payroll_tab = st.tabs([
+    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab, super_payroll_tab, super_tab_order_tab = global_ordered_tabs([
         "➕ Addition & Deduction",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
@@ -16426,8 +16560,11 @@ elif role == "Super Admin":
         "🛡️ Data Control",
         "🔧 System Management",
         "📚 Training & Help",
-        "📋 Payroll Timesheet"
+        "📋 Payroll Timesheet",
+        "↕️ Tab Order"
     ])
+    with super_tab_order_tab:
+        render_global_tab_order_settings()
     with super_add_ded_tab:
         st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
         st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
