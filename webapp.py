@@ -6694,6 +6694,58 @@ def render_hr_download_reports():
 def render_hr_portal(current_user_info=None):
     """HR Portal — HR Management, Holiday Calendar, Employee Details, Leave and Leave History."""
     _hr_portal_init()
+
+    # HR Portal tab styling: clear, modern tabs with a strong active state.
+    # Keep this presentation-only so existing navigation and workflows are unchanged.
+    st.markdown("""
+    <style>
+    div[data-testid="stTabs"] {
+        margin-top: .45rem;
+    }
+    div[data-testid="stTabs"] [data-testid="stTabsList"] {
+        gap: .45rem;
+        border-bottom: 1px solid rgba(128, 128, 128, .28);
+        padding: .35rem .2rem .55rem .2rem;
+        flex-wrap: wrap;
+    }
+    div[data-testid="stTabs"] button[role="tab"] {
+        border: 1px solid rgba(128, 128, 128, .28);
+        border-radius: 10px 10px 7px 7px;
+        padding: .55rem .9rem;
+        min-height: 2.7rem;
+        background: rgba(128, 128, 128, .07);
+        transition: background .15s ease, border-color .15s ease, transform .15s ease;
+        font-weight: 600;
+    }
+    div[data-testid="stTabs"] button[role="tab"]:hover {
+        background: rgba(20, 130, 145, .12);
+        border-color: rgba(20, 130, 145, .55);
+    }
+    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+        color: var(--primary-color);
+        background: rgba(20, 130, 145, .13);
+        border-color: var(--primary-color);
+        box-shadow: inset 0 -3px 0 var(--primary-color);
+    }
+    div[data-testid="stTabs"] button[role="tab"] p {
+        font-weight: 600;
+        white-space: normal;
+        line-height: 1.25;
+        margin: 0;
+    }
+    div[data-testid="stTabs"] [data-testid="stTabContent"] {
+        padding-top: 1rem;
+    }
+    @media (max-width: 700px) {
+        div[data-testid="stTabs"] [data-testid="stTabsList"] { gap: .3rem; }
+        div[data-testid="stTabs"] button[role="tab"] {
+            padding: .45rem .6rem;
+            min-height: 2.45rem;
+            font-size: .88rem;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
     if "hrp_role" not in st.session_state:
         st.session_state.hrp_role = "hr"
     if "hrp_current_emp_id" not in st.session_state:
