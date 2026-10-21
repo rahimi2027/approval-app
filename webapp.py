@@ -163,17 +163,24 @@ def _path(filename):
     # DRIVE_BACKUP_FILENAMES is constructed at import time, before init_payroll().
     # Use the Streamlit repository working directory until APP_FOLDER is injected.
     folder = _ctx.get("app_folder") or os.getcwd()
-    return os.path.join(folder, filename)
+
+    # Defensive fallback: never let a bad injected folder value crash the app.
+    # os.path.join raises TypeError if folder is not str/bytes/PathLike.
+    try:
+        return os.path.join(folder, filename)
+    except TypeError:
+        print(
+            f"WARNING: payroll app_folder is not a valid path "
+            f"(type={type(folder).__name__}, value={folder!r}); "
+            f"falling back to os.getcwd()"
+        )
+        return os.path.join(os.getcwd(), filename)
 
 
-def _p_timesheets():
-    return _path("payroll_timesheets.xlsx")
-def _p_week_states(): 
-    return _path("payroll_week_states.xlsx")
-def _p_flags():       
-    return _path("payroll_flags.xlsx")
-def _p_approvals():   
-    return _path("payroll_approvals.xlsx")
+def _p_timesheets(): return _path("payroll_timesheets.xlsx")
+def _p_week_states(): return _path("payroll_week_states.xlsx")
+def _p_flags():       return _path("payroll_flags.xlsx")
+def _p_approvals():   return _path("payroll_approvals.xlsx")
 
 
 def _ensure_storage():
@@ -4151,6 +4158,11 @@ def render_global_tab_order_settings():
 
 # Drive restoration is deliberately called AFTER payroll.init_payroll registers
 # the real workbook paths, so payroll workbooks are included in the daily restore.
+# Ensure the injected app folder is a usable path before payroll initialisation.
+if not isinstance(APP_FOLDER, str) or not APP_FOLDER.strip():
+    APP_FOLDER = os.path.join(os.getcwd(), "Acoole_App_Uploads")
+    os.makedirs(APP_FOLDER, exist_ok=True)
+
 try:
     payroll.init_payroll(
         app_folder=APP_FOLDER,
