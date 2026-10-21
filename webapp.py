@@ -16825,61 +16825,6 @@ elif role == "Super Admin":
                 _payroll_stem,
                 "backup_" + _payroll_stem,
             ))
-        # One-click full backup: include every known workbook plus all files under
-        # the application's data/attachment/PDF folders. Keep secrets and source
-        # code outside the archive by deliberately limiting the folder scan.
-        st.markdown("### 📦 Download All Data Backups in One ZIP")
-        st.caption("Creates one ZIP containing all available backup workbooks plus saved attachments, PDFs and other files in the portal's application-data folders.")
-        try:
-            _zip_buffer = io.BytesIO()
-            _included_paths = {}
-            for _label, _path, _stem, _key in backup_files:
-                if _path and os.path.isfile(_path):
-                    _included_paths[os.path.abspath(_path)] = os.path.basename(_path)
-
-            # These folders contain user-uploaded documents and generated PDFs.
-            _data_dirs = [
-                APP_FOLDER, UPLOAD_DIR, PDF_DIR, WORK_ORDER_PDF_DIR,
-                INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, STORE_DEDUCTION_PDF_DIR,
-            ]
-            for _folder in _data_dirs:
-                if _folder and os.path.isdir(_folder):
-                    for _root, _dirs, _files in os.walk(_folder):
-                        # Avoid accidentally archiving caches or VCS metadata.
-                        _dirs[:] = [d for d in _dirs if d not in {"__pycache__", ".git", ".streamlit"}]
-                        for _filename in _files:
-                            _full = os.path.abspath(os.path.join(_root, _filename))
-                            if os.path.isfile(_full):
-                                _included_paths[_full] = os.path.relpath(_full, BASE_DIR)
-
-            with zipfile.ZipFile(_zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as _zf:
-                for _full_path, _archive_name in sorted(_included_paths.items()):
-                    try:
-                        _zf.write(_full_path, arcname=_archive_name)
-                    except (OSError, PermissionError) as _backup_file_error:
-                        # Continue packing other files if one optional file is unreadable.
-                        pass
-                _manifest = "Full data backup generated: " + datetime.now().isoformat(timespec="seconds") + "\n"
-                _manifest += "Files included: " + str(len(_included_paths)) + "\n"
-                _manifest += "Contains files available on this application server; remote-only Google Drive files are not fetched.\n"
-                _zf.writestr("BACKUP_README.txt", _manifest)
-            _zip_buffer.seek(0)
-            st.download_button(
-                label="⬇️ Download ALL Data Files as ZIP",
-                data=_zip_buffer.getvalue(),
-                file_name=f"ACOole_FULL_DATA_BACKUP_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zip",
-                mime="application/zip",
-                type="primary",
-                key="super_admin_download_all_data_zip",
-                width="stretch",
-                help="Downloads all available backup workbooks and files from the portal data folders in one ZIP.",
-            )
-            st.caption(f"Prepared {len(_included_paths)} available files for the full backup archive.")
-        except Exception as _zip_error:
-            st.error(f"Unable to prepare the full ZIP backup: {_zip_error}")
-
-        st.divider()
-        st.markdown("### Individual Data Backups")
         backup_cols = st.columns(3)
         for i, (label, path, stem, key) in enumerate(backup_files):
             with backup_cols[i % 3]:
