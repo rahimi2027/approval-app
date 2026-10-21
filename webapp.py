@@ -16870,7 +16870,7 @@ elif role == "Super Admin":
                 file_name=f"ACOole_FULL_DATA_BACKUP_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zip",
                 mime="application/zip",
                 type="primary",
-                key="super_admin_download_all_data_zip",
+                key="super_admin_download_all_data_zip_backup_page",
                 width="stretch",
                 help="Downloads all available backup workbooks and files from the portal data folders in one ZIP.",
             )
