@@ -15478,12 +15478,11 @@ def render_new_store_department_layout(full_name, dept_name, can_manage_store_it
     st.subheader("📦 Store Department")
     st.caption("Store requests, employee holdings, and leaver clearance.")
 
+    # Addition & Deduction is a top-level portal tab, not a nested Store tab.
+    # Keep this layout focused only on Store-specific workflows.
     store_tab_labels = ["📦 Store Requests", "🧰 Issue Items & Employee Holdings", "🔗 Leaver Item Check-in & Clearance", "📊 Reports"]
-    if can_access_addition_deduction:
-        store_tab_labels.append("➕ Addition & Deduction")
     store_tabs = st.tabs(store_tab_labels)
-    store_requests_tab, store_items_tab, store_clearance_tab, store_reports_tab = store_tabs[:4]
-    store_addition_deduction_tab = store_tabs[4] if can_access_addition_deduction else None
+    store_requests_tab, store_items_tab, store_clearance_tab, store_reports_tab = store_tabs
 
     with store_requests_tab:
         request_tab, return_tab, submitted_tab = st.tabs([
@@ -15530,9 +15529,6 @@ def render_new_store_department_layout(full_name, dept_name, can_manage_store_it
     with store_reports_tab:
         render_store_reports_tab(full_name, dept_name)
 
-    if can_access_addition_deduction and store_addition_deduction_tab is not None:
-        with store_addition_deduction_tab:
-            render_store_addition_deduction_module(full_name, dept_name)
 
 
 if role == "Employee":
@@ -15855,14 +15851,26 @@ elif role in ["Manager", "Staff", "Team Member"]:
     if is_store_user:
         # Only the Store Department Manager can add/edit/delete Store Items & Prices.
         is_store_department_manager = str(role).strip().casefold() == "manager"
+        # Put general Addition & Deduction at the same top-level navigation level
+        # as Store Department, and before it when the permission is enabled.
+        store_top_level_labels = []
+        if has_addition_deduction:
+            store_top_level_labels.append("➕ Addition & Deduction")
+        store_top_level_labels.append("📦 Store Department")
         if user_info.get("can_access_training_help", False):
-            store_portal_tab, training_help_tab = st.tabs(["📦 Store Department", "📚 Training & Help"])
-            with store_portal_tab:
-                render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager, can_access_addition_deduction=bool(has_addition_deduction))
-            with training_help_tab:
+            store_top_level_labels.append("📚 Training & Help")
+        store_top_level_tabs = st.tabs(store_top_level_labels)
+        store_top_level_idx = 0
+        if has_addition_deduction:
+            with store_top_level_tabs[store_top_level_idx]:
+                render_store_addition_deduction_module(full_name, dept_name)
+            store_top_level_idx += 1
+        with store_top_level_tabs[store_top_level_idx]:
+            render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager)
+        store_top_level_idx += 1
+        if user_info.get("can_access_training_help", False):
+            with store_top_level_tabs[store_top_level_idx]:
                 render_training_help(user_info)
-        else:
-            render_new_store_department_layout(full_name, dept_name, can_manage_store_items=is_store_department_manager, can_access_addition_deduction=bool(has_addition_deduction))
     else:
         labels = []
         if has_addition_deduction: labels.append("➕ Addition & Deduction")
