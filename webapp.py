@@ -1,7 +1,7 @@
 # ============================================================
 # 🔄 ACOOLE PORTAL — PROFESSIONAL VERSION v4.30
 #    • Robust pandas NaT/date normalisation for employee HR reports
-#    • Google Drive backup: manual-only sync; restore Drive data before creating empty local files
+#    • Google Drive: sync changed workbook immediately after completed saves; manual full backup remains available
 #    • NEW: Employee Items (Issue / Holdings / Leaver Check-in → auto Store Deduction)
 # ============================================================
 import streamlit as st
@@ -2351,7 +2351,7 @@ _DRIVE_SYNC_QUEUE = None
 # are the durable working copy and RAM is never treated as the only copy.
 LOCAL_RECOVERY_DIR = os.path.join(APP_FOLDER, "local_recovery")
 DRIVE_SYNC_STATE_PATH = os.path.join(APP_FOLDER, "drive_sync_state.json")
-DRIVE_AUTO_SYNC_INTERVAL_SECONDS = 0  # Automatic hourly uploads disabled; use manual Drive sync.
+DRIVE_AUTO_SYNC_INTERVAL_SECONDS = 0  # Hourly bulk backups disabled; completed saves sync their affected workbook immediately.
 # User accounts are business-critical. Keep timestamped Drive recovery copies so
 # a bad/empty local file or a failed overwrite can never destroy the last good user DB.
 USER_DB_RECOVERY_PREFIX = "RECOVERY_users_"
@@ -2951,18 +2951,14 @@ def _sync_saved_file_to_drive_now_once(local_path):
         if backup_name and not backup_ok:
             print(f"Google Drive backup sync failed for {backup_name}: {DRIVE_LAST_SYNC_ERROR.get(backup_name, '')}")
 
-        if live_ok or backup_ok:
+        if live_ok:
             try:
                 st_info = os.stat(local_path)
                 _DRIVE_SYNC_FINGERPRINTS[local_path] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
             except Exception:
                 pass
-            # A user DB is considered fully synced only when its live Drive copy was
-            # verified. A backup-only success is not enough for this critical file.
-            if local_path == USER_DB_PATH and not live_ok:
-                DRIVE_PENDING_SYNC.add(local_path)
-                _save_drive_sync_state()
-                return False
+            # The live Drive copy must be current for Refresh Data to expose the
+            # latest transaction. A backup-only success is not enough.
             DRIVE_PENDING_SYNC.discard(local_path)
             _save_drive_sync_state()
             return True
@@ -3013,17 +3009,62 @@ _DRIVE_STORAGE_PROCESS_READY = False
 
 
 def sync_saved_file_to_drive(local_path):
-    """Routine save hook: persist locally only. Drive uploads are explicit/manual.
+    """Sync the affected live workbook after a completed save.
 
-    Avoid network calls while users enter data and prevent background uploads from
-    replacing a good Drive workbook with a transient empty local workbook.
+    Form fields are not uploaded while the user is typing: this hook runs after a
+    persistence function writes a workbook. Startup initialisation is excluded so
+    an empty temporary workbook cannot overwrite Drive. The local save is retained
+    if the Drive upload fails.
     """
-    filename = os.path.basename(local_path)
-    if not os.path.exists(local_path):
+    filename = os.path.basename(local_path) if local_path else "unknown"
+    if not local_path or not os.path.exists(local_path):
         DRIVE_LAST_SYNC_ERROR[filename] = "Local file does not exist."
         return False
-    DRIVE_PENDING_SYNC.discard(os.path.abspath(local_path))
-    return True
+
+    # Do not upload files written by import-time initialisers.
+    if not _DRIVE_STORAGE_PROCESS_READY:
+        return True
+
+    if drive_service is None:
+        error = "Google Drive is not connected; the change is saved locally only."
+        DRIVE_LAST_SYNC_ERROR[filename] = error
+        DRIVE_PENDING_SYNC.add(os.path.abspath(local_path))
+        _save_drive_sync_state()
+        try:
+            st.warning(f"Saved locally, but Google Drive was not updated for {filename}. Check the Drive connection and retry the backup when available.")
+        except Exception:
+            pass
+        return False
+
+    # Routine saves update only the live workbook to keep the save action quicker.
+    # BACKUP_*.xlsx files are refreshed by the full manual backup and existing
+    # module-specific backup flows.
+    try:
+        live_id = _drive_upload_path(local_path, filename)
+        if live_id:
+            DRIVE_LAST_SYNC[filename] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            DRIVE_LAST_SYNC_ERROR.pop(filename, None)
+            DRIVE_PENDING_SYNC.discard(os.path.abspath(local_path))
+            try:
+                st_info = os.stat(local_path)
+                _DRIVE_SYNC_FINGERPRINTS[os.path.abspath(local_path)] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
+            except Exception:
+                pass
+            _save_drive_sync_state()
+            return True
+        error = DRIVE_LAST_SYNC_ERROR.get(filename, "Google Drive upload returned no file ID.")
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        DRIVE_LAST_SYNC_ERROR[filename] = error
+
+    DRIVE_PENDING_SYNC.add(os.path.abspath(local_path))
+    _save_drive_sync_state()
+    try:
+        st.warning(f"Saved locally, but Google Drive could not be updated for {filename}. The local save remains in place; check Drive status and use the full manual backup after resolving the connection issue.")
+    except Exception:
+        pass
+    print(f"Immediate Google Drive sync failed for {filename}: {error}")
+    return False
 
 
 def ensure_all_drive_backups():
@@ -3083,7 +3124,7 @@ def _start_drive_background_worker():
     """Automatic Drive uploads are intentionally disabled; backups are manual."""
     global _DRIVE_WORKER_STARTED
     _DRIVE_WORKER_STARTED = False
-    print("Automatic Google Drive backup worker disabled; use manual backup.")
+    print("Hourly bulk Google Drive backup worker disabled; completed-save sync is enabled.")
     return
 
 
@@ -3160,7 +3201,7 @@ def render_google_drive_status():
             st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
         else:
             st.success("Google Drive backup is connected.")
-            st.caption("User edits save locally for speed. Google Drive is updated only when an authorised user runs a manual backup.")
+            st.caption("Each completed save uploads the affected workbook to Google Drive. The full-app backup remains a separate manual action.")
 
         if st.button("🔄 Save All Data to Google Drive Now", key="force_drive_sync_all"):
             if drive_service is None:
@@ -3177,8 +3218,8 @@ def render_google_drive_status():
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         pending = len(DRIVE_PENDING_SYNC)
         st.caption(
-            f"Pending Drive uploads: {pending}. Local saves never wait for Google Drive. "
-            "Automatic backups are disabled. Use “Save All Data to Google Drive Now” for a manual backup."
+            f"Pending Drive uploads: {pending}. Completed saves attempt an immediate upload of the affected workbook. "
+            "Hourly bulk backups are disabled. Use “Save All Data to Google Drive Now” for a full manual backup."
         )
 
 @st.cache_resource(show_spinner=False)
@@ -3360,7 +3401,7 @@ PERMISSION_LABELS = {
     **payroll.get_payroll_permission_labels(),
     "can_access_employee_items": "🧰 Employee Items / Holdings",
     "can_access_training_help": "📚 Training & Help Centre",
-    "can_backup_google_drive": "☁️ Save All Data to Google Drive (Manual Backup)"
+    "can_backup_google_drive": "☁️ Save All Data to Google Drive (Full Manual Backup)"
 }
 
 
@@ -3741,7 +3782,9 @@ def refresh_data_button():
             if drive_service is not None:
                 # Store Items must be loaded from its named backup: the live local
                 # workbook can be stale even while BACKUP_store_items.xlsx is current.
-                for path in (EXCEL_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH, EMPLOYEE_ITEMS_PATH, ITEM_CHECKIN_PATH, LEAVER_CLEARANCE_PATH):
+                _refresh_paths = [EXCEL_PATH, SETTINGS_PATH, AUDIT_LOG_PATH, INSPECTOR_BONUS_PATH, WORK_ORDERS_PATH, HR_LEAVE_PATH, HR_DAILY_RATES_PATH, STORE_DEDUCTION_PATH, STORE_ITEMS_PATH, HR_EMPLOYEES_PATH, HR_PORTAL_LEAVE_PATH, EMPLOYEE_ITEMS_PATH, ITEM_CHECKIN_PATH, LEAVER_CLEARANCE_PATH]
+                _refresh_paths.extend(list(globals().get("_payroll_backup_map", {}).keys()))
+                for path in dict.fromkeys(_refresh_paths):
                     if path == USER_DB_PATH:
                         continue
                     if path == STORE_ITEMS_PATH:
@@ -3783,6 +3826,18 @@ def refresh_data_button():
             st.session_state["hrp_force_reload"] = True
             st.session_state["hrp_data_loaded"] = False
             st.session_state["_last_refresh"] = datetime.now().isoformat()
+
+            # Payroll data is cached per Streamlit session. A normal rerun or
+            # Refresh Data click does not reload these keys because the payroll
+            # loaders only read Excel when a key is missing. Drop them so the
+            # next render reloads the latest saved workbook data.
+            for _payroll_cache_key in (
+                "payroll_ts",
+                "payroll_states",
+                "payroll_flags",
+                "payroll_approvals",
+            ):
+                st.session_state.pop(_payroll_cache_key, None)
         if refreshed:
             st.success("Refreshed: " + ", ".join(refreshed))
         if failures:
@@ -13312,6 +13367,9 @@ initialise_inspector_bonus()
 initialise_hr_leave()
 initialise_store_deduction()
 initialise_employee_items()
+# From this point onwards, calls to sync_saved_file_to_drive originate from normal
+# app actions and should immediately sync the affected workbook to Google Drive.
+_DRIVE_STORAGE_PROCESS_READY = True
 
 def load_records_from_excel(force=False):
     if not force and "_records_cache" in st.session_state:
