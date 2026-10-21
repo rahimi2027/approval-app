@@ -15060,12 +15060,13 @@ TRAINING_ROLE_CONTENT = {
         ]
     },
     "Project Manager": {
-        "emoji": "🏗️", "title": "Project Manager Training",
-        "intro": "Training for project-management functions and the request workflow assigned to this role.",
+        "emoji": "🏗️", "title": "Projects / Project Manager Training",
+        "intro": "Training for Projects department users, project task assignments and Site Electrician timesheets.",
         "topics": [
-            ("🔐 Login & navigation", ["Log in with your assigned credentials and use only the modules displayed for your role."]),
-            ("🏗️ Project workflow", ["Use the Project Manager area for the project workflow assigned to your account.", "Review employee/request details carefully before submitting or approving an available action."]),
-            ("🔄 Refresh & support", ["Refresh data when you need the latest information and contact Wais Rahimi for help with any how-to question."])
+            ("🔐 Login & navigation", ["Log in with your assigned credentials and use the Projects department modules displayed for your account.", "If a module or action you need is missing, ask Super Admin to check your role and module permissions."]),
+            ("🏗️ Projects and assigned tasks", ["Open the Projects area and review the projects and tasks assigned to you or your team.", "Open each task and check the project/site, task description, assigned employee, dates and current status before updating it.", "Update task progress only with information confirmed by the site/team, then save or submit using the available controls.", "If an expected task is missing, confirm that it has been assigned to the correct employee/project and use Refresh Data before reporting the issue."]),
+            ("⏱️ Site Electrician timesheet", ["Open the Projects / Site Electrician timesheet workflow available to your account.", "Select the correct project/site and Site Electrician, then check the week or date range before entering hours.", "Enter the actual start and finish times and any required travel, time-away, status or notes fields; do not estimate hours when the actual record is available.", "Review each day and the calculated totals for obvious errors before saving.", "If the timesheet has a submit/approval step, save the entries first and then use the designated submit action. Check the displayed status afterwards.", "If a Site Electrician or project is missing from the selector, ask Super Admin to verify the employee's department/work type, project assignment and your access permissions."]),
+            ("🔄 Refresh, save & support", ["Use Refresh Data when you need the latest assignments or timesheet status.", "After saving, verify that the updated details remain visible. If the save fails, record the exact error and do not assume the change was stored.", "When asking for help, include your username, project/site, employee, week/date, screenshot and exact error message; contact Wais Rahimi for a walkthrough."])
         ]
     },
     "Accounts Manager": {
@@ -15172,6 +15173,7 @@ def _training_role_key(role_name, department_name=""):
         "National Grid": "National Grid Manager",
         "Isolator": "Isolator Manager",
         "Project": "Project Manager",
+        "Projects": "Project Manager",  # Current department label is plural in user records.
         "Store": "Store Manager",
         "HR": "HR Manager",
         "Human Resources": "HR Manager",
