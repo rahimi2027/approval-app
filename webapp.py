@@ -166,10 +166,14 @@ def _path(filename):
     return os.path.join(folder, filename)
 
 
-def _p_timesheets(): return _path("payroll_timesheets.xlsx")
-def _p_week_states(): return _path("payroll_week_states.xlsx")
-def _p_flags():       return _path("payroll_flags.xlsx")
-def _p_approvals():   return _path("payroll_approvals.xlsx")
+def _p_timesheets():
+    return _path("payroll_timesheets.xlsx")
+def _p_week_states(): 
+    return _path("payroll_week_states.xlsx")
+def _p_flags():       
+    return _path("payroll_flags.xlsx")
+def _p_approvals():   
+    return _path("payroll_approvals.xlsx")
 
 
 def _ensure_storage():
