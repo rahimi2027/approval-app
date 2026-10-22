@@ -74,7 +74,7 @@ PAYROLL_STATUS_COLOURS = {
     "Early Out": ("#FFF200", "#222222"),
     "Sick": ("#BFBFBF", "#222222"),
     "College": ("#00B7E5", "#111111"),
-    "Holiday": ("#F4C7E8", "#222222"),
+    "Holiday": ("#FFCCFF", "#222222"),
     "Unpaid Holiday": ("#7030A0", "#FFFFFF"),
     "HD Holiday": ("#F4A000", "#222222"),
     "Bank Holiday": ("#FFE699", "#222222"),
@@ -2086,14 +2086,10 @@ def _build_week_excel(week_key, dept):
     ws.cell(director_signature_row, 1).alignment = Alignment(vertical="center")
     ws.row_dimensions[director_signature_row].height = 42
 
-    # Status colour legend at the right of the sign-off block, starting under
-    # the "Days" column (H), so the exported workbook explains the colours.
+    # Horizontal status colour legend at the right of the sign-off block,
+    # starting under the "Days" column (H). Each status title itself is filled
+    # with its matching colour; do not add separate colour swatch cells.
     legend_col = 8  # H = Days
-    ws.cell(signature_start, legend_col, "STATUS COLOUR KEY")
-    ws.cell(signature_start, legend_col).font = Font(bold=True, color="FFFFFF")
-    ws.cell(signature_start, legend_col).fill = navy
-    ws.cell(signature_start, legend_col).alignment = Alignment(horizontal="center", vertical="center")
-    ws.cell(signature_start, legend_col).border = border
     legend_items = [
         ("Late", "Late In"), ("Sick", "Sick"), ("College", "College"),
         ("Holiday", "Holiday"), ("Unpaid Holiday", "Unpaid Holiday"),
@@ -2104,17 +2100,21 @@ def _build_week_excel(week_key, dept):
         ("Unpaid Absence", "Unpaid Absence"), ("AWOL", "AWOL"),
         ("Early Out", "Early Out"), ("Lay-off", "Lay-off"),
     ]
-    for offset, (label, status_key) in enumerate(legend_items, start=1):
-        legend_cell = ws.cell(signature_start + offset, legend_col, label)
+    items_per_row = 8
+    for idx, (label, status_key) in enumerate(legend_items):
+        legend_row = signature_start + (idx // items_per_row)
+        legend_target_col = legend_col + (idx % items_per_row)
+        legend_cell = ws.cell(legend_row, legend_target_col, label)
         bg_hex, fg_hex = PAYROLL_STATUS_COLOURS.get(status_key, ("#FFFFFF", "#222222"))
         legend_cell.fill = PatternFill("solid", fgColor=bg_hex.lstrip("#"))
-        legend_cell.font = Font(color=fg_hex.lstrip("#"), bold=True)
+        legend_cell.font = Font(color=fg_hex.lstrip("#"), bold=True, size=9)
         legend_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         legend_cell.border = border
-        legend_cell_comment = ws.cell(signature_start + offset, legend_col + 1, " ")
-        legend_cell_comment.fill = PatternFill("solid", fgColor=bg_hex.lstrip("#"))
-        legend_cell_comment.border = border
-    ws.column_dimensions["H"].width = max(ws.column_dimensions["H"].width or 8, 20)
+        ws.column_dimensions[ws.cell(1, legend_target_col).column_letter].width = max(
+            ws.column_dimensions[ws.cell(1, legend_target_col).column_letter].width or 8, 15
+        )
+    ws.row_dimensions[signature_start].height = max(ws.row_dimensions[signature_start].height or 15, 30)
+    ws.row_dimensions[signature_start + 1].height = max(ws.row_dimensions[signature_start + 1].height or 15, 30)
 
     out = BytesIO()
     wb.save(out)
