@@ -19,6 +19,7 @@ import threading
 import queue
 import time
 import textwrap
+import zipfile
 from datetime import datetime, date, timezone, timedelta
 
 from googleapiclient.discovery import build
@@ -6616,6 +6617,11 @@ def render_hr_portal(current_user_info=None):
                                 placeholder="e.g. John Smith",
                                 key=f"hrp_new_name_{new_form_version}",
                             )
+                            new_job_title = st.text_input(
+                                "Position / Job Title",
+                                placeholder="e.g. Electrician, Project Manager, HR Officer",
+                                key=f"hrp_new_job_title_{new_form_version}",
+                            )
                             new_start_date = st.date_input(
                                 "Start Date",
                                 value=date.today(),
@@ -6679,7 +6685,7 @@ def render_hr_portal(current_user_info=None):
                                 "work_end_time": new_work_end.strftime("%H:%M"),
                                 "department": new_department,
                                 "work_type": new_work_type,
-                                "job_title": new_work_type,
+                                "job_title": new_job_title.strip(),
                                 "agreement_type": new_agreement,
                                 "status": "Active",
                                 "working_pattern": new_pattern,
@@ -16586,9 +16592,6 @@ elif role == "Super Admin":
                             clear_audit_log_file(); st.session_state["confirm_clear_audit"] = False
                             st.success("✅ Cleared."); st.rerun()
         st.divider()
-        st.subheader("📥 Download Data Backups")
-        st.caption("Download a copy before using the live-launch reset. User accounts and system settings are kept separately.")
-
         backup_files = [
             ("📥 Requests", EXCEL_PATH, "requests", "backup_requests"),
             ("📥 Users", USER_DB_PATH, "users", "backup_users"),
@@ -16620,6 +16623,47 @@ elif role == "Super Admin":
                 _payroll_stem,
                 "backup_" + _payroll_stem,
             ))
+        # Build one ZIP containing every currently available workbook listed below.
+        # The individual download buttons remain available for selective backups.
+        all_backup_zip = io.BytesIO()
+        zip_added = 0
+        zip_errors = []
+        try:
+            with zipfile.ZipFile(all_backup_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
+                seen_archive_names = set()
+                for _label, _path, _stem, _key in backup_files:
+                    if not os.path.isfile(_path):
+                        continue
+                    _archive_name = os.path.basename(_path)
+                    if _archive_name in seen_archive_names:
+                        _archive_name = f"{_stem}_{_archive_name}"
+                    seen_archive_names.add(_archive_name)
+                    try:
+                        zipf.write(_path, arcname=_archive_name)
+                        zip_added += 1
+                    except Exception as _zip_exc:
+                        zip_errors.append(f"{_archive_name}: {_zip_exc}")
+        except Exception as _zip_exc:
+            zip_errors.append(str(_zip_exc))
+
+        if zip_added:
+            st.download_button(
+                "📦 Download All Data Backup (ZIP)",
+                data=all_backup_zip.getvalue(),
+                file_name=f"ACOole_All_Data_Backup_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.zip",
+                mime="application/zip",
+                type="primary",
+                key="super_admin_download_all_data_backup_zip",
+                width="stretch",
+                help="Downloads all currently available data backup workbooks in one ZIP file.",
+            )
+            if zip_errors:
+                st.warning("Some files could not be added to the ZIP: " + "; ".join(zip_errors))
+        else:
+            st.button("📦 Download All Data Backup (ZIP) — no files available", disabled=True, key="super_admin_download_all_data_backup_zip_empty", width="stretch")
+
+        st.subheader("📥 Download Data Backups")
+        st.caption("Download a copy before using the live-launch reset. User accounts and system settings are kept separately.")
         backup_cols = st.columns(3)
         for i, (label, path, stem, key) in enumerate(backup_files):
             with backup_cols[i % 3]:
