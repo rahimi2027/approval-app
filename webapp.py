@@ -32,7 +32,6 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import streamlit as st
 import os
-import traceback
 
 # ============================================================
 # CONSTANTS
@@ -213,7 +212,6 @@ def _ensure_storage():
                 "ERROR: payroll storage initialisation failed for "
                 f"{path!r}: {type(exc).__name__}: {exc}"
             )
-            traceback.print_exc()
             raise
 
 
@@ -844,7 +842,6 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             "ERROR: render_payroll_timesheet stopped during storage initialisation: "
             f"{type(storage_error).__name__}: {storage_error}"
         )
-        traceback.print_exc()
         return
     _ts(); _states(); _flags(); _approvals()
 
@@ -3578,60 +3575,53 @@ def _write_empty_excel(path, columns):
                 pass
 
 def safe_init_excel(path, columns):
-    parent = os.path.dirname(os.path.abspath(path))
-    os.makedirs(parent, exist_ok=True)
-
-    stem = os.path.splitext(os.path.basename(path))[0]
-    unique_id = f"{os.getpid()}_{threading.get_ident()}"
-    init_tmp = os.path.join(parent, f".{stem}.init_{unique_id}.tmp.xlsx")
-    repair_tmp = os.path.join(parent, f".{stem}.repair_{unique_id}.tmp.xlsx")
-
-    try:
-        with _EXCEL_INIT_LOCK:
-            if not os.path.exists(path):
-                pd.DataFrame(columns=columns).to_excel(
-                    init_tmp, index=False, engine="openpyxl"
-                )
-                if not os.path.exists(path):
-                    os.replace(init_tmp, path)
-                return True
-
-            try:
-                df = pd.read_excel(path, engine="openpyxl").fillna("")
-            except Exception as exc:
-                print(
-                    f"Excel initialisation/recovery for {path} failed: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-                traceback.print_exc()
-                return False
-
-            changed = False
-            for col in columns:
-                if col not in df.columns:
-                    df[col] = ""
-                    changed = True
-
-            if changed:
-                df.to_excel(repair_tmp, index=False, engine="openpyxl")
-                os.replace(repair_tmp, path)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if not os.path.exists(path):
+        tmp_path = f"{path}.init.tmp.xlsx"
+        try:
+            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
+            os.replace(tmp_path, path)
             return True
-
-    except Exception as exc:
-        print(
-            f"Excel initialisation/recovery for {path} failed: "
-            f"{type(exc).__name__}: {exc}"
-        )
-        traceback.print_exc()
-        return False
-
-    finally:
-        for tmp_path in (init_tmp, repair_tmp):
+        finally:
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
-            except OSError as exc:
-                print(f"Could not remove temporary file {tmp_path}: {exc}")
+            except Exception:
+                pass
+    try:
+        df = pd.read_excel(path, engine="openpyxl").fillna("")
+        changed = False
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+                changed = True
+        if changed:
+            tmp_path = f"{path}.repair.tmp.xlsx"
+            try:
+                df.to_excel(tmp_path, index=False, engine="openpyxl")
+                os.replace(tmp_path, path)
+            finally:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+        return True
+    except Exception as e:
+        print(f"Excel initialisation/recovery for {path} failed: {e}")
+        if os.path.exists(path):
+            return False
+        tmp_path = f"{path}.init.tmp.xlsx"
+        try:
+            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
+            os.replace(tmp_path, path)
+            return True
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
 
 def _invalidate_data_cache(*names):
     for name in names: st.session_state.pop(name, None)
@@ -4217,11 +4207,7 @@ try:
         invalidate_cache_fn=_invalidate_data_cache,
     )
 except Exception as e:
-    print(
-        "Payroll timesheet initialisation skipped: "
-        f"{type(e).__name__}: {e}"
-    )
-    traceback.print_exc()
+    print(f"Payroll timesheet initialisation skipped: {e}")
 
 # Register payroll backup files AFTER init_payroll injects APP_FOLDER.
 # The initial dictionary is created at import time, when payroll paths may still
@@ -6708,58 +6694,6 @@ def render_hr_download_reports():
 def render_hr_portal(current_user_info=None):
     """HR Portal — HR Management, Holiday Calendar, Employee Details, Leave and Leave History."""
     _hr_portal_init()
-
-    # HR Portal tab styling: clear, modern tabs with a strong active state.
-    # Keep this presentation-only so existing navigation and workflows are unchanged.
-    st.markdown("""
-    <style>
-    div[data-testid="stTabs"] {
-        margin-top: .45rem;
-    }
-    div[data-testid="stTabs"] [data-testid="stTabsList"] {
-        gap: .45rem;
-        border-bottom: 1px solid rgba(128, 128, 128, .28);
-        padding: .35rem .2rem .55rem .2rem;
-        flex-wrap: wrap;
-    }
-    div[data-testid="stTabs"] button[role="tab"] {
-        border: 1px solid rgba(128, 128, 128, .28);
-        border-radius: 10px 10px 7px 7px;
-        padding: .55rem .9rem;
-        min-height: 2.7rem;
-        background: rgba(128, 128, 128, .07);
-        transition: background .15s ease, border-color .15s ease, transform .15s ease;
-        font-weight: 600;
-    }
-    div[data-testid="stTabs"] button[role="tab"]:hover {
-        background: rgba(20, 130, 145, .12);
-        border-color: rgba(20, 130, 145, .55);
-    }
-    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-        color: var(--primary-color);
-        background: rgba(20, 130, 145, .13);
-        border-color: var(--primary-color);
-        box-shadow: inset 0 -3px 0 var(--primary-color);
-    }
-    div[data-testid="stTabs"] button[role="tab"] p {
-        font-weight: 600;
-        white-space: normal;
-        line-height: 1.25;
-        margin: 0;
-    }
-    div[data-testid="stTabs"] [data-testid="stTabContent"] {
-        padding-top: 1rem;
-    }
-    @media (max-width: 700px) {
-        div[data-testid="stTabs"] [data-testid="stTabsList"] { gap: .3rem; }
-        div[data-testid="stTabs"] button[role="tab"] {
-            padding: .45rem .6rem;
-            min-height: 2.45rem;
-            font-size: .88rem;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
     if "hrp_role" not in st.session_state:
         st.session_state.hrp_role = "hr"
     if "hrp_current_emp_id" not in st.session_state:
