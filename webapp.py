@@ -81,7 +81,7 @@ PAYROLL_STATUS_COLOURS = {
     "Authorised Absence": ("#A9D18E", "#222222"),
     "Overtime Approved": ("#70AD47", "#14210D"),
     "Maternity": ("#9DC3E6", "#222222"),
-    "Lay-off": ("#FBE2D5", "#222222"),
+    "Lay-off": ("#D9D9D9", "#222222"),
     "Leaver": ("#FF0000", "#FFFFFF"),
     "N/A": ("#FFE699", "#222222"),
     "Unpaid Absence": ("#00FFFF", "#222222"),
@@ -159,17 +159,17 @@ def init_payroll(app_folder, safe_init_excel_fn, read_excel_records_fn,
 # PATHS
 # ============================================================
 
-def _path(filename):
+def _payroll_file_path(filename):
     # DRIVE_BACKUP_FILENAMES is constructed at import time, before init_payroll().
     # Use the Streamlit repository working directory until APP_FOLDER is injected.
     folder = _ctx.get("app_folder") or os.getcwd()
     return os.path.join(folder, filename)
 
 
-def _p_timesheets(): return _path("payroll_timesheets.xlsx")
-def _p_week_states(): return _path("payroll_week_states.xlsx")
-def _p_flags():       return _path("payroll_flags.xlsx")
-def _p_approvals():   return _path("payroll_approvals.xlsx")
+def _p_timesheets(): return _payroll_file_path("payroll_timesheets.xlsx")
+def _p_week_states(): return _payroll_file_path("payroll_week_states.xlsx")
+def _p_flags():       return _payroll_file_path("payroll_flags.xlsx")
+def _p_approvals():   return _payroll_file_path("payroll_approvals.xlsx")
 
 
 def _ensure_storage():
