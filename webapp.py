@@ -32,6 +32,7 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import streamlit as st
 import os
+import traceback
 
 # ============================================================
 # CONSTANTS
@@ -212,6 +213,7 @@ def _ensure_storage():
                 "ERROR: payroll storage initialisation failed for "
                 f"{path!r}: {type(exc).__name__}: {exc}"
             )
+            traceback.print_exc()
             raise
 
 
@@ -842,6 +844,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             "ERROR: render_payroll_timesheet stopped during storage initialisation: "
             f"{type(storage_error).__name__}: {storage_error}"
         )
+        traceback.print_exc()
         return
     _ts(); _states(); _flags(); _approvals()
 
@@ -3578,27 +3581,21 @@ def safe_init_excel(path, columns):
     parent = os.path.dirname(os.path.abspath(path))
     os.makedirs(parent, exist_ok=True)
 
-    # Unique temporary filenames prevent threads/processes from sharing temp files.
     stem = os.path.splitext(os.path.basename(path))[0]
     unique_id = f"{os.getpid()}_{threading.get_ident()}"
     init_tmp = os.path.join(parent, f".{stem}.init_{unique_id}.tmp.xlsx")
     repair_tmp = os.path.join(parent, f".{stem}.repair_{unique_id}.tmp.xlsx")
 
     try:
-        # This lock coordinates threads in this Python process.
         with _EXCEL_INIT_LOCK:
             if not os.path.exists(path):
                 pd.DataFrame(columns=columns).to_excel(
                     init_tmp, index=False, engine="openpyxl"
                 )
-
-                # Recheck before installing the newly created workbook.
                 if not os.path.exists(path):
                     os.replace(init_tmp, path)
-
                 return True
 
-            # Preserve existing data and add any missing columns.
             try:
                 df = pd.read_excel(path, engine="openpyxl").fillna("")
             except Exception as exc:
@@ -3606,6 +3603,7 @@ def safe_init_excel(path, columns):
                     f"Excel initialisation/recovery for {path} failed: "
                     f"{type(exc).__name__}: {exc}"
                 )
+                traceback.print_exc()
                 return False
 
             changed = False
@@ -3617,7 +3615,6 @@ def safe_init_excel(path, columns):
             if changed:
                 df.to_excel(repair_tmp, index=False, engine="openpyxl")
                 os.replace(repair_tmp, path)
-
             return True
 
     except Exception as exc:
@@ -3625,6 +3622,7 @@ def safe_init_excel(path, columns):
             f"Excel initialisation/recovery for {path} failed: "
             f"{type(exc).__name__}: {exc}"
         )
+        traceback.print_exc()
         return False
 
     finally:
@@ -4219,7 +4217,11 @@ try:
         invalidate_cache_fn=_invalidate_data_cache,
     )
 except Exception as e:
-    print(f"Payroll timesheet initialisation skipped: {e}")
+    print(
+        "Payroll timesheet initialisation skipped: "
+        f"{type(e).__name__}: {e}"
+    )
+    traceback.print_exc()
 
 # Register payroll backup files AFTER init_payroll injects APP_FOLDER.
 # The initial dictionary is created at import time, when payroll paths may still
