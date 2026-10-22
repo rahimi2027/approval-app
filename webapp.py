@@ -81,7 +81,7 @@ PAYROLL_STATUS_COLOURS = {
     "Authorised Absence": ("#A9D18E", "#222222"),
     "Overtime Approved": ("#70AD47", "#14210D"),
     "Maternity": ("#9DC3E6", "#222222"),
-    "Lay-off": ("#D9D9D9", "#222222"),
+    "Lay-off": ("#FBE2D5", "#222222"),
     "Leaver": ("#FF0000", "#FFFFFF"),
     "N/A": ("#FFE699", "#222222"),
     "Unpaid Absence": ("#00FFFF", "#222222"),
