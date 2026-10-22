@@ -81,7 +81,7 @@ PAYROLL_STATUS_COLOURS = {
     "Authorised Absence": ("#A9D18E", "#222222"),
     "Overtime Approved": ("#70AD47", "#14210D"),
     "Maternity": ("#9DC3E6", "#222222"),
-    "Lay-off": ("#FBE2D5", "#222222"),
+    "Lay-off": ("#D9D9D9", "#222222"),
     "Leaver": ("#FF0000", "#FFFFFF"),
     "N/A": ("#FFE699", "#222222"),
     "Unpaid Absence": ("#00FFFF", "#222222"),
@@ -2091,14 +2091,14 @@ def _build_week_excel(week_key, dept):
     # with its matching colour; do not add separate colour swatch cells.
     legend_col = 8  # H = Days
     legend_items = [
-        ("Late", "Late In"), ("Sick", "Sick"), ("College", "College"),
+        ("Late/Early Out", "Late In"), ("Sick", "Sick"), ("College", "College"),
         ("Holiday", "Holiday"), ("Unpaid Holiday", "Unpaid Holiday"),
         ("HD Holiday", "HD Holiday"), ("Bank Holiday", "Bank Holiday"),
         ("Authorised Absence", "Authorised Absence"),
         ("Overtime Approved", "Overtime Approved"), ("Maternity", "Maternity"),
         ("Leaver", "Leaver"), ("N/A", "N/A"),
         ("Unpaid Absence", "Unpaid Absence"), ("AWOL", "AWOL"),
-        ("Early Out", "Early Out"), ("Lay-off", "Lay-off"),
+        ("Lay-off", "Lay-off"),
     ]
     items_per_row = 8
     for idx, (label, status_key) in enumerate(legend_items):
