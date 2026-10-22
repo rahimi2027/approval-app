@@ -3575,53 +3575,65 @@ def _write_empty_excel(path, columns):
                 pass
 
 def safe_init_excel(path, columns):
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if not os.path.exists(path):
-        tmp_path = f"{path}.init.tmp.xlsx"
-        try:
-            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
-            os.replace(tmp_path, path)
-            return True
-        finally:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+
+    # Unique temporary filenames prevent threads/processes from sharing temp files.
+    stem = os.path.splitext(os.path.basename(path))[0]
+    unique_id = f"{os.getpid()}_{threading.get_ident()}"
+    init_tmp = os.path.join(parent, f".{stem}.init_{unique_id}.tmp.xlsx")
+    repair_tmp = os.path.join(parent, f".{stem}.repair_{unique_id}.tmp.xlsx")
+
     try:
-        df = pd.read_excel(path, engine="openpyxl").fillna("")
-        changed = False
-        for col in columns:
-            if col not in df.columns:
-                df[col] = ""
-                changed = True
-        if changed:
-            tmp_path = f"{path}.repair.tmp.xlsx"
+        # This lock coordinates threads in this Python process.
+        with _EXCEL_INIT_LOCK:
+            if not os.path.exists(path):
+                pd.DataFrame(columns=columns).to_excel(
+                    init_tmp, index=False, engine="openpyxl"
+                )
+
+                # Recheck before installing the newly created workbook.
+                if not os.path.exists(path):
+                    os.replace(init_tmp, path)
+
+                return True
+
+            # Preserve existing data and add any missing columns.
             try:
-                df.to_excel(tmp_path, index=False, engine="openpyxl")
-                os.replace(tmp_path, path)
-            finally:
-                try:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                except Exception:
-                    pass
-        return True
-    except Exception as e:
-        print(f"Excel initialisation/recovery for {path} failed: {e}")
-        if os.path.exists(path):
-            return False
-        tmp_path = f"{path}.init.tmp.xlsx"
-        try:
-            pd.DataFrame(columns=columns).to_excel(tmp_path, index=False, engine="openpyxl")
-            os.replace(tmp_path, path)
+                df = pd.read_excel(path, engine="openpyxl").fillna("")
+            except Exception as exc:
+                print(
+                    f"Excel initialisation/recovery for {path} failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                return False
+
+            changed = False
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = ""
+                    changed = True
+
+            if changed:
+                df.to_excel(repair_tmp, index=False, engine="openpyxl")
+                os.replace(repair_tmp, path)
+
             return True
-        finally:
+
+    except Exception as exc:
+        print(
+            f"Excel initialisation/recovery for {path} failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return False
+
+    finally:
+        for tmp_path in (init_tmp, repair_tmp):
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
-            except Exception:
-                pass
+            except OSError as exc:
+                print(f"Could not remove temporary file {tmp_path}: {exc}")
 
 def _invalidate_data_cache(*names):
     for name in names: st.session_state.pop(name, None)
