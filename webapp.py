@@ -2110,9 +2110,12 @@ def _build_week_excel(week_key, dept):
         legend_cell.font = Font(color=fg_hex.lstrip("#"), bold=True, size=9)
         legend_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         legend_cell.border = border
-        ws.column_dimensions[ws.cell(1, legend_target_col).column_letter].width = max(
-            ws.column_dimensions[ws.cell(1, legend_target_col).column_letter].width or 8, 15
-        )
+        # Use the numeric column index directly for compatibility across
+        # openpyxl versions; avoid relying on Cell.column_letter here.
+        from openpyxl.utils import get_column_letter
+        legend_column_letter = get_column_letter(legend_target_col)
+        current_width = ws.column_dimensions[legend_column_letter].width
+        ws.column_dimensions[legend_column_letter].width = max(current_width or 8, 15)
     ws.row_dimensions[signature_start].height = max(ws.row_dimensions[signature_start].height or 15, 30)
     ws.row_dimensions[signature_start + 1].height = max(ws.row_dimensions[signature_start + 1].height or 15, 30)
 
