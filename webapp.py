@@ -1971,8 +1971,16 @@ def _build_week_excel(week_key, dept):
                 txt = str(d.get("status", "") or "")
 
             cell = ws.cell(r, 3 + i, txt)
+            status_for_colour = str((d or {}).get("status", "") or "").strip()
+            # Preserve the same status background colours used in the app UI.
+            status_colour = PAYROLL_STATUS_COLOURS.get(status_for_colour)
+            if status_colour and status_for_colour != "Worked":
+                bg_hex, fg_hex = status_colour
+                cell.fill = PatternFill("solid", fgColor=bg_hex.lstrip("#"))
+                cell.font = Font(color=fg_hex.lstrip("#"))
             if i in emp_flags:
                 cell.fill = red
+                cell.font = Font(color="9C0006")
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
             if d:
@@ -2077,6 +2085,36 @@ def _build_week_excel(week_key, dept):
     ws.cell(director_signature_row, 1, "Signature: " + "_" * 65)
     ws.cell(director_signature_row, 1).alignment = Alignment(vertical="center")
     ws.row_dimensions[director_signature_row].height = 42
+
+    # Status colour legend at the right of the sign-off block, starting under
+    # the "Days" column (H), so the exported workbook explains the colours.
+    legend_col = 8  # H = Days
+    ws.cell(signature_start, legend_col, "STATUS COLOUR KEY")
+    ws.cell(signature_start, legend_col).font = Font(bold=True, color="FFFFFF")
+    ws.cell(signature_start, legend_col).fill = navy
+    ws.cell(signature_start, legend_col).alignment = Alignment(horizontal="center", vertical="center")
+    ws.cell(signature_start, legend_col).border = border
+    legend_items = [
+        ("Late", "Late In"), ("Sick", "Sick"), ("College", "College"),
+        ("Holiday", "Holiday"), ("Unpaid Holiday", "Unpaid Holiday"),
+        ("HD Holiday", "HD Holiday"), ("Bank Holiday", "Bank Holiday"),
+        ("Authorised Absence", "Authorised Absence"),
+        ("Overtime Approved", "Overtime Approved"), ("Maternity", "Maternity"),
+        ("Leaver", "Leaver"), ("N/A", "N/A"),
+        ("Unpaid Absence", "Unpaid Absence"), ("AWOL", "AWOL"),
+        ("Early Out", "Early Out"), ("Lay-off", "Lay-off"),
+    ]
+    for offset, (label, status_key) in enumerate(legend_items, start=1):
+        legend_cell = ws.cell(signature_start + offset, legend_col, label)
+        bg_hex, fg_hex = PAYROLL_STATUS_COLOURS.get(status_key, ("#FFFFFF", "#222222"))
+        legend_cell.fill = PatternFill("solid", fgColor=bg_hex.lstrip("#"))
+        legend_cell.font = Font(color=fg_hex.lstrip("#"), bold=True)
+        legend_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        legend_cell.border = border
+        legend_cell_comment = ws.cell(signature_start + offset, legend_col + 1, " ")
+        legend_cell_comment.fill = PatternFill("solid", fgColor=bg_hex.lstrip("#"))
+        legend_cell_comment.border = border
+    ws.column_dimensions["H"].width = max(ws.column_dimensions["H"].width or 8, 20)
 
     out = BytesIO()
     wb.save(out)
