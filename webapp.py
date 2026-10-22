@@ -10,7 +10,6 @@ import sys
 import json
 import base64
 import shutil
-import zipfile
 import subprocess
 import pandas as pd
 import io
@@ -163,18 +162,7 @@ def _path(filename):
     # DRIVE_BACKUP_FILENAMES is constructed at import time, before init_payroll().
     # Use the Streamlit repository working directory until APP_FOLDER is injected.
     folder = _ctx.get("app_folder") or os.getcwd()
-
-    # Defensive fallback: never let a bad injected folder value crash the app.
-    # os.path.join raises TypeError if folder is not str/bytes/PathLike.
-    try:
-        return os.path.join(folder, filename)
-    except TypeError:
-        print(
-            f"WARNING: payroll app_folder is not a valid path "
-            f"(type={type(folder).__name__}, value={folder!r}); "
-            f"falling back to os.getcwd()"
-        )
-        return os.path.join(os.getcwd(), filename)
+    return os.path.join(folder, filename)
 
 
 def _p_timesheets(): return _path("payroll_timesheets.xlsx")
@@ -184,35 +172,12 @@ def _p_approvals():   return _path("payroll_approvals.xlsx")
 
 
 def _ensure_storage():
-    if not _ctx.get("initialised"):
+    if not _ctx["initialised"]:
         return
-
-    # Validate injected callbacks before calling them. A malformed or overwritten
-    # callback must not cause the whole Streamlit app to fail with
-    # TypeError: 'str' object is not callable.
-    safe_init = _ctx.get("safe_init_excel")
-    if not callable(safe_init):
-        message = (
-            "Payroll storage initialisation skipped: safe_init_excel callback "
-            f"is not callable (type={type(safe_init).__name__}, value={safe_init!r})."
-        )
-        print("WARNING: " + message)
-        raise TypeError(message)
-
-    for path, columns in (
-        (_p_timesheets(), PAYROLL_TIMESHEETS_COLUMNS),
-        (_p_week_states(), PAYROLL_WEEK_STATES_COLUMNS),
-        (_p_flags(), PAYROLL_FLAGS_COLUMNS),
-        (_p_approvals(), PAYROLL_APPROVALS_COLUMNS),
-    ):
-        try:
-            safe_init(path, columns)
-        except TypeError as exc:
-            print(
-                "ERROR: payroll storage initialisation failed for "
-                f"{path!r}: {type(exc).__name__}: {exc}"
-            )
-            raise
+    _ctx["safe_init_excel"](_p_timesheets(), PAYROLL_TIMESHEETS_COLUMNS)
+    _ctx["safe_init_excel"](_p_week_states(), PAYROLL_WEEK_STATES_COLUMNS)
+    _ctx["safe_init_excel"](_p_flags(), PAYROLL_FLAGS_COLUMNS)
+    _ctx["safe_init_excel"](_p_approvals(), PAYROLL_APPROVALS_COLUMNS)
 
 
 def get_backup_filenames():
@@ -831,18 +796,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         st.error("Payroll module not initialised. Call payroll.init_payroll(...) first.")
         return
 
-    try:
-        _ensure_storage()
-    except TypeError as storage_error:
-        st.error(
-            "Payroll could not initialise its storage. The rest of the portal can "
-            "continue; please check the Streamlit Cloud logs for the detailed cause."
-        )
-        print(
-            "ERROR: render_payroll_timesheet stopped during storage initialisation: "
-            f"{type(storage_error).__name__}: {storage_error}"
-        )
-        return
+    _ensure_storage()
     _ts(); _states(); _flags(); _approvals()
 
     full_name = str(current_user_info.get("full_name")
@@ -3232,52 +3186,6 @@ def _user_facing_drive_message(value):
         return "Drive status details are unavailable."
 
 
-def _build_all_data_backup_zip():
-    """Build an in-memory ZIP of all persistent application data files.
-
-    The archive contains the contents of Acoole_App_Uploads (workbooks,
-    settings, audit history, saved PDFs, attachments and archived records).
-    Temporary files and cache/lock artifacts are excluded. Application source
-    code and credentials outside the data folder are deliberately not included.
-    """
-    root = os.path.abspath(APP_FOLDER)
-    output = io.BytesIO()
-    included = 0
-    skipped_dirs = {"__pycache__", ".git"}
-    skipped_suffixes = (".tmp", ".temp", ".lock", ".part")
-    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for current_root, dirs, files in os.walk(root):
-            dirs[:] = sorted(d for d in dirs if d not in skipped_dirs and not d.startswith("."))
-            for filename in sorted(files):
-                if filename.startswith(".") or filename.endswith(skipped_suffixes):
-                    continue
-                full_path = os.path.join(current_root, filename)
-                if not os.path.isfile(full_path):
-                    continue
-                arcname = os.path.relpath(full_path, root).replace(os.sep, "/")
-                try:
-                    archive.write(full_path, arcname)
-                    included += 1
-                except (OSError, PermissionError) as exc:
-                    # Keep the backup usable if an individual transient file is locked.
-                    archive.writestr(
-                        "BACKUP_README.txt",
-                        "Some files could not be included in this backup.\n"
-                        f"File: {arcname}\nReason: {type(exc).__name__}: {exc}\n"
-                    )
-        archive.writestr(
-            "BACKUP_MANIFEST.txt",
-            "Acoole Portal — full data backup\n"
-            f"Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Data folder: {os.path.basename(root)}\n"
-            f"Files included: {included}\n"
-            "Contents are application data files, saved documents and attachments.\n"
-            "This archive does not contain application source code or external credentials.\n"
-        )
-    output.seek(0)
-    return output.getvalue(), included
-
-
 def render_google_drive_status():
     if not st.session_state.get("logged_in"):
         return
@@ -3285,25 +3193,6 @@ def render_google_drive_status():
     user_info = st.session_state.get("user_info", {})
     if role not in {"Super Admin", "Director"} and not bool(user_info.get("can_backup_google_drive", False)):
         return
-
-    # The full ZIP export is intentionally restricted to Super Admin.
-    # It is independent of Google Drive connectivity and downloads local saved data.
-    if role == "Super Admin":
-        with st.sidebar.expander("📦 Download All Data Backup", expanded=False):
-            st.caption("Download all persistent portal data, saved documents, attachments and audit archives in one ZIP file.")
-            try:
-                zip_bytes, zip_file_count = _build_all_data_backup_zip()
-                st.download_button(
-                    label=f"⬇️ Download All Data ({zip_file_count} files) as ZIP",
-                    data=zip_bytes,
-                    file_name=f"Acoole_Full_Data_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                    mime="application/zip",
-                    key="super_admin_download_all_data_zip",
-                    type="primary",
-                    help="Super Admin only. Includes files stored in the application's persistent data folder.",
-                )
-            except Exception as backup_error:
-                st.error(f"Could not prepare the full data backup: {type(backup_error).__name__}: {backup_error}")
 
     with st.sidebar.expander("☁️ Google Drive Backup Status", expanded=False):
         if drive_service is None:
@@ -4056,147 +3945,8 @@ def save_hr_categories(cats):
     _invalidate_data_cache("_settings_cache")
     sync_saved_file_to_drive(SETTINGS_PATH)
 
-# ============================================================
-# 🌐 GLOBAL TOP-LEVEL TAB ORDER (Super Admin controlled)
-# ============================================================
-GLOBAL_TAB_ORDER_DEFAULTS = [
-    "➕ Addition & Deduction",
-    "🏢 HR Department",
-    "📝 Leave Request",
-    "👤 My HR Report",
-    "📦 Store Department",
-    "📦 Store Deduction",
-    "📦 Store Deductions",
-    "📦 Store Return (Addition)",
-    "📦 Store Returns (Additions)",
-    "📋 My Submitted Store Requests",
-    "🧰 Issue Items",
-    "🧰 Employee Items",
-    "🧰 Employee Items (View)",
-    "📊 Employee Holdings",
-    "📋 Leaver Item Check-in",
-    "🔗 Leaver Clearance",
-    "📚 Check-in History",
-    "🛠️ Work Orders",
-    "💰 National Grid Inspector Bonus",
-    "🧾 Payroll",
-    "👥 HR Leave Settlement",
-    "🧾 Leaver Payroll",
-    "📊 HR Reports & Calendar",
-    "🛡️ Data Control",
-    "🔧 System Management",
-    "📚 Training & Help",
-    "📚 Training & Help Centre",
-    "📋 Payroll Timesheet",
-    "📋 Timesheet",
-    "↕️ Tab Order",
-]
-
-
-def load_global_tab_order():
-    """Load the saved cross-role top-level tab sequence from settings.xlsx."""
-    saved = _load_setting_value("global_tab_order", GLOBAL_TAB_ORDER_DEFAULTS)
-    # Remove any duplicates from older/manual settings, preserving their order.
-    saved = list(dict.fromkeys(saved))
-    # Retain newly introduced labels when an older configuration is loaded.
-    for label in GLOBAL_TAB_ORDER_DEFAULTS:
-        if label not in saved:
-            saved.append(label)
-    return saved
-
-
-def save_global_tab_order(order):
-    """Persist Super Admin's global tab order and immediately sync settings to Drive."""
-    init_settings()
-    df = _read_excel_records(SETTINGS_PATH)
-    found = False
-    serialised = "|".join(str(label) for label in order)
-    for idx, row in df.iterrows():
-        if str(row.get("setting", "")).strip() == "global_tab_order":
-            df.at[idx, "value"] = serialised
-            found = True
-    if not found:
-        df = pd.concat([df, pd.DataFrame([{"setting": "global_tab_order", "value": serialised}])], ignore_index=True)
-    df.to_excel(SETTINGS_PATH, index=False, engine="openpyxl")
-    _invalidate_data_cache("_settings_cache")
-    sync_saved_file_to_drive(SETTINGS_PATH)
-
-
-def global_ordered_tabs(labels):
-    """Create tabs in the configured visual order while preserving callers' original index mapping."""
-    original = list(labels)
-    if len(original) < 2:
-        return st.tabs(original)
-    order = load_global_tab_order()
-
-    def sort_key(item):
-        idx, label = item
-        text_label = str(label).strip()
-        rank = len(order) + idx
-        for rank_idx, preferred in enumerate(order):
-            # Prefix matching handles labels that include dynamic pending counts.
-            if text_label == preferred or text_label.startswith(preferred + " ") or text_label.startswith(preferred + " ·") or text_label.startswith(preferred + " ("):
-                rank = rank_idx
-                break
-        return (rank, idx)
-
-    sorted_indexed = sorted(enumerate(original), key=sort_key)
-    sorted_tabs = st.tabs([label for _, label in sorted_indexed])
-    tabs_by_original_index = [None] * len(original)
-    for visual_idx, (original_idx, _) in enumerate(sorted_indexed):
-        tabs_by_original_index[original_idx] = sorted_tabs[visual_idx]
-    return tabs_by_original_index
-
-
-def render_global_tab_order_settings():
-    """Super Admin editor for one global tab order shared by all roles."""
-    st.subheader("↕️ Global Tab Order & Navigation")
-    st.caption("Choose one portal-wide sequence. Each user will see only the tabs they are permitted to access, arranged in this order. Changing the order does not grant permissions.")
-    current = st.session_state.get("global_tab_order_editor")
-    if not current:
-        current = load_global_tab_order()
-        st.session_state["global_tab_order_editor"] = list(current)
-    current = list(st.session_state["global_tab_order_editor"])
-    if not current:
-        current = list(GLOBAL_TAB_ORDER_DEFAULTS)
-        st.session_state["global_tab_order_editor"] = list(current)
-
-    chosen = st.selectbox("Tab to move", current, key="global_tab_order_chosen")
-    move_col, save_col, reset_col = st.columns(3)
-    with move_col:
-        if st.button("⬆️ Move earlier", key="global_tab_order_up", disabled=current.index(chosen) == 0):
-            pos = current.index(chosen)
-            current[pos - 1], current[pos] = current[pos], current[pos - 1]
-            st.session_state["global_tab_order_editor"] = current
-            st.rerun()
-        if st.button("⬇️ Move later", key="global_tab_order_down", disabled=current.index(chosen) == len(current) - 1):
-            pos = current.index(chosen)
-            current[pos + 1], current[pos] = current[pos], current[pos + 1]
-            st.session_state["global_tab_order_editor"] = current
-            st.rerun()
-    with save_col:
-        if st.button("💾 Save global order", type="primary", key="global_tab_order_save"):
-            save_global_tab_order(current)
-            st.session_state["global_tab_order_editor"] = list(current)
-            st.success("Global tab order saved. It will apply to users' top-level tabs on their next rerun or login.")
-    with reset_col:
-        if st.button("↩️ Reset default order", key="global_tab_order_reset"):
-            st.session_state["global_tab_order_editor"] = list(GLOBAL_TAB_ORDER_DEFAULTS)
-            st.rerun()
-
-    st.markdown("**Current sequence**")
-    for index, label in enumerate(current, start=1):
-        st.write(f"{index}. {label}")
-    st.info("Some specialist roles have a smaller set of tabs. Tabs not listed in this sequence remain after the configured items in their existing relative order.")
-
-
 # Drive restoration is deliberately called AFTER payroll.init_payroll registers
 # the real workbook paths, so payroll workbooks are included in the daily restore.
-# Ensure the injected app folder is a usable path before payroll initialisation.
-if not isinstance(APP_FOLDER, str) or not APP_FOLDER.strip():
-    APP_FOLDER = os.path.join(os.getcwd(), "Acoole_App_Uploads")
-os.makedirs(APP_FOLDER, exist_ok=True)
-
 try:
     payroll.init_payroll(
         app_folder=APP_FOLDER,
@@ -15176,13 +14926,12 @@ TRAINING_ROLE_CONTENT = {
         ]
     },
     "Project Manager": {
-        "emoji": "🏗️", "title": "Projects / Project Manager Training",
-        "intro": "Training for Projects department users, project task assignments and Site Electrician timesheets.",
+        "emoji": "🏗️", "title": "Project Manager Training",
+        "intro": "Training for project-management functions and the request workflow assigned to this role.",
         "topics": [
-            ("🔐 Login & navigation", ["Log in with your assigned credentials and use the Projects department modules displayed for your account.", "If a module or action you need is missing, ask Super Admin to check your role and module permissions."]),
-            ("🏗️ Projects and assigned tasks", ["Open the Projects area and review the projects and tasks assigned to you or your team.", "Open each task and check the project/site, task description, assigned employee, dates and current status before updating it.", "Update task progress only with information confirmed by the site/team, then save or submit using the available controls.", "If an expected task is missing, confirm that it has been assigned to the correct employee/project and use Refresh Data before reporting the issue."]),
-            ("⏱️ Site Electrician timesheet", ["Open the Projects / Site Electrician timesheet workflow available to your account.", "Select the correct project/site and Site Electrician, then check the week or date range before entering hours.", "Enter the actual start and finish times and any required travel, time-away, status or notes fields; do not estimate hours when the actual record is available.", "Review each day and the calculated totals for obvious errors before saving.", "If the timesheet has a submit/approval step, save the entries first and then use the designated submit action. Check the displayed status afterwards.", "If a Site Electrician or project is missing from the selector, ask Super Admin to verify the employee's department/work type, project assignment and your access permissions."]),
-            ("🔄 Refresh, save & support", ["Use Refresh Data when you need the latest assignments or timesheet status.", "After saving, verify that the updated details remain visible. If the save fails, record the exact error and do not assume the change was stored.", "When asking for help, include your username, project/site, employee, week/date, screenshot and exact error message; contact Wais Rahimi for a walkthrough."])
+            ("🔐 Login & navigation", ["Log in with your assigned credentials and use only the modules displayed for your role."]),
+            ("🏗️ Project workflow", ["Use the Project Manager area for the project workflow assigned to your account.", "Review employee/request details carefully before submitting or approving an available action."]),
+            ("🔄 Refresh & support", ["Refresh data when you need the latest information and contact Wais Rahimi for help with any how-to question."])
         ]
     },
     "Accounts Manager": {
@@ -15289,7 +15038,6 @@ def _training_role_key(role_name, department_name=""):
         "National Grid": "National Grid Manager",
         "Isolator": "Isolator Manager",
         "Project": "Project Manager",
-        "Projects": "Project Manager",  # Current department label is plural in user records.
         "Store": "Store Manager",
         "HR": "HR Manager",
         "Human Resources": "HR Manager",
@@ -15813,7 +15561,7 @@ if role == "Employee":
     has_training_help = bool(user_info.get("can_access_training_help", False))
     has_employee_items = bool(user_info.get("can_access_employee_items", False))
     if has_training_help and has_employee_items:
-        training_tab, items_tab = global_ordered_tabs(["📚 Training & Help", "🧰 My Employee Items"])
+        training_tab, items_tab = st.tabs(["📚 Training & Help", "🧰 My Employee Items"])
         with training_tab:
             render_training_help(user_info)
         with items_tab:
@@ -15857,7 +15605,7 @@ if role == "Employee":
 
 elif role == "Work Order Employee":
     if user_info.get("can_access_training_help", False):
-        training_tab, portal_tab = global_ordered_tabs(["📚 Training & Help", "🛠️ Work Orders"])
+        training_tab, portal_tab = st.tabs(["📚 Training & Help", "🛠️ Work Orders"])
         with training_tab: render_training_help(user_info)
         with portal_tab: render_work_order_employee_portal(full_name, dept)
     else:
@@ -15874,7 +15622,7 @@ elif role == "Payroll":
         outer_labels.append("📚 Training & Help Centre")
     if has_payroll_timesheet:
         outer_labels.append("📋 Timesheet")
-    outer_tabs = global_ordered_tabs(outer_labels)
+    outer_tabs = st.tabs(outer_labels)
     payroll_main_tab = outer_tabs[0]
     training_main_tab = outer_tabs[1] if has_training_help else None
     timesheet_main_tab = outer_tabs[-1] if has_payroll_timesheet else None
@@ -15951,7 +15699,7 @@ elif role == "Work Order Manager":
     dept_name = dept
     wo_mgr_tab_labels = ["➕ Addition & Deduction", "🛠️ Work Orders"]
     if user_info.get("can_access_training_help", False): wo_mgr_tab_labels.append("📚 Training & Help")
-    wo_mgr_tabs = global_ordered_tabs(wo_mgr_tab_labels)
+    wo_mgr_tabs = st.tabs(wo_mgr_tab_labels)
     request_tab, work_order_tab = wo_mgr_tabs[0], wo_mgr_tabs[1]
     training_help_tab = wo_mgr_tabs[2] if len(wo_mgr_tabs) > 2 else None
     with request_tab:
@@ -16137,7 +15885,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
         store_top_level_labels.append("📦 Store Department")
         if user_info.get("can_access_training_help", False):
             store_top_level_labels.append("📚 Training & Help")
-        store_top_level_tabs = global_ordered_tabs(store_top_level_labels)
+        store_top_level_tabs = st.tabs(store_top_level_labels)
         store_top_level_idx = 0
         if has_addition_deduction:
             with store_top_level_tabs[store_top_level_idx]:
@@ -16175,7 +15923,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
             st.subheader("🔐 Access Restricted")
             st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
         else:
-            tabs = global_ordered_tabs(labels)
+            tabs = st.tabs(labels)
             tab_idx = 0
             if has_addition_deduction:
                 with tabs[tab_idx]:
@@ -16486,7 +16234,7 @@ elif role == "Director":
     if user_info.get("can_access_training_help", False):
         director_tab_labels.append("📚 Training & Help")
     director_tab_labels.append("📋 Payroll Timesheet")
-    director_tabs = global_ordered_tabs(director_tab_labels)
+    director_tabs = st.tabs(director_tab_labels)
     director_addition_tab = director_tabs[0]
     if director_hr_access_enabled:
         director_hr_access_tab = director_tabs[1]
@@ -16668,7 +16416,7 @@ elif role == "Director":
         payroll.render_payroll_timesheet(user_info, mode="director")
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab, super_payroll_tab, super_tab_order_tab = global_ordered_tabs([
+    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab, super_payroll_tab = st.tabs([
         "➕ Addition & Deduction",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
@@ -16678,11 +16426,8 @@ elif role == "Super Admin":
         "🛡️ Data Control",
         "🔧 System Management",
         "📚 Training & Help",
-        "📋 Payroll Timesheet",
-        "↕️ Tab Order"
+        "📋 Payroll Timesheet"
     ])
-    with super_tab_order_tab:
-        render_global_tab_order_settings()
     with super_add_ded_tab:
         st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
         st.info("✅ View ALL requests across ALL departments. Download PDFs. **Approval → Director only.**")
@@ -16875,61 +16620,6 @@ elif role == "Super Admin":
                 _payroll_stem,
                 "backup_" + _payroll_stem,
             ))
-        # One-click full backup: include every known workbook plus all files under
-        # the application's data/attachment/PDF folders. Keep secrets and source
-        # code outside the archive by deliberately limiting the folder scan.
-        st.markdown("### 📦 Download All Data Backups in One ZIP")
-        st.caption("Creates one ZIP containing all available backup workbooks plus saved attachments, PDFs and other files in the portal's application-data folders.")
-        try:
-            _zip_buffer = io.BytesIO()
-            _included_paths = {}
-            for _label, _path, _stem, _key in backup_files:
-                if _path and os.path.isfile(_path):
-                    _included_paths[os.path.abspath(_path)] = os.path.basename(_path)
-
-            # These folders contain user-uploaded documents and generated PDFs.
-            _data_dirs = [
-                APP_FOLDER, UPLOAD_DIR, PDF_DIR, WORK_ORDER_PDF_DIR,
-                INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, STORE_DEDUCTION_PDF_DIR,
-            ]
-            for _folder in _data_dirs:
-                if _folder and os.path.isdir(_folder):
-                    for _root, _dirs, _files in os.walk(_folder):
-                        # Avoid accidentally archiving caches or VCS metadata.
-                        _dirs[:] = [d for d in _dirs if d not in {"__pycache__", ".git", ".streamlit"}]
-                        for _filename in _files:
-                            _full = os.path.abspath(os.path.join(_root, _filename))
-                            if os.path.isfile(_full):
-                                _included_paths[_full] = os.path.relpath(_full, BASE_DIR)
-
-            with zipfile.ZipFile(_zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as _zf:
-                for _full_path, _archive_name in sorted(_included_paths.items()):
-                    try:
-                        _zf.write(_full_path, arcname=_archive_name)
-                    except (OSError, PermissionError) as _backup_file_error:
-                        # Continue packing other files if one optional file is unreadable.
-                        pass
-                _manifest = "Full data backup generated: " + datetime.now().isoformat(timespec="seconds") + "\n"
-                _manifest += "Files included: " + str(len(_included_paths)) + "\n"
-                _manifest += "Contains files available on this application server; remote-only Google Drive files are not fetched.\n"
-                _zf.writestr("BACKUP_README.txt", _manifest)
-            _zip_buffer.seek(0)
-            st.download_button(
-                label="⬇️ Download ALL Data Files as ZIP",
-                data=_zip_buffer.getvalue(),
-                file_name=f"ACOole_FULL_DATA_BACKUP_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zip",
-                mime="application/zip",
-                type="primary",
-                key="super_admin_download_all_data_zip_backup_page",
-                width="stretch",
-                help="Downloads all available backup workbooks and files from the portal data folders in one ZIP.",
-            )
-            st.caption(f"Prepared {len(_included_paths)} available files for the full backup archive.")
-        except Exception as _zip_error:
-            st.error(f"Unable to prepare the full ZIP backup: {_zip_error}")
-
-        st.divider()
-        st.markdown("### Individual Data Backups")
         backup_cols = st.columns(3)
         for i, (label, path, stem, key) in enumerate(backup_files):
             with backup_cols[i % 3]:
