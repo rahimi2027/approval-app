@@ -81,7 +81,7 @@ PAYROLL_STATUS_COLOURS = {
     "Authorised Absence": ("#A9D18E", "#222222"),
     "Overtime Approved": ("#70AD47", "#14210D"),
     "Maternity": ("#9DC3E6", "#222222"),
-    "Lay-off": ("#D9D9D9", "#222222"),
+    "Lay-off": ("#FBE2D5", "#222222"),
     "Leaver": ("#FF0000", "#FFFFFF"),
     "N/A": ("#FFE699", "#222222"),
     "Unpaid Absence": ("#00FFFF", "#222222"),
@@ -16729,7 +16729,8 @@ elif role == "Super Admin":
         st.warning(
             "Use this only after downloading the backups above. "
             "It permanently clears all operational/test data: requests, work orders, "
-            "inspector bonuses, HR leave requests and audit history. User accounts and system settings are NOT deleted."
+            "inspector bonuses, HR leave requests, audit history and all payroll timesheet entries/approval states. "
+            "Employee records, user accounts and system settings are NOT deleted."
         )
 
         def _clear_live_launch_data():
@@ -16756,6 +16757,27 @@ elif role == "Super Admin":
             sync_saved_file_to_drive(EMPLOYEE_ITEMS_PATH)
             sync_saved_file_to_drive(ITEM_CHECKIN_PATH)
             clear_audit_log_file()
+
+            # A live launch must also start the payroll timesheet module fresh.
+            # Keep employee/user master records intact, but remove all existing
+            # time-in/out entries, day statuses, notes, submissions, approvals,
+            # and timesheet correction flags from the four payroll workbooks.
+            payroll_empty_workbooks = {
+                "payroll_timesheets.xlsx": payroll.PAYROLL_TIMESHEETS_COLUMNS,
+                "payroll_week_states.xlsx": payroll.PAYROLL_WEEK_STATES_COLUMNS,
+                "payroll_flags.xlsx": payroll.PAYROLL_FLAGS_COLUMNS,
+                "payroll_approvals.xlsx": payroll.PAYROLL_APPROVALS_COLUMNS,
+            }
+            for payroll_path, backup_name in payroll.get_backup_filenames().items():
+                basename = os.path.basename(payroll_path)
+                columns = payroll_empty_workbooks.get(basename)
+                if columns is not None:
+                    _write_empty_excel(payroll_path, columns)
+                    sync_saved_file_to_drive(payroll_path)
+
+            # Clear any in-memory copies too, so a rerun cannot restore stale data.
+            for state_key in ("payroll_ts", "payroll_states", "payroll_flags", "payroll_approvals"):
+                st.session_state.pop(state_key, None)
 
             for folder in (PDF_DIR, WORK_ORDER_PDF_DIR, INSPECTOR_BONUS_PDF_DIR, HR_LEAVE_PDF_DIR, STORE_DEDUCTION_PDF_DIR, UPLOAD_DIR):
                 if os.path.isdir(folder):
@@ -16784,8 +16806,8 @@ elif role == "Super Admin":
         else:
             st.error(
                 "⚠️ FINAL CONFIRMATION: this will permanently remove all requests, "
-                "work orders, inspector bonuses, HR leave requests, Store Deductions, audit history, generated PDFs and uploaded attachments. "
-                "Users and system settings will remain."
+                "work orders, inspector bonuses, HR leave requests, Store Deductions, audit history, payroll timesheet entries/approvals, generated PDFs and uploaded attachments. "
+                "Employee records, users and system settings will remain."
             )
             live_c1, live_c2 = st.columns(2)
             with live_c1:
@@ -16798,7 +16820,7 @@ elif role == "Super Admin":
                     try:
                         _clear_live_launch_data()
                         st.session_state["confirm_live_launch"] = False
-                        st.success("✅ Software is ready for live use. All operational/test data has been cleared.")
+                        st.success("✅ Software is ready for live use. Operational/test data and all existing payroll timesheet entries/approval states have been cleared. Employee records and user accounts were preserved.")
                         st.rerun()
                     except Exception as e:
                         st.session_state["confirm_clear_live_launch"] = False
