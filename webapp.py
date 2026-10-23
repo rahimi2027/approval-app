@@ -1905,7 +1905,7 @@ def _maybe_finalize(week_key, dept, working_emps, approver_name=""):
 # ============================================================
 
 def _build_week_excel(week_key, dept):
-    """Build the weekly payroll workbook with independent In/Out time cells."""
+    """Return an Excel workbook matching the columns shown in the on-screen timesheet."""
     from io import BytesIO
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -1922,7 +1922,7 @@ def _build_week_excel(week_key, dept):
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.freeze_panes = "C3"
-    ws.auto_filter.ref = "A2:W2"
+    ws.auto_filter.ref = "A2:R2"
 
     navy = PatternFill("solid", fgColor="1F4E78")
     light = PatternFill("solid", fgColor="F3F6F9")
@@ -1932,33 +1932,33 @@ def _build_week_excel(week_key, dept):
     thin = Side(style="thin", color="D9E1F2")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # 23 columns: employee + contract, separate In/Out columns for each day,
-    # followed by the 11 payroll summary columns.
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=23)
+    # Title row spans all 18 columns, matching the on-screen timesheet.
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=18)
     title = f"{_department_label(dept)} - {week_obj['label']} Payroll - {PAYROLL_MONTH_LABELS[week_obj['month']]}"
     ws.cell(1, 1, title).font = Font(size=16, bold=True, color="FFFFFF")
     ws.cell(1, 1).fill = navy
     ws.cell(1, 1).alignment = Alignment(horizontal="center", vertical="center")
-    for col in range(1, 24):
+    for col in range(1, 19):
         ws.cell(1, col).fill = navy
     ws.row_dimensions[1].height = 28
 
+    # Keep the same column order as the software screen.
     headers = ["Employee", "Contract (wk)"]
     for iso in week_obj["dates"]:
         dt = datetime.fromisoformat(iso)
-        day_label = dt.strftime('%a %d %b')
-        headers.extend([f"{day_label}\nTime In", f"{day_label}\nTime Out"])
+        headers.append(f"{dt.strftime('%a %d %b')}")
     headers += [
         "Days", "Sub Total", "Lunch", "Travel", "Away", "Working",
         "Contracted", "Wk Extra", "Balance", "Check", "Notes",
     ]
+
     for i, h in enumerate(headers, start=1):
         c = ws.cell(2, i, h)
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = navy
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         c.border = border
-    ws.row_dimensions[2].height = 34
+    ws.row_dimensions[2].height = 30
 
     # Employee rows
     r = 3
@@ -1978,45 +1978,34 @@ def _build_week_excel(week_key, dept):
         note_items = []
         for i in range(5):
             d = ts_days[i]
-            in_col = 3 + i * 2
-            out_col = in_col + 1
-            status = str((d or {}).get("status", "") or "").strip()
-            is_time_entry = bool(
-                d and status in PAYROLL_TIME_ENTRY_STATUSES and d.get("in") and d.get("out")
-            )
-
-            if is_time_entry:
-                in_cell = ws.cell(r, in_col, str(d.get("in", "")))
-                out_cell = ws.cell(r, out_col, f"{d.get('out', '')}\n({_m2t(_day_total(d) or 0)})")
-                # Highlight only the side responsible for the attendance status.
-                if status == "Late In":
-                    in_cell.fill = yellow
-                    in_cell.font = Font(color="9A6700", bold=True)
-                elif status == "Early Out":
-                    out_cell.fill = yellow
-                    out_cell.font = Font(color="9A6700", bold=True)
+            if d is None:
+                txt = ""
+            elif d.get("status") in PAYROLL_TIME_ENTRY_STATUSES and d.get("in") and d.get("out"):
+                # Compact Excel layout requested: time range on line one,
+                # duration on line two. Extra day details remain in the Notes
+                # summary column rather than making each weekday column huge.
+                details = [f"{d['in']}→{d['out']}", f"({_m2t(_day_total(d) or 0)})"]
+                txt = "\n".join(details)
             else:
-                # For leave/absence statuses, place the label in the first cell
-                # and colour both cells so the day remains clearly marked.
-                if d:
-                    ws.cell(r, in_col, status)
-                    status_colour = PAYROLL_STATUS_COLOURS.get(status)
-                    if status_colour and status != "Worked":
-                        bg_hex, fg_hex = status_colour
-                        for col in (in_col, out_col):
-                            ws.cell(r, col).fill = PatternFill("solid", fgColor=bg_hex.lstrip("#"))
-                            ws.cell(r, col).font = Font(color=fg_hex.lstrip("#"))
+                # Non-working days show their status (e.g. Holiday, Sick).
+                txt = str(d.get("status", "") or "")
 
-            for col in (in_col, out_col):
-                cell = ws.cell(r, col)
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                if i in emp_flags:
-                    cell.fill = red
-                    cell.font = Font(color="9C0006")
+            cell = ws.cell(r, 3 + i, txt)
+            status_for_colour = str((d or {}).get("status", "") or "").strip()
+            # Preserve the same status background colours used in the app UI.
+            status_colour = PAYROLL_STATUS_COLOURS.get(status_for_colour)
+            if status_colour and status_for_colour != "Worked":
+                bg_hex, fg_hex = status_colour
+                cell.fill = PatternFill("solid", fgColor=bg_hex.lstrip("#"))
+                cell.font = Font(color=fg_hex.lstrip("#"))
+            if i in emp_flags:
+                cell.fill = red
+                cell.font = Font(color="9C0006")
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
             if d:
                 note_text = str(d.get("note", "") or "").strip()
-                status_text = status
+                status_text = str(d.get("status", "") or "").strip()
                 date_label = _ordinal_day(week_obj["dates"][i])
                 if status_text and status_text not in ("Worked", "Late In", "Early Out"):
                     display_status = "Half Day Holiday" if status_text == "HD Holiday" else status_text
@@ -2030,20 +2019,20 @@ def _build_week_excel(week_key, dept):
                     if item not in note_items:
                         note_items.append(item)
 
-        # Summary columns now start at M (13) and end at W (23).
-        summary_values = [
-            calc["days_worked"],
-            _m2t(calc["sub_total"]),
-            _m2t(calc["lunch"]) if calc["days_worked"] else "—",
-            _m2t(calc["travel"]),
-            _m2t(calc["away"]),
-            _m2t(calc["working"]) if calc["days_worked"] else "—",
-            _m2t(calc["contracted"]),
-            "—" if bal["week_net"] is None else (("+" if bal["week_net"] >= 0 else "") + _m2t(bal["week_net"])),
-            "—" if bal["balance"] is None else (("+" if bal["balance"] >= 0 else "") + _m2t(bal["balance"])),
-        ]
-        for col, value in enumerate(summary_values, start=13):
-            ws.cell(r, col, value)
+        # Columns 8–18 mirror the UI: Days, Sub Total, Lunch, Travel, Away,
+        # Working, Contracted, Wk Extra, Balance, Check, Notes.
+        ws.cell(r, 8, calc["days_worked"])
+        ws.cell(r, 9, _m2t(calc["sub_total"]))
+        ws.cell(r, 10, _m2t(calc["lunch"]) if calc["days_worked"] else "—")
+        ws.cell(r, 11, _m2t(calc["travel"]))
+        ws.cell(r, 12, _m2t(calc["away"]))
+        ws.cell(r, 13, _m2t(calc["working"]) if calc["days_worked"] else "—")
+        ws.cell(r, 14, _m2t(calc["contracted"]))
+        ws.cell(r, 15, "—" if bal["week_net"] is None
+                else (("+" if bal["week_net"] >= 0 else "") + _m2t(bal["week_net"])))
+        ws.cell(r, 16, "—" if bal["balance"] is None
+                else (("+" if bal["balance"] >= 0 else "") + _m2t(bal["balance"])))
+
         if calc["days_worked"] == 0:
             check_text = "N/A"
         elif calc["check_ok"]:
@@ -2052,34 +2041,37 @@ def _build_week_excel(week_key, dept):
             check_text = "Hours short"
         if emp_flags:
             check_text = "Flagged"
-        ws.cell(r, 22, check_text)
-        ws.cell(r, 23, " · ".join(note_items) if note_items else "—")
+        ws.cell(r, 17, check_text)
+        ws.cell(r, 18, " · ".join(note_items) if note_items else "—")
 
-        for col in range(13, 20):
+        for col in (8, 9, 10, 11, 12, 13, 14):
             ws.cell(r, col).fill = light
-        ws.cell(r, 20).fill = yellow
+        ws.cell(r, 15).fill = yellow
+        ws.cell(r, 16).fill = green
         if emp_flags:
-            ws.cell(r, 22).fill = red
-        ws.cell(r, 21).fill = green
+            ws.cell(r, 17).fill = red
 
-        for col in range(1, 24):
+        for col in range(1, 19):
             ws.cell(r, col).border = border
             ws.cell(r, col).alignment = Alignment(
                 horizontal="center" if col > 1 else "left",
                 vertical="center", wrap_text=True,
             )
-        max_lines = max([len(str(ws.cell(r, c).value or "").splitlines()) for c in range(3, 13)] + [1])
+        # Compact row height for the requested two-line day display.
+        max_lines = max([len(str(ws.cell(r, c).value or "").splitlines()) for c in range(3, 8)] + [1])
         ws.row_dimensions[r].height = max(32, min(48, 16 * max_lines))
         r += 1
 
+    # Practical widths for all 18 columns.
     widths = {
-        "A": 30, "B": 12,
-        "C": 8, "D": 8, "E": 8, "F": 8, "G": 8, "H": 8, "I": 8, "J": 8, "K": 8, "L": 8,
-        "M": 7, "N": 10, "O": 8, "P": 8, "Q": 8, "R": 9, "S": 10, "T": 9, "U": 10, "V": 11, "W": 32,
+        "A": 32, "B": 13, "C": 15, "D": 15, "E": 15, "F": 15, "G": 15,
+        "H": 8, "I": 11, "J": 9, "K": 9, "L": 9, "M": 11, "N": 12,
+        "O": 11, "P": 11, "Q": 12, "R": 32,
     }
     for letter, width in widths.items():
         ws.column_dimensions[letter].width = width
 
+    # Signature / audit block, separated from the employee table by three rows.
     state = _get_state(week_key, dept)
     signature_start = r + 3
     prepared_by = str(state.get("submitted_by", "") or "Unknown")
@@ -2096,11 +2088,13 @@ def _build_week_excel(week_key, dept):
     ws.cell(signature_start, 1).alignment = Alignment(vertical="center")
     ws.cell(signature_start + 1, 1, f"Date of Submission: {prepared_at or '—'}")
     ws.cell(signature_start + 1, 1).alignment = Alignment(vertical="center")
+    # Give each signer a larger, easy-to-use signature area in the exported workbook.
     prepared_signature_row = signature_start + 2
     ws.cell(prepared_signature_row, 1, "Signature: " + "_" * 65)
     ws.cell(prepared_signature_row, 1).alignment = Alignment(vertical="center")
     ws.row_dimensions[prepared_signature_row].height = 42
 
+    # Leave two clear rows between the preparer's and director's sign-off sections.
     approved_name_row = signature_start + 5
     ws.cell(approved_name_row, 1, f"Approved By: {approved_by}")
     ws.cell(approved_name_row, 1).font = Font(bold=True, size=11)
@@ -2112,8 +2106,10 @@ def _build_week_excel(week_key, dept):
     ws.cell(director_signature_row, 1).alignment = Alignment(vertical="center")
     ws.row_dimensions[director_signature_row].height = 42
 
-    # Status legend, placed after the expanded day columns.
-    legend_col = 13  # M = Days
+    # Horizontal status colour legend at the right of the sign-off block,
+    # starting under the "Days" column (H). Each status title itself is filled
+    # with its matching colour; do not add separate colour swatch cells.
+    legend_col = 8  # H = Days
     legend_items = [
         ("Late/Early Out", "Late In"), ("Sick", "Sick"), ("College", "College"),
         ("Holiday", "Holiday"), ("Unpaid Holiday", "Unpaid Holiday"),
@@ -2134,6 +2130,8 @@ def _build_week_excel(week_key, dept):
         legend_cell.font = Font(color=fg_hex.lstrip("#"), bold=True, size=9)
         legend_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         legend_cell.border = border
+        # Use the numeric column index directly for compatibility across
+        # openpyxl versions; avoid relying on Cell.column_letter here.
         from openpyxl.utils import get_column_letter
         legend_column_letter = get_column_letter(legend_target_col)
         current_width = ws.column_dimensions[legend_column_letter].width
