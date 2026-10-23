@@ -723,7 +723,7 @@ def _calc_row(emp, week_key, dept):
     working = sub - lunch
     contracted = daily_contract * days_worked
     week_extra = None if days_worked == 0 else working - contracted
-    check_ok = (working + away) >= contracted
+    check_ok = working >= contracted
 
     return {
         "sub_total": sub, "travel": travel, "away": away,
@@ -1563,7 +1563,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 and _t2m(d.get("out")) is not None
             )
             expected_minutes = daily_contract * recorded_work_days
-            short_by = max(0, expected_minutes - (c["working"] + c["away"]))
+            short_by = max(0, expected_minutes - c["working"])
 
             if recorded_work_days and short_by > 0:
                 items.append({
@@ -1573,8 +1573,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     "detail": (f"Working {_m2t(c['working'])} vs pro-rated contract "
                                f"{_m2t(expected_minutes)} (short by {_m2t(short_by)})"),
                 })
-            elif recorded_work_days and c["working"] + c["away"] > expected_minutes:
-                extra = c["working"] + c["away"] - expected_minutes
+            elif recorded_work_days and c["working"] > expected_minutes:
+                extra = c["working"] - expected_minutes
                 items.append({
                     "icon": "➕",
                     "headline": f"{emp.get('name', '')} — extra hours this week",
@@ -6567,9 +6567,10 @@ def render_hr_portal(current_user_info=None):
     emp = _hrp_get_employee(selected_employee_id) if selected_employee_id else None
 
     if is_hr:
-        tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
+        tab_hr, tab_calendar, tab_reports, tab_details, tab_leave, tab_history = st.tabs([
             "🧑‍💼 HR Management",
             "📅 Holiday Calendar",
+            "📥 HR Reports",
             "👤 Employee Details",
             "✏️ Leave",
             "📋 Leave History",
@@ -6582,16 +6583,17 @@ def render_hr_portal(current_user_info=None):
         ])
         tab_hr = None
         tab_calendar = None
+        tab_reports = None
 
     if is_hr and tab_hr is not None:
         with tab_hr:
             st.subheader("🧑‍💼 HR Management")
             st.caption("Employee management, leave & holidays, leavers, clearance and HR reports")
 
-            hr_employee_section, hr_leave_section, hr_leaver_section = st.tabs([
+            hr_employee_section, hr_leaver_section, hr_leave_section = st.tabs([
                 "👥 Employee Management",
+                "🚪 Leavers, Clearance",
                 "📅 Leave & Holidays",
-                "🚪 Leavers, Clearance & Reports",
             ])
 
             with hr_employee_section:
@@ -6614,11 +6616,10 @@ def render_hr_portal(current_user_info=None):
                     hr_approval_tab = None
 
             with hr_leaver_section:
-                hr_leaving_tab, hr_clearance_tab, hr_leavers_tab, hr_reports_tab = st.tabs([
+                hr_leaving_tab, hr_clearance_tab, hr_leavers_tab = st.tabs([
                     "🚪 Employee Leaving",
                     "🔗 Leaver Clearance",
                     "📚 Leavers",
-                    "📥 HR Reports",
                 ])
 
             with employee_overview_tab:
@@ -7762,8 +7763,8 @@ def render_hr_portal(current_user_info=None):
         else:
             st.info("No employee record is available.")
 
-    if is_hr and hr_reports_tab is not None:
-        with hr_reports_tab:
+    if is_hr and tab_reports is not None:
+        with tab_reports:
             render_hr_download_reports()
 
     if not is_hr:
@@ -15702,14 +15703,14 @@ elif role == "Payroll":
     outer_labels = ["🧾 Payroll"]
     has_training_help = bool(user_info.get("can_access_training_help", False))
     has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False) or _normalise_subdepartment_permissions(user_info.get("can_access_subdepartment_timesheets", [])))
+    if has_payroll_timesheet:
+        outer_labels.insert(0, "📋 Timesheet")
     if has_training_help:
         outer_labels.append("📚 Training & Help Centre")
-    if has_payroll_timesheet:
-        outer_labels.append("📋 Timesheet")
     outer_tabs = st.tabs(outer_labels)
-    payroll_main_tab = outer_tabs[0]
-    training_main_tab = outer_tabs[1] if has_training_help else None
-    timesheet_main_tab = outer_tabs[-1] if has_payroll_timesheet else None
+    timesheet_main_tab = outer_tabs[0] if has_payroll_timesheet else None
+    payroll_main_tab = outer_tabs[1] if has_payroll_timesheet else outer_tabs[0]
+    training_main_tab = outer_tabs[-1] if has_training_help else None
 
     with payroll_main_tab:
         payroll_tab_labels = [
@@ -16002,13 +16003,17 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
         if user_info.get("can_access_training_help", False): labels.append("📚 Training & Help")
         has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False) or _normalise_subdepartment_permissions(user_info.get("can_access_subdepartment_timesheets", [])))
-        if has_payroll_timesheet: labels.append("📋 Payroll Timesheet")
+        if has_payroll_timesheet: labels.insert(0, "📋 Payroll Timesheet")
         if not labels:
             st.subheader("🔐 Access Restricted")
             st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
         else:
             tabs = st.tabs(labels)
             tab_idx = 0
+            if has_payroll_timesheet:
+                with tabs[tab_idx]:
+                    payroll.render_payroll_timesheet(user_info, mode="payroll" if user_info.get("can_access_all_departments_timesheet", False) else "manager")
+                tab_idx += 1
             if has_addition_deduction:
                 with tabs[tab_idx]:
                     if st.session_state.get("editing_request_id"):
@@ -16244,10 +16249,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
                 with tabs[tab_idx]:
                     render_training_help(user_info)
                 tab_idx += 1
-            if has_payroll_timesheet:
-                with tabs[tab_idx]:
-                    payroll.render_payroll_timesheet(user_info, mode="payroll" if user_info.get("can_access_all_departments_timesheet", False) else "manager")
-                tab_idx += 1
 
 
 elif role == "Director":
@@ -16317,11 +16318,22 @@ elif role == "Director":
         director_tab_labels.insert(1, "📊 HR Reports & Calendar")
     if user_info.get("can_access_training_help", False):
         director_tab_labels.append("📚 Training & Help")
-    director_tab_labels.append("📋 Payroll Timesheet")
+    director_tab_labels.insert(0, "📋 Payroll Timesheet")
     director_tabs = st.tabs(director_tab_labels)
-    director_addition_tab = director_tabs[0]
+    director_payroll_tab = director_tabs[0]
+    director_addition_tab = director_tabs[1]
     if director_hr_access_enabled:
-        director_hr_access_tab = director_tabs[1]
+        director_hr_access_tab = director_tabs[2]
+        director_leaver_payroll_tab = director_tabs[3]
+        director_hr_leave_tab = director_tabs[4]
+        director_store_ded_tab = director_tabs[5]
+        director_store_ret_tab = director_tabs[6]
+        director_employee_items_tab = director_tabs[7]
+        director_work_order_tab = director_tabs[8]
+        director_inspector_tab = director_tabs[9]
+        director_training_tab = director_tabs[10] if user_info.get("can_access_training_help", False) else None
+    else:
+        director_hr_access_tab = None
         director_leaver_payroll_tab = director_tabs[2]
         director_hr_leave_tab = director_tabs[3]
         director_store_ded_tab = director_tabs[4]
@@ -16330,16 +16342,6 @@ elif role == "Director":
         director_work_order_tab = director_tabs[7]
         director_inspector_tab = director_tabs[8]
         director_training_tab = director_tabs[9] if user_info.get("can_access_training_help", False) else None
-    else:
-        director_hr_access_tab = None
-        director_leaver_payroll_tab = director_tabs[1]
-        director_hr_leave_tab = director_tabs[2]
-        director_store_ded_tab = director_tabs[3]
-        director_store_ret_tab = director_tabs[4]
-        director_employee_items_tab = director_tabs[5]
-        director_work_order_tab = director_tabs[6]
-        director_inspector_tab = director_tabs[7]
-        director_training_tab = director_tabs[8] if user_info.get("can_access_training_help", False) else None
     with director_addition_tab:
         st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -16496,11 +16498,12 @@ elif role == "Director":
     if director_training_tab is not None:
         with director_training_tab:
             render_training_help(user_info)
-    with director_tabs[-1]:
+    with director_payroll_tab:
         payroll.render_payroll_timesheet(user_info, mode="director")
 
 elif role == "Super Admin":
-    super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab, super_payroll_tab = st.tabs([
+    super_payroll_tab, super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab = st.tabs([
+        "📋 Payroll Timesheet",
         "➕ Addition & Deduction",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
@@ -16509,8 +16512,7 @@ elif role == "Super Admin":
         "💰 National Grid Inspector Bonus",
         "🛡️ Data Control",
         "🔧 System Management",
-        "📚 Training & Help",
-        "📋 Payroll Timesheet"
+        "📚 Training & Help"
     ])
     with super_add_ded_tab:
         st.subheader("🛡️ Super Admin — All Addition & Deduction Requests")
