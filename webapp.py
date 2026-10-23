@@ -2108,11 +2108,16 @@ def _build_week_excel(week_key, dept):
     if str(state.get("status", "")).strip().casefold() == "approved" and os.path.isfile(APPROVED_STAMP_PATH):
         from openpyxl.drawing.image import Image as XLImage
         stamp_image = XLImage(APPROVED_STAMP_PATH)
-        # Size the stamp to sit neatly over the Director signature area in Excel.
+        # Preserve the stamp image's original aspect ratio so it keeps its
+        # designed shape (Excel otherwise stretches it if width/height differ).
+        original_width, original_height = stamp_image.width, stamp_image.height
+        # XLImage.width/height are the original pixel dimensions when loaded.
+        # Calculate height from the original ratio before changing either size.
+        original_ratio = original_width / original_height if original_height else (345 / 99)
         stamp_image.width = 190
-        stamp_image.height = 58
+        stamp_image.height = stamp_image.width / original_ratio
         ws.add_image(stamp_image, f"A{director_signature_row}")
-        ws.row_dimensions[director_signature_row].height = 46
+        ws.row_dimensions[director_signature_row].height = max(42, stamp_image.height * 0.75)
     else:
         ws.cell(director_signature_row, 1, "Signature: " + "_" * 65)
         ws.cell(director_signature_row, 1).alignment = Alignment(vertical="center")
