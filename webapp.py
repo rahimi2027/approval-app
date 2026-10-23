@@ -7993,47 +7993,47 @@ def render_hrp_employee_leaving(current_user_info=None):
                         st.session_state["hr_leave_last_created_id"] = new_id
                         st.rerun()
 
-st.divider()
-st.subheader("📋 Submitted Final Holiday Settlements")
-final_records = [r for r in load_hr_leave(force=False) if _hrp_is_final_holiday_settlement_record(r)]
-if final_records:
-    for r in final_records[:20]:
-        status = str(r.get("status", "pending")).strip().casefold()
-        icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
-        with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):
-            st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")
-            st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")
-            st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")
-            if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")
-            if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")
-            if status == "pending":
-                edit_key = f"hrp_edit_final_{r.get('id')}"
-                if st.button("✏️ Edit Pending Settlement", key=edit_key):
-                    st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True
-                if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):
-                    new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")
-                    new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")
-                    new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")
-                    ec1, ec2 = st.columns(2)
-                    with ec1:
-                        if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", width="stretch"):
-                            records = load_hr_leave(force=True)
-                            for rr in records:
-                                if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):
-                                    rr['manager'] = new_manager.strip()
-                                    rr['amount'] = float(new_amount)
-                                    rr['desc'] = new_desc.strip()
-                                    break
-                            save_all_hr_leave(records)
-                            st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)
-                            st.success(f"Settlement #{r.get('id')} updated.")
-                            st.rerun()
-                    with ec2:
-                        if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", width="stretch"):
-                            st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)
-                            st.rerun()
-else:
-    st.info("No final holiday settlements have been submitted yet.")
+            st.divider()
+            st.subheader("📋 Submitted Final Holiday Settlements")
+            final_records = [r for r in load_hr_leave(force=False) if _hrp_is_final_holiday_settlement_record(r)]
+            if final_records:
+                for r in final_records[:20]:
+                    status = str(r.get("status", "pending")).strip().casefold()
+                    icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
+                    with st.expander(f"{icon} Settlement #{r.get('id')} | {r.get('emp_name')} | {r.get('type')} | {float(r.get('days', 0) or 0):.1f} days | {status.upper()}"):
+                        st.write(f"👤 **Employee:** {r.get('emp_name')} | 🆔 {r.get('employee_id')} | 🏢 {r.get('emp_dept')}")
+                        st.write(f"🔄 **Type:** {r.get('type')} | 🔢 **Days:** {float(r.get('days', 0) or 0):.1f} | 💷 **Amount:** £{float(r.get('amount', 0) or 0):.2f}")
+                        st.write(f"📅 **Leaving / Settlement Date:** {r.get('date')} | 📝 **Submitted by:** {r.get('submitted_by')}")
+                        if r.get('director_comments'): st.info(f"💬 Director: {r.get('director_comments')}")
+                        if r.get('rejection_reason'): st.error(f"❌ Rejection: {r.get('rejection_reason')}")
+                        if status == "pending":
+                            edit_key = f"hrp_edit_final_{r.get('id')}"
+                            if st.button("✏️ Edit Pending Settlement", key=edit_key):
+                                st.session_state[f"hrp_edit_final_open_{r.get('id')}"] = True
+                            if st.session_state.get(f"hrp_edit_final_open_{r.get('id')}"):
+                                new_manager = st.text_input("Line Manager", value=str(r.get('manager', '') or ''), key=f"hrp_final_mgr_{r.get('id')}")
+                                new_amount = st.number_input("Amount (£)", min_value=0.01, value=float(r.get('amount', 0.01) or 0.01), step=1.0, key=f"hrp_final_amt_{r.get('id')}")
+                                new_desc = st.text_area("Description / Justification", value=str(r.get('desc', '') or ''), key=f"hrp_final_desc_{r.get('id')}")
+                                ec1, ec2 = st.columns(2)
+                                with ec1:
+                                    if st.button("💾 Save Changes", key=f"hrp_save_final_{r.get('id')}", type="primary", width="stretch"):
+                                        records = load_hr_leave(force=True)
+                                        for rr in records:
+                                            if int(rr.get('id', 0) or 0) == int(r.get('id', 0) or 0):
+                                                rr['manager'] = new_manager.strip()
+                                                rr['amount'] = float(new_amount)
+                                                rr['desc'] = new_desc.strip()
+                                                break
+                                        save_all_hr_leave(records)
+                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)
+                                        st.success(f"Settlement #{r.get('id')} updated.")
+                                        st.rerun()
+                                with ec2:
+                                    if st.button("Cancel", key=f"hrp_cancel_final_{r.get('id')}", width="stretch"):
+                                        st.session_state.pop(f"hrp_edit_final_open_{r.get('id')}", None)
+                                        st.rerun()
+            else:
+                st.info("No final holiday settlements have been submitted yet.")
 
 
 def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
