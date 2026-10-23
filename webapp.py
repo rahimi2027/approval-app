@@ -2102,25 +2102,17 @@ def _build_week_excel(week_key, dept):
     ws.cell(approved_name_row + 1, 1, f"Date of Approval: {approved_at or '—'}")
     ws.cell(approved_name_row + 1, 1).alignment = Alignment(vertical="center")
     director_signature_row = approved_name_row + 2
-    # Only apply the approval stamp after the Director's approval workflow has
-    # actually marked this week Approved. The stamp replaces the signature line
-    # visually; it does not create or imitate a handwritten signature.
-    if str(state.get("status", "")).strip().casefold() == "approved":
-        from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-        stamp_border = Side(style="medium", color="C00000")
-        ws.merge_cells(
-            start_row=director_signature_row, start_column=1,
-            end_row=director_signature_row, end_column=4,
-        )
-        stamp_cell = ws.cell(director_signature_row, 1, "✓  APPROVED BY DIRECTOR")
-        stamp_cell.font = Font(name="Arial", size=14, bold=True, color="C00000")
-        stamp_cell.fill = PatternFill("solid", fgColor="FFF2F2")
-        stamp_cell.alignment = Alignment(horizontal="center", vertical="center")
-        stamp_cell.border = Border(
-            left=stamp_border, right=stamp_border,
-            top=stamp_border, bottom=stamp_border,
-        )
-        ws.row_dimensions[director_signature_row].height = 30
+    # Use the application's existing approved_stamp.png image only after the
+    # Director approval workflow has marked this week Approved.
+    # Keep the normal signature line if the image file is not present.
+    if str(state.get("status", "")).strip().casefold() == "approved" and os.path.isfile(APPROVED_STAMP_PATH):
+        from openpyxl.drawing.image import Image as XLImage
+        stamp_image = XLImage(APPROVED_STAMP_PATH)
+        # Size the stamp to sit neatly over the Director signature area in Excel.
+        stamp_image.width = 190
+        stamp_image.height = 58
+        ws.add_image(stamp_image, f"A{director_signature_row}")
+        ws.row_dimensions[director_signature_row].height = 46
     else:
         ws.cell(director_signature_row, 1, "Signature: " + "_" * 65)
         ws.cell(director_signature_row, 1).alignment = Alignment(vertical="center")
