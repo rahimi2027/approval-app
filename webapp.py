@@ -6576,10 +6576,9 @@ def render_hr_portal(current_user_info=None):
     emp = _hrp_get_employee(selected_employee_id) if selected_employee_id else None
 
     if is_hr:
-        tab_hr, tab_calendar, tab_reports, tab_details, tab_leave, tab_history = st.tabs([
+        tab_hr, tab_calendar, tab_details, tab_leave, tab_history = st.tabs([
             "🧑‍💼 HR Management",
             "📅 Holiday Calendar",
-            "📥 HR Reports",
             "👤 Employee Details",
             "✏️ Leave",
             "📋 Leave History",
@@ -6592,7 +6591,6 @@ def render_hr_portal(current_user_info=None):
         ])
         tab_hr = None
         tab_calendar = None
-        tab_reports = None
 
     if is_hr and tab_hr is not None:
         with tab_hr:
@@ -7498,10 +7496,6 @@ def render_hr_portal(current_user_info=None):
         else:
             st.info("No employee record is available.")
 
-    if is_hr and tab_reports is not None:
-        with tab_reports:
-            render_hr_download_reports()
-
     if not is_hr:
         pass
 
@@ -8034,9 +8028,10 @@ def render_hrp_employee_leaving(current_user_info=None):
 
 def render_hr_department(current_user_info=None, is_super_admin=False, is_director=False, director_name="", has_hr_access=False):
     """HR department area. Department managers get requests only; HR Manager keeps the full direct-entry portal."""
-    sub_portal_tab, sub_leaving_clearance_tab = st.tabs([
+    sub_portal_tab, sub_leaving_clearance_tab, sub_hr_reports_tab = st.tabs([
         "🧑‍💼 HR Portal (Employee / Holiday)",
         "🚪 Employee Leaving & Clearance",
+        "📥 HR Reports",
     ])
 
     with sub_portal_tab:
@@ -8071,6 +8066,9 @@ def render_hr_department(current_user_info=None, is_super_admin=False, is_direct
             render_leaver_clearance_hr()
         with leavers_tab:
             _hrp_render_leavers_tab()
+
+    with sub_hr_reports_tab:
+        render_hr_download_reports()
 
 
 def initialise_work_orders():
