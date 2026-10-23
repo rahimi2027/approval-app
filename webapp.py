@@ -6588,11 +6588,10 @@ def render_hr_portal(current_user_info=None):
     if is_hr and tab_hr is not None:
         with tab_hr:
             st.subheader("🧑‍💼 HR Management")
-            st.caption("Employee management, leave & holidays, leavers, clearance and HR reports")
+            st.caption("Employee management, leave & holidays, and HR reports")
 
-            hr_employee_section, hr_leaver_section, hr_leave_section = st.tabs([
+            hr_employee_section, hr_leave_section = st.tabs([
                 "👥 Employee Management",
-                "🚪 Leavers, Clearance",
                 "📅 Leave & Holidays",
             ])
 
@@ -6614,12 +6613,6 @@ def render_hr_portal(current_user_info=None):
                         "📊 Holiday Calculator",
                     ])[0]
                     hr_approval_tab = None
-
-            with hr_leaver_section:
-                hr_clearance_tab, hr_leavers_tab = st.tabs([
-                    "🔗 Leaver Clearance",
-                    "📚 Leavers",
-                ])
 
             with employee_overview_tab:
                 st.subheader("📊 Employee Overview — All Employees")
@@ -6973,12 +6966,6 @@ def render_hr_portal(current_user_info=None):
             if is_hr_manager:
                 with hr_approval_tab:
                     render_hr_leave_approvals()
-
-            with hr_clearance_tab:
-                render_leaver_clearance_hr()
-
-            with hr_leavers_tab:
-                _hrp_render_leavers_tab()
 
             with hr_holiday_calc_tab:
                 st.session_state.hrp_leave_records = _hrp_load_leave_records()
