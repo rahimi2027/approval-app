@@ -1135,11 +1135,31 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     status_text = str(d.get("status", "Worked") or "Worked")
                     status_line = (f"<div style='font-size:10px;color:#64748b;'>{_short_status(status_text)}</div>"
                                    if status_text not in ("Worked", "Late In", "Early Out") else "")
-                    tile_style = _payroll_status_tile_style(status_text)
+                    # Late In / Early Out highlight only the affected time,
+                    # leaving the other time and the day tile uncoloured.
+                    # All other payroll statuses retain their existing tile colours.
+                    if status_text in ("Late In", "Early Out"):
+                        tile_style = _payroll_status_tile_style("Worked")
+                        flagged_time_style = (
+                            "background-color:#FFF200;color:#222222;"
+                            "border-radius:3px;padding:1px 3px;"
+                        )
+                        time_in_html = (
+                            f"<span style='{flagged_time_style}'>{d['in']}</span>"
+                            if status_text == "Late In" else str(d['in'])
+                        )
+                        time_out_html = (
+                            f"<span style='{flagged_time_style}'>{d['out']}</span>"
+                            if status_text == "Early Out" else str(d['out'])
+                        )
+                    else:
+                        tile_style = _payroll_status_tile_style(status_text)
+                        time_in_html = str(d['in'])
+                        time_out_html = str(d['out'])
                     cell.markdown(
                         f"<div style='{tile_style}'>"
                         f"<div style='font-size:11px;font-weight:600;white-space:nowrap;'>"
-                        f"{d['in']} → {d['out']}</div>"
+                        f"{time_in_html} → {time_out_html}</div>"
                         f"<div style='font-size:10px;'>{duration_text}</div>"
                         f"{status_line}</div>", unsafe_allow_html=True,
                     )
