@@ -11794,12 +11794,27 @@ def _super_admin_transaction_control():
                 new_id=c1.text_input("ACE-ID / Employee ID", value=old_id)
                 new_name=c2.text_input("Full Name", value=emp.get("name",""))
                 new_start=c1.date_input("Start Date", value=emp.get("start_date") or date.today())
+                # Keep the job title separate from the working category/sub-department.
+                new_position=c1.text_input("Position / Job Title", value=emp.get("job_title", ""))
                 depts=load_departments(); dept_idx=depts.index(emp.get("department")) if emp.get("department") in depts else 0
                 new_dept=c1.selectbox("Department", depts, index=dept_idx)
                 edit_work_options=_hrp_work_type_options(new_dept)
                 current_work=_hrp_normalize_work_type(new_dept, emp.get("work_type", ""), emp.get("job_title", ""))
                 work_idx=edit_work_options.index(current_work) if current_work in edit_work_options else 0
                 new_work_type=c2.selectbox("Working As / Sub-department", edit_work_options, index=work_idx)
+                # Match the HR Edit form by exposing the employee's normal daily working times.
+                _default_start = str(emp.get("work_start_time", "08:00") or "08:00")[:5]
+                _default_end = str(emp.get("work_end_time", "16:30") or "16:30")[:5]
+                try:
+                    _start_time_value = datetime.strptime(_default_start, "%H:%M").time()
+                except Exception:
+                    _start_time_value = datetime.strptime("08:00", "%H:%M").time()
+                try:
+                    _end_time_value = datetime.strptime(_default_end, "%H:%M").time()
+                except Exception:
+                    _end_time_value = datetime.strptime("16:30", "%H:%M").time()
+                new_work_start=c1.time_input("Working Day Start Time", value=_start_time_value)
+                new_work_end=c2.time_input("Working Day End Time", value=_end_time_value)
                 agreements=["Permanent","Temporary","Fixed Term","Apprenticeship","Other"]; ag_idx=agreements.index(emp.get("agreement_type")) if emp.get("agreement_type") in agreements else 0
                 new_agreement=c2.selectbox("Agreement Type", agreements, index=ag_idx)
                 statuses=["Active","Inactive","Left"]; st_idx=statuses.index(emp.get("status")) if emp.get("status") in statuses else 0
@@ -11841,7 +11856,23 @@ def _super_admin_transaction_control():
                 else:
                     new_id = validated_id
                 if valid_id:
-                    emp["emp_id"]=new_id; emp["name"]=new_name.strip(); emp["start_date"]=new_start; emp["department"]=new_dept; emp["work_type"]=new_work_type; emp["job_title"]=new_work_type; emp["agreement_type"]=new_agreement; emp["status"]=new_status; emp["working_pattern"]=new_pattern; emp["days_per_week"]=float(new_days); emp["contracted_hours_per_week"]=float(new_hours); emp["entitlement_override"]=None if float(new_override)==0 else float(new_override); emp["adjustment_note"]=new_note.strip(); emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave; emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
+                    emp["emp_id"]=new_id
+                    emp["name"]=new_name.strip()
+                    emp["start_date"]=new_start
+                    emp["department"]=new_dept
+                    emp["work_type"]=new_work_type
+                    emp["job_title"]=new_position.strip()
+                    emp["work_start_time"]=new_work_start.strftime("%H:%M")
+                    emp["work_end_time"]=new_work_end.strftime("%H:%M")
+                    emp["agreement_type"]=new_agreement
+                    emp["status"]=new_status
+                    emp["working_pattern"]=new_pattern
+                    emp["days_per_week"]=float(new_days)
+                    emp["contracted_hours_per_week"]=float(new_hours)
+                    emp["entitlement_override"]=None if float(new_override)==0 else float(new_override)
+                    emp["adjustment_note"]=new_note.strip()
+                    emp["leaving_date"]=None if new_status != "Left" or new_leave==date(1970,1,1) else new_leave
+                    emp["leaving_reason"]="" if new_status != "Left" else new_reason.strip()
                     if new_id != old_id:
                         users=load_users()
                         changed=False
