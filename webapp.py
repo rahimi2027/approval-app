@@ -78,6 +78,76 @@ def _verify_password(stored_value, candidate):
     except (ValueError, TypeError):
         return False
 
+# Password lifecycle policy: expire after 90 days and block reuse of the current
+# password plus the two most recently used passwords.
+_PASSWORD_MAX_AGE_DAYS = 90
+_PASSWORD_HISTORY_LIMIT = 2
+
+def _parse_password_changed_at(value):
+    """Parse a stored timestamp into an aware UTC datetime, or return None."""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = pd.to_datetime(value, utc=True, errors="coerce")
+        if pd.isna(parsed):
+            return None
+        return parsed.to_pydatetime()
+    except Exception:
+        return None
+
+def _password_is_expired(user_record, now=None):
+    """Return True when a password has reached its 90-day age limit."""
+    changed_at = _parse_password_changed_at(user_record.get("password_changed_at"))
+    if changed_at is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now >= changed_at + timedelta(days=_PASSWORD_MAX_AGE_DAYS)
+
+def _decode_password_history(value):
+    """Read a password history field stored as JSON in the user workbook."""
+    if isinstance(value, list):
+        items = value
+    else:
+        try:
+            items = json.loads(str(value or "[]"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            items = []
+    if not isinstance(items, list):
+        return []
+    return [str(item) for item in items if isinstance(item, str) and item][: _PASSWORD_HISTORY_LIMIT]
+
+def _password_was_recently_used(user_record, candidate):
+    """Check current and two previous password hashes without storing raw passwords."""
+    current = str(user_record.get("password", "") or "")
+    if current and _verify_password(current, candidate):
+        return True
+    for old_hash in _decode_password_history(user_record.get("password_history", [])):
+        if _verify_password(old_hash, candidate):
+            return True
+    return False
+
+def _set_user_password(user_record, new_password):
+    """Set a new password hash, preserve the prior two hashes, and reset expiry."""
+    old_password = str(user_record.get("password", "") or "")
+    history = _decode_password_history(user_record.get("password_history", []))
+    # Keep only password hashes in history, including records migrated from older
+    # plaintext-password databases.
+    history = [item if _is_password_hash(item) else _hash_password(item) for item in history]
+    if old_password:
+        old_password_hash = old_password if _is_password_hash(old_password) else _hash_password(old_password)
+        history = [old_password_hash] + [item for item in history if item != old_password_hash]
+    user_record["password_history"] = history[:_PASSWORD_HISTORY_LIMIT]
+    user_record["password"] = _hash_password(new_password)
+    user_record["password_changed_at"] = datetime.now(timezone.utc).isoformat()
+    user_record["force_password_change"] = False
+
 # ============================================================
 # CONSTANTS
 # ============================================================
@@ -2468,7 +2538,8 @@ USER_DB_COLUMNS = [
     "can_access_holiday_calculator", "can_access_employee_directory",
     "employee_id", "can_access_store_deduction", "can_access_employee_items",
     "can_access_training_help", "can_access_payroll_timesheet", "can_access_all_departments_timesheet",
-    "can_access_subdepartment_timesheets", "can_backup_google_drive", "is_active"
+    "can_access_subdepartment_timesheets", "can_backup_google_drive", "is_active",
+    "password_changed_at", "password_history", "force_password_change"
 ]
 
 ONEDRIVE_CLIENT_ID = ""
@@ -3504,6 +3575,9 @@ if _bootstrap_username and len(_bootstrap_password) >= _MIN_PASSWORD_LENGTH:
         "full_name": "Initial System Administrator",
         "username": _bootstrap_username,
         "password": _hash_password(_bootstrap_password),
+        "password_changed_at": datetime.now(timezone.utc).isoformat(),
+        "password_history": [],
+        "force_password_change": False,
         "role": "Super Admin",
         "dept": "System Administration",
         "can_access_hr_leave": False,
@@ -4220,7 +4294,10 @@ def save_users(users_dict):
             "can_access_all_departments_timesheet": u.get("can_access_all_departments_timesheet", False),
             "can_access_subdepartment_timesheets": json.dumps(_normalise_subdepartment_permissions(u.get("can_access_subdepartment_timesheets", []))),
             "can_backup_google_drive": u.get("can_backup_google_drive", False),
-            "is_active": u.get("is_active", True)
+            "is_active": u.get("is_active", True),
+            "password_changed_at": u.get("password_changed_at", ""),
+            "password_history": json.dumps(_decode_password_history(u.get("password_history", []))),
+            "force_password_change": bool(u.get("force_password_change", False))
         })
 
     # Write the complete new user database locally first.  Never roll this back merely
@@ -4330,7 +4407,10 @@ def load_users(force=False):
                 "can_access_all_departments_timesheet": _flag_or_default(r.get("can_access_all_departments_timesheet", ""), user_role, "can_access_all_departments_timesheet"),
                 "can_access_subdepartment_timesheets": _normalise_subdepartment_permissions(r.get("can_access_subdepartment_timesheets", "[]")),
                 "can_backup_google_drive": _flag_or_default(r.get("can_backup_google_drive", ""), user_role, "can_backup_google_drive"),
-                "is_active": _active_or_default(r.get("is_active", ""))
+                "is_active": _active_or_default(r.get("is_active", "")),
+                "password_changed_at": str(r.get("password_changed_at", "") or "").strip(),
+                "password_history": _decode_password_history(r.get("password_history", "[]")),
+                "force_password_change": str(r.get("force_password_change", "false")).strip().lower() in ("true", "1", "yes")
             }
             if user_role == "Super Admin":
                 users[username].update({
@@ -13838,11 +13918,12 @@ def display_company_header():
         st.divider()
 
 def change_my_password_form():
-    if not st.session_state.get("logged_in") or not st.session_state.get("user_info"): return
+    if not st.session_state.get("logged_in") or not st.session_state.get("user_info"):
+        return
     render_google_drive_status()
 
     with st.sidebar.expander("🔑 Change My Password", expanded=False):
-        USERS = load_users()
+        USERS = load_users(force=True)
         current_username = st.session_state.user_info.get("username")
         if not current_username or current_username not in USERS:
             st.warning("⚠️ Please log in before changing password.")
@@ -13852,13 +13933,25 @@ def change_my_password_form():
             new_pass1 = st.text_input("New Password", type="password")
             new_pass2 = st.text_input("Confirm New Password", type="password")
             if st.form_submit_button("✅ Update Password", type="primary"):
-                if not _verify_password(USERS[current_username]["password"], old_pass): st.error("❌ Current password is NOT correct!"); return
-                if new_pass1 != new_pass2: st.error("❌ New passwords do NOT match!"); return
-                if len(new_pass1) < _MIN_PASSWORD_LENGTH: st.error(f"❌ New password must be at least {_MIN_PASSWORD_LENGTH} characters!"); return
-                USERS[current_username]["password"] = new_pass1
+                current_user = USERS[current_username]
+                if not _verify_password(current_user.get("password", ""), old_pass):
+                    st.error("❌ Current password is not correct!")
+                    return
+                if new_pass1 != new_pass2:
+                    st.error("❌ New passwords do not match!")
+                    return
+                if len(new_pass1) < _MIN_PASSWORD_LENGTH:
+                    st.error(f"❌ New password must be at least {_MIN_PASSWORD_LENGTH} characters!")
+                    return
+                if _password_was_recently_used(current_user, new_pass1):
+                    st.error("❌ You cannot reuse your current password or either of your two previous passwords.")
+                    return
+                _set_user_password(current_user, new_pass1)
                 save_users(USERS)
-                st.session_state.user_info["password"] = _hash_password(new_pass1)
-                st.success("✅ Password changed successfully!"); st.balloons(); st.rerun()
+                st.session_state.user_info = {**current_user, "username": current_username}
+                st.success("✅ Password changed successfully. It will expire in 90 days.")
+                st.balloons()
+                st.rerun()
 
 def settings_management_panel():
     st.subheader("⚙️ System Settings — Categories, Departments & Roles")
@@ -14130,7 +14223,7 @@ def user_management_panel():
                 elif len(new_password) < _MIN_PASSWORD_LENGTH: st.error(f"❌ Password must be at least {_MIN_PASSWORD_LENGTH} characters!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_all_departments_timesheet": perm_all_dept_ts, "can_access_subdepartment_timesheets": create_subdept_permissions, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": _hash_password(new_password), "password_changed_at": datetime.now(timezone.utc).isoformat(), "password_history": [], "force_password_change": False, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_all_departments_timesheet": perm_all_dept_ts, "can_access_subdepartment_timesheets": create_subdept_permissions, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
                     # Manager accounts receive the requested baseline at save time;
                     # the creation form itself still opens with every checkbox unticked.
                     if new_role == "Manager":
@@ -14231,11 +14324,22 @@ def user_management_panel():
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
-                        USERS[upd_username_new] = {"full_name": upd_full_name.strip(), "password": upd_password if upd_password else curr["password"], "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_all_departments_timesheet": edit_all_dept_ts, "can_access_subdepartment_timesheets": edit_subdept_permissions, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_backup_google_drive": edit_backup_drive, "is_active": edit_active}
+                        _edited_user = dict(curr)
+                        if upd_password:
+                            if _password_was_recently_used(curr, upd_password):
+                                st.error("❌ Cannot set the current or either of the two previous passwords.")
+                                return
+                            _set_user_password(_edited_user, upd_password)
+                        _edited_user.update({"full_name": upd_full_name.strip(), "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_all_departments_timesheet": edit_all_dept_ts, "can_access_subdepartment_timesheets": edit_subdept_permissions, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_backup_google_drive": edit_backup_drive, "is_active": edit_active})
+                        USERS[upd_username_new] = _edited_user
                         del USERS[edit_user_sel]
                     else:
                         USERS[edit_user_sel]["full_name"] = upd_full_name.strip()
-                        if upd_password: USERS[edit_user_sel]["password"] = upd_password
+                        if upd_password:
+                            if _password_was_recently_used(USERS[edit_user_sel], upd_password):
+                                st.error("❌ Cannot set the current or either of the two previous passwords.")
+                                return
+                            _set_user_password(USERS[edit_user_sel], upd_password)
                         USERS[edit_user_sel]["role"] = upd_role
                         USERS[edit_user_sel]["dept"] = upd_dept
                         USERS[edit_user_sel]["can_view_all_dept"] = edit_view
@@ -14281,7 +14385,7 @@ def user_management_panel():
                 st.success(f"✅ User **{del_name}** deleted!"); st.rerun()
 
 # ============================================================
-# 🔐 LOGIN
+# 🔐 LOGIN + 90-DAY PASSWORD EXPIRY
 # ============================================================
 if not st.session_state.logged_in:
     display_company_header()
@@ -14295,6 +14399,38 @@ if not st.session_state.logged_in:
             )
     except Exception:
         pass
+
+    pending_username = str(st.session_state.get("password_reset_required_user", "")).strip().lower()
+    if pending_username:
+        pending_users = load_users(force=True)
+        pending_user = pending_users.get(pending_username)
+        if not pending_user or not pending_user.get("is_active", True):
+            st.session_state.pop("password_reset_required_user", None)
+            st.error("This account is unavailable. Please sign in again or contact your Super Admin.")
+        else:
+            st.warning("🔐 Your password has expired or must be changed. Create a new password to continue.")
+            st.info("Passwords expire every 90 days. You cannot reuse your current password or either of your two previous passwords.")
+            with st.form("expired_password_change_form", border=True, clear_on_submit=True):
+                expired_new_1 = st.text_input("New Password", type="password")
+                expired_new_2 = st.text_input("Confirm New Password", type="password")
+                if st.form_submit_button("Update Password and Continue", type="primary", width="stretch"):
+                    if expired_new_1 != expired_new_2:
+                        st.error("❌ New passwords do not match.")
+                    elif len(expired_new_1) < _MIN_PASSWORD_LENGTH:
+                        st.error(f"❌ Password must be at least {_MIN_PASSWORD_LENGTH} characters.")
+                    elif _password_was_recently_used(pending_user, expired_new_1):
+                        st.error("❌ Choose a password that is different from your current password and your two previous passwords.")
+                    else:
+                        _set_user_password(pending_user, expired_new_1)
+                        save_users(pending_users)
+                        st.session_state.pop("password_reset_required_user", None)
+                        st.session_state.logged_in = True
+                        st.session_state.user_info = {**pending_user, "username": pending_username}
+                        log_action("PASSWORD_CHANGED", old_data={"username": pending_username, "reason": "expired_or_forced"}, new_data={"username": pending_username})
+                        st.success("Password updated. You are now signed in.")
+                        st.rerun()
+            st.stop()
+
     with st.form("login_form", border=True):
         st.markdown("### 🔒 Secure Gateway Login")
         st.caption("Enter your credentials to access the system"); st.divider()
@@ -14306,15 +14442,28 @@ if not st.session_state.logged_in:
                 if not USERS[username].get("is_active", True):
                     st.error("❌ Your account has been deactivated. Please contact your Super Admin.")
                 else:
-                    # Upgrade legacy plaintext records on successful login.
-                    if not _is_password_hash(USERS[username].get("password", "")):
-                        USERS[username]["password"] = _hash_password(password)
+                    user = USERS[username]
+                    # Older records have no expiry metadata. Start their 90-day clock
+                    # at the first successful login rather than expiring all accounts at once.
+                    needs_save = False
+                    if not _parse_password_changed_at(user.get("password_changed_at")):
+                        user["password_changed_at"] = datetime.now(timezone.utc).isoformat()
+                        needs_save = True
+                    if not _is_password_hash(user.get("password", "")):
+                        user["password"] = _hash_password(password)
+                        needs_save = True
+                    if user.get("force_password_change") or _password_is_expired(user):
+                        if needs_save:
+                            save_users(USERS)
+                        st.session_state.password_reset_required_user = username
+                        st.rerun()
+                    if needs_save:
                         save_users(USERS)
-                        USERS = load_users(force=True)
                     st.session_state.logged_in = True
-                    st.session_state.user_info = {**USERS[username], "username": username}
+                    st.session_state.user_info = {**user, "username": username}
                     st.rerun()
-            else: st.error("❌ Invalid Username or Password. Please try again.")
+            else:
+                st.error("❌ Invalid Username or Password. Please try again.")
     st.stop()
 
 # Always refresh the authenticated user's role/permissions from USER_DB_PATH before
@@ -15237,7 +15386,7 @@ TRAINING_ROLE_CONTENT = {
             ("🏢 Departments & sub-departments", ["Manage Departments and their Sub-departments from System Settings."]),
             ("⚙️ System settings", ["Manage categories, departments, sub-departments and roles from the System Settings area."]),
             ("📖 Audit history", ["Use the Full System Audit Log to review recorded activity.", "Audit/data-reset controls are restricted to Super Admin and include permanent actions; review the warning before using any reset control."]),
-            ("🛡️ Security", ["Keep user accounts active only when required, use secure passwords, and log out when finished."])
+            ("🛡️ Security", ["Use a unique password of at least 12 characters. Passwords expire every 90 days; on expiry, the portal requires a password update at login before access is granted.", "The current password and the two most recently used passwords cannot be reused.", "Keep user accounts active only when required, and log out when finished."])
         ]
     }
 }
