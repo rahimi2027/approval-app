@@ -7162,7 +7162,7 @@ def render_hr_portal(current_user_info=None):
 
             if is_hr_manager:
                 with hr_approval_tab:
-                    render_hr_leave_approvals()
+                    render_hr_leave_approvals(key_prefix="hr_portal_leave_approvals")
 
             with hr_holiday_calc_tab:
                 st.session_state.hrp_leave_records = _hrp_load_leave_records()
@@ -7846,8 +7846,8 @@ def render_department_manager_leave_request(current_user_info=None):
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
-def render_hr_leave_approvals():
-    """HR approval inbox for department-manager leave requests."""
+def render_hr_leave_approvals(key_prefix="hr_leave_approvals"):
+    """HR approval inbox for department-manager leave requests. key_prefix namespaces widgets when rendered in multiple tabs."""
     try:
         _hrp_init_storage()
         st.session_state.hrp_employees = _hrp_load_employees()
@@ -7891,10 +7891,10 @@ def render_hr_leave_approvals():
                         st.write(f"**Reference:** {record.get('request_reference', '') or '-'}")
                     if record.get("notes"):
                         st.info(f"**Notes:** {record['notes']}")
-                    rejection_reason = st.text_area("Rejection reason (required only if rejecting)", key=f"hr_reject_reason_{record['leave_id']}_{record_index}")
+                    rejection_reason = st.text_area("Rejection reason (required only if rejecting)", key=f"{key_prefix}_reject_reason_{record['leave_id']}_{record_index}")
                     a1, a2 = st.columns(2)
                     with a1:
-                        if st.button("✅ Approve Leave", type="primary", key=f"approve_leave_{record['leave_id']}_{record_index}"):
+                        if st.button("✅ Approve Leave", type="primary", key=f"{key_prefix}_approve_leave_{record['leave_id']}_{record_index}"):
                             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             old = dict(record)
                             approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
@@ -7911,7 +7911,7 @@ def render_hr_leave_approvals():
                             st.success(f"{record['leave_id']} approved. It is now part of the employee's official leave history.")
                             st.rerun()
                     with a2:
-                        if st.button("❌ Reject Leave", key=f"reject_leave_{record['leave_id']}_{record_index}"):
+                        if st.button("❌ Reject Leave", key=f"{key_prefix}_reject_leave_{record['leave_id']}_{record_index}"):
                             if not rejection_reason.strip():
                                 st.error("Please enter a rejection reason before rejecting the request.")
                             else:
@@ -16519,7 +16519,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                     normalized_dept = re.sub(r"\s+", " ", str(dept_name or "")).strip().casefold()
                     is_hr_manager_account = normalized_dept in {"hr", "human resource", "human resources", "hr department", "human resource department"} and has_hr_leave
                     if is_hr_manager_account:
-                        render_hr_leave_approvals()
+                        render_hr_leave_approvals(key_prefix="main_leave_tab_approvals")
                     else:
                         render_department_manager_leave_request(current_user_info=user_info)
                 tab_idx += 1
