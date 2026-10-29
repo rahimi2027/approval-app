@@ -1851,7 +1851,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
         with st.form(f"{k}_flag_form"):
             flag_comment = st.text_area(
                 "Flag comment", value=existing_flag.get("comment", "") if existing_flag else "",
-                placeholder="e.g. Please check Time In — should be 08:30 not 09:15.", height=80,
+                placeholder="e.g. Please check Time In — should be 08:00 not 09:15.", height=80,
             )
             flag_submit = st.form_submit_button(
                 "⚠ Flag for Amendment" if not existing_flag else "↻ Update Flag",
