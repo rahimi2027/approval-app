@@ -7871,7 +7871,7 @@ def render_hr_leave_approvals():
         if not pending:
             st.success("There are no leave requests waiting for HR approval.")
         else:
-            for record in reversed(pending):
+            for record_index, record in enumerate(reversed(pending)):
                 employee = _hrp_get_employee(record.get("employee_id"))
                 employee_name = employee.get("name", record.get("employee_id")) if employee else record.get("employee_id")
                 department = employee.get("department", "") if employee else ""
@@ -7891,10 +7891,10 @@ def render_hr_leave_approvals():
                         st.write(f"**Reference:** {record.get('request_reference', '') or '-'}")
                     if record.get("notes"):
                         st.info(f"**Notes:** {record['notes']}")
-                    rejection_reason = st.text_area("Rejection reason (required only if rejecting)", key=f"hr_reject_reason_{record['leave_id']}")
+                    rejection_reason = st.text_area("Rejection reason (required only if rejecting)", key=f"hr_reject_reason_{record['leave_id']}_{record_index}")
                     a1, a2 = st.columns(2)
                     with a1:
-                        if st.button("✅ Approve Leave", type="primary", key=f"approve_leave_{record['leave_id']}"):
+                        if st.button("✅ Approve Leave", type="primary", key=f"approve_leave_{record['leave_id']}_{record_index}"):
                             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             old = dict(record)
                             approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
@@ -7911,7 +7911,7 @@ def render_hr_leave_approvals():
                             st.success(f"{record['leave_id']} approved. It is now part of the employee's official leave history.")
                             st.rerun()
                     with a2:
-                        if st.button("❌ Reject Leave", key=f"reject_leave_{record['leave_id']}"):
+                        if st.button("❌ Reject Leave", key=f"reject_leave_{record['leave_id']}_{record_index}"):
                             if not rejection_reason.strip():
                                 st.error("Please enter a rejection reason before rejecting the request.")
                             else:
