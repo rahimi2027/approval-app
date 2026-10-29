@@ -20,6 +20,10 @@ import queue
 import time
 import textwrap
 import zipfile
+import hashlib
+import hmac
+import secrets
+import html
 from datetime import datetime, date, timezone, timedelta
 
 from googleapiclient.discovery import build
@@ -32,6 +36,47 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import streamlit as st
 import os
+
+# ============================================================
+# PASSWORD SECURITY
+# ============================================================
+_PASSWORD_HASH_SCHEME = "pbkdf2_sha256"
+_PASSWORD_HASH_ITERATIONS = 310_000
+_MIN_PASSWORD_LENGTH = 12
+
+def _is_password_hash(value):
+    return isinstance(value, str) and value.startswith(f"{_PASSWORD_HASH_SCHEME}$")
+
+def _hash_password(password):
+    """Hash a password with PBKDF2-HMAC-SHA256 and a per-password random salt."""
+    password = str(password or "")
+    if _is_password_hash(password):
+        return password
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, _PASSWORD_HASH_ITERATIONS
+    )
+    salt_text = base64.urlsafe_b64encode(salt).decode("ascii").rstrip("=")
+    digest_text = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return f"{_PASSWORD_HASH_SCHEME}${_PASSWORD_HASH_ITERATIONS}${salt_text}${digest_text}"
+
+def _verify_password(stored_value, candidate):
+    """Verify hashed passwords and safely support legacy plaintext during migration."""
+    stored_value = str(stored_value or "")
+    candidate = str(candidate or "")
+    if not _is_password_hash(stored_value):
+        return bool(stored_value) and hmac.compare_digest(stored_value, candidate)
+    try:
+        scheme, rounds, salt_text, digest_text = stored_value.split("$", 3)
+        if scheme != _PASSWORD_HASH_SCHEME:
+            return False
+        pad = lambda value: value + "=" * (-len(value) % 4)
+        salt = base64.urlsafe_b64decode(pad(salt_text))
+        expected = base64.urlsafe_b64decode(pad(digest_text))
+        actual = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), salt, int(rounds))
+        return hmac.compare_digest(expected, actual)
+    except (ValueError, TypeError):
+        return False
 
 # ============================================================
 # CONSTANTS
@@ -248,7 +293,23 @@ def _day_total(d):
     i, o = _t2m(d.get("in")), _t2m(d.get("out"))
     if i is None or o is None:
         return None
-    return max(0, o - i)
+    duration = o - i
+    if duration < 0:
+        duration += 24 * 60  # Overnight shift crossing midnight.
+    return max(0, duration)
+
+
+def _working_minutes(time_in, time_out, away="0:00"):
+    """Calculate net working minutes: elapsed time minus Away; Travel is excluded.
+
+    Handles shifts crossing midnight. Travel is intentionally not an argument because
+    it is displayed and reported separately and must never change Working time.
+    """
+    gross_minutes = _day_total({"in": time_in, "out": time_out})
+    if gross_minutes is None:
+        return 0
+    away_minutes = _t2m(away) or 0
+    return max(0, gross_minutes - away_minutes)
 
 
 def _lunch_for(days):
@@ -1120,13 +1181,9 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                             and d.get("in") and d.get("out"):
                         # Show the time range and worked duration on separate
                         # lines, matching the compact weekly calendar layout.
-                        time_in_minutes = _t2m(d.get("in", "")) or 0
-                        time_out_minutes = _t2m(d.get("out", "")) or 0
-                        duration_minutes = time_out_minutes - time_in_minutes
-                        if duration_minutes < 0:
-                            duration_minutes += 24 * 60
-                        duration_minutes = max(0, duration_minutes - (_t2m(d.get("away", "0:00")) or 0)
-                                               + (_t2m(d.get("travel", "0:00")) or 0))
+                        duration_minutes = _working_minutes(
+                            d.get("in", ""), d.get("out", ""), d.get("away", "0:00")
+                        )  # Travel is displayed separately and never changes Working hours.
                         time_label = f"{d['in']} → {d['out']}\n{_m2t(duration_minutes)}"
                         if status not in ("Worked", "Late In", "Early Out"):
                             time_label += f"\n{_short_status(status)}"
@@ -1154,17 +1211,17 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                             "border-radius:3px;padding:1px 3px;"
                         )
                         time_in_html = (
-                            f"<span style='{flagged_time_style}'>{d['in']}</span>"
-                            if status_text == "Late In" else str(d['in'])
+                            f"<span style='{flagged_time_style}'>{html.escape(str(d['in']), quote=True)}</span>"
+                            if status_text == "Late In" else html.escape(str(d['in']), quote=True)
                         )
                         time_out_html = (
-                            f"<span style='{flagged_time_style}'>{d['out']}</span>"
-                            if status_text == "Early Out" else str(d['out'])
+                            f"<span style='{flagged_time_style}'>{html.escape(str(d['out']), quote=True)}</span>"
+                            if status_text == "Early Out" else html.escape(str(d['out']), quote=True)
                         )
                     else:
                         tile_style = _payroll_status_tile_style(status_text)
-                        time_in_html = str(d['in'])
-                        time_out_html = str(d['out'])
+                        time_in_html = html.escape(str(d['in']), quote=True)
+                        time_out_html = html.escape(str(d['out']), quote=True)
                     cell.markdown(
                         f"<div style='{tile_style}'>"
                         f"<div style='font-size:11px;font-weight:600;white-space:nowrap;'>"
@@ -1261,7 +1318,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     if item not in note_items:
                         note_items.append(item)
             notes_text = " / ".join(note_items) if note_items else "—"
-            row[17].markdown(f"<div style='font-size:11px;white-space:normal;overflow-wrap:anywhere;'>{notes_text}</div>", unsafe_allow_html=True)
+            notes_html = html.escape(notes_text, quote=True)
+            row[17].markdown(f"<div style='font-size:11px;white-space:normal;overflow-wrap:anywhere;'>{notes_html}</div>", unsafe_allow_html=True)
 
             # Inline open day panel
             for i in range(5):
@@ -1810,8 +1868,8 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                 with c4:
                     away = st.text_input("⏸ Time Away (unpaid)", value=current.get("away", "0:00"), key=f"{k}_away")
                 if time_in and time_out:
-                    t = (_t2m(time_out) or 0) - (_t2m(time_in) or 0) - (_t2m(away) or 0) + (_t2m(travel) or 0)
-                    st.caption(f"**Day total:** {_m2t(t)}  (= Time Out − Time In − Away + Travel)")
+                    t = _working_minutes(time_in, time_out, away)
+                    st.caption(f"**Working time:** {_m2t(t)}  (= Time Out − Time In − Away; Travel is shown separately)")
             else:
                 time_in = time_out = ""
                 travel = away = "0:00"
@@ -3435,15 +3493,24 @@ EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Categ
 WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours", "Amount (£)", "Manager", "Description", "Attachment Name", "Status", "Site Address", "Customer Job No.", "Manager Comments", "Manager Decision Date", "Manager Decision By", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date", "Payroll By", "PDF File Path"]
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
 
-DEFAULT_USERS = [
-    {"full_name": "National Grid Manager", "username": "national_grid", "password": "acoole123", "role": "Manager", "dept": "National Grid", "can_access_inspector_bonus": True, "can_access_addition_deduction": True, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": True, "can_access_leave_request": True, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Isolator Manager", "username": "isolator", "password": "acoole123", "role": "Manager", "dept": "Isolator", "can_access_hr_leave": True, "can_access_leave_request": True, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Project Manager", "username": "project", "password": "acoole123", "role": "Manager", "dept": "Project", "can_access_hr_leave": True, "can_access_leave_request": True, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Accounts Manager", "username": "accounts", "password": "acoole123", "role": "Manager", "dept": "Accounts", "can_access_hr_leave": True, "can_access_leave_request": True, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Andy Acoole", "username": "andy", "password": "andy2026", "role": "Director", "dept": "ACoole Electrical Ltd", "can_access_hr_leave": False, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "System Administrator", "username": "wais", "password": "superadmin123", "role": "Super Admin", "dept": "System Administration", "can_access_hr_leave": False, "can_access_store_deduction": True, "is_active": True},
-    {"full_name": "Payroll Team", "username": "payroll", "password": "payroll2026", "role": "Payroll", "dept": "Payroll Department", "can_access_store_deduction": True, "is_active": True}
-]
+# Never ship reusable default passwords in source code. For a brand-new installation,
+# configure ACOOLE_BOOTSTRAP_ADMIN_PASSWORD (12+ characters) and optionally
+# ACOOLE_BOOTSTRAP_ADMIN_USERNAME before first start. Existing user workbooks are retained.
+_bootstrap_username = os.environ.get("ACOOLE_BOOTSTRAP_ADMIN_USERNAME", "admin").strip().lower()
+_bootstrap_password = os.environ.get("ACOOLE_BOOTSTRAP_ADMIN_PASSWORD", "")
+DEFAULT_USERS = []
+if _bootstrap_username and len(_bootstrap_password) >= _MIN_PASSWORD_LENGTH:
+    DEFAULT_USERS.append({
+        "full_name": "Initial System Administrator",
+        "username": _bootstrap_username,
+        "password": _hash_password(_bootstrap_password),
+        "role": "Super Admin",
+        "dept": "System Administration",
+        "can_access_hr_leave": False,
+        "can_access_store_deduction": True,
+        "is_active": True,
+    })
+
 PERMISSION_DEFAULTS = {
     "Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": False, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_employee_hr_reports": True, "can_access_store_deduction": False, "can_access_employee_items": False, "can_access_training_help": False},
     "Work Order Employee": {"can_view_all_dept": False, "can_generate_pdf": False, "can_download_data": False, "can_approve_requests": False, "can_access_inspector_bonus": False, "can_access_addition_deduction": False, "can_access_work_orders": True, "can_access_wo_total": False, "can_access_hr_leave": False, "can_access_leave_request": False, "can_access_store_deduction": False, "can_access_employee_items": False, "can_access_training_help": False},
@@ -4102,7 +4169,15 @@ def init_user_db():
         shutil.copy2(BUNDLED_USER_DB_PATH, USER_DB_PATH)
         _invalidate_data_cache("_users_cache")
         return True
-    pd.DataFrame(DEFAULT_USERS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+    if not DEFAULT_USERS:
+        print(
+            "WARNING: No user accounts exist. Configure ACOOLE_BOOTSTRAP_ADMIN_PASSWORD "
+            "(at least 12 characters) and restart to create the initial administrator."
+        )
+        return False
+    pd.DataFrame(DEFAULT_USERS, columns=USER_DB_COLUMNS).to_excel(
+        USER_DB_PATH, index=False, engine="openpyxl"
+    )
     _invalidate_data_cache("_users_cache")
     return True
 
@@ -4119,7 +4194,7 @@ def save_users(users_dict):
     for username, u in users_dict.items():
         rows.append({
             "full_name": u.get("full_name", username), "username": username,
-            "password": u.get("password", ""), "role": u.get("role", "Staff"),
+            "password": _hash_password(u.get("password", "")), "role": u.get("role", "Staff"),
             "dept": u.get("dept", ""),
             "can_view_all_dept": u.get("can_view_all_dept", False),
             "can_generate_pdf": u.get("can_generate_pdf", False),
@@ -4150,7 +4225,16 @@ def save_users(users_dict):
 
     # Write the complete new user database locally first.  Never roll this back merely
     # because Drive is temporarily unavailable.
-    pd.DataFrame(rows, columns=USER_DB_COLUMNS).to_excel(USER_DB_PATH, index=False, engine="openpyxl")
+    _user_tmp_path = f"{USER_DB_PATH}.tmp.xlsx"
+    try:
+        pd.DataFrame(rows, columns=USER_DB_COLUMNS).to_excel(_user_tmp_path, index=False, engine="openpyxl")
+        os.replace(_user_tmp_path, USER_DB_PATH)
+    finally:
+        if os.path.exists(_user_tmp_path):
+            try:
+                os.remove(_user_tmp_path)
+            except OSError:
+                pass
     _invalidate_data_cache("_users_cache")
 
     # Always keep a local recovery snapshot as an additional safety net.
@@ -13768,12 +13852,12 @@ def change_my_password_form():
             new_pass1 = st.text_input("New Password", type="password")
             new_pass2 = st.text_input("Confirm New Password", type="password")
             if st.form_submit_button("✅ Update Password", type="primary"):
-                if USERS[current_username]["password"] != old_pass: st.error("❌ Current password is NOT correct!"); return
+                if not _verify_password(USERS[current_username]["password"], old_pass): st.error("❌ Current password is NOT correct!"); return
                 if new_pass1 != new_pass2: st.error("❌ New passwords do NOT match!"); return
-                if len(new_pass1) < 4: st.error("❌ New password must be at least 4 characters!"); return
+                if len(new_pass1) < _MIN_PASSWORD_LENGTH: st.error(f"❌ New password must be at least {_MIN_PASSWORD_LENGTH} characters!"); return
                 USERS[current_username]["password"] = new_pass1
                 save_users(USERS)
-                st.session_state.user_info["password"] = new_pass1
+                st.session_state.user_info["password"] = _hash_password(new_pass1)
                 st.success("✅ Password changed successfully!"); st.balloons(); st.rerun()
 
 def settings_management_panel():
@@ -14043,6 +14127,7 @@ def user_management_panel():
             new_active = st.checkbox("✅ Account Active", value=True, help="Uncheck to block this user from logging in.")
             if st.form_submit_button("✅ Create User Account", type="primary"):
                 if not new_full_name.strip() or not new_username or not new_password: st.error("❌ All fields required!")
+                elif len(new_password) < _MIN_PASSWORD_LENGTH: st.error(f"❌ Password must be at least {_MIN_PASSWORD_LENGTH} characters!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
                     USERS[new_username] = {"full_name": new_full_name.strip(), "password": new_password, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_all_departments_timesheet": perm_all_dept_ts, "can_access_subdepartment_timesheets": create_subdept_permissions, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
@@ -14140,6 +14225,9 @@ def user_management_panel():
                 edit_ib = st.checkbox(PERMISSION_LABELS["can_access_inspector_bonus"], value=curr_perm_ib)
                 edit_active = st.checkbox("✅ Account Active", value=curr.get("is_active", True), help="Uncheck to block this user from logging in.")
                 if st.form_submit_button("🔄 Update User", type="primary"):
+                    if upd_password and len(upd_password) < _MIN_PASSWORD_LENGTH:
+                        st.error(f"❌ Password must be at least {_MIN_PASSWORD_LENGTH} characters!")
+                        return
                     USERS = load_users()
                     if upd_username_new != edit_user_sel:
                         if upd_username_new in USERS: st.error(f"❌ Username '{upd_username_new}' already exists!"); return
@@ -14197,6 +14285,16 @@ def user_management_panel():
 # ============================================================
 if not st.session_state.logged_in:
     display_company_header()
+    try:
+        if not load_users(force=True):
+            st.warning(
+                "No user accounts are configured. For a new installation, set the environment "
+                "variable ACOOLE_BOOTSTRAP_ADMIN_PASSWORD to a strong password of at least 12 "
+                "characters, optionally set ACOOLE_BOOTSTRAP_ADMIN_USERNAME, then restart the app. "
+                "Do not reuse a password that has been exposed in source code."
+            )
+    except Exception:
+        pass
     with st.form("login_form", border=True):
         st.markdown("### 🔒 Secure Gateway Login")
         st.caption("Enter your credentials to access the system"); st.divider()
@@ -14204,10 +14302,15 @@ if not st.session_state.logged_in:
         password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
         if st.form_submit_button("🔐 Authenticate Portal", type="primary", width="stretch"):
             USERS = load_users(force=True)
-            if username in USERS and USERS[username]["password"] == password:
+            if username in USERS and _verify_password(USERS[username]["password"], password):
                 if not USERS[username].get("is_active", True):
                     st.error("❌ Your account has been deactivated. Please contact your Super Admin.")
                 else:
+                    # Upgrade legacy plaintext records on successful login.
+                    if not _is_password_hash(USERS[username].get("password", "")):
+                        USERS[username]["password"] = _hash_password(password)
+                        save_users(USERS)
+                        USERS = load_users(force=True)
                     st.session_state.logged_in = True
                     st.session_state.user_info = {**USERS[username], "username": username}
                     st.rerun()
