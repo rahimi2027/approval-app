@@ -344,6 +344,30 @@ def _t2m(s):
         return None
 
 
+def _duration_minutes(value):
+    """Parse a duration as HH:MM or as a plain number of minutes.
+
+    Timesheet Travel/Away fields are durations, not clock times. Accept values
+    such as ``30``, ``30 min``, ``0:30`` and ``1:15``; return None for invalid
+    or negative values so callers can handle them safely.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if ":" in text:
+        minutes = _t2m(text)
+        return minutes if minutes is not None else None
+    match = re.fullmatch(r"(\d+)(?:\.0+)?\s*(?:m|min|mins|minute|minutes)?", text, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
 def _m2t(m):
     if m is None:
         return ""
@@ -378,7 +402,7 @@ def _working_minutes(time_in, time_out, away="0:00"):
     gross_minutes = _day_total({"in": time_in, "out": time_out})
     if gross_minutes is None:
         return 0
-    away_minutes = _t2m(away) or 0
+    away_minutes = _duration_minutes(away) or 0
     return max(0, gross_minutes - away_minutes)
 
 
@@ -580,8 +604,8 @@ def _ts_load():
         data[wk][dept][eid][di] = {
             "in":     str(r.get("Time_In", "")).strip(),
             "out":    str(r.get("Time_Out", "")).strip(),
-            "travel": str(r.get("Travel", "0:00")).strip() or "0:00",
-            "away":   str(r.get("Time_Away", "0:00")).strip() or "0:00",
+            "travel": _m2t(_duration_minutes(r.get("Travel", "0:00")) or 0),
+            "away":   _m2t(_duration_minutes(r.get("Time_Away", "0:00")) or 0),
             "status": str(r.get("Status", "Worked")).strip() or "Worked",
             "note":   str(r.get("Note", "")).strip(),
         }
@@ -602,8 +626,8 @@ def _ts_save():
                         "Employee_ID": eid, "Day_Index": i,
                         "Time_In": d.get("in", ""),
                         "Time_Out": d.get("out", ""),
-                        "Travel": d.get("travel", "0:00"),
-                        "Time_Away": d.get("away", "0:00"),
+                        "Travel": _m2t(_duration_minutes(d.get("travel", "0:00")) or 0),
+                        "Time_Away": _m2t(_duration_minutes(d.get("away", "0:00")) or 0),
                         "Status": d.get("status", "Worked"),
                         "Note": d.get("note", ""),
                     })
@@ -852,8 +876,8 @@ def _calc_row(emp, week_key, dept):
                         day_equivalents += 0.5
                     else:
                         day_equivalents += 0.5 if t_out < (12 * 60 + 30) else 1.0
-        travel += (_t2m(d.get("travel")) or 0)
-        away += (_t2m(d.get("away")) or 0)
+        travel += (_duration_minutes(d.get("travel")) or 0)
+        away += (_duration_minutes(d.get("away")) or 0)
 
     days_worked = day_equivalents
     lunch = _lunch_for(days_worked) if days_worked else 0
@@ -1934,9 +1958,9 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                 with c2:
                     time_out = st.text_input("🕐 Time Out (HH:MM)", value=current.get("out", ""), key=f"{k}_out")
                 with c3:
-                    travel = st.text_input("🚗 Travel (paid)", value=current.get("travel", "0:00"), key=f"{k}_travel")
+                    travel = st.text_input("🚗 Travel (minutes or HH:MM)", value=current.get("travel", "0:00"), key=f"{k}_travel", help="Enter minutes (e.g. 30) or hours:minutes (e.g. 0:30). Shown separately from Working time.")
                 with c4:
-                    away = st.text_input("⏸ Time Away (unpaid)", value=current.get("away", "0:00"), key=f"{k}_away")
+                    away = st.text_input("⏸ Time Away (minutes or HH:MM)", value=current.get("away", "0:00"), key=f"{k}_away", help="Enter minutes (e.g. 30) or hours:minutes (e.g. 0:30). Deducted from Working time.")
                 if time_in and time_out:
                     t = _working_minutes(time_in, time_out, away)
                     st.caption(f"**Working time:** {_m2t(t)}  (= Time Out − Time In − Away; Travel is shown separately)")
@@ -1956,7 +1980,9 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
 
         if save_day:
             ts_days[day_idx] = {
-                "in": time_in, "out": time_out, "travel": travel, "away": away,
+                "in": time_in, "out": time_out,
+                "travel": _m2t(_duration_minutes(travel) or 0),
+                "away": _m2t(_duration_minutes(away) or 0),
                 "status": status, "note": note,
             }
             if existing_flag:
