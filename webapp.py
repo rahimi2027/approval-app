@@ -285,6 +285,7 @@ def _p_timesheets(): return _payroll_file_path("payroll_timesheets.xlsx")
 def _p_week_states(): return _payroll_file_path("payroll_week_states.xlsx")
 def _p_flags():       return _payroll_file_path("payroll_flags.xlsx")
 def _p_approvals():   return _payroll_file_path("payroll_approvals.xlsx")
+def _p_eom():         return _payroll_file_path("payroll_eom.xlsx")
 
 
 def _ensure_storage():
@@ -294,6 +295,7 @@ def _ensure_storage():
     _ctx["safe_init_excel"](_p_week_states(), PAYROLL_WEEK_STATES_COLUMNS)
     _ctx["safe_init_excel"](_p_flags(), PAYROLL_FLAGS_COLUMNS)
     _ctx["safe_init_excel"](_p_approvals(), PAYROLL_APPROVALS_COLUMNS)
+    _ctx["safe_init_excel"](_p_eom(), EOM_COLUMNS)
 
 
 def get_backup_filenames():
@@ -303,6 +305,7 @@ def get_backup_filenames():
         _p_week_states(): "BACKUP_payroll_week_states.xlsx",
         _p_flags(): "BACKUP_payroll_flags.xlsx",
         _p_approvals(): "BACKUP_payroll_approvals.xlsx",
+        _p_eom(): "BACKUP_payroll_eom.xlsx",
     }
 
 
@@ -932,10 +935,10 @@ def _calc_balance(emp, week_key, dept):
 def get_payroll_permission_defaults():
     """Return {role: {permission: bool}} to merge into PERMISSION_DEFAULTS."""
     return {
-        "Manager":     {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": False},
-        "Director":    {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True},
-        "Payroll":     {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True},
-        "Super Admin": {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True},
+        "Manager":     {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": False, "can_access_payroll_eom": False},
+        "Director":    {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True, "can_access_payroll_eom": True},
+        "Payroll":     {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True, "can_access_payroll_eom": True},
+        "Super Admin": {"can_access_payroll_timesheet": True, "can_access_all_departments_timesheet": True, "can_access_payroll_eom": True},
     }
 
 
@@ -944,6 +947,7 @@ def get_payroll_permission_labels():
     return {
         "can_access_payroll_timesheet": "📋 Payroll Timesheet",
         "can_access_all_departments_timesheet": "🏢 All Departments Timesheet Access (view, edit and save)",
+        "can_access_payroll_eom": "📊 EOM Payroll Summary",
     }
 
 
@@ -1467,6 +1471,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                             "BACKUP_payroll_week_states.xlsx",
                             "BACKUP_payroll_flags.xlsx",
                             "BACKUP_payroll_approvals.xlsx",
+                            "BACKUP_payroll_eom.xlsx",
                         }
                         backup_results = []
                         with st.spinner("Saving timesheet and updating timesheet files in Google Drive..."):
@@ -2364,6 +2369,174 @@ def _long_date(iso):
     return d.strftime("%A, %d %B %Y")
 
 
+# ============================================================
+# END-OF-MONTH (EOM) PAYROLL SUMMARY
+# ============================================================
+EOM_MANUAL_FIELDS = ["Overtime", "Mileage", "Expenses", "Benefit in Kind", "ADD", "DED", "Bonus", "Note"]
+EOM_COLUMNS = ["Month_Key", "Department", "Employee_ID", "Week_Number"] + EOM_MANUAL_FIELDS
+
+
+def _eom_load():
+    _ensure_storage()
+    df = _ctx["read_excel"](_p_eom())
+    records = {}
+    for r in df.to_dict(orient="records"):
+        key = (str(r.get("Month_Key", "")).strip(), str(r.get("Department", "")).strip(),
+               str(r.get("Employee_ID", "")).strip(), str(r.get("Week_Number", "")).strip())
+        if all(key):
+            records[key] = {field: r.get(field, "") for field in EOM_MANUAL_FIELDS}
+    return records
+
+
+def _eom_save(records):
+    rows = []
+    for (month_key, dept, eid, week_no), values in records.items():
+        row = {"Month_Key": month_key, "Department": dept, "Employee_ID": eid, "Week_Number": week_no}
+        row.update({field: values.get(field, "") for field in EOM_MANUAL_FIELDS})
+        rows.append(row)
+    pd.DataFrame(rows, columns=EOM_COLUMNS).to_excel(_p_eom(), index=False, engine="openpyxl")
+    _ctx["sync_to_drive"](_p_eom())
+
+
+def _eom_status_totals(week_key, dept, eid, month_key):
+    counts = {"Holiday Paid": 0.0, "Holiday Unpaid": 0, "B Hols": 0, "Sick Days": 0, "Authorised Absence": 0}
+    week_obj = PAYROLL_WEEKS.get(week_key, {})
+    y, m = map(int, month_key.split("-"))
+    days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
+    for i, d in enumerate(days):
+        if not d or i >= len(week_obj.get("dates", [])):
+            continue
+        dt = datetime.fromisoformat(week_obj["dates"][i])
+        if dt.year != y or dt.month != m:
+            continue
+        status = str(d.get("status", "")).strip()
+        if status == "Holiday": counts["Holiday Paid"] += 1
+        elif status == "HD Holiday": counts["Holiday Paid"] += 0.5
+        elif status == "Unpaid Holiday": counts["Holiday Unpaid"] += 1
+        elif status == "Bank Holiday": counts["B Hols"] += 1
+        elif status == "Sick": counts["Sick Days"] += 1
+        elif status == "Authorised Absence": counts["Authorised Absence"] += 1
+    return counts
+
+
+def render_payroll_eom(current_user_info, mode="payroll"):
+    """Department-wise EOM summary. Hours/travel/leave derive from weekly timesheets;
+    financial adjustments and notes are entered and stored separately per employee/week.
+    """
+    if not _ctx["initialised"]:
+        st.error("Payroll module not initialised.")
+        return
+    _ensure_storage(); _ts()
+    st.subheader("📊 End-of-Month Payroll Summary")
+    st.caption("Weekly totals are transferred from the approved/recorded payroll timesheets. Enter the additional payroll values below and save.")
+    month_labels = [label for _, label in PAYROLL_MONTHS]
+    month_keys = [key for key, _ in PAYROLL_MONTHS]
+    default_month = "2026-10" if "2026-10" in month_keys else month_keys[0]
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        month_label = st.selectbox("📅 Payroll month", month_labels,
+            index=month_keys.index(default_month), key="eom_month_select")
+    month_key = month_keys[month_labels.index(month_label)]
+    with c2:
+        options = _get_payroll_department_options() or _get_departments() or ["Store"]
+        can_all = mode in ("super_admin", "director") or bool(current_user_info.get("can_access_all_departments_timesheet", False))
+        if not can_all:
+            user_dept = str(current_user_info.get("dept", "")).strip()
+            options = [o for o in options
+                       if _department_parts(o)[0] == user_dept and not _department_parts(o)[1]]
+        if not options:
+            st.warning("No department access is assigned to this account.")
+            return
+        dept = st.selectbox("🏢 Department / Sub-department", options,
+                            format_func=_department_label, key="eom_department_select")
+    employees = _get_employees(
+        dept, separate_subdepartments=(mode in ("payroll", "director", "super_admin"))
+    )
+    if not employees:
+        st.info("No active employees found in this department.")
+        return
+    records = _eom_load()
+    weeks = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk]["month"] == month_key]
+    week_rows = []
+    for emp in employees:
+        eid = str(emp.get("emp_id", ""))
+        emp_name = str(emp.get("name", ""))
+        for index, wk in enumerate(weeks, start=1):
+            raw_days = _ts().get(wk, {}).get(dept, {}).get(eid) or [None] * 5
+            month_dates = PAYROLL_WEEKS[wk].get("dates", [])
+            y, m = map(int, month_key.split("-"))
+            gross = away = travel = worked_equivalents = 0
+            for day_index, day_entry in enumerate(raw_days):
+                if not day_entry or day_index >= len(month_dates):
+                    continue
+                day_date = datetime.fromisoformat(month_dates[day_index])
+                if day_date.year != y or day_date.month != m:
+                    continue
+                status = str(day_entry.get("status", "Worked")).strip()
+                in_minutes, out_minutes = _t2m(day_entry.get("in")), _t2m(day_entry.get("out"))
+                if in_minutes is not None and out_minutes is not None:
+                    gross += _day_total(day_entry) or 0
+                    if status in PAYROLL_TIME_ENTRY_STATUSES:
+                        if status == "HD Holiday": worked_equivalents += 0.5
+                        else: worked_equivalents += 0.5 if out_minutes < (12 * 60 + 30) else 1.0
+                away += _duration_minutes(day_entry.get("away")) or 0
+                travel += _duration_minutes(day_entry.get("travel")) or 0
+            working_minutes = max(0, gross - (_lunch_for(worked_equivalents) if worked_equivalents else 0) - away)
+            leave = _eom_status_totals(wk, dept, eid, month_key)
+            key = (month_key, dept, eid, str(index))
+            manual = records.get(key, {})
+            week_rows.append({
+                "Employee": emp_name, "Employee ID": eid, "Week": f"Week {index}",
+                "Hours": _m2t(working_minutes), "Travel": _m2t(travel),
+                "Holiday Paid": leave["Holiday Paid"], "Holiday Unpaid": leave["Holiday Unpaid"],
+                "B Hols": leave["B Hols"], "Sick Days": leave["Sick Days"],
+                "Authorised Absence": leave["Authorised Absence"],
+                "Overtime": manual.get("Overtime", ""), "Mileage": manual.get("Mileage", ""),
+                "Expenses": manual.get("Expenses", ""), "Benefit in Kind": manual.get("Benefit in Kind", ""),
+                "ADD": manual.get("ADD", ""), "DED": manual.get("DED", ""),
+                "Bonus": manual.get("Bonus", ""), "Note": manual.get("Note", ""),
+            })
+    if not week_rows:
+        st.info("No payroll weeks are configured for this month.")
+        return
+    df = pd.DataFrame(week_rows)
+    st.caption("Hours and Travel are calculated from timesheet records. Holiday and absence columns are counted from daily statuses. Overtime and Mileage are currently manual/not in use.")
+    st.markdown("**Weekly employee details**")
+    editable_cols = ["Overtime", "Mileage", "Expenses", "Benefit in Kind", "ADD", "DED", "Bonus", "Note"]
+    edited = st.data_editor(df, hide_index=True, use_container_width=True, disabled=[c for c in df.columns if c not in editable_cols],
+        column_config={"Note": st.column_config.TextColumn("Note", width="large"),
+                       **{c: st.column_config.TextColumn(c) for c in editable_cols}},
+        key=f"eom_editor_{month_key}_{dept}")
+    if st.button("💾 Save EOM Entries", type="primary", key=f"save_eom_{month_key}_{dept}"):
+        for row in edited.to_dict(orient="records"):
+            key = (month_key, dept, str(row["Employee ID"]), str(row["Week"]).replace("Week ", ""))
+            records[key] = {field: row.get(field, "") for field in EOM_MANUAL_FIELDS}
+        _eom_save(records)
+        st.success("EOM payroll entries saved.")
+        st.rerun()
+    st.markdown("**Department totals**")
+    numeric = ["Holiday Paid", "Holiday Unpaid", "B Hols", "Sick Days", "Authorised Absence"]
+    summary = []
+    for emp in employees:
+        eid = str(emp.get("emp_id", "")); subset = df[df["Employee ID"] == eid]
+        total_minutes = sum((_t2m(v) or 0) for v in subset["Hours"])
+        travel_minutes = sum((_t2m(v) or 0) for v in subset["Travel"])
+        row = {"Employee": emp.get("name", ""), "Hours": _m2t(total_minutes), "Travel": _m2t(travel_minutes)}
+        for col in numeric: row[col] = subset[col].sum()
+        for col in editable_cols[:-1]:
+            vals = pd.to_numeric(subset[col], errors="coerce").fillna(0)
+            row[col] = round(vals.sum(), 2)
+        summary.append(row)
+    st.dataframe(pd.DataFrame(summary), hide_index=True, use_container_width=True)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="EOM Weekly")
+        pd.DataFrame(summary).to_excel(writer, index=False, sheet_name="Department Total")
+    st.download_button("⬇️ Download EOM Excel", data=output.getvalue(),
+        file_name=f"EOM_Payroll_{month_key}_{re.sub(r'[^A-Za-z0-9_-]+', '_', dept)}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 
 # Payroll Timesheet is embedded in this file so Streamlit Cloud does not need
 # a separate payroll_module.py alongside webapp.py.
@@ -2375,6 +2548,7 @@ payroll = _payroll_types.SimpleNamespace(
     get_payroll_permission_labels=get_payroll_permission_labels,
     get_payroll_user_db_column=get_payroll_user_db_column,
     render_payroll_timesheet=render_payroll_timesheet,
+    render_payroll_eom=render_payroll_eom,
 )
 
 st.markdown("""
@@ -2564,7 +2738,7 @@ USER_DB_COLUMNS = [
     "can_access_holiday_calculator", "can_access_employee_directory",
     "employee_id", "can_access_store_deduction", "can_access_employee_items",
     "can_access_training_help", "can_access_payroll_timesheet", "can_access_all_departments_timesheet",
-    "can_access_subdepartment_timesheets", "can_backup_google_drive", "is_active",
+    "can_access_subdepartment_timesheets", "can_access_payroll_eom", "can_backup_google_drive", "is_active",
     "password_changed_at", "password_history", "force_password_change"
 ]
 
@@ -4319,6 +4493,7 @@ def save_users(users_dict):
             "can_access_payroll_timesheet": u.get("can_access_payroll_timesheet", False),
             "can_access_all_departments_timesheet": u.get("can_access_all_departments_timesheet", False),
             "can_access_subdepartment_timesheets": json.dumps(_normalise_subdepartment_permissions(u.get("can_access_subdepartment_timesheets", []))),
+            "can_access_payroll_eom": u.get("can_access_payroll_eom", False),
             "can_backup_google_drive": u.get("can_backup_google_drive", False),
             "is_active": u.get("is_active", True),
             "password_changed_at": u.get("password_changed_at", ""),
@@ -4432,6 +4607,7 @@ def load_users(force=False):
                 "can_access_payroll_timesheet": _flag_or_default(r.get("can_access_payroll_timesheet", ""), user_role, "can_access_payroll_timesheet"),
                 "can_access_all_departments_timesheet": _flag_or_default(r.get("can_access_all_departments_timesheet", ""), user_role, "can_access_all_departments_timesheet"),
                 "can_access_subdepartment_timesheets": _normalise_subdepartment_permissions(r.get("can_access_subdepartment_timesheets", "[]")),
+                "can_access_payroll_eom": _flag_or_default(r.get("can_access_payroll_eom", ""), user_role, "can_access_payroll_eom"),
                 "can_backup_google_drive": _flag_or_default(r.get("can_backup_google_drive", ""), user_role, "can_backup_google_drive"),
                 "is_active": _active_or_default(r.get("is_active", "")),
                 "password_changed_at": str(r.get("password_changed_at", "") or "").strip(),
@@ -4443,6 +4619,7 @@ def load_users(force=False):
                     "can_view_all_dept": True, "can_generate_pdf": True, "can_download_data": True,
                     "can_approve_requests": True, "can_access_inspector_bonus": True,
                     "can_access_addition_deduction": True, "can_access_work_orders": True,
+                    "can_access_payroll_eom": True,
                     "can_access_wo_total": True, "can_access_hr_leave": False, "can_access_leave_request": False,
                     "can_access_store_deduction": True, "can_access_employee_items": True, "is_active": True
                 })
@@ -14230,6 +14407,7 @@ def user_management_panel():
             perm_employee_directory = rcol1.checkbox(PERMISSION_LABELS["can_access_employee_directory"], value=defaults.get("can_access_employee_directory", False))
             perm_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=defaults.get("can_access_store_deduction", False))
             perm_payroll = st.checkbox(PERMISSION_LABELS["can_access_payroll_timesheet"], value=defaults.get("can_access_payroll_timesheet", False), key="create_payroll_timesheet_permission")
+            perm_payroll_eom = st.checkbox(PERMISSION_LABELS["can_access_payroll_eom"], value=defaults.get("can_access_payroll_eom", False), key="create_payroll_eom_permission")
             perm_all_dept_ts = st.checkbox(PERMISSION_LABELS["can_access_all_departments_timesheet"], value=defaults.get("can_access_all_departments_timesheet", False), key="create_all_dept_timesheet_permission")
             st.markdown("**🧩 Sub-department Timesheet Access**")
             st.caption("Select only the sub-department timesheets this user may view, edit and save. All-departments access overrides these individual selections.")
@@ -14249,7 +14427,7 @@ def user_management_panel():
                 elif len(new_password) < _MIN_PASSWORD_LENGTH: st.error(f"❌ Password must be at least {_MIN_PASSWORD_LENGTH} characters!")
                 elif new_username in USERS: st.error(f"❌ Username '{new_username}' already exists!")
                 else:
-                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": _hash_password(new_password), "password_changed_at": datetime.now(timezone.utc).isoformat(), "password_history": [], "force_password_change": False, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_all_departments_timesheet": perm_all_dept_ts, "can_access_subdepartment_timesheets": create_subdept_permissions, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
+                    USERS[new_username] = {"full_name": new_full_name.strip(), "password": _hash_password(new_password), "password_changed_at": datetime.now(timezone.utc).isoformat(), "password_history": [], "force_password_change": False, "role": new_role, "dept": new_dept, "can_view_all_dept": perm_view_all, "can_generate_pdf": perm_pdf, "can_download_data": perm_download, "can_approve_requests": perm_approve, "can_access_inspector_bonus": perm_inspector, "can_access_addition_deduction": perm_ad, "can_access_work_orders": perm_wo, "can_access_wo_total": perm_wo_total, "can_access_hr_leave": perm_hr, "can_access_leave_request": perm_leave_req, "can_access_employee_hr_reports": perm_employee_reports, "can_access_holiday_calendar": perm_holiday_calendar, "can_access_hr_reports": perm_hr_reports, "can_access_employee_overview": perm_employee_overview, "can_access_holiday_calculator": perm_holiday_calculator, "can_access_employee_directory": perm_employee_directory, "employee_id": new_employee_id, "can_access_store_deduction": perm_store, "can_access_payroll_timesheet": perm_payroll, "can_access_payroll_eom": perm_payroll_eom, "can_access_all_departments_timesheet": perm_all_dept_ts, "can_access_subdepartment_timesheets": create_subdept_permissions, "can_access_employee_items": perm_employee_items, "can_access_training_help": perm_training_help, "can_backup_google_drive": perm_backup_drive, "is_active": new_active}
                     # Manager accounts receive the requested baseline at save time;
                     # the creation form itself still opens with every checkbox unticked.
                     if new_role == "Manager":
@@ -14332,6 +14510,7 @@ def user_management_panel():
                 edit_store = st.checkbox(PERMISSION_LABELS["can_access_store_deduction"], value=curr_perm_store)
                 curr_perm_payroll = bool(curr.get("can_access_payroll_timesheet", False))
                 edit_payroll = st.checkbox(PERMISSION_LABELS["can_access_payroll_timesheet"], value=curr_perm_payroll, key="edit_payroll_timesheet_permission")
+                edit_payroll_eom = st.checkbox(PERMISSION_LABELS["can_access_payroll_eom"], value=bool(curr.get("can_access_payroll_eom", False)), key=f"edit_payroll_eom_{edit_user_sel}")
                 edit_all_dept_ts = st.checkbox(PERMISSION_LABELS["can_access_all_departments_timesheet"], value=bool(curr.get("can_access_all_departments_timesheet", False)), key=f"edit_all_dept_timesheet_{edit_user_sel}")
                 st.markdown("**🧩 Sub-department Timesheet Access**")
                 st.caption("Select the individual sub-department timesheets this user may view, edit and save. All-departments access overrides these selections.")
@@ -14356,7 +14535,7 @@ def user_management_panel():
                                 st.error("❌ Cannot set the current or either of the two previous passwords.")
                                 return
                             _set_user_password(_edited_user, upd_password)
-                        _edited_user.update({"full_name": upd_full_name.strip(), "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_all_departments_timesheet": edit_all_dept_ts, "can_access_subdepartment_timesheets": edit_subdept_permissions, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_backup_google_drive": edit_backup_drive, "is_active": edit_active})
+                        _edited_user.update({"full_name": upd_full_name.strip(), "role": upd_role, "dept": upd_dept, "can_view_all_dept": edit_view, "can_generate_pdf": edit_pdf, "can_download_data": edit_dl, "can_approve_requests": edit_app, "can_access_inspector_bonus": edit_ib, "can_access_addition_deduction": edit_ad, "can_access_work_orders": edit_wo, "can_access_wo_total": edit_wo_total, "can_access_hr_leave": edit_hr, "can_access_leave_request": edit_leave_req, "can_access_employee_hr_reports": edit_employee_reports, "can_access_holiday_calendar": edit_holiday_calendar, "can_access_hr_reports": edit_hr_reports, "can_access_employee_overview": edit_employee_overview, "can_access_holiday_calculator": edit_holiday_calculator, "can_access_employee_directory": edit_employee_directory, "employee_id": edit_employee_id, "can_access_store_deduction": edit_store, "can_access_payroll_timesheet": edit_payroll, "can_access_payroll_eom": edit_payroll_eom, "can_access_all_departments_timesheet": edit_all_dept_ts, "can_access_subdepartment_timesheets": edit_subdept_permissions, "can_access_employee_items": edit_employee_items, "can_access_training_help": edit_training_help, "can_backup_google_drive": edit_backup_drive, "is_active": edit_active})
                         USERS[upd_username_new] = _edited_user
                         del USERS[edit_user_sel]
                     else:
@@ -14387,6 +14566,7 @@ def user_management_panel():
                         USERS[edit_user_sel]["employee_id"] = edit_employee_id
                         USERS[edit_user_sel]["can_access_store_deduction"] = edit_store
                         USERS[edit_user_sel]["can_access_payroll_timesheet"] = edit_payroll
+                        USERS[edit_user_sel]["can_access_payroll_eom"] = edit_payroll_eom
                         USERS[edit_user_sel]["can_access_all_departments_timesheet"] = edit_all_dept_ts
                         USERS[edit_user_sel]["can_access_subdepartment_timesheets"] = edit_subdept_permissions
                         USERS[edit_user_sel]["can_access_employee_items"] = edit_employee_items
@@ -16021,13 +16201,17 @@ elif role == "Payroll":
     outer_labels = ["🧾 Payroll"]
     has_training_help = bool(user_info.get("can_access_training_help", False))
     has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False) or _normalise_subdepartment_permissions(user_info.get("can_access_subdepartment_timesheets", [])))
+    has_payroll_eom = bool(user_info.get("can_access_payroll_eom", False))
     if has_payroll_timesheet:
         outer_labels.insert(0, "📋 Timesheet")
+    if has_payroll_eom:
+        outer_labels.append("📊 EOM Payroll Summary")
     if has_training_help:
         outer_labels.append("📚 Training & Help Centre")
     outer_tabs = st.tabs(outer_labels)
     timesheet_main_tab = outer_tabs[0] if has_payroll_timesheet else None
-    payroll_main_tab = outer_tabs[1] if has_payroll_timesheet else outer_tabs[0]
+    payroll_main_tab = outer_tabs[outer_labels.index("🧾 Payroll")]
+    eom_main_tab = outer_tabs[outer_labels.index("📊 EOM Payroll Summary")] if has_payroll_eom else None
     training_main_tab = outer_tabs[-1] if has_training_help else None
 
     with payroll_main_tab:
@@ -16091,6 +16275,9 @@ elif role == "Payroll":
         with tab_leaver: render_leaver_clearance_payroll(full_name)
         with tab_work_orders: render_work_order_payroll_portal(full_name)
         with tab_inspector_bonus: render_inspector_bonus_payroll_portal(full_name)
+    if eom_main_tab is not None:
+        with eom_main_tab:
+            payroll.render_payroll_eom(user_info, mode="payroll")
     if training_main_tab is not None:
         with training_main_tab:
             render_training_help(user_info)
@@ -16283,6 +16470,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
         # Put general Addition & Deduction at the same top-level navigation level
         # as Store Department, and before it when the permission is enabled.
         store_top_level_labels = []
+        if has_payroll_eom := bool(user_info.get("can_access_payroll_eom", False)):
+            store_top_level_labels.append("📊 EOM Payroll Summary")
         if has_addition_deduction:
             store_top_level_labels.append("➕ Addition & Deduction")
         store_top_level_labels.append("📦 Store Department")
@@ -16290,6 +16479,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
             store_top_level_labels.append("📚 Training & Help")
         store_top_level_tabs = st.tabs(store_top_level_labels)
         store_top_level_idx = 0
+        if has_payroll_eom:
+            with store_top_level_tabs[store_top_level_idx]:
+                payroll.render_payroll_eom(user_info, mode="manager")
+            store_top_level_idx += 1
         if has_addition_deduction:
             with store_top_level_tabs[store_top_level_idx]:
                 render_store_addition_deduction_module(full_name, dept_name)
@@ -16321,7 +16514,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
         if has_inspector_bonus: labels.append("💰 National Grid Inspector Bonus")
         if user_info.get("can_access_training_help", False): labels.append("📚 Training & Help")
         has_payroll_timesheet = bool(user_info.get("can_access_payroll_timesheet", False) or user_info.get("can_access_all_departments_timesheet", False) or _normalise_subdepartment_permissions(user_info.get("can_access_subdepartment_timesheets", [])))
+        has_payroll_eom = bool(user_info.get("can_access_payroll_eom", False))
         if has_payroll_timesheet: labels.insert(0, "📋 Payroll Timesheet")
+        if has_payroll_eom: labels.insert(1 if has_payroll_timesheet else 0, "📊 EOM Payroll Summary")
         if not labels:
             st.subheader("🔐 Access Restricted")
             st.error("❌ No modules have been enabled for your account. Please contact your Super Admin.")
@@ -16331,6 +16526,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
             if has_payroll_timesheet:
                 with tabs[tab_idx]:
                     payroll.render_payroll_timesheet(user_info, mode="payroll" if user_info.get("can_access_all_departments_timesheet", False) else "manager")
+                tab_idx += 1
+            if has_payroll_eom:
+                with tabs[tab_idx]:
+                    payroll.render_payroll_eom(user_info, mode="manager")
                 tab_idx += 1
             if has_addition_deduction:
                 with tabs[tab_idx]:
@@ -16637,29 +16836,34 @@ elif role == "Director":
     if user_info.get("can_access_training_help", False):
         director_tab_labels.append("📚 Training & Help")
     director_tab_labels.insert(0, "📋 Payroll Timesheet")
+    has_director_eom = bool(user_info.get("can_access_payroll_eom", False))
+    if has_director_eom:
+        director_tab_labels.insert(1, "📊 EOM Payroll Summary")
     director_tabs = st.tabs(director_tab_labels)
     director_payroll_tab = director_tabs[0]
-    director_addition_tab = director_tabs[1]
+    director_eom_tab = director_tabs[1] if has_director_eom else None
+    director_addition_tab = director_tabs[2] if has_director_eom else director_tabs[1]
+    _director_offset = 1 if has_director_eom else 0
     if director_hr_access_enabled:
-        director_hr_access_tab = director_tabs[2]
-        director_leaver_payroll_tab = director_tabs[3]
-        director_hr_leave_tab = director_tabs[4]
-        director_store_ded_tab = director_tabs[5]
-        director_store_ret_tab = director_tabs[6]
-        director_employee_items_tab = director_tabs[7]
-        director_work_order_tab = director_tabs[8]
-        director_inspector_tab = director_tabs[9]
-        director_training_tab = director_tabs[10] if user_info.get("can_access_training_help", False) else None
+        director_hr_access_tab = director_tabs[2 + _director_offset]
+        director_leaver_payroll_tab = director_tabs[3 + _director_offset]
+        director_hr_leave_tab = director_tabs[4 + _director_offset]
+        director_store_ded_tab = director_tabs[5 + _director_offset]
+        director_store_ret_tab = director_tabs[6 + _director_offset]
+        director_employee_items_tab = director_tabs[7 + _director_offset]
+        director_work_order_tab = director_tabs[8 + _director_offset]
+        director_inspector_tab = director_tabs[9 + _director_offset]
+        director_training_tab = director_tabs[10 + _director_offset] if user_info.get("can_access_training_help", False) else None
     else:
         director_hr_access_tab = None
-        director_leaver_payroll_tab = director_tabs[2]
-        director_hr_leave_tab = director_tabs[3]
-        director_store_ded_tab = director_tabs[4]
-        director_store_ret_tab = director_tabs[5]
-        director_employee_items_tab = director_tabs[6]
-        director_work_order_tab = director_tabs[7]
-        director_inspector_tab = director_tabs[8]
-        director_training_tab = director_tabs[9] if user_info.get("can_access_training_help", False) else None
+        director_leaver_payroll_tab = director_tabs[2 + _director_offset]
+        director_hr_leave_tab = director_tabs[3 + _director_offset]
+        director_store_ded_tab = director_tabs[4 + _director_offset]
+        director_store_ret_tab = director_tabs[5 + _director_offset]
+        director_employee_items_tab = director_tabs[6 + _director_offset]
+        director_work_order_tab = director_tabs[7 + _director_offset]
+        director_inspector_tab = director_tabs[8 + _director_offset]
+        director_training_tab = director_tabs[9 + _director_offset] if user_info.get("can_access_training_help", False) else None
     with director_addition_tab:
         st.subheader(f"🎛️ Director Approval Portal — {full_name}")
         st.info("✅ Review all requests, Approve, Reject, OR Change Status. Decisions update automatically.")
@@ -16818,10 +17022,14 @@ elif role == "Director":
             render_training_help(user_info)
     with director_payroll_tab:
         payroll.render_payroll_timesheet(user_info, mode="director")
+    if director_eom_tab is not None:
+        with director_eom_tab:
+            payroll.render_payroll_eom(user_info, mode="director")
 
 elif role == "Super Admin":
-    super_payroll_tab, super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab = st.tabs([
+    super_payroll_tab, super_eom_tab, super_add_ded_tab, super_store_ded_tab, super_store_ret_tab, super_employee_items_tab, super_work_orders_tab, super_inspector_bonus_tab, super_data_control_tab, super_system_mgmt_tab, super_training_help_tab = st.tabs([
         "📋 Payroll Timesheet",
+        "📊 EOM Payroll Summary",
         "➕ Addition & Deduction",
         "📦 Store Deductions",
         "📦 Store Returns (Additions)",
@@ -17195,6 +17403,9 @@ elif role == "Super Admin":
 
     with super_payroll_tab:
         payroll.render_payroll_timesheet(user_info, mode="super_admin")
+
+    with super_eom_tab:
+        payroll.render_payroll_eom(user_info, mode="super_admin")
 
 else:
     st.subheader("🔐 Access Restricted")
