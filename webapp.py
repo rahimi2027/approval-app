@@ -2564,15 +2564,19 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
     for group in employee_groups:
         emp = group["employee"]
         weekly = group["rows"]
-        # Each employee starts with the full-width green separator used in the
-        # supplied payroll workbook, followed by that employee's column headings.
-        ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=16)
+        # Employee name stays on the left; department is centred in its own
+        # half of the green separator so the two labels are easy to scan.
         group_dept = group.get("_department", dept)
-        separator = ws.cell(row_num, 1, f"{emp.get('name', '')} - {_department_label(group_dept)}")
-        separator.fill = green
-        separator.font = Font(name="Aptos Narrow", size=11, bold=True)
-        separator.alignment = Alignment(vertical="center")
-        separator.border = cell_border
+        ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=8)
+        ws.merge_cells(start_row=row_num, start_column=9, end_row=row_num, end_column=16)
+        name_cell = ws.cell(row_num, 1, str(emp.get("name", "")))
+        dept_cell = ws.cell(row_num, 9, _department_label(group_dept))
+        for separator_cell in (name_cell, dept_cell):
+            separator_cell.fill = green
+            separator_cell.font = Font(name="Aptos Narrow", size=11, bold=True)
+            separator_cell.border = cell_border
+        name_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        dept_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         for col in range(2, 17):
             ws.cell(row_num, col).fill = green
             ws.cell(row_num, col).border = cell_border
@@ -2753,20 +2757,29 @@ def render_payroll_eom(current_user_info, mode="payroll"):
                "Benefit In Kind", "ADD", "DED", "Bonus", "Comments"]
     esc = html.escape
     table_parts = [
-        "<div style='width:100%;overflow-x:auto;'>",
-        "<table style='border-collapse:collapse;width:100%;min-width:1500px;font-family:Arial,sans-serif;font-size:12px;'>",
-        f"<tr><th colspan='16' style='background:#D9EAD3;border:1px solid #333;padding:8px;font-size:19px;text-align:center;'>TO BE PAID ON {esc(pay_date_text)}</th></tr>",
-        f"<tr><th colspan='16' style='background:#92D050;border:1px solid #333;padding:7px;text-align:left;'>{esc(_department_label(dept))} — {esc(month_label)}</th></tr>",
+        # Keep the report inside the available page width. Fixed column sizing and
+        # wrapping prevent long comments/labels from expanding the whole table.
+        "<div style='width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;'>",
+        "<table style='border-collapse:collapse;width:100%;min-width:1180px;table-layout:fixed;font-family:Arial,sans-serif;font-size:11px;'>",
+        "<colgroup>" + "".join(f"<col style='width:{w}px;'>" for w in [125,58,58,62,78,82,52,62,100,58,68,88,52,52,60,135]) + "</colgroup>",
+        f"<tr><th colspan='16' style='background:#D9EAD3;border:1px solid #333;padding:6px;font-size:16px;text-align:center;overflow-wrap:anywhere;'>TO BE PAID ON {esc(pay_date_text)}</th></tr>",
+        f"<tr><th colspan='16' style='background:#92D050;border:1px solid #333;padding:6px;text-align:left;overflow-wrap:anywhere;'>{esc(_department_label(dept))} — {esc(month_label)}</th></tr>",
     ]
     for group in employee_groups:
         emp = group["employee"]
         weekly = group["rows"]
+        # Keep the employee name at the left and centre the department label
+        # in a separate right-hand section of the green employee separator.
         table_parts.append(
-            f"<tr><th colspan='16' style='border:1px solid #333;padding:7px;background:#92D050;"
-            f"font-weight:bold;text-align:left;'>{esc(str(emp.get('name', '')))} - {esc(_department_label(group.get('_department', dept)))}</th></tr>"
+            f"<tr>"
+            f"<th colspan='8' style='border:1px solid #333;padding:5px;background:#92D050;"
+            f"font-weight:bold;text-align:left;overflow-wrap:anywhere;'>{esc(str(emp.get('name', '')))}</th>"
+            f"<th colspan='8' style='border:1px solid #333;padding:5px;background:#92D050;"
+            f"font-weight:bold;text-align:center;overflow-wrap:anywhere;'>{esc(_department_label(group.get('_department', dept)))}</th>"
+            f"</tr>"
         )
         table_parts.append("<tr>" + "".join(
-            f"<th style='border:1px solid #333;padding:6px;background:#fff;color:{'#111' if i == 0 else '#d00'};font-weight:normal;text-align:center;white-space:normal;'>{esc(str(v))}</th>"
+            f"<th style='border:1px solid #333;padding:4px;background:#fff;color:{'#111' if i == 0 else '#d00'};font-weight:normal;text-align:center;white-space:normal;overflow-wrap:anywhere;word-break:normal;'>{esc(str(v))}</th>"
             for i, v in enumerate([str(emp.get("name", ""))] + headers)
         ) + "</tr>")
         total_keys = [
@@ -2783,7 +2796,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
                 rec["ADD"], rec["DED"], rec["Bonus"], rec["Comments"],
             ]
             table_parts.append("<tr>" + "".join(
-                f"<td style='border:1px solid #333;padding:5px;text-align:center;vertical-align:middle;white-space:normal;'>{esc('' if v is None else str(v))}</td>"
+                f"<td style='border:1px solid #333;padding:4px;text-align:center;vertical-align:middle;white-space:normal;overflow-wrap:anywhere;word-break:break-word;'>{esc('' if v is None else str(v))}</td>"
                 for v in rowvals
             ) + "</tr>")
             totals["Hours"] += rec["Hours"]
@@ -2798,7 +2811,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
             totals["ADD"], totals["DED"], totals["Bonus"], "",
         ]
         table_parts.append("<tr>" + "".join(
-            f"<td style='border:1px solid #333;padding:5px;text-align:center;background:#FFF2CC;'>{esc(str(v))}</td>"
+            f"<td style='border:1px solid #333;padding:4px;text-align:center;background:#FFF2CC;white-space:normal;overflow-wrap:anywhere;'>{esc(str(v))}</td>"
             for v in totalvals
         ) + "</tr>")
     table_parts.append("</table></div>")
@@ -2872,11 +2885,11 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         editor_df, hide_index=True, use_container_width=True,
         disabled=["Employee", "Employee ID", "Department", "Week"],
         column_config={
-            "Employee": st.column_config.TextColumn("Employee", width="medium"),
+            "Employee": st.column_config.TextColumn("Employee", width="small"),
             "Employee ID": st.column_config.TextColumn("Employee ID", width="small"),
-            "Department": st.column_config.TextColumn("Department", width="medium"),
+            "Department": st.column_config.TextColumn("Department", width="small"),
             "Week": st.column_config.TextColumn("Week", width="small"),
-            "Note": st.column_config.TextColumn("Comments / Note", width="large"),
+            "Note": st.column_config.TextColumn("Comments / Note", width="medium"),
             **{field: st.column_config.TextColumn(field, width="small") for field in editable_fields if field != "Note"},
         },
         key=f"eom_editor_{month_key}_{dept}",
