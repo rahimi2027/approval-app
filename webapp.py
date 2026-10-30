@@ -2564,7 +2564,20 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
     for group in employee_groups:
         emp = group["employee"]
         weekly = group["rows"]
-        # Employee/header row: exactly the visual arrangement of the supplied workbook.
+        # Each employee starts with the full-width green separator used in the
+        # supplied payroll workbook, followed by that employee's column headings.
+        ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=16)
+        separator = ws.cell(row_num, 1, f"{emp.get('name', '')} - {_department_label(dept)}")
+        separator.fill = green
+        separator.font = Font(name="Aptos Narrow", size=11, bold=True)
+        separator.alignment = Alignment(vertical="center")
+        separator.border = cell_border
+        for col in range(2, 17):
+            ws.cell(row_num, col).fill = green
+            ws.cell(row_num, col).border = cell_border
+        ws.row_dimensions[row_num].height = 21
+        row_num += 1
+
         row_values = [str(emp.get("name", ""))] + headers
         for col, value in enumerate(row_values, start=1):
             cell = ws.cell(row_num, col, value)
@@ -2641,7 +2654,7 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
         row_num += 1
         # Spacer between employees is intentionally omitted: the reference uses compact blocks.
 
-    ws.print_title_rows = "1:3"
+    ws.print_title_rows = "1:2"
     ws.print_area = f"A1:P{row_num - 1}"
     ws.sheet_properties.pageSetUpPr.autoPageBreaks = False
     output = io.BytesIO()
@@ -2719,6 +2732,10 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     for group in employee_groups:
         emp = group["employee"]
         weekly = group["rows"]
+        table_parts.append(
+            f"<tr><th colspan='16' style='border:1px solid #333;padding:7px;background:#92D050;"
+            f"font-weight:bold;text-align:left;'>{esc(str(emp.get('name', '')))} - {esc(_department_label(dept))}</th></tr>"
+        )
         table_parts.append("<tr>" + "".join(
             f"<th style='border:1px solid #333;padding:6px;background:#fff;color:{'#111' if i == 0 else '#d00'};font-weight:normal;text-align:center;white-space:normal;'>{esc(str(v))}</th>"
             for i, v in enumerate([str(emp.get("name", ""))] + headers)
@@ -2758,9 +2775,53 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     table_parts.append("</table></div>")
     st.markdown("".join(table_parts), unsafe_allow_html=True)
 
-    # Editable companion grid keeps manual adjustments separate from timesheet-derived fields.
-    st.markdown("**Enter / edit weekly payroll adjustments**")
-    editable_fields = ["Overtime", "Mileage", "Expenses", "Benefit In Kind", "ADD", "DED", "Bonus", "Note"]
+    # Addition and deduction forms are employee-linked EOM adjustments. They do
+    # not write to the weekly timesheet and are stored against the selected month,
+    # department, employee and week.
+    st.markdown("### ➕ Addition / ➖ Deduction")
+    st.caption("Choose the employee and week. The amount and description will appear only in that employee's EOM block.")
+    employee_options = {
+        f"{emp.get('name', '')} ({emp.get('emp_id', '')})": str(emp.get('emp_id', ""))
+        for emp in employees
+    }
+    eom_weeks = [f"Week {i}" for i in range(1, len(employee_groups[0]["rows"]) + 1)]
+    if eom_weeks:
+        with st.form(key=f"eom_adjustment_form_{month_key}_{dept}", clear_on_submit=True):
+            adj_c1, adj_c2, adj_c3 = st.columns(3)
+            with adj_c1:
+                selected_employee_label = st.selectbox("Employee", list(employee_options.keys()))
+            with adj_c2:
+                adjustment_type = st.selectbox("Adjustment type", ["ADD", "DED"], format_func=lambda x: "Addition (ADD)" if x == "ADD" else "Deduction (DED)")
+            with adj_c3:
+                adjustment_week = st.selectbox("Week", eom_weeks)
+            adj_c4, adj_c5 = st.columns([1, 2])
+            with adj_c4:
+                adjustment_amount = st.number_input("Amount (£)", min_value=0.0, step=0.01, format="%.2f")
+            with adj_c5:
+                adjustment_description = st.text_input("Description / Note")
+            add_adjustment = st.form_submit_button("Save addition / deduction", type="primary", use_container_width=True)
+        if add_adjustment:
+            selected_eid = employee_options[selected_employee_label]
+            selected_week_no = adjustment_week.replace("Week ", "")
+            adjustment_key = (month_key, dept, selected_eid, selected_week_no)
+            target_record = dict(records.get(adjustment_key, {}))
+            current_amount = _eom_numeric(target_record.get(adjustment_type, 0))
+            target_record[adjustment_type] = round(current_amount + float(adjustment_amount), 2)
+            description = str(adjustment_description or "").strip()
+            if description:
+                existing_note = str(target_record.get("Note", "") or "").strip()
+                target_record["Note"] = " / ".join(x for x in (existing_note, f"{adjustment_type}: {description}") if x)
+            for field in EOM_MANUAL_FIELDS:
+                target_record.setdefault(field, "")
+            records[adjustment_key] = target_record
+            _eom_save(records)
+            st.success(f"{adjustment_type} of £{float(adjustment_amount):.2f} saved for {selected_employee_label} — {adjustment_week}.")
+            st.rerun()
+
+    # Editable companion grid keeps the other manual fields separate from
+    # timesheet-derived fields. ADD/DED are managed through the employee form above.
+    st.markdown("**Enter / edit weekly payroll details**")
+    editable_fields = ["Overtime", "Mileage", "Expenses", "Benefit In Kind", "Bonus", "Note"]
     editor_rows = []
     for group in employee_groups:
         for rec in group["rows"]:
@@ -2785,7 +2846,14 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     if st.button("💾 Save EOM Entries", type="primary", key=f"save_eom_{month_key}_{dept}"):
         for row in edited.to_dict(orient="records"):
             key = (month_key, dept, str(row["Employee ID"]), str(row["Week"]).replace("Week ", ""))
-            records[key] = {field: row.get(field, "") for field in EOM_MANUAL_FIELDS}
+            saved_values = dict(records.get(key, {}))
+            for field in editable_fields:
+                saved_values[field] = row.get(field, "")
+            # ADD and DED are intentionally controlled by the employee-linked
+            # adjustment form and must survive saves from this details grid.
+            saved_values.setdefault("ADD", 0)
+            saved_values.setdefault("DED", 0)
+            records[key] = {field: saved_values.get(field, "") for field in EOM_MANUAL_FIELDS}
         _eom_save(records)
         st.success("EOM payroll entries saved.")
         st.rerun()
