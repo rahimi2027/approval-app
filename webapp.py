@@ -2556,7 +2556,7 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
     c = ws.cell(row_num, 1, f"{_department_label(dept)} — {month_label}")
     c.fill = green
     c.font = Font(name="Aptos Narrow", size=11, bold=True)
-    c.alignment = Alignment(vertical="center")
+    c.alignment = Alignment(horizontal="center", vertical="center")
     c.border = cell_border
     ws.row_dimensions[row_num].height = 21
     row_num += 1
@@ -2564,19 +2564,15 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
     for group in employee_groups:
         emp = group["employee"]
         weekly = group["rows"]
-        # Employee name stays on the left; department is centred in its own
-        # half of the green separator so the two labels are easy to scan.
+        # Each employee starts with the full-width green separator used in the
+        # supplied payroll workbook, followed by that employee's column headings.
+        ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=16)
         group_dept = group.get("_department", dept)
-        ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=8)
-        ws.merge_cells(start_row=row_num, start_column=9, end_row=row_num, end_column=16)
-        name_cell = ws.cell(row_num, 1, str(emp.get("name", "")))
-        dept_cell = ws.cell(row_num, 9, _department_label(group_dept))
-        for separator_cell in (name_cell, dept_cell):
-            separator_cell.fill = green
-            separator_cell.font = Font(name="Aptos Narrow", size=11, bold=True)
-            separator_cell.border = cell_border
-        name_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-        dept_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        separator = ws.cell(row_num, 1, f"{emp.get('name', '')} - {_department_label(group_dept)}")
+        separator.fill = green
+        separator.font = Font(name="Aptos Narrow", size=11, bold=True)
+        separator.alignment = Alignment(vertical="center")
+        separator.border = cell_border
         for col in range(2, 17):
             ws.cell(row_num, col).fill = green
             ws.cell(row_num, col).border = cell_border
@@ -2763,20 +2759,14 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         "<table style='border-collapse:collapse;width:100%;min-width:1180px;table-layout:fixed;font-family:Arial,sans-serif;font-size:11px;'>",
         "<colgroup>" + "".join(f"<col style='width:{w}px;'>" for w in [125,58,58,62,78,82,52,62,100,58,68,88,52,52,60,135]) + "</colgroup>",
         f"<tr><th colspan='16' style='background:#D9EAD3;border:1px solid #333;padding:6px;font-size:16px;text-align:center;overflow-wrap:anywhere;'>TO BE PAID ON {esc(pay_date_text)}</th></tr>",
-        f"<tr><th colspan='16' style='background:#92D050;border:1px solid #333;padding:6px;text-align:left;overflow-wrap:anywhere;'>{esc(_department_label(dept))} — {esc(month_label)}</th></tr>",
+        f"<tr><th colspan='16' style='background:#92D050;border:1px solid #333;padding:6px;text-align:center;overflow-wrap:anywhere;'>{esc(_department_label(dept))} — {esc(month_label)}</th></tr>",
     ]
     for group in employee_groups:
         emp = group["employee"]
         weekly = group["rows"]
-        # Keep the employee name at the left and centre the department label
-        # in a separate right-hand section of the green employee separator.
         table_parts.append(
-            f"<tr>"
-            f"<th colspan='8' style='border:1px solid #333;padding:5px;background:#92D050;"
-            f"font-weight:bold;text-align:left;overflow-wrap:anywhere;'>{esc(str(emp.get('name', '')))}</th>"
-            f"<th colspan='8' style='border:1px solid #333;padding:5px;background:#92D050;"
-            f"font-weight:bold;text-align:center;overflow-wrap:anywhere;'>{esc(_department_label(group.get('_department', dept)))}</th>"
-            f"</tr>"
+            f"<tr><th colspan='16' style='border:1px solid #333;padding:5px;background:#92D050;overflow-wrap:anywhere;"
+            f"font-weight:bold;text-align:left;'>{esc(str(emp.get('name', '')))} - {esc(_department_label(group.get('_department', dept)))}</th></tr>"
         )
         table_parts.append("<tr>" + "".join(
             f"<th style='border:1px solid #333;padding:4px;background:#fff;color:{'#111' if i == 0 else '#d00'};font-weight:normal;text-align:center;white-space:normal;overflow-wrap:anywhere;word-break:normal;'>{esc(str(v))}</th>"
