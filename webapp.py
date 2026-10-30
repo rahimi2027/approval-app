@@ -2399,7 +2399,7 @@ def _eom_save(records):
 
 
 def _eom_status_totals(week_key, dept, eid, month_key):
-    counts = {"Holiday Paid": 0.0, "Holiday Unpaid": 0, "B Hols": 0, "Sick Days": 0, "Authorised Absence": 0}
+    counts = {"Holiday Paid": 0.0, "Holiday Unpaid": 0, "B Hols": 0, "Sick Days": 0, "Unpaid Absence": 0}
     week_obj = PAYROLL_WEEKS.get(week_key, {})
     y, m = map(int, month_key.split("-"))
     days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
@@ -2415,20 +2415,243 @@ def _eom_status_totals(week_key, dept, eid, month_key):
         elif status == "Unpaid Holiday": counts["Holiday Unpaid"] += 1
         elif status == "Bank Holiday": counts["B Hols"] += 1
         elif status == "Sick": counts["Sick Days"] += 1
-        elif status == "Authorised Absence": counts["Authorised Absence"] += 1
+        elif status == "Unpaid Absence": counts["Unpaid Absence"] += 1
     return counts
 
 
+def _eom_minutes_for_week(week_key, dept, eid, month_key):
+    """Calculate payroll hours/travel for only the selected month's dates in a week."""
+    week_obj = PAYROLL_WEEKS.get(week_key, {})
+    try:
+        y, m = map(int, month_key.split("-"))
+    except Exception:
+        return 0, 0, []
+    days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
+    gross = away = travel = worked_equivalents = 0
+    notes = []
+    for i, entry in enumerate(days):
+        if not isinstance(entry, dict) or i >= len(week_obj.get("dates", [])):
+            continue
+        try:
+            dt = datetime.fromisoformat(week_obj["dates"][i])
+        except Exception:
+            continue
+        if dt.year != y or dt.month != m:
+            continue
+        status = str(entry.get("status", "Worked")).strip()
+        in_minutes, out_minutes = _t2m(entry.get("in")), _t2m(entry.get("out"))
+        if in_minutes is not None and out_minutes is not None:
+            gross += _day_total(entry) or 0
+            if status in PAYROLL_TIME_ENTRY_STATUSES:
+                if status == "HD Holiday":
+                    worked_equivalents += 0.5
+                else:
+                    worked_equivalents += 0.5 if out_minutes < (12 * 60 + 30) else 1.0
+        away += _duration_minutes(entry.get("away")) or 0
+        travel += _duration_minutes(entry.get("travel")) or 0
+        note = str(entry.get("note", "") or "").strip()
+        if note:
+            label = _ordinal_day(week_obj["dates"][i])
+            item = f"{label} {note}"
+            if item not in notes:
+                notes.append(item)
+    working = max(0, gross - (_lunch_for(worked_equivalents) if worked_equivalents else 0) - away)
+    return working, travel, notes
+
+
+def _eom_department_rows(month_key, dept, employees, records):
+    """Build the five weekly rows and calculated totals for each employee."""
+    week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == month_key]
+    result = []
+    for emp in employees:
+        eid = str(emp.get("emp_id", ""))
+        emp_name = str(emp.get("name", ""))
+        weekly = []
+        for index, wk in enumerate(week_keys, start=1):
+            working, travel, day_notes = _eom_minutes_for_week(wk, dept, eid, month_key)
+            leave = _eom_status_totals(wk, dept, eid, month_key)
+            manual = records.get((month_key, dept, eid, str(index)), {})
+            manual_note = str(manual.get("Note", "") or "").strip()
+            notes = list(day_notes)
+            if manual_note:
+                notes.append(manual_note)
+            weekly.append({
+                "Employee": emp_name, "Employee ID": eid, "Week": f"Week {index}",
+                "Hours": working, "Travel": travel,
+                "Overtime": manual.get("Overtime", ""),
+                "Holiday Paid": leave["Holiday Paid"],
+                "Holiday Unpaid": leave["Holiday Unpaid"],
+                "B Hols": leave["B Hols"],
+                "Sick Days": leave["Sick Days"],
+                "Unpaid Absence": leave.get("Unpaid Absence", 0),
+                "Mileage": manual.get("Mileage", ""),
+                "Expenses": manual.get("Expenses", ""),
+                "Benefit In Kind": manual.get("Benefit in Kind", ""),
+                "ADD": manual.get("ADD", ""), "DED": manual.get("DED", ""),
+                "Bonus": manual.get("Bonus", ""),
+                "Comments": " / ".join(notes),
+                "_manual_values": {field: manual.get(field, "") for field in EOM_MANUAL_FIELDS},
+                "_week_no": str(index),
+            })
+        result.append({"employee": emp, "rows": weekly})
+    return result
+
+
+def _eom_numeric(value):
+    try:
+        if value in (None, ""):
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
+    """Create the department EOM workbook in the same grouped layout as the supplied example."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "EOM Payroll"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A3
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.2
+    ws.page_margins.right = 0.2
+    ws.page_margins.top = 0.35
+    ws.page_margins.bottom = 0.35
+    ws.freeze_panes = "B4"
+    ws.column_dimensions["A"].width = 22
+    for col in range(2, 16):
+        ws.column_dimensions[get_column_letter(col)].width = 13
+    ws.column_dimensions["P"].width = 43.5
+
+    green = PatternFill("solid", fgColor="92D050")
+    total_fill = PatternFill("solid", fgColor="FFF2CC")
+    white = PatternFill("solid", fgColor="FFFFFF")
+    thin = Side(style="thin", color="000000")
+    medium = Side(style="medium", color="000000")
+    cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    headers = ["Hours", "Travel", "Overtime", "Holiday Paid", "Holiday Unpaid",
+               "B Hols", "Sick Days", "Unpaid Absence", "Mileage", "Expenses",
+               "Benefit In Kind", "ADD", "DED", "Bonus'", "Comments"]
+
+    month_label = dict(PAYROLL_MONTHS).get(month_key, month_key)
+    ws.merge_cells("A1:P1")
+    title = ws["A1"]
+    title.value = f"TO BE PAID ON {pay_date_text}"
+    title.font = Font(name="Aptos Narrow", size=20, bold=True)
+    title.alignment = Alignment(horizontal="center", vertical="center")
+    title.fill = PatternFill("solid", fgColor="D9EAD3")
+    title.border = Border(bottom=medium)
+    ws.row_dimensions[1].height = 30
+
+    row_num = 2
+    ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=16)
+    c = ws.cell(row_num, 1, f"{_department_label(dept)} — {month_label}")
+    c.fill = green
+    c.font = Font(name="Aptos Narrow", size=11, bold=True)
+    c.alignment = Alignment(vertical="center")
+    c.border = cell_border
+    ws.row_dimensions[row_num].height = 21
+    row_num += 1
+
+    for group in employee_groups:
+        emp = group["employee"]
+        weekly = group["rows"]
+        # Employee/header row: exactly the visual arrangement of the supplied workbook.
+        row_values = [str(emp.get("name", ""))] + headers
+        for col, value in enumerate(row_values, start=1):
+            cell = ws.cell(row_num, col, value)
+            cell.font = Font(name="Aptos Narrow", size=11, color=("FF0000" if col > 1 else "000000"))
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = cell_border
+        ws.row_dimensions[row_num].height = 30
+        row_num += 1
+
+        totals = {k: 0.0 for k in headers[:-1]}
+        for record in weekly:
+            values = [
+                record["Week"],
+                record["Hours"] / 1440,
+                record["Travel"] / 1440,
+                _eom_numeric(record["Overtime"]),
+                _eom_numeric(record["Holiday Paid"]),
+                _eom_numeric(record["Holiday Unpaid"]),
+                _eom_numeric(record["B Hols"]),
+                _eom_numeric(record["Sick Days"]),
+                _eom_numeric(record["Unpaid Absence"]),
+                _eom_numeric(record["Mileage"]),
+                _eom_numeric(record["Expenses"]),
+                _eom_numeric(record["Benefit In Kind"]),
+                _eom_numeric(record["ADD"]),
+                _eom_numeric(record["DED"]),
+                _eom_numeric(record["Bonus"]),
+                record["Comments"],
+            ]
+            for col, value in enumerate(values, start=1):
+                cell = ws.cell(row_num, col, value)
+                cell.font = Font(name="Aptos Narrow", size=11)
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=(col == 16))
+                cell.border = cell_border
+                if col in (2, 3):
+                    cell.number_format = '[h]:mm'
+                elif col in (11, 12, 13, 14, 15):
+                    cell.number_format = '£#,##0.00'
+                elif col == 10:
+                    cell.number_format = '0.00'
+            for idx, key in enumerate(headers[:-1], start=2):
+                if key in ("Hours", "Travel"):
+                    totals[key] += record[key]
+                else:
+                    totals[key] += _eom_numeric(record.get(key))
+            ws.row_dimensions[row_num].height = 21
+            row_num += 1
+
+        total_values = [
+            "Total", totals["Hours"] / 1440, totals["Travel"] / 1440,
+            totals["Overtime"], totals["Holiday Paid"], totals["Holiday Unpaid"],
+            totals["B Hols"], totals["Sick Days"], totals["Unpaid Absence"],
+            totals["Mileage"], totals["Expenses"], totals["Benefit In Kind"],
+            totals["ADD"], totals["DED"], totals["Bonus"], "",
+        ]
+        for col, value in enumerate(total_values, start=1):
+            cell = ws.cell(row_num, col, value)
+            cell.fill = total_fill
+            cell.font = Font(name="Aptos Narrow", size=11)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = cell_border
+            if col in (2, 3):
+                cell.number_format = '[h]:mm'
+            elif col in (11, 12, 13, 14, 15):
+                cell.number_format = '£#,##0.00'
+        ws.row_dimensions[row_num].height = 21
+        row_num += 1
+        # Spacer between employees is intentionally omitted: the reference uses compact blocks.
+
+    ws.print_title_rows = "1:3"
+    ws.print_area = f"A1:P{row_num - 1}"
+    ws.sheet_properties.pageSetUpPr.autoPageBreaks = False
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
 def render_payroll_eom(current_user_info, mode="payroll"):
-    """Department-wise EOM summary. Hours/travel/leave derive from weekly timesheets;
-    financial adjustments and notes are entered and stored separately per employee/week.
-    """
+    """Render and export the EOM payroll sheet in the exact grouped layout supplied by the user."""
     if not _ctx["initialised"]:
         st.error("Payroll module not initialised.")
         return
-    _ensure_storage(); _ts()
+    _ensure_storage()
+    _ts()
     st.subheader("📊 End-of-Month Payroll Summary")
-    st.caption("Weekly totals are transferred from the approved/recorded payroll timesheets. Enter the additional payroll values below and save.")
+    st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet; payroll adjustments are saved separately.")
+
     month_labels = [label for _, label in PAYROLL_MONTHS]
     month_keys = [key for key, _ in PAYROLL_MONTHS]
     default_month = "2026-10" if "2026-10" in month_keys else month_keys[0]
@@ -2439,74 +2662,114 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     month_key = month_keys[month_labels.index(month_label)]
     with c2:
         options = _get_payroll_department_options() or _get_departments() or ["Store"]
-        can_all = mode in ("super_admin", "director") or bool(current_user_info.get("can_access_all_departments_timesheet", False))
+        can_all = (mode in ("super_admin", "director")
+                   or bool(current_user_info.get("can_access_all_departments_timesheet", False)))
         if not can_all:
             user_dept = str(current_user_info.get("dept", "")).strip()
             options = [o for o in options
-                       if _department_parts(o)[0] == user_dept and not _department_parts(o)[1]]
+                       if _department_parts(o)[0] == user_dept]
         if not options:
             st.warning("No department access is assigned to this account.")
             return
         dept = st.selectbox("🏢 Department / Sub-department", options,
                             format_func=_department_label, key="eom_department_select")
+
     employees = _get_employees(
         dept, separate_subdepartments=(mode in ("payroll", "director", "super_admin"))
     )
     if not employees:
         st.info("No active employees found in this department.")
         return
+
     records = _eom_load()
-    weeks = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk]["month"] == month_key]
-    week_rows = []
-    for emp in employees:
-        eid = str(emp.get("emp_id", ""))
-        emp_name = str(emp.get("name", ""))
-        for index, wk in enumerate(weeks, start=1):
-            raw_days = _ts().get(wk, {}).get(dept, {}).get(eid) or [None] * 5
-            month_dates = PAYROLL_WEEKS[wk].get("dates", [])
-            y, m = map(int, month_key.split("-"))
-            gross = away = travel = worked_equivalents = 0
-            for day_index, day_entry in enumerate(raw_days):
-                if not day_entry or day_index >= len(month_dates):
-                    continue
-                day_date = datetime.fromisoformat(month_dates[day_index])
-                if day_date.year != y or day_date.month != m:
-                    continue
-                status = str(day_entry.get("status", "Worked")).strip()
-                in_minutes, out_minutes = _t2m(day_entry.get("in")), _t2m(day_entry.get("out"))
-                if in_minutes is not None and out_minutes is not None:
-                    gross += _day_total(day_entry) or 0
-                    if status in PAYROLL_TIME_ENTRY_STATUSES:
-                        if status == "HD Holiday": worked_equivalents += 0.5
-                        else: worked_equivalents += 0.5 if out_minutes < (12 * 60 + 30) else 1.0
-                away += _duration_minutes(day_entry.get("away")) or 0
-                travel += _duration_minutes(day_entry.get("travel")) or 0
-            working_minutes = max(0, gross - (_lunch_for(worked_equivalents) if worked_equivalents else 0) - away)
-            leave = _eom_status_totals(wk, dept, eid, month_key)
-            key = (month_key, dept, eid, str(index))
-            manual = records.get(key, {})
-            week_rows.append({
-                "Employee": emp_name, "Employee ID": eid, "Week": f"Week {index}",
-                "Hours": _m2t(working_minutes), "Travel": _m2t(travel),
-                "Holiday Paid": leave["Holiday Paid"], "Holiday Unpaid": leave["Holiday Unpaid"],
-                "B Hols": leave["B Hols"], "Sick Days": leave["Sick Days"],
-                "Authorised Absence": leave["Authorised Absence"],
-                "Overtime": manual.get("Overtime", ""), "Mileage": manual.get("Mileage", ""),
-                "Expenses": manual.get("Expenses", ""), "Benefit in Kind": manual.get("Benefit in Kind", ""),
-                "ADD": manual.get("ADD", ""), "DED": manual.get("DED", ""),
-                "Bonus": manual.get("Bonus", ""), "Note": manual.get("Note", ""),
-            })
-    if not week_rows:
+    employee_groups = _eom_department_rows(month_key, dept, employees, records)
+    if not any(group["rows"] for group in employee_groups):
         st.info("No payroll weeks are configured for this month.")
         return
-    df = pd.DataFrame(week_rows)
-    st.caption("Hours and Travel are calculated from timesheet records. Holiday and absence columns are counted from daily statuses. Overtime and Mileage are currently manual/not in use.")
-    st.markdown("**Weekly employee details**")
-    editable_cols = ["Overtime", "Mileage", "Expenses", "Benefit in Kind", "ADD", "DED", "Bonus", "Note"]
-    edited = st.data_editor(df, hide_index=True, use_container_width=True, disabled=[c for c in df.columns if c not in editable_cols],
-        column_config={"Note": st.column_config.TextColumn("Note", width="large"),
-                       **{c: st.column_config.TextColumn(c) for c in editable_cols}},
-        key=f"eom_editor_{month_key}_{dept}")
+
+    # The payroll month is paid on the 10th of the following month by default,
+    # matching the supplied example (October 2026 paid on 10 November 2026).
+    y, m = map(int, month_key.split("-"))
+    next_month = date(y + (1 if m == 12 else 0), 1 if m == 12 else m + 1, 1)
+    pay_day = date(next_month.year, next_month.month, 10)
+    def _ordinal(n):
+        return f"{n}{'th' if 10 <= n % 100 <= 20 else {1:'st', 2:'nd', 3:'rd'}.get(n % 10, 'th')}"
+    default_pay_date = f"{_ordinal(pay_day.day)} {pay_day.strftime('%B %Y')}"
+    pay_date_text = st.text_input("Payment date shown on the sheet", value=default_pay_date,
+                                  key=f"eom_pay_date_{month_key}")
+
+    # Main in-system view: a styled HTML table matching the uploaded Excel layout.
+    headers = ["Hours", "Travel", "Overtime", "Holiday Paid", "Holiday Unpaid",
+               "B Hols", "Sick Days", "Unpaid Absence", "Mileage", "Expenses",
+               "Benefit In Kind", "ADD", "DED", "Bonus'", "Comments"]
+    esc = html.escape
+    table_parts = [
+        "<div style='width:100%;overflow-x:auto;'>",
+        "<table style='border-collapse:collapse;width:100%;min-width:1500px;font-family:Arial,sans-serif;font-size:12px;'>",
+        f"<tr><th colspan='16' style='background:#D9EAD3;border:1px solid #333;padding:8px;font-size:19px;text-align:center;'>TO BE PAID ON {esc(pay_date_text)}</th></tr>",
+        f"<tr><th colspan='16' style='background:#92D050;border:1px solid #333;padding:7px;text-align:left;'>{esc(_department_label(dept))} — {esc(month_label)}</th></tr>",
+    ]
+    for group in employee_groups:
+        emp = group["employee"]
+        weekly = group["rows"]
+        table_parts.append("<tr>" + "".join(
+            f"<th style='border:1px solid #333;padding:6px;background:#fff;color:{'#111' if i == 0 else '#d00'};font-weight:normal;text-align:center;white-space:normal;'>{esc(str(v))}</th>"
+            for i, v in enumerate([str(emp.get("name", ""))] + headers)
+        ) + "</tr>")
+        totals = {k: 0.0 for k in headers[:-1]}
+        for rec in weekly:
+            rowvals = [
+                rec["Week"], _m2t(rec["Hours"]), _m2t(rec["Travel"]), rec["Overtime"],
+                rec["Holiday Paid"], rec["Holiday Unpaid"], rec["B Hols"], rec["Sick Days"],
+                rec["Unpaid Absence"], rec["Mileage"], rec["Expenses"], rec["Benefit In Kind"],
+                rec["ADD"], rec["DED"], rec["Bonus"], rec["Comments"],
+            ]
+            table_parts.append("<tr>" + "".join(
+                f"<td style='border:1px solid #333;padding:5px;text-align:center;vertical-align:middle;white-space:normal;'>{esc('' if v is None else str(v))}</td>"
+                for v in rowvals
+            ) + "</tr>")
+            totals["Hours"] += rec["Hours"]
+            totals["Travel"] += rec["Travel"]
+            for key in headers[2:-1]:
+                totals[key] += _eom_numeric(rec.get(key))
+        totalvals = [
+            "Total", _m2t(totals["Hours"]), _m2t(totals["Travel"]),
+            totals["Overtime"], totals["Holiday Paid"], totals["Holiday Unpaid"],
+            totals["B Hols"], totals["Sick Days"], totals["Unpaid Absence"],
+            totals["Mileage"], totals["Expenses"], totals["Benefit In Kind"],
+            totals["ADD"], totals["DED"], totals["Bonus"], "",
+        ]
+        table_parts.append("<tr>" + "".join(
+            f"<td style='border:1px solid #333;padding:5px;text-align:center;background:#FFF2CC;'>{esc(str(v))}</td>"
+            for v in totalvals
+        ) + "</tr>")
+    table_parts.append("</table></div>")
+    st.markdown("".join(table_parts), unsafe_allow_html=True)
+
+    # Editable companion grid keeps manual adjustments separate from timesheet-derived fields.
+    st.markdown("**Enter / edit weekly payroll adjustments**")
+    editable_fields = ["Overtime", "Mileage", "Expenses", "Benefit In Kind", "ADD", "DED", "Bonus", "Note"]
+    editor_rows = []
+    for group in employee_groups:
+        for rec in group["rows"]:
+            editor_rows.append({
+                "Employee": rec["Employee"], "Employee ID": rec["Employee ID"],
+                "Week": rec["Week"],
+                **{field: rec.get("_manual_values", {}).get(field, "") for field in editable_fields}
+            })
+    editor_df = pd.DataFrame(editor_rows)
+    edited = st.data_editor(
+        editor_df, hide_index=True, use_container_width=True,
+        disabled=["Employee", "Employee ID", "Week"],
+        column_config={
+            "Employee": st.column_config.TextColumn("Employee", width="medium"),
+            "Employee ID": st.column_config.TextColumn("Employee ID", width="small"),
+            "Week": st.column_config.TextColumn("Week", width="small"),
+            "Note": st.column_config.TextColumn("Comments / Note", width="large"),
+            **{field: st.column_config.TextColumn(field, width="small") for field in editable_fields if field != "Note"},
+        },
+        key=f"eom_editor_{month_key}_{dept}",
+    )
     if st.button("💾 Save EOM Entries", type="primary", key=f"save_eom_{month_key}_{dept}"):
         for row in edited.to_dict(orient="records"):
             key = (month_key, dept, str(row["Employee ID"]), str(row["Week"]).replace("Week ", ""))
@@ -2514,27 +2777,15 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         _eom_save(records)
         st.success("EOM payroll entries saved.")
         st.rerun()
-    st.markdown("**Department totals**")
-    numeric = ["Holiday Paid", "Holiday Unpaid", "B Hols", "Sick Days", "Authorised Absence"]
-    summary = []
-    for emp in employees:
-        eid = str(emp.get("emp_id", "")); subset = df[df["Employee ID"] == eid]
-        total_minutes = sum((_t2m(v) or 0) for v in subset["Hours"])
-        travel_minutes = sum((_t2m(v) or 0) for v in subset["Travel"])
-        row = {"Employee": emp.get("name", ""), "Hours": _m2t(total_minutes), "Travel": _m2t(travel_minutes)}
-        for col in numeric: row[col] = subset[col].sum()
-        for col in editable_cols[:-1]:
-            vals = pd.to_numeric(subset[col], errors="coerce").fillna(0)
-            row[col] = round(vals.sum(), 2)
-        summary.append(row)
-    st.dataframe(pd.DataFrame(summary), hide_index=True, use_container_width=True)
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="EOM Weekly")
-        pd.DataFrame(summary).to_excel(writer, index=False, sheet_name="Department Total")
-    st.download_button("⬇️ Download EOM Excel", data=output.getvalue(),
-        file_name=f"EOM_Payroll_{month_key}_{re.sub(r'[^A-Za-z0-9_-]+', '_', dept)}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    excel_bytes = _eom_build_excel(month_key, dept, employee_groups, pay_date_text)
+    st.download_button(
+        "⬇️ Download Department EOM Excel",
+        data=excel_bytes,
+        file_name=f"EOM_Payroll_{month_key}_{re.sub(r'[^A-Za-z0-9_-]+', '_', _department_label(dept))}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+    )
 
 
 
