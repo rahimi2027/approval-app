@@ -2567,7 +2567,8 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
         # Each employee starts with the full-width green separator used in the
         # supplied payroll workbook, followed by that employee's column headings.
         ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=16)
-        separator = ws.cell(row_num, 1, f"{emp.get('name', '')} - {_department_label(dept)}")
+        group_dept = group.get("_department", dept)
+        separator = ws.cell(row_num, 1, f"{emp.get('name', '')} - {_department_label(group_dept)}")
         separator.fill = green
         separator.font = Font(name="Aptos Narrow", size=11, bold=True)
         separator.alignment = Alignment(vertical="center")
@@ -2686,23 +2687,37 @@ def render_payroll_eom(current_user_info, mode="payroll"):
                    or bool(current_user_info.get("can_access_all_departments_timesheet", False)))
         if not can_all:
             user_dept = str(current_user_info.get("dept", "")).strip()
-            options = [o for o in options
-                       if _department_parts(o)[0] == user_dept]
+            options = [o for o in options if _department_parts(o)[0] == user_dept]
         if not options:
             st.warning("No department access is assigned to this account.")
             return
-        dept = st.selectbox("🏢 Department / Sub-department", options,
-                            format_func=_department_label, key="eom_department_select")
+        dept_choices = (["All Departments"] + options) if can_all else options
+        dept = st.selectbox("🏢 Department / Sub-department", dept_choices,
+                            format_func=lambda x: x if x == "All Departments" else _department_label(x),
+                            key="eom_department_select")
+    with st.container():
+        sort_order = st.radio("Sort employees", ["By Department", "Alphabetically"],
+                              horizontal=True, key="eom_sort_order")
 
-    employees = _get_employees(
-        dept, separate_subdepartments=(mode in ("payroll", "director", "super_admin"))
-    )
-    if not employees:
-        st.info("No active employees found in this department.")
-        return
-
+    selected_departments = options if dept == "All Departments" else [dept]
     records = _eom_load()
-    employee_groups = _eom_department_rows(month_key, dept, employees, records)
+    employee_groups = []
+    for group_dept in selected_departments:
+        dept_employees = _get_employees(
+            group_dept, separate_subdepartments=(mode in ("payroll", "director", "super_admin"))
+        ) or []
+        for group in _eom_department_rows(month_key, group_dept, dept_employees, records):
+            group["_department"] = group_dept
+            employee_groups.append(group)
+    if sort_order == "Alphabetically":
+        employee_groups.sort(key=lambda g: str(g["employee"].get("name", "")).casefold())
+    else:
+        employee_groups.sort(key=lambda g: (str(g.get("_department", "")).casefold(),
+                                            str(g["employee"].get("name", "")).casefold()))
+    employees = [g["employee"] for g in employee_groups]
+    if not employees:
+        st.info("No active employees found in the selected scope.")
+        return
     if not any(group["rows"] for group in employee_groups):
         st.info("No payroll weeks are configured for this month.")
         return
@@ -2734,7 +2749,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         weekly = group["rows"]
         table_parts.append(
             f"<tr><th colspan='16' style='border:1px solid #333;padding:7px;background:#92D050;"
-            f"font-weight:bold;text-align:left;'>{esc(str(emp.get('name', '')))} - {esc(_department_label(dept))}</th></tr>"
+            f"font-weight:bold;text-align:left;'>{esc(str(emp.get('name', '')))} - {esc(_department_label(group.get('_department', dept)))}</th></tr>"
         )
         table_parts.append("<tr>" + "".join(
             f"<th style='border:1px solid #333;padding:6px;background:#fff;color:{'#111' if i == 0 else '#d00'};font-weight:normal;text-align:center;white-space:normal;'>{esc(str(v))}</th>"
@@ -2801,9 +2816,9 @@ def render_payroll_eom(current_user_info, mode="payroll"):
                 adjustment_description = st.text_input("Description / Note")
             add_adjustment = st.form_submit_button("Save addition / deduction", type="primary", use_container_width=True)
         if add_adjustment:
-            selected_eid = employee_options[selected_employee_label]
+            selected_eid, selected_dept = employee_options[selected_employee_label]
             selected_week_no = adjustment_week.replace("Week ", "")
-            adjustment_key = (month_key, dept, selected_eid, selected_week_no)
+            adjustment_key = (month_key, selected_dept, selected_eid, selected_week_no)
             target_record = dict(records.get(adjustment_key, {}))
             current_amount = _eom_numeric(target_record.get(adjustment_type, 0))
             target_record[adjustment_type] = round(current_amount + float(adjustment_amount), 2)
@@ -2827,16 +2842,17 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         for rec in group["rows"]:
             editor_rows.append({
                 "Employee": rec["Employee"], "Employee ID": rec["Employee ID"],
-                "Week": rec["Week"],
+                "Department": group.get("_department", dept), "Week": rec["Week"],
                 **{field: rec.get("_manual_values", {}).get(field, "") for field in editable_fields}
             })
     editor_df = pd.DataFrame(editor_rows)
     edited = st.data_editor(
         editor_df, hide_index=True, use_container_width=True,
-        disabled=["Employee", "Employee ID", "Week"],
+        disabled=["Employee", "Employee ID", "Department", "Week"],
         column_config={
             "Employee": st.column_config.TextColumn("Employee", width="medium"),
             "Employee ID": st.column_config.TextColumn("Employee ID", width="small"),
+            "Department": st.column_config.TextColumn("Department", width="medium"),
             "Week": st.column_config.TextColumn("Week", width="small"),
             "Note": st.column_config.TextColumn("Comments / Note", width="large"),
             **{field: st.column_config.TextColumn(field, width="small") for field in editable_fields if field != "Note"},
@@ -2845,7 +2861,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     )
     if st.button("💾 Save EOM Entries", type="primary", key=f"save_eom_{month_key}_{dept}"):
         for row in edited.to_dict(orient="records"):
-            key = (month_key, dept, str(row["Employee ID"]), str(row["Week"]).replace("Week ", ""))
+            key = (month_key, str(row.get("Department", dept)), str(row["Employee ID"]), str(row["Week"]).replace("Week ", ""))
             saved_values = dict(records.get(key, {}))
             for field in editable_fields:
                 saved_values[field] = row.get(field, "")
@@ -2858,11 +2874,12 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         st.success("EOM payroll entries saved.")
         st.rerun()
 
+    export_title = "All_Departments" if dept == "All Departments" else re.sub(r'[^A-Za-z0-9_-]+', '_', _department_label(dept))
     excel_bytes = _eom_build_excel(month_key, dept, employee_groups, pay_date_text)
     st.download_button(
-        "⬇️ Download Department EOM Excel",
+        "⬇️ Download EOM Excel (All selected employees)",
         data=excel_bytes,
-        file_name=f"EOM_Payroll_{month_key}_{re.sub(r'[^A-Za-z0-9_-]+', '_', _department_label(dept))}.xlsx",
+        file_name=f"EOM_Payroll_{month_key}_{export_title}_{sort_order.replace(' ', '_')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
     )
