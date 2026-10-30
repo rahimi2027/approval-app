@@ -2681,25 +2681,35 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         month_label = st.selectbox("📅 Payroll month", month_labels,
             index=month_keys.index(default_month), key="eom_month_select")
     month_key = month_keys[month_labels.index(month_label)]
-    with c2:
-        options = _get_payroll_department_options() or _get_departments() or ["Store"]
-        can_all = (mode in ("super_admin", "director")
-                   or bool(current_user_info.get("can_access_all_departments_timesheet", False)))
-        if not can_all:
-            user_dept = str(current_user_info.get("dept", "")).strip()
-            options = [o for o in options if _department_parts(o)[0] == user_dept]
-        if not options:
-            st.warning("No department access is assigned to this account.")
-            return
-        dept_choices = (["All Departments"] + options) if can_all else options
-        dept = st.selectbox("🏢 Department / Sub-department", dept_choices,
-                            format_func=lambda x: x if x == "All Departments" else _department_label(x),
-                            key="eom_department_select")
-    with st.container():
-        sort_order = st.radio("Sort employees", ["By Department", "Alphabetically"],
-                              horizontal=True, key="eom_sort_order")
 
-    selected_departments = options if dept == "All Departments" else [dept]
+    options = _get_payroll_department_options() or _get_departments() or ["Store"]
+    can_all = (mode in ("super_admin", "director")
+               or bool(current_user_info.get("can_access_all_departments_timesheet", False)))
+    if not can_all:
+        user_dept = str(current_user_info.get("dept", "")).strip()
+        options = [o for o in options if _department_parts(o)[0] == user_dept]
+    if not options:
+        st.warning("No department access is assigned to this account.")
+        return
+
+    # Company-wide view is a separate scope choice. It always combines all
+    # accessible departments and sorts the complete employee list A-Z.
+    scope_choices = (["All Employees", "By Department"] if can_all else ["By Department"])
+    scope = st.radio("👥 Employee selection", scope_choices, horizontal=True,
+                     key="eom_employee_scope")
+    if scope == "All Employees":
+        dept = "All Departments"
+        selected_departments = list(options)
+        sort_order = "Alphabetically"
+        st.caption("Showing every employee across all accessible departments, sorted alphabetically (A–Z).")
+    else:
+        with c2:
+            dept = st.selectbox("🏢 Department / Sub-department", options,
+                                format_func=_department_label,
+                                key="eom_department_select")
+        sort_order = "By Department"
+        selected_departments = [dept]
+
     records = _eom_load()
     employee_groups = []
     for group_dept in selected_departments:
@@ -2710,7 +2720,11 @@ def render_payroll_eom(current_user_info, mode="payroll"):
             group["_department"] = group_dept
             employee_groups.append(group)
     if sort_order == "Alphabetically":
-        employee_groups.sort(key=lambda g: str(g["employee"].get("name", "")).casefold())
+        employee_groups.sort(key=lambda g: (
+            str(g["employee"].get("name", "")).casefold(),
+            str(g.get("_department", "")).casefold(),
+            str(g["employee"].get("emp_id", "")).casefold(),
+        ))
     else:
         employee_groups.sort(key=lambda g: (str(g.get("_department", "")).casefold(),
                                             str(g["employee"].get("name", "")).casefold()))
@@ -2795,10 +2809,18 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     # department, employee and week.
     st.markdown("### ➕ Addition / ➖ Deduction")
     st.caption("Choose the employee and week. The amount and description will appear only in that employee's EOM block.")
-    employee_options = {
-        f"{emp.get('name', '')} ({emp.get('emp_id', '')})": str(emp.get('emp_id', ""))
-        for emp in employees
-    }
+    employee_options = {}
+    for group in employee_groups:
+        emp = group["employee"]
+        group_dept = str(group.get("_department", dept))
+        label = f"{emp.get('name', '')} ({emp.get('emp_id', '')}) — {_department_label(group_dept)}"
+        # Keep labels unique if duplicate employee records exist.
+        base_label = label
+        suffix = 2
+        while label in employee_options:
+            label = f"{base_label} [{suffix}]"
+            suffix += 1
+        employee_options[label] = (group_dept, str(emp.get("emp_id", "")))
     eom_weeks = [f"Week {i}" for i in range(1, len(employee_groups[0]["rows"]) + 1)]
     if eom_weeks:
         with st.form(key=f"eom_adjustment_form_{month_key}_{dept}", clear_on_submit=True):
