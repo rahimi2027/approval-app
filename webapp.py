@@ -2399,7 +2399,7 @@ def _eom_save(records):
 
 
 def _eom_status_totals(week_key, dept, eid, month_key):
-    counts = {"Holiday Paid": 0.0, "Holiday Unpaid": 0, "B Hols": 0, "Sick Days": 0, "Unpaid Absence": 0}
+    counts = {"Holiday Paid": 0.0, "Holiday Unpaid": 0, "B Hols": 0, "Sick Days": 0, "Authorised Absence": 0}
     week_obj = PAYROLL_WEEKS.get(week_key, {})
     y, m = map(int, month_key.split("-"))
     days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
@@ -2415,7 +2415,7 @@ def _eom_status_totals(week_key, dept, eid, month_key):
         elif status == "Unpaid Holiday": counts["Holiday Unpaid"] += 1
         elif status == "Bank Holiday": counts["B Hols"] += 1
         elif status == "Sick": counts["Sick Days"] += 1
-        elif status == "Unpaid Absence": counts["Unpaid Absence"] += 1
+        elif status == "Authorised Absence": counts["Authorised Absence"] += 1
     return counts
 
 
@@ -2483,7 +2483,7 @@ def _eom_department_rows(month_key, dept, employees, records):
                 "Holiday Unpaid": leave["Holiday Unpaid"],
                 "B Hols": leave["B Hols"],
                 "Sick Days": leave["Sick Days"],
-                "Unpaid Absence": leave.get("Unpaid Absence", 0),
+                "Authorised Absence": leave.get("Authorised Absence", 0),
                 "Mileage": manual.get("Mileage", ""),
                 "Expenses": manual.get("Expenses", ""),
                 "Benefit In Kind": manual.get("Benefit in Kind", ""),
@@ -2538,8 +2538,8 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
     medium = Side(style="medium", color="000000")
     cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
     headers = ["Hours", "Travel", "Overtime", "Holiday Paid", "Holiday Unpaid",
-               "B Hols", "Sick Days", "Unpaid Absence", "Mileage", "Expenses",
-               "Benefit In Kind", "ADD", "DED", "Bonus'", "Comments"]
+               "B Hols", "Sick Days", "Authorised Absence", "Mileage", "Expenses",
+               "Benefit In Kind", "ADD", "DED", "Bonus", "Comments"]
 
     month_label = dict(PAYROLL_MONTHS).get(month_key, month_key)
     ws.merge_cells("A1:P1")
@@ -2574,7 +2574,14 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
         ws.row_dimensions[row_num].height = 30
         row_num += 1
 
-        totals = {k: 0.0 for k in headers[:-1]}
+        # Explicit canonical keys prevent KeyError when a display heading contains
+        # punctuation or differs in capitalisation from the underlying data field.
+        total_keys = [
+            "Hours", "Travel", "Overtime", "Holiday Paid", "Holiday Unpaid",
+            "B Hols", "Sick Days", "Authorised Absence", "Mileage", "Expenses",
+            "Benefit In Kind", "ADD", "DED", "Bonus",
+        ]
+        totals = {key: 0.0 for key in total_keys}
         for record in weekly:
             values = [
                 record["Week"],
@@ -2585,7 +2592,7 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
                 _eom_numeric(record["Holiday Unpaid"]),
                 _eom_numeric(record["B Hols"]),
                 _eom_numeric(record["Sick Days"]),
-                _eom_numeric(record["Unpaid Absence"]),
+                _eom_numeric(record.get("Authorised Absence", 0)),
                 _eom_numeric(record["Mileage"]),
                 _eom_numeric(record["Expenses"]),
                 _eom_numeric(record["Benefit In Kind"]),
@@ -2605,18 +2612,18 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
                     cell.number_format = '£#,##0.00'
                 elif col == 10:
                     cell.number_format = '0.00'
-            for idx, key in enumerate(headers[:-1], start=2):
+            for key in total_keys:
                 if key in ("Hours", "Travel"):
-                    totals[key] += record[key]
-                else:
                     totals[key] += _eom_numeric(record.get(key))
+                else:
+                    totals[key] += _eom_numeric(record.get(key, 0))
             ws.row_dimensions[row_num].height = 21
             row_num += 1
 
         total_values = [
             "Total", totals["Hours"] / 1440, totals["Travel"] / 1440,
             totals["Overtime"], totals["Holiday Paid"], totals["Holiday Unpaid"],
-            totals["B Hols"], totals["Sick Days"], totals["Unpaid Absence"],
+            totals["B Hols"], totals["Sick Days"], totals["Authorised Absence"],
             totals["Mileage"], totals["Expenses"], totals["Benefit In Kind"],
             totals["ADD"], totals["DED"], totals["Bonus"], "",
         ]
@@ -2700,8 +2707,8 @@ def render_payroll_eom(current_user_info, mode="payroll"):
 
     # Main in-system view: a styled HTML table matching the uploaded Excel layout.
     headers = ["Hours", "Travel", "Overtime", "Holiday Paid", "Holiday Unpaid",
-               "B Hols", "Sick Days", "Unpaid Absence", "Mileage", "Expenses",
-               "Benefit In Kind", "ADD", "DED", "Bonus'", "Comments"]
+               "B Hols", "Sick Days", "Authorised Absence", "Mileage", "Expenses",
+               "Benefit In Kind", "ADD", "DED", "Bonus", "Comments"]
     esc = html.escape
     table_parts = [
         "<div style='width:100%;overflow-x:auto;'>",
@@ -2716,12 +2723,17 @@ def render_payroll_eom(current_user_info, mode="payroll"):
             f"<th style='border:1px solid #333;padding:6px;background:#fff;color:{'#111' if i == 0 else '#d00'};font-weight:normal;text-align:center;white-space:normal;'>{esc(str(v))}</th>"
             for i, v in enumerate([str(emp.get("name", ""))] + headers)
         ) + "</tr>")
-        totals = {k: 0.0 for k in headers[:-1]}
+        total_keys = [
+            "Hours", "Travel", "Overtime", "Holiday Paid", "Holiday Unpaid",
+            "B Hols", "Sick Days", "Authorised Absence", "Mileage", "Expenses",
+            "Benefit In Kind", "ADD", "DED", "Bonus",
+        ]
+        totals = {key: 0.0 for key in total_keys}
         for rec in weekly:
             rowvals = [
                 rec["Week"], _m2t(rec["Hours"]), _m2t(rec["Travel"]), rec["Overtime"],
                 rec["Holiday Paid"], rec["Holiday Unpaid"], rec["B Hols"], rec["Sick Days"],
-                rec["Unpaid Absence"], rec["Mileage"], rec["Expenses"], rec["Benefit In Kind"],
+                rec["Authorised Absence"], rec["Mileage"], rec["Expenses"], rec["Benefit In Kind"],
                 rec["ADD"], rec["DED"], rec["Bonus"], rec["Comments"],
             ]
             table_parts.append("<tr>" + "".join(
@@ -2730,12 +2742,12 @@ def render_payroll_eom(current_user_info, mode="payroll"):
             ) + "</tr>")
             totals["Hours"] += rec["Hours"]
             totals["Travel"] += rec["Travel"]
-            for key in headers[2:-1]:
-                totals[key] += _eom_numeric(rec.get(key))
+            for key in total_keys[2:]:
+                totals[key] += _eom_numeric(rec.get(key, 0))
         totalvals = [
             "Total", _m2t(totals["Hours"]), _m2t(totals["Travel"]),
             totals["Overtime"], totals["Holiday Paid"], totals["Holiday Unpaid"],
-            totals["B Hols"], totals["Sick Days"], totals["Unpaid Absence"],
+            totals["B Hols"], totals["Sick Days"], totals["Authorised Absence"],
             totals["Mileage"], totals["Expenses"], totals["Benefit In Kind"],
             totals["ADD"], totals["DED"], totals["Bonus"], "",
         ]
