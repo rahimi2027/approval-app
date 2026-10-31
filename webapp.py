@@ -2477,6 +2477,7 @@ def _eom_department_rows(month_key, dept, employees, records):
             working, travel, day_notes = _eom_minutes_for_week(wk, dept, eid, month_key)
             leave = _eom_status_totals(wk, dept, eid, month_key)
             manual = records.get((month_key, dept, eid, str(index)), {})
+            manual_entry = dict(manual)  # Keep approved request values out of editable/manual storage.
             request_add = request_ded = 0.0
             request_notes = []
             main_dept, sub_dept = _department_parts(dept)
@@ -2505,10 +2506,21 @@ def _eom_department_rows(month_key, dept, employees, records):
                     continue
                 request_type = str(request.get("type", "")).strip().casefold()
                 amount = _eom_numeric(request.get("amount", 0))
-                if request_type == "addition":
-                    request_add += amount
-                elif request_type == "deduction":
+                eom_type = str(request.get("transaction_type", "") or "").strip().casefold()
+                if request_type == "deduction":
                     request_ded += amount
+                elif request_type == "addition":
+                    # Legacy additions without a subtype continue to post to ADD.
+                    if eom_type in {"expense", "expenses"}:
+                        manual["Expenses"] = round(_eom_numeric(manual.get("Expenses", 0)) + amount, 2)
+                    elif eom_type in {"benefit in kind", "benefit_in_kind", "benefit-in-kind"}:
+                        manual["Benefit in Kind"] = round(_eom_numeric(manual.get("Benefit in Kind", 0)) + amount, 2)
+                    elif eom_type == "bonus":
+                        manual["Bonus"] = round(_eom_numeric(manual.get("Bonus", 0)) + amount, 2)
+                    elif eom_type == "add":
+                        request_add += amount
+                    else:
+                        request_add += amount
                 category = str(request.get("category", "")).strip()
                 desc = str(request.get("desc", "")).strip()
                 note = f"{request_type.title()}: {category or desc}".strip()
@@ -2534,7 +2546,7 @@ def _eom_department_rows(month_key, dept, employees, records):
                 "DED": round(_eom_numeric(manual.get("DED", 0)) + request_ded, 2),
                 "Bonus": manual.get("Bonus", ""),
                 "Comments": " / ".join(notes),
-                "_manual_values": {field: manual.get(field, "") for field in EOM_MANUAL_FIELDS},
+                "_manual_values": {field: manual_entry.get(field, "") for field in EOM_MANUAL_FIELDS},
                 "_week_no": str(index),
             })
         result.append({"employee": emp, "rows": weekly})
@@ -2773,6 +2785,31 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         employee_groups.sort(key=lambda g: (str(g.get("_department", "")).casefold(),
                                             str(g["employee"].get("name", "")).casefold()))
     employees = [g["employee"] for g in employee_groups]
+
+    # Weekly expense report uses the same employee/week figures as EOM payroll.
+    # It therefore includes approved Expense requests as well as manually entered
+    # EOM expense values, and respects the currently selected department/company scope.
+    expense_report_rows = []
+    for group in employee_groups:
+        group_dept = group.get("_department", dept)
+        for weekly_row in group.get("rows", []):
+            expense_report_rows.append({
+                "Department": _department_label(group_dept),
+                "Week": weekly_row.get("Week", ""),
+                "Expenses (£)": round(_eom_numeric(weekly_row.get("Expenses", 0)), 2),
+            })
+    if expense_report_rows:
+        expense_report = pd.DataFrame(expense_report_rows)
+        weekly_expense_summary = (
+            expense_report.groupby(["Department", "Week"], as_index=False)["Expenses (£)"]
+            .sum()
+            .sort_values(["Department", "Week"])
+        )
+        st.markdown("#### 🧾 Weekly company expense reporting")
+        st.caption("Includes approved Expense transactions allocated to the selected payroll month/week, alongside manual EOM expense entries.")
+        st.dataframe(weekly_expense_summary, hide_index=True, use_container_width=True)
+        st.metric("Total expenses in selected scope", f"£{weekly_expense_summary['Expenses (£)'].sum():,.2f}")
+
     if not employees:
         st.info("No active employees found in the selected scope.")
         return
@@ -4129,7 +4166,7 @@ DEFAULT_DEPARTMENTS = [
     "Store",
     "HR",
 ]
-EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Category Reason", "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name", "Status", "Director Comments", "Decision Date", "Decision By", "Submitted By", "PDF File Path", "Edited From ID", "Old Data"]
+EXCEL_COLUMNS = ["ID", "Employee Name", "Department", "Transaction Type", "Category Reason", "Date", "Amount (£)", "Line Manager", "Description", "Attachment Name", "Status", "Director Comments", "Decision Date", "Decision By", "Submitted By", "PDF File Path", "Edited From ID", "Old Data", "Payroll Month", "Payroll Week", "Payroll Week Key", "Employee ID", "Payroll Employee ID", "Payroll Department", "Payroll Subdepartment", "EOM Transaction Type"]
 WORK_ORDER_COLUMNS = ["Work Order ID", "Manual Work Order No.", "Employee Name", "Department", "Work Date", "Hours", "Amount (£)", "Manager", "Description", "Attachment Name", "Status", "Site Address", "Customer Job No.", "Manager Comments", "Manager Decision Date", "Manager Decision By", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "Payroll Status", "Payroll Date", "Payroll By", "PDF File Path"]
 INSPECTOR_BONUS_COLUMNS = ["ID", "Inspector Name", "Month & Year", "Days Absent", "Reasons for Absence", "Total Jobs Completed", "Bonus Amount (£)", "Status", "Director Comments", "Director Decision Date", "Director Decision By", "Submitted By", "Submitted Date", "PDF File Path"]
 
@@ -14245,7 +14282,7 @@ def load_records_from_excel(force=False):
             except: record_id = 0
             try: amount = float(r.get("Amount (£)", 0))
             except: amount = 0.0
-            parsed.append({"id": record_id, "emp_name": str(r.get("Employee Name", "Not Specified")).strip(), "dept": str(r.get("Department", "Not Specified")).strip(), "type": str(r.get("Transaction Type", "Not Specified")).strip(), "category": str(r.get("Category Reason", "Not Specified")).strip(), "date": str(r.get("Date", "")).strip(), "amount": amount, "manager": str(r.get("Line Manager", "Not Specified")).strip(), "desc": str(r.get("Description", "")).strip(), "attachment_name": str(r.get("Attachment Name", "None")).strip(), "status": str(r.get("Status", "pending")).strip().lower(), "director_comments": str(r.get("Director Comments", "")).strip(), "decision_date": str(r.get("Decision Date", "")).strip(), "decision_by": str(r.get("Decision By", "")).strip(), "submitted_by": str(r.get("Submitted By", "")).strip(), "pdf_path": str(r.get("PDF File Path", "")).strip(), "edited_from_id": str(r.get("Edited From ID", "")).strip(), "old_data": str(r.get("Old Data", "")).strip()})
+            parsed.append({"id": record_id, "emp_name": str(r.get("Employee Name", "Not Specified")).strip(), "dept": str(r.get("Department", "Not Specified")).strip(), "type": str(r.get("Transaction Type", "Not Specified")).strip(), "category": str(r.get("Category Reason", "Not Specified")).strip(), "date": str(r.get("Date", "")).strip(), "amount": amount, "manager": str(r.get("Line Manager", "Not Specified")).strip(), "desc": str(r.get("Description", "")).strip(), "attachment_name": str(r.get("Attachment Name", "None")).strip(), "status": str(r.get("Status", "pending")).strip().lower(), "director_comments": str(r.get("Director Comments", "")).strip(), "decision_date": str(r.get("Decision Date", "")).strip(), "decision_by": str(r.get("Decision By", "")).strip(), "submitted_by": str(r.get("Submitted By", "")).strip(), "pdf_path": str(r.get("PDF File Path", "")).strip(), "edited_from_id": str(r.get("Edited From ID", "")).strip(), "old_data": str(r.get("Old Data", "")).strip(), "payroll_month": str(r.get("Payroll Month", "") or "").strip(), "payroll_week": str(r.get("Payroll Week", "") or "").strip(), "payroll_week_key": str(r.get("Payroll Week Key", "") or "").strip(), "employee_id": str(r.get("Employee ID", "") or "").strip(), "payroll_employee_id": str(r.get("Payroll Employee ID", "") or "").strip(), "payroll_department": str(r.get("Payroll Department", "") or "").strip(), "payroll_subdepartment": str(r.get("Payroll Subdepartment", "") or "").strip(), "transaction_type": str(r.get("EOM Transaction Type", "") or "").strip()})
         _set_data_cache("_records_cache", parsed)
         return list(parsed)
     except Exception as e:
@@ -14255,7 +14292,7 @@ def load_records_from_excel(force=False):
 def save_all_records(records):
     export = []
     for r in records:
-        export.append({"ID": int(r.get("id", 0)), "Employee Name": str(r.get("emp_name", "")), "Department": str(r.get("dept", "")), "Transaction Type": str(r.get("type", "")), "Category Reason": str(r.get("category", "")), "Date": str(r.get("date", "")), "Amount (£)": float(r.get("amount", 0.0)), "Line Manager": str(r.get("manager", "")), "Description": str(r.get("desc", "")), "Attachment Name": str(r.get("attachment_name", "None")), "Status": str(r.get("status", "pending")).lower(), "Director Comments": str(r.get("director_comments", "")), "Decision Date": str(r.get("decision_date", "")), "Decision By": str(r.get("decision_by", "")), "Submitted By": str(r.get("submitted_by", "")), "PDF File Path": str(r.get("pdf_path", "")), "Edited From ID": str(r.get("edited_from_id", "")), "Old Data": str(r.get("old_data", ""))})
+        export.append({"ID": int(r.get("id", 0)), "Employee Name": str(r.get("emp_name", "")), "Department": str(r.get("dept", "")), "Transaction Type": str(r.get("type", "")), "Category Reason": str(r.get("category", "")), "Date": str(r.get("date", "")), "Amount (£)": float(r.get("amount", 0.0)), "Line Manager": str(r.get("manager", "")), "Description": str(r.get("desc", "")), "Attachment Name": str(r.get("attachment_name", "None")), "Status": str(r.get("status", "pending")).lower(), "Director Comments": str(r.get("director_comments", "")), "Decision Date": str(r.get("decision_date", "")), "Decision By": str(r.get("decision_by", "")), "Submitted By": str(r.get("submitted_by", "")), "PDF File Path": str(r.get("pdf_path", "")), "Edited From ID": str(r.get("edited_from_id", "")), "Old Data": str(r.get("old_data", "")), "Payroll Month": str(r.get("payroll_month", "")), "Payroll Week": str(r.get("payroll_week", "")), "Payroll Week Key": str(r.get("payroll_week_key", "")), "Employee ID": str(r.get("employee_id", "")), "Payroll Employee ID": str(r.get("payroll_employee_id", "")), "Payroll Department": str(r.get("payroll_department", "")), "Payroll Subdepartment": str(r.get("payroll_subdepartment", "")), "EOM Transaction Type": str(r.get("transaction_type", ""))})
     pd.DataFrame(export, columns=EXCEL_COLUMNS).to_excel(EXCEL_PATH, index=False, engine="openpyxl")
     _set_data_cache("_records_cache", list(records))
     sync_saved_file_to_drive(EXCEL_PATH)
@@ -16408,6 +16445,13 @@ def render_store_addition_deduction_module(full_name, dept_name):
                 if manual_mode:
                     employee_name = st.text_input("👤 Employee Name", key=f"store_ad_manual_name_v{form_version}")
                 request_type = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"store_ad_type_v{form_version}")
+                eom_transaction_type = st.selectbox(
+                    "📊 Addition Category (EOM column)",
+                    ["Expense", "Benefit in Kind", "ADD", "Bonus"],
+                    key=f"store_ad_eom_type_v{form_version}",
+                    disabled=(request_type == "Deduction"),
+                    help="Deductions always post to DED.",
+                )
                 category = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"store_ad_category_v{form_version}")
                 amount = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, key=f"store_ad_amount_v{form_version}")
             with c2:
@@ -16441,6 +16485,7 @@ def render_store_addition_deduction_module(full_name, dept_name):
                         "payroll_week": selected_payroll_week_number,
                         "payroll_week_key": selected_payroll_week_key,
                         "type": request_type,
+                        "transaction_type": (eom_transaction_type if request_type == "Addition" else ""),
                         "category": category,
                         "date": str(request_date),
                         "amount": float(amount),
@@ -16475,7 +16520,8 @@ def render_store_addition_deduction_module(full_name, dept_name):
                 icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴" if status == "rejected" else "⚪")
                 with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount', 0) or 0):.2f}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Line Manager: {req.get('manager')}")
-                    st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')} | 📅 Transaction date: {req.get('date')} | Payroll: {dict(PAYROLL_MONTHS).get(str(req.get('payroll_month', "")), req.get('payroll_month', "Not assigned"))} — Week {req.get('payroll_week', "Not assigned")}")
+                    eom_destination = req.get("transaction_type") or ("DED" if str(req.get("type", "")).casefold() == "deduction" else "ADD (legacy)")
+                    st.write(f"🔄 {req.get('type')} | 📊 EOM destination: {eom_destination} | 🏷️ {req.get('category')} | 📅 Transaction date: {req.get('date')} | Payroll: {dict(PAYROLL_MONTHS).get(str(req.get('payroll_month', "")), req.get('payroll_month', "Not assigned"))} — Week {req.get('payroll_week', "Not assigned")}")
                     st.write(f"💷 Amount: £{float(req.get('amount', 0) or 0):.2f}")
                     st.info(f"📝 {req.get('desc', '')}")
                     if req.get("director_comments"):
@@ -16756,10 +16802,10 @@ elif role == "Work Order Manager":
                                 final_attachments.append(fn)
                         records = load_records_from_excel()
                         old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
-                        new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
+                        new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "transaction_type": (eom_transaction_type if rt == "Addition" else ""), "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
                         for r in records:
                             if int(r.get("id", 0)) == int(eid):
-                                r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
+                                r["emp_name"] = en.strip(); r["type"] = rt; r["transaction_type"] = (eom_transaction_type if rt == "Addition" else ""); r["payroll_month"] = edit_payroll_month; r["payroll_week"] = edit_payroll_week; r["payroll_week_key"] = edit_payroll_week_key; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
                                 break
                         log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
                         save_all_records(records)
@@ -16847,7 +16893,7 @@ elif role == "Work Order Manager":
                             st.error("Please select a payroll month with a configured payroll week.")
                             st.stop()
                         employee_id = str((registered_employee or {}).get("emp_id", (registered_employee or {}).get("employee_id", (registered_employee or {}).get("Employee ID", ""))) or "").strip()
-                        payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "employee_id": employee_id, "payroll_employee_id": employee_id, "payroll_department": str((registered_employee or {}).get("department", dept_name) or dept_name).strip(), "payroll_subdepartment": str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", "Office Staff")) or "Office Staff").strip(), "payroll_month": selected_payroll_month, "payroll_week": selected_payroll_week_number, "payroll_week_key": selected_payroll_week_key, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                        payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "employee_id": employee_id, "payroll_employee_id": employee_id, "payroll_department": str((registered_employee or {}).get("department", dept_name) or dept_name).strip(), "payroll_subdepartment": str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", "Office Staff")) or "Office Staff").strip(), "payroll_month": selected_payroll_month, "payroll_week": selected_payroll_week_number, "payroll_week_key": selected_payroll_week_key, "type": rt, "transaction_type": (eom_transaction_type if rt == "Addition" else ""), "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
                         st.session_state["wo_mgr_new_req_form_version"] = form_version + 1
@@ -16855,7 +16901,7 @@ elif role == "Work Order Manager":
                     else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
             st.divider()
             st.subheader("📋 My Department Requests")
-            my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+            my_reqs = [r for r in all_live_requests if str(r.get("dept", "")).strip().casefold() == str(dept_name).strip().casefold()]
             if not my_reqs: st.info("📋 No requests yet.")
             else:
                 for req in reversed(my_reqs):
@@ -16990,9 +17036,43 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 with c1:
                                     en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
                                     rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
+                                    eom_options = ["Expense", "Benefit in Kind", "ADD", "Bonus"]
+                                    saved_eom_type = rec.get("transaction_type", "ADD") or "ADD"
+                                    eom_transaction_type = st.selectbox(
+                                        "📊 Addition Category (EOM column)", eom_options,
+                                        index=eom_options.index(saved_eom_type) if saved_eom_type in eom_options else 2,
+                                        disabled=(rt == "Deduction"),
+                                        help="Deductions always post to DED.",
+                                    )
                                     cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
                                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
                                     amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
+                                    edit_month_labels = [label for _, label in PAYROLL_MONTHS]
+                                    edit_month_keys = [key for key, _ in PAYROLL_MONTHS]
+                                    saved_month = str(rec.get("payroll_month", "")).strip()
+                                    if saved_month not in edit_month_keys:
+                                        saved_month = datetime.today().strftime("%Y-%m")
+                                    if saved_month not in edit_month_keys:
+                                        saved_month = edit_month_keys[0]
+                                    edit_month_label = st.selectbox(
+                                        "📅 Payroll Month", edit_month_labels,
+                                        index=edit_month_keys.index(saved_month),
+                                        key=f"edit_payroll_month_{eid}",
+                                    )
+                                    edit_payroll_month = edit_month_keys[edit_month_labels.index(edit_month_label)]
+                                    edit_week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == edit_payroll_month]
+                                    saved_week_key = str(rec.get("payroll_week_key", "")).strip()
+                                    if saved_week_key not in edit_week_keys:
+                                        saved_week_no = str(rec.get("payroll_week", "")).replace("Week ", "").strip()
+                                        saved_week_key = next((wk for wk in edit_week_keys if PAYROLL_WEEKS[wk]["label"].replace("Week ", "") == saved_week_no), edit_week_keys[0])
+                                    edit_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in edit_week_keys]
+                                    edit_week_label = st.selectbox(
+                                        "📆 Payroll Week", edit_week_labels,
+                                        index=edit_week_keys.index(saved_week_key),
+                                        key=f"edit_payroll_week_{eid}_{edit_payroll_month}",
+                                    )
+                                    edit_payroll_week_key = edit_week_keys[edit_week_labels.index(edit_week_label)]
+                                    edit_payroll_week = PAYROLL_WEEKS[edit_payroll_week_key]["label"].replace("Week ", "")
                                 with c2:
                                     from datetime import datetime as dt
                                     try: d = dt.strptime(str(rec.get("date", ""))[:10], "%Y-%m-%d")
@@ -17010,11 +17090,11 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                             _upload_to_drive_bg(edit_path, fn)
                                             final_attachments.append(fn)
                                     records = load_records_from_excel()
-                                    old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc")}
-                                    new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip()}
+                                    old_data_dict = {"emp_name": rec.get("emp_name"), "dept": rec.get("dept"), "type": rec.get("type"), "transaction_type": rec.get("transaction_type", ""), "category": rec.get("category"), "date": rec.get("date"), "amount": rec.get("amount"), "manager": rec.get("manager"), "desc": rec.get("desc"), "payroll_month": rec.get("payroll_month", ""), "payroll_week": rec.get("payroll_week", "")}
+                                    new_data_dict = {"emp_name": en.strip(), "dept": dept_name, "type": rt, "transaction_type": (eom_transaction_type if rt == "Addition" else ""), "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "payroll_month": rec.get("payroll_month", ""), "payroll_week": rec.get("payroll_week", "")}
                                     for r in records:
                                         if int(r.get("id", 0)) == int(eid):
-                                            r["emp_name"] = en.strip(); r["type"] = rt; r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
+                                            r["emp_name"] = en.strip(); r["type"] = rt; r["transaction_type"] = (eom_transaction_type if rt == "Addition" else ""); r["category"] = ct; r["amount"] = amt; r["date"] = str(dt_val); r["manager"] = mgr.strip(); r["desc"] = desc.strip(); r["status"] = "pending"; r["attachment_name"] = ", ".join(final_attachments) or "None"; r["old_data"] = json.dumps(old_data_dict, default=str)
                                             break
                                     log_action("EDITED", eid, old_data=old_data_dict, new_data=new_data_dict)
                                     save_all_records(records)
@@ -17104,6 +17184,13 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     selected_payroll_week_number = ""
                                     st.warning("No payroll weeks are configured for the selected month.")
                                 rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
+                                eom_transaction_type = st.selectbox(
+                                    "📊 Addition Category (EOM column)",
+                                    ["Expense", "Benefit in Kind", "ADD", "Bonus"],
+                                    key=f"eom_transaction_type_v{form_version}",
+                                    disabled=(rt == "Deduction"),
+                                    help="Deductions always post to DED. Select the EOM destination for additions.",
+                                )
                                 ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
                                 amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
                             with c2:
@@ -17134,7 +17221,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
                         st.divider()
                         st.subheader("📋 My Department Requests")
-                        my_reqs = [r for r in all_live_requests if r.get("dept") == dept_name]
+                        my_reqs = [r for r in all_live_requests if str(r.get("dept", "")).strip().casefold() == str(dept_name).strip().casefold()]
                         if not my_reqs: st.info("📋 No requests yet.")
                         else:
                             for req in reversed(my_reqs):
@@ -17142,7 +17229,10 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴")
                                 with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount',0)):.2f}"):
                                     st.write(f"👤 {req.get('emp_name')} | 👔 {req.get('manager')}")
-                                    st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')}")
+                                    eom_destination = req.get("transaction_type") or ("DED" if str(req.get("type", "")).casefold() == "deduction" else "ADD (legacy)")
+                                    payroll_month_display = dict(PAYROLL_MONTHS).get(str(req.get("payroll_month", "")), req.get("payroll_month", "Not assigned"))
+                                    st.write(f"🔄 {req.get('type')} | 📊 EOM destination: {eom_destination} | 🏷️ {req.get('category')}")
+                                    st.caption(f"Payroll allocation: {payroll_month_display} — Week {req.get('payroll_week', 'Not assigned')}")
                                     st.info(f"📝 {req.get('desc')}")
                                     display_attachments(req)
                                     if req.get("director_comments"): st.info(f"💬 Director Comments: {req.get('director_comments')}")
