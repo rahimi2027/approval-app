@@ -2486,24 +2486,30 @@ def _eom_department_rows(month_key, dept, employees, records):
                     continue
                 if str(request.get("payroll_month", "")).strip() != month_key:
                     continue
-                request_week = str(request.get("payroll_week", "")).strip().replace("Week ", "")
+                request_week = str(request.get("payroll_week") or "").strip().replace("Week ", "")
+                if not request_week:
+                    week_key = str(request.get("payroll_week_key") or "").strip()
+                    request_week = week_key.rsplit("-w", 1)[-1] if "-w" in week_key else ""
                 if request_week != str(index):
                     continue
-                request_eid = str(request.get("payroll_employee_id", request.get("employee_id", "")) or "").strip()
+                request_eid = str(request.get("payroll_employee_id") or request.get("employee_id") or "").strip()
                 request_name = str(request.get("emp_name", "")).strip().casefold()
                 if request_eid:
+                    # The registered employee ID is the authoritative identity key.
+                    # HR and EOM department/work-type labels are not always identical.
                     if request_eid != eid:
                         continue
-                elif request_name != emp_name.casefold():
-                    continue
-                request_main = str(request.get("payroll_department", request.get("dept", "")) or "").strip()
-                request_sub = str(request.get("payroll_subdepartment", "") or "").strip()
-                if request_main and request_main.casefold() != main_dept.casefold():
-                    continue
-                if sub_dept and request_sub and request_sub.casefold() != sub_dept.casefold():
-                    continue
-                if not sub_dept and request_sub and request_sub.casefold() != "office staff":
-                    continue
+                else:
+                    if request_name != emp_name.casefold():
+                        continue
+                    request_main = str(request.get("payroll_department") or request.get("dept") or "").strip()
+                    request_sub = str(request.get("payroll_subdepartment", "") or "").strip()
+                    if request_main and request_main.casefold() != main_dept.casefold():
+                        continue
+                    if sub_dept and request_sub and request_sub.casefold() != sub_dept.casefold():
+                        continue
+                    if not sub_dept and request_sub and request_sub.casefold() != "office staff":
+                        continue
                 request_type = str(request.get("type", "")).strip().casefold()
                 amount = _eom_numeric(request.get("amount", 0))
                 eom_type = str(request.get("transaction_type", "") or "").strip().casefold()
@@ -16372,6 +16378,15 @@ def _addition_deduction_same_department(employee, user_department):
     return bool(current_department and employee_department == current_department)
 
 
+def _addition_deduction_request_in_department(request, department):
+    """Include sub-department requests in their parent department history."""
+    target = re.sub(r"\s+", " ", str(department or "").strip()).casefold()
+    return bool(target) and any(
+        re.sub(r"\s+", " ", str(request.get(field, "") or "").strip()).casefold() == target
+        for field in ("dept", "payroll_department")
+    )
+
+
 def render_store_addition_deduction_module(full_name, dept_name):
     """Addition & Deduction module for Store users with explicit permission.
 
@@ -16439,19 +16454,22 @@ def render_store_addition_deduction_module(full_name, dept_name):
         selected_payroll_week_key = payroll_week_keys[payroll_week_labels.index(selected_payroll_week_label)]
         selected_payroll_week_number = PAYROLL_WEEKS[selected_payroll_week_key]["label"].replace("Week ", "")
 
+        request_type = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"store_ad_type_v{form_version}")
+        eom_transaction_type = ""
+        if request_type == "Addition":
+            eom_transaction_type = st.selectbox(
+                "📊 Addition Category (EOM column)",
+                ["Expense", "Benefit in Kind", "ADD", "Bonus"],
+                key=f"store_ad_eom_type_v{form_version}",
+                help="Choose the EOM column for this addition.",
+            )
+        else:
+            st.caption("📊 EOM destination: DED (addition category does not apply).")
         with st.form(f"store_ad_new_request_v{form_version}", clear_on_submit=False):
             c1, c2 = st.columns(2)
             with c1:
                 if manual_mode:
                     employee_name = st.text_input("👤 Employee Name", key=f"store_ad_manual_name_v{form_version}")
-                request_type = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"store_ad_type_v{form_version}")
-                eom_transaction_type = st.selectbox(
-                    "📊 Addition Category (EOM column)",
-                    ["Expense", "Benefit in Kind", "ADD", "Bonus"],
-                    key=f"store_ad_eom_type_v{form_version}",
-                    disabled=(request_type == "Deduction"),
-                    help="Deductions always post to DED.",
-                )
                 category = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"store_ad_category_v{form_version}")
                 amount = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, key=f"store_ad_amount_v{form_version}")
             with c2:
@@ -16511,7 +16529,7 @@ def render_store_addition_deduction_module(full_name, dept_name):
 
     with history_tab:
         records = load_records_from_excel(force=True)
-        department_records = [r for r in records if str(r.get("dept", "")).strip().casefold() == str(dept_name).strip().casefold()]
+        department_records = [r for r in records if _addition_deduction_request_in_department(r, dept_name)]
         if not department_records:
             st.info("No Addition & Deduction requests have been recorded for this department yet.")
         else:
@@ -16825,6 +16843,17 @@ elif role == "Work Order Manager":
                 horizontal=True,
                 key=f"wo_mgr_employee_source_v{form_version}",
             )
+            rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"wo_mgr_rt_v{form_version}")
+            eom_transaction_type = ""
+            if rt == "Addition":
+                eom_transaction_type = st.selectbox(
+                    "📊 Addition Category (EOM column)",
+                    ["Expense", "Benefit in Kind", "ADD", "Bonus"],
+                    key=f"wo_mgr_eom_type_v{form_version}",
+                    help="Choose the EOM column for this addition.",
+                )
+            else:
+                st.caption("📊 EOM destination: DED (addition category does not apply).")
             with st.form(f"wo_mgr_new_req_v{form_version}", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 with c1:
@@ -16870,7 +16899,6 @@ elif role == "Work Order Manager":
                         selected_payroll_week_key = ""
                         selected_payroll_week_number = ""
                         st.warning("No payroll weeks are configured for the selected month.")
-                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"wo_mgr_rt_v{form_version}")
                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"wo_mgr_ct_v{form_version}")
                     amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"wo_mgr_req_amt_v{form_version}")
                 with c2:
@@ -16901,7 +16929,7 @@ elif role == "Work Order Manager":
                     else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
             st.divider()
             st.subheader("📋 My Department Requests")
-            my_reqs = [r for r in all_live_requests if str(r.get("dept", "")).strip().casefold() == str(dept_name).strip().casefold()]
+            my_reqs = [r for r in all_live_requests if _addition_deduction_request_in_department(r, dept_name)]
             if not my_reqs: st.info("📋 No requests yet.")
             else:
                 for req in reversed(my_reqs):
@@ -17031,19 +17059,27 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             else: st.info("📋 No attachments currently attached.")
                             st.markdown("#### ➕ Attach New Files")
                             new_files_upload = st.file_uploader("Upload additional files", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"new_upload_{eid}")
+                            rt = st.selectbox(
+                                "🔄 Transaction Type", ["Addition", "Deduction"],
+                                index=["Addition", "Deduction"].index(rec.get("type", "Addition")),
+                                key=f"edit_transaction_type_{eid}",
+                            )
+                            eom_transaction_type = ""
+                            if rt == "Addition":
+                                eom_options = ["Expense", "Benefit in Kind", "ADD", "Bonus"]
+                                saved_eom_type = rec.get("transaction_type", "ADD") or "ADD"
+                                eom_transaction_type = st.selectbox(
+                                    "📊 Addition Category (EOM column)", eom_options,
+                                    index=eom_options.index(saved_eom_type) if saved_eom_type in eom_options else 2,
+                                    key=f"edit_eom_type_{eid}",
+                                    help="Choose the EOM column for this addition.",
+                                )
+                            else:
+                                st.caption("📊 EOM destination: DED (addition category does not apply).")
                             with st.form("edit_form"):
                                 c1, c2 = st.columns(2)
                                 with c1:
                                     en = st.text_input("👤 Employee Name", rec.get("emp_name", ""))
-                                    rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], index=["Addition", "Deduction"].index(rec.get("type", "Addition")))
-                                    eom_options = ["Expense", "Benefit in Kind", "ADD", "Bonus"]
-                                    saved_eom_type = rec.get("transaction_type", "ADD") or "ADD"
-                                    eom_transaction_type = st.selectbox(
-                                        "📊 Addition Category (EOM column)", eom_options,
-                                        index=eom_options.index(saved_eom_type) if saved_eom_type in eom_options else 2,
-                                        disabled=(rt == "Deduction"),
-                                        help="Deductions always post to DED.",
-                                    )
                                     cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
                                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
                                     amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
@@ -17114,6 +17150,17 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             horizontal=True,
                             key=f"employee_source_v{form_version}",
                         )
+                        rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
+                        eom_transaction_type = ""
+                        if rt == "Addition":
+                            eom_transaction_type = st.selectbox(
+                                "📊 Addition Category (EOM column)",
+                                ["Expense", "Benefit in Kind", "ADD", "Bonus"],
+                                key=f"eom_transaction_type_v{form_version}",
+                                help="Choose the EOM column for this addition.",
+                            )
+                        else:
+                            st.caption("📊 EOM destination: DED (addition category does not apply).")
                         with st.form(f"new_req_v{form_version}", clear_on_submit=False):
                             c1, c2 = st.columns(2)
                             with c1:
@@ -17183,14 +17230,6 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     selected_payroll_week_key = ""
                                     selected_payroll_week_number = ""
                                     st.warning("No payroll weeks are configured for the selected month.")
-                                rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
-                                eom_transaction_type = st.selectbox(
-                                    "📊 Addition Category (EOM column)",
-                                    ["Expense", "Benefit in Kind", "ADD", "Bonus"],
-                                    key=f"eom_transaction_type_v{form_version}",
-                                    disabled=(rt == "Deduction"),
-                                    help="Deductions always post to DED. Select the EOM destination for additions.",
-                                )
                                 ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
                                 amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
                             with c2:
@@ -17213,7 +17252,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                         st.error("Please select a payroll month with a configured payroll week.")
                                         st.stop()
                                     employee_id = str((registered_employee or {}).get("emp_id", (registered_employee or {}).get("employee_id", (registered_employee or {}).get("Employee ID", ""))) or "").strip()
-                                    payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "employee_id": employee_id, "payroll_employee_id": employee_id, "payroll_department": str((registered_employee or {}).get("department", dept_name) or dept_name).strip(), "payroll_subdepartment": str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", "Office Staff")) or "Office Staff").strip(), "payroll_month": selected_payroll_month, "payroll_week": selected_payroll_week_number, "payroll_week_key": selected_payroll_week_key, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                                    payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "employee_id": employee_id, "payroll_employee_id": employee_id, "payroll_department": str((registered_employee or {}).get("department", dept_name) or dept_name).strip(), "payroll_subdepartment": str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", "Office Staff")) or "Office Staff").strip(), "payroll_month": selected_payroll_month, "payroll_week": selected_payroll_week_number, "payroll_week_key": selected_payroll_week_key, "type": rt, "transaction_type": (eom_transaction_type if rt == "Addition" else ""), "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                                     save_record_to_excel(payload)
                                     log_action("CREATED", nid)
                                     st.session_state["new_req_form_version"] = form_version + 1
@@ -17221,7 +17260,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 else: st.error("⚠️ Please fill in: Employee Name, Line Manager, and Description")
                         st.divider()
                         st.subheader("📋 My Department Requests")
-                        my_reqs = [r for r in all_live_requests if str(r.get("dept", "")).strip().casefold() == str(dept_name).strip().casefold()]
+                        my_reqs = [r for r in all_live_requests if _addition_deduction_request_in_department(r, dept_name)]
                         if not my_reqs: st.info("📋 No requests yet.")
                         else:
                             for req in reversed(my_reqs):
