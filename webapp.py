@@ -2851,57 +2851,9 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     table_parts.append("</table></div>")
     st.markdown("".join(table_parts), unsafe_allow_html=True)
 
-    # Addition and deduction forms are employee-linked EOM adjustments. They do
-    # not write to the weekly timesheet and are stored against the selected month,
-    # department, employee and week.
-    st.markdown("### ➕ Addition / ➖ Deduction")
-    st.caption("Choose the employee and week. The amount and description will appear only in that employee's EOM block.")
-    employee_options = {}
-    for group in employee_groups:
-        emp = group["employee"]
-        group_dept = str(group.get("_department", dept))
-        label = f"{emp.get('name', '')} ({emp.get('emp_id', '')}) — {_department_label(group_dept)}"
-        # Keep labels unique if duplicate employee records exist.
-        base_label = label
-        suffix = 2
-        while label in employee_options:
-            label = f"{base_label} [{suffix}]"
-            suffix += 1
-        employee_options[label] = (group_dept, str(emp.get("emp_id", "")))
-    eom_weeks = [f"Week {i}" for i in range(1, len(employee_groups[0]["rows"]) + 1)]
-    if eom_weeks:
-        with st.form(key=f"eom_adjustment_form_{month_key}_{dept}", clear_on_submit=True):
-            adj_c1, adj_c2, adj_c3 = st.columns(3)
-            with adj_c1:
-                selected_employee_label = st.selectbox("Employee", list(employee_options.keys()))
-            with adj_c2:
-                adjustment_type = st.selectbox("Adjustment type", ["ADD", "DED"], format_func=lambda x: "Addition (ADD)" if x == "ADD" else "Deduction (DED)")
-            with adj_c3:
-                adjustment_week = st.selectbox("Week", eom_weeks)
-            adj_c4, adj_c5 = st.columns([1, 2])
-            with adj_c4:
-                adjustment_amount = st.number_input("Amount (£)", min_value=0.0, step=0.01, format="%.2f")
-            with adj_c5:
-                adjustment_description = st.text_input("Description / Note")
-            add_adjustment = st.form_submit_button("Save addition / deduction", type="primary", use_container_width=True)
-        if add_adjustment:
-            selected_eid, selected_dept = employee_options[selected_employee_label]
-            selected_week_no = adjustment_week.replace("Week ", "")
-            adjustment_key = (month_key, selected_dept, selected_eid, selected_week_no)
-            target_record = dict(records.get(adjustment_key, {}))
-            current_amount = _eom_numeric(target_record.get(adjustment_type, 0))
-            target_record[adjustment_type] = round(current_amount + float(adjustment_amount), 2)
-            description = str(adjustment_description or "").strip()
-            if description:
-                existing_note = str(target_record.get("Note", "") or "").strip()
-                target_record["Note"] = " / ".join(x for x in (existing_note, f"{adjustment_type}: {description}") if x)
-            for field in EOM_MANUAL_FIELDS:
-                target_record.setdefault(field, "")
-            records[adjustment_key] = target_record
-            _eom_save(records)
-            st.success(f"{adjustment_type} of £{float(adjustment_amount):.2f} saved for {selected_employee_label} — {adjustment_week}.")
-            st.rerun()
-
+    # ADD/DED are populated automatically from approved requests submitted in
+    # the main Addition & Deduction module for the selected payroll month/week.
+    # They are intentionally not editable or entered through the EOM form.
     # Editable companion grid keeps the other manual fields separate from
     # timesheet-derived fields. ADD/DED are managed through the employee form above.
     st.markdown("**Enter / edit weekly payroll details**")
@@ -16379,7 +16331,7 @@ def render_store_addition_deduction_module(full_name, dept_name):
     Director approval continues through the existing workflow.
     """
     st.subheader("➕ Addition & Deduction")
-    st.caption("General employee Addition & Deduction requests. This is separate from Store Deduction and Store Return requests.")
+    st.caption("Submit employee additions and deductions here. After Director approval, the amount is included in the selected employee, payroll month and week in EOM.")
     request_tab, history_tab = st.tabs(["📤 New Request", "📋 Department Requests"])
 
     with request_tab:
@@ -16419,6 +16371,8 @@ def render_store_addition_deduction_module(full_name, dept_name):
             else:
                 st.warning("No active registered employees found. Enter the employee name manually below.")
                 manual_mode = True
+        st.markdown("**📅 Payroll allocation**")
+        st.caption("Select the month and week where this request should appear in the employee's EOM payroll after Director approval.")
         payroll_month_labels = [label for _, label in PAYROLL_MONTHS]
         payroll_month_keys = [key for key, _ in PAYROLL_MONTHS]
         default_payroll_month = datetime.today().strftime("%Y-%m")
@@ -16431,6 +16385,9 @@ def render_store_addition_deduction_module(full_name, dept_name):
         )
         selected_payroll_month = payroll_month_keys[payroll_month_labels.index(selected_payroll_month_label)]
         payroll_week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == selected_payroll_month]
+        if not payroll_week_keys:
+            st.warning("No payroll weeks are configured for the selected month.")
+            return
         payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in payroll_week_keys]
         selected_payroll_week_label = st.selectbox(
             "📆 Payroll Week", payroll_week_labels,
