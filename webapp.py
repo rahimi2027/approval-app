@@ -2855,7 +2855,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     # the main Addition & Deduction module for the selected payroll month/week.
     # They are intentionally not editable or entered through the EOM form.
     # Editable companion grid keeps the other manual fields separate from
-    # timesheet-derived fields. ADD/DED are managed through the employee form above.
+    # timesheet-derived fields.
     st.markdown("**Enter / edit weekly payroll details**")
     editable_fields = ["Overtime", "Mileage", "Expenses", "Benefit In Kind", "Bonus", "Note"]
     editor_rows = []
@@ -2886,8 +2886,8 @@ def render_payroll_eom(current_user_info, mode="payroll"):
             saved_values = dict(records.get(key, {}))
             for field in editable_fields:
                 saved_values[field] = row.get(field, "")
-            # ADD and DED are intentionally controlled by the employee-linked
-            # adjustment form and must survive saves from this details grid.
+            # ADD and DED are calculated from approved main Addition & Deduction
+            # requests and must survive saves from this details grid.
             saved_values.setdefault("ADD", 0)
             saved_values.setdefault("DED", 0)
             records[key] = {field: saved_values.get(field, "") for field in EOM_MANUAL_FIELDS}
@@ -16324,6 +16324,17 @@ def render_training_help(current_user_info=None):
 # ============================================================
 # 📋 ROLE-BASED PORTALS
 # ============================================================
+def _addition_deduction_same_department(employee, user_department):
+    """Match an HR employee to the logged-in user's parent department.
+
+    Deliberately use the HR Department field, not Work Type/Sub-department,
+    so every team sees its own department roster without mixing departments.
+    """
+    employee_department = re.sub(r"\s+", " ", str((employee or {}).get("department", "")).strip()).casefold()
+    current_department = re.sub(r"\s+", " ", str(user_department or "").strip()).casefold()
+    return bool(current_department and employee_department == current_department)
+
+
 def render_store_addition_deduction_module(full_name, dept_name):
     """Addition & Deduction module for Store users with explicit permission.
 
@@ -16331,7 +16342,7 @@ def render_store_addition_deduction_module(full_name, dept_name):
     Director approval continues through the existing workflow.
     """
     st.subheader("➕ Addition & Deduction")
-    st.caption("Submit employee additions and deductions here. After Director approval, the amount is included in the selected employee, payroll month and week in EOM.")
+    st.caption("Submit additions and deductions for active registered employees in your department, or enter a manual employee. After Director approval, the amount is included in the selected employee, payroll month and week in EOM.")
     request_tab, history_tab = st.tabs(["📤 New Request", "📋 Department Requests"])
 
     with request_tab:
@@ -16351,13 +16362,8 @@ def render_store_addition_deduction_module(full_name, dept_name):
                 e for e in _hrp_load_employees()
                 if str(e.get("status", "Active")).strip().casefold() == "active"
                 and str(e.get("name", "")).strip()
+                and _addition_deduction_same_department(e, dept_name)
             ]
-            dept_filtered = [
-                e for e in registered
-                if str(e.get("department", "")).strip().casefold() == str(dept_name).strip().casefold()
-            ]
-            if dept_filtered:
-                registered = dept_filtered
             registered = sorted(registered, key=lambda e: str(e.get("name", "")).casefold())
             if registered:
                 labels = [
@@ -16761,7 +16767,7 @@ elif role == "Work Order Manager":
                 if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
                     st.session_state.editing_request_id = None; st.rerun()
         else:
-            st.subheader(f"➕ New Request — {dept_name}")
+            st.subheader("➕ New Request — All Departments")
             nid = get_next_id(all_live_requests)
             form_version = st.session_state.get("wo_mgr_new_req_form_version", 0)
             # Keep Employee Source outside the form so switching between
@@ -16783,12 +16789,6 @@ elif role == "Work Order Manager":
                             if str(e.get("status", "Active")).strip().casefold() == "active"
                             and str(e.get("name", "")).strip()
                         ]
-                        dept_filtered = [
-                            e for e in registered
-                            if str(e.get("department", "")).strip().casefold() == str(dept_name).strip().casefold()
-                        ]
-                        if dept_filtered:
-                            registered = dept_filtered
                         registered = sorted(registered, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
                         if registered:
                             labels = [f"{e.get('name','')} — {e.get('emp_id','')} · {e.get('department','')}" for e in registered]
@@ -16799,12 +16799,31 @@ elif role == "Work Order Manager":
                             if registered_employee:
                                 st.caption(f"Employee ID: {registered_employee.get('emp_id', '-')} · Department: {request_dept}")
                         else:
-                            st.warning("No active registered employees found for this department. You can use Manual Employee instead.")
+                            st.warning("No active registered employees found. You can use Manual Employee instead.")
                             en = ""
                             request_dept = dept_name
                     else:
                         en = st.text_input("👤 Employee Name", key=f"wo_mgr_en_v{form_version}")
                         request_dept = dept_name
+                    st.markdown("**📅 Payroll allocation**")
+                    st.caption("Select the month and week where this request should appear in the employee's EOM payroll after Director approval.")
+                    payroll_month_labels = [label for _, label in PAYROLL_MONTHS]
+                    payroll_month_keys = [key for key, _ in PAYROLL_MONTHS]
+                    default_payroll_month = datetime.today().strftime("%Y-%m")
+                    if default_payroll_month not in payroll_month_keys:
+                        default_payroll_month = payroll_month_keys[0]
+                    selected_payroll_month_label = st.selectbox("📅 Payroll Month", payroll_month_labels, index=payroll_month_keys.index(default_payroll_month), key=f"wo_mgr_payroll_month_v{form_version}")
+                    selected_payroll_month = payroll_month_keys[payroll_month_labels.index(selected_payroll_month_label)]
+                    payroll_week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == selected_payroll_month]
+                    if payroll_week_keys:
+                        payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in payroll_week_keys]
+                        selected_payroll_week_label = st.selectbox("📆 Payroll Week", payroll_week_labels, key=f"wo_mgr_payroll_week_v{form_version}_{selected_payroll_month}")
+                        selected_payroll_week_key = payroll_week_keys[payroll_week_labels.index(selected_payroll_week_label)]
+                        selected_payroll_week_number = PAYROLL_WEEKS[selected_payroll_week_key]["label"].replace("Week ", "")
+                    else:
+                        selected_payroll_week_key = ""
+                        selected_payroll_week_number = ""
+                        st.warning("No payroll weeks are configured for the selected month.")
                     rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"wo_mgr_rt_v{form_version}")
                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"wo_mgr_ct_v{form_version}")
                     amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"wo_mgr_req_amt_v{form_version}")
@@ -16824,7 +16843,11 @@ elif role == "Work Order Manager":
                                 with open(file_path, "wb") as out: out.write(f.getbuffer())
                                 att_list.append(fn)
                                 _upload_to_drive_bg(file_path, fn)
-                        payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                        if not selected_payroll_week_key:
+                            st.error("Please select a payroll month with a configured payroll week.")
+                            st.stop()
+                        employee_id = str((registered_employee or {}).get("emp_id", (registered_employee or {}).get("employee_id", (registered_employee or {}).get("Employee ID", ""))) or "").strip()
+                        payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "employee_id": employee_id, "payroll_employee_id": employee_id, "payroll_department": str((registered_employee or {}).get("department", dept_name) or dept_name).strip(), "payroll_subdepartment": str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", "Office Staff")) or "Office Staff").strip(), "payroll_month": selected_payroll_month, "payroll_week": selected_payroll_week_number, "payroll_week_key": selected_payroll_week_key, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                         save_record_to_excel(payload)
                         log_action("CREATED", nid)
                         st.session_state["wo_mgr_new_req_form_version"] = form_version + 1
@@ -16999,7 +17022,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             if st.button("❌ Cancel", key=f"cancel_edit_{eid}"):
                                 st.session_state.editing_request_id = None; st.rerun()
                     else:
-                        st.subheader(f"➕ New Request — {dept_name}")
+                        st.subheader("➕ New Request — All Departments")
                         nid = get_next_id(all_live_requests)
                         form_version = st.session_state.get("new_req_form_version", 0)
                         # Keep Employee Source outside the form so switching between
@@ -17020,13 +17043,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                         e for e in _hrp_load_employees()
                                         if str(e.get("status", "Active")).strip().casefold() == "active"
                                         and str(e.get("name", "")).strip()
+                                        and _addition_deduction_same_department(e, dept_name)
                                     ]
-                                    dept_filtered = [
-                                        e for e in registered
-                                        if str(e.get("department", "")).strip().casefold() == str(dept_name).strip().casefold()
-                                    ]
-                                    if dept_filtered:
-                                        registered = dept_filtered
                                     registered = sorted(registered, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
                                     if registered:
                                         # Show employee name and their effective department only.
@@ -17060,12 +17078,31 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                         en = str((registered_employee or {}).get("name", "")).strip()
                                         request_dept = _addition_deduction_employee_department(registered_employee or {})
                                     else:
-                                        st.warning("No active registered employees found for this department. You can use Manual Employee instead.")
+                                        st.warning("No active registered employees found. You can use Manual Employee instead.")
                                         en = ""
                                         request_dept = dept_name
                                 else:
                                     en = st.text_input("👤 Employee Name", key=f"en_v{form_version}")
                                     request_dept = dept_name
+                                st.markdown("**📅 Payroll allocation**")
+                                st.caption("Select the month and week where this request should appear in the employee's EOM payroll after Director approval.")
+                                payroll_month_labels = [label for _, label in PAYROLL_MONTHS]
+                                payroll_month_keys = [key for key, _ in PAYROLL_MONTHS]
+                                default_payroll_month = datetime.today().strftime("%Y-%m")
+                                if default_payroll_month not in payroll_month_keys:
+                                    default_payroll_month = payroll_month_keys[0]
+                                selected_payroll_month_label = st.selectbox("📅 Payroll Month", payroll_month_labels, index=payroll_month_keys.index(default_payroll_month), key=f"payroll_month_v{form_version}")
+                                selected_payroll_month = payroll_month_keys[payroll_month_labels.index(selected_payroll_month_label)]
+                                payroll_week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == selected_payroll_month]
+                                if payroll_week_keys:
+                                    payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in payroll_week_keys]
+                                    selected_payroll_week_label = st.selectbox("📆 Payroll Week", payroll_week_labels, key=f"payroll_week_v{form_version}_{selected_payroll_month}")
+                                    selected_payroll_week_key = payroll_week_keys[payroll_week_labels.index(selected_payroll_week_label)]
+                                    selected_payroll_week_number = PAYROLL_WEEKS[selected_payroll_week_key]["label"].replace("Week ", "")
+                                else:
+                                    selected_payroll_week_key = ""
+                                    selected_payroll_week_number = ""
+                                    st.warning("No payroll weeks are configured for the selected month.")
                                 rt = st.selectbox("🔄 Transaction Type", ["Addition", "Deduction"], key=f"rt_v{form_version}")
                                 ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, key=f"ct_v{form_version}")
                                 amt = st.number_input("💷 Amount (£)", 0.01, step=10.0, key=f"amt_v{form_version}")
@@ -17085,7 +17122,11 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                             with open(file_path, "wb") as out: out.write(f.getbuffer())
                                             att_list.append(fn)
                                             _upload_to_drive_bg(file_path, fn)
-                                    payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
+                                    if not selected_payroll_week_key:
+                                        st.error("Please select a payroll month with a configured payroll week.")
+                                        st.stop()
+                                    employee_id = str((registered_employee or {}).get("emp_id", (registered_employee or {}).get("employee_id", (registered_employee or {}).get("Employee ID", ""))) or "").strip()
+                                    payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "employee_id": employee_id, "payroll_employee_id": employee_id, "payroll_department": str((registered_employee or {}).get("department", dept_name) or dept_name).strip(), "payroll_subdepartment": str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", "Office Staff")) or "Office Staff").strip(), "payroll_month": selected_payroll_month, "payroll_week": selected_payroll_week_number, "payroll_week_key": selected_payroll_week_key, "type": rt, "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
                                     save_record_to_excel(payload)
                                     log_action("CREATED", nid)
                                     st.session_state["new_req_form_version"] = form_version + 1
