@@ -2460,8 +2460,14 @@ def _eom_minutes_for_week(week_key, dept, eid, month_key):
 
 
 def _eom_department_rows(month_key, dept, employees, records):
-    """Build the five weekly rows and calculated totals for each employee."""
+    """Build weekly rows, including approved Addition/Deduction requests assigned to this period."""
     week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == month_key]
+    # Requests raised through the Addition & Deduction module are included only
+    # after approval and only in the month/week explicitly selected on the request.
+    try:
+        adjustment_requests = load_records_from_excel(force=True)
+    except Exception:
+        adjustment_requests = []
     result = []
     for emp in employees:
         eid = str(emp.get("emp_id", ""))
@@ -2471,8 +2477,45 @@ def _eom_department_rows(month_key, dept, employees, records):
             working, travel, day_notes = _eom_minutes_for_week(wk, dept, eid, month_key)
             leave = _eom_status_totals(wk, dept, eid, month_key)
             manual = records.get((month_key, dept, eid, str(index)), {})
+            request_add = request_ded = 0.0
+            request_notes = []
+            main_dept, sub_dept = _department_parts(dept)
+            for request in adjustment_requests:
+                if str(request.get("status", "")).strip().casefold() != "approved":
+                    continue
+                if str(request.get("payroll_month", "")).strip() != month_key:
+                    continue
+                request_week = str(request.get("payroll_week", "")).strip().replace("Week ", "")
+                if request_week != str(index):
+                    continue
+                request_eid = str(request.get("payroll_employee_id", request.get("employee_id", "")) or "").strip()
+                request_name = str(request.get("emp_name", "")).strip().casefold()
+                if request_eid:
+                    if request_eid != eid:
+                        continue
+                elif request_name != emp_name.casefold():
+                    continue
+                request_main = str(request.get("payroll_department", request.get("dept", "")) or "").strip()
+                request_sub = str(request.get("payroll_subdepartment", "") or "").strip()
+                if request_main and request_main.casefold() != main_dept.casefold():
+                    continue
+                if sub_dept and request_sub and request_sub.casefold() != sub_dept.casefold():
+                    continue
+                if not sub_dept and request_sub and request_sub.casefold() != "office staff":
+                    continue
+                request_type = str(request.get("type", "")).strip().casefold()
+                amount = _eom_numeric(request.get("amount", 0))
+                if request_type == "addition":
+                    request_add += amount
+                elif request_type == "deduction":
+                    request_ded += amount
+                category = str(request.get("category", "")).strip()
+                desc = str(request.get("desc", "")).strip()
+                note = f"{request_type.title()}: {category or desc}".strip()
+                if note and note not in request_notes:
+                    request_notes.append(note)
             manual_note = str(manual.get("Note", "") or "").strip()
-            notes = list(day_notes)
+            notes = list(day_notes) + request_notes
             if manual_note:
                 notes.append(manual_note)
             weekly.append({
@@ -2487,7 +2530,8 @@ def _eom_department_rows(month_key, dept, employees, records):
                 "Mileage": manual.get("Mileage", ""),
                 "Expenses": manual.get("Expenses", ""),
                 "Benefit In Kind": manual.get("Benefit in Kind", ""),
-                "ADD": manual.get("ADD", ""), "DED": manual.get("DED", ""),
+                "ADD": round(_eom_numeric(manual.get("ADD", 0)) + request_add, 2),
+                "DED": round(_eom_numeric(manual.get("DED", 0)) + request_ded, 2),
                 "Bonus": manual.get("Bonus", ""),
                 "Comments": " / ".join(notes),
                 "_manual_values": {field: manual.get(field, "") for field in EOM_MANUAL_FIELDS},
@@ -2671,7 +2715,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     _ensure_storage()
     _ts()
     st.subheader("📊 End-of-Month Payroll Summary")
-    st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet; payroll adjustments are saved separately.")
+    st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Approved Addition/Deduction requests are included automatically in the month and week selected on the request.")
 
     month_labels = [label for _, label in PAYROLL_MONTHS]
     month_keys = [key for key, _ in PAYROLL_MONTHS]
@@ -16375,6 +16419,26 @@ def render_store_addition_deduction_module(full_name, dept_name):
             else:
                 st.warning("No active registered employees found. Enter the employee name manually below.")
                 manual_mode = True
+        payroll_month_labels = [label for _, label in PAYROLL_MONTHS]
+        payroll_month_keys = [key for key, _ in PAYROLL_MONTHS]
+        default_payroll_month = datetime.today().strftime("%Y-%m")
+        if default_payroll_month not in payroll_month_keys:
+            default_payroll_month = payroll_month_keys[0]
+        selected_payroll_month_label = st.selectbox(
+            "📅 Payroll Month", payroll_month_labels,
+            index=payroll_month_keys.index(default_payroll_month),
+            key=f"store_ad_payroll_month_v{form_version}",
+        )
+        selected_payroll_month = payroll_month_keys[payroll_month_labels.index(selected_payroll_month_label)]
+        payroll_week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == selected_payroll_month]
+        payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in payroll_week_keys]
+        selected_payroll_week_label = st.selectbox(
+            "📆 Payroll Week", payroll_week_labels,
+            key=f"store_ad_payroll_week_v{form_version}_{selected_payroll_month}",
+        )
+        selected_payroll_week_key = payroll_week_keys[payroll_week_labels.index(selected_payroll_week_label)]
+        selected_payroll_week_number = PAYROLL_WEEKS[selected_payroll_week_key]["label"].replace("Week ", "")
+
         with st.form(f"store_ad_new_request_v{form_version}", clear_on_submit=False):
             c1, c2 = st.columns(2)
             with c1:
@@ -16406,6 +16470,13 @@ def render_store_addition_deduction_module(full_name, dept_name):
                         "id": request_id,
                         "emp_name": employee_name.strip(),
                         "dept": request_dept,
+                        "employee_id": str((registered_employee or {}).get("employee_id", (registered_employee or {}).get("emp_id", (registered_employee or {}).get("Employee ID", ""))) or "").strip(),
+                        "payroll_employee_id": str((registered_employee or {}).get("employee_id", (registered_employee or {}).get("emp_id", (registered_employee or {}).get("Employee ID", ""))) or "").strip(),
+                        "payroll_department": str((registered_employee or {}).get("department", dept_name) or dept_name).strip(),
+                        "payroll_subdepartment": str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", "Office Staff")) or "Office Staff").strip(),
+                        "payroll_month": selected_payroll_month,
+                        "payroll_week": selected_payroll_week_number,
+                        "payroll_week_key": selected_payroll_week_key,
                         "type": request_type,
                         "category": category,
                         "date": str(request_date),
@@ -16441,7 +16512,7 @@ def render_store_addition_deduction_module(full_name, dept_name):
                 icon = "🟡" if status == "pending" else ("🟢" if status == "approved" else "🔴" if status == "rejected" else "⚪")
                 with st.expander(f"{icon} ID #{req.get('id')} | {req.get('emp_name')} | {status.upper()} | £{float(req.get('amount', 0) or 0):.2f}"):
                     st.write(f"👤 Employee: {req.get('emp_name')} | 👔 Line Manager: {req.get('manager')}")
-                    st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')} | 📅 {req.get('date')}")
+                    st.write(f"🔄 {req.get('type')} | 🏷️ {req.get('category')} | 📅 Transaction date: {req.get('date')} | Payroll: {dict(PAYROLL_MONTHS).get(str(req.get('payroll_month', "")), req.get('payroll_month', "Not assigned"))} — Week {req.get('payroll_week', "Not assigned")}")
                     st.write(f"💷 Amount: £{float(req.get('amount', 0) or 0):.2f}")
                     st.info(f"📝 {req.get('desc', '')}")
                     if req.get("director_comments"):
