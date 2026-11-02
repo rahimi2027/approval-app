@@ -2558,12 +2558,12 @@ def _eom_department_rows(month_key, dept, employees, records):
                 else:
                     continue
 
-                # Keep every approved transaction's description, including repeated
-                # categories, so Payroll can audit exactly what makes up the total.
-                detail = desc or category or "No description provided"
-                if category and desc:
-                    detail = f"{category}: {desc}"
-                request_notes.append(f"{request_type.title()} ({destination}): {detail} [£{amount:,.2f}]")
+                # In the EOM Comments column, show only the exact text entered
+                # in Description / Justification. Do not add transaction type,
+                # category, amount, or a placeholder. Keep each non-empty
+                # transaction description as a separate comment, including repeats.
+                if desc:
+                    request_notes.append(desc)
 
             manual_note = str(manual.get("Note", "") or "").strip()
             notes = list(day_notes) + request_notes
@@ -2929,49 +2929,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     table_parts.append("</table></div>")
     st.markdown("".join(table_parts), unsafe_allow_html=True)
 
-    # ADD/DED are populated automatically from approved requests submitted in
-    # the main Addition & Deduction module for the selected payroll month/week.
-    # They are intentionally not editable or entered through the EOM form.
-    # Editable companion grid keeps the other manual fields separate from
-    # timesheet-derived fields.
-    st.markdown("**Enter / edit weekly payroll details (manual entries only)**")
-    st.caption("Use this table for manual overtime, mileage, expenses, benefits, bonuses and notes. Approved Addition/Deduction requests populate the EOM automatically; do not enter ADD or DED here. Approved Expense, Benefit in Kind and Bonus additions are included automatically alongside any manual amount.")
-    editable_fields = ["Overtime", "Mileage", "Expenses", "Benefit In Kind", "Bonus", "Note"]
-    editor_rows = []
-    for group in employee_groups:
-        for rec in group["rows"]:
-            editor_rows.append({
-                "Employee": rec["Employee"], "Employee ID": rec["Employee ID"],
-                "Department": group.get("_department", dept), "Week": rec["Week"],
-                **{field: rec.get("_manual_values", {}).get(field, "") for field in editable_fields}
-            })
-    editor_df = pd.DataFrame(editor_rows)
-    edited = st.data_editor(
-        editor_df, hide_index=True, use_container_width=True,
-        disabled=["Employee", "Employee ID", "Department", "Week"],
-        column_config={
-            "Employee": st.column_config.TextColumn("Employee", width="small"),
-            "Employee ID": st.column_config.TextColumn("Employee ID", width="small"),
-            "Department": st.column_config.TextColumn("Department", width="small"),
-            "Week": st.column_config.TextColumn("Week", width="small"),
-            "Note": st.column_config.TextColumn("Comments / Note", width="medium"),
-            **{field: st.column_config.TextColumn(field, width="small") for field in editable_fields if field != "Note"},
-        },
-        key=f"eom_editor_{month_key}_{dept}",
-    )
-    if st.button("💾 Save EOM Entries", type="primary", key=f"save_eom_{month_key}_{dept}"):
-        for row in edited.to_dict(orient="records"):
-            key = (month_key, str(row.get("Department", dept)), str(row["Employee ID"]), str(row["Week"]).replace("Week ", ""))
-            saved_values = dict(records.get(key, {}))
-            for field in editable_fields:
-                saved_values[field] = row.get(field, "")
-            # ADD and DED are calculated exclusively from approved requests.
-            # Retain legacy workbook fields for compatibility, but never use them
-            # in the EOM calculation or expose them in this manual editor.
-            records[key] = {field: saved_values.get(field, "") for field in EOM_MANUAL_FIELDS}
-        _eom_save(records)
-        st.success("EOM payroll entries saved.")
-        st.rerun()
+    # EOM values are populated automatically; the manual weekly editor has been removed.
 
     export_title = "All_Departments" if dept == "All Departments" else re.sub(r'[^A-Za-z0-9_-]+', '_', _department_label(dept))
     excel_bytes = _eom_build_excel(month_key, dept, employee_groups, pay_date_text)
