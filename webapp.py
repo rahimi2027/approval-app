@@ -467,6 +467,38 @@ def _build_weeks():
     return weeks
 
 
+def _payroll_week_month_range(month_key, week_obj):
+    """Display only the weekday dates that fall inside the selected payroll month.
+
+    The underlying week still retains its full Monday-Friday dates for timesheet
+    processing; this helper only clips the displayed allocation label.
+    """
+    try:
+        year, month = (int(part) for part in str(month_key).split("-", 1))
+        month_dates = [
+            date.fromisoformat(str(value)[:10])
+            for value in week_obj.get("dates", [])
+            if date.fromisoformat(str(value)[:10]).year == year
+            and date.fromisoformat(str(value)[:10]).month == month
+        ]
+    except (TypeError, ValueError):
+        return str(week_obj.get("range", ""))
+    if not month_dates:
+        return str(week_obj.get("range", ""))
+    first_day, last_day = min(month_dates), max(month_dates)
+    if first_day == last_day:
+        return f"{first_day.day}{_ordinal_suffix(first_day.day)} {first_day.strftime('%b %Y')}"
+    if first_day.month == last_day.month and first_day.year == last_day.year:
+        return f"{first_day.day}{_ordinal_suffix(first_day.day)}–{last_day.day}{_ordinal_suffix(last_day.day)} {last_day.strftime('%b %Y')}"
+    return f"{first_day.strftime('%d %b')} – {last_day.strftime('%d %b %Y')}"
+
+
+def _ordinal_suffix(day_number):
+    if 10 <= day_number % 100 <= 20:
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(day_number % 10, "th")
+
+
 PAYROLL_WEEKS = _build_weeks()
 PAYROLL_WEEK_ORDER = list(PAYROLL_WEEKS.keys())
 PAYROLL_MONTH_LABELS = dict(PAYROLL_MONTHS)
@@ -16439,7 +16471,7 @@ def render_store_addition_deduction_module(full_name, dept_name):
         if not payroll_week_keys:
             st.warning("No payroll weeks are configured for the selected month.")
             return
-        payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in payroll_week_keys]
+        payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({_payroll_week_month_range(selected_payroll_month, PAYROLL_WEEKS[wk])})" for wk in payroll_week_keys]
         selected_payroll_week_label = st.selectbox(
             "📆 Payroll Week", payroll_week_labels,
             key=f"store_ad_payroll_week_v{form_version}_{selected_payroll_month}",
@@ -16884,7 +16916,7 @@ elif role == "Work Order Manager":
                     selected_payroll_month = payroll_month_keys[payroll_month_labels.index(selected_payroll_month_label)]
                     payroll_week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == selected_payroll_month]
                     if payroll_week_keys:
-                        payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in payroll_week_keys]
+                        payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({_payroll_week_month_range(selected_payroll_month, PAYROLL_WEEKS[wk])})" for wk in payroll_week_keys]
                         selected_payroll_week_label = st.selectbox("📆 Payroll Week", payroll_week_labels, key=f"wo_mgr_payroll_week_v{form_version}_{selected_payroll_month}")
                         selected_payroll_week_key = payroll_week_keys[payroll_week_labels.index(selected_payroll_week_label)]
                         selected_payroll_week_number = PAYROLL_WEEKS[selected_payroll_week_key]["label"].replace("Week ", "")
@@ -17094,7 +17126,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     if saved_week_key not in edit_week_keys:
                                         saved_week_no = str(rec.get("payroll_week", "")).replace("Week ", "").strip()
                                         saved_week_key = next((wk for wk in edit_week_keys if PAYROLL_WEEKS[wk]["label"].replace("Week ", "") == saved_week_no), edit_week_keys[0])
-                                    edit_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in edit_week_keys]
+                                    edit_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({_payroll_week_month_range(edit_payroll_month, PAYROLL_WEEKS[wk])})" for wk in edit_week_keys]
                                     edit_week_label = st.selectbox(
                                         "📆 Payroll Week", edit_week_labels,
                                         index=edit_week_keys.index(saved_week_key),
@@ -17215,7 +17247,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                 selected_payroll_month = payroll_month_keys[payroll_month_labels.index(selected_payroll_month_label)]
                                 payroll_week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == selected_payroll_month]
                                 if payroll_week_keys:
-                                    payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({PAYROLL_WEEKS[wk]['range']})" for wk in payroll_week_keys]
+                                    payroll_week_labels = [f"{PAYROLL_WEEKS[wk]['label']} ({_payroll_week_month_range(selected_payroll_month, PAYROLL_WEEKS[wk])})" for wk in payroll_week_keys]
                                     selected_payroll_week_label = st.selectbox("📆 Payroll Week", payroll_week_labels, key=f"payroll_week_v{form_version}_{selected_payroll_month}")
                                     selected_payroll_week_key = payroll_week_keys[payroll_week_labels.index(selected_payroll_week_label)]
                                     selected_payroll_week_number = PAYROLL_WEEKS[selected_payroll_week_key]["label"].replace("Week ", "")
