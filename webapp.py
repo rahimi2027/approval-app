@@ -2460,82 +2460,116 @@ def _eom_minutes_for_week(week_key, dept, eid, month_key):
 
 
 def _eom_department_rows(month_key, dept, employees, records):
-    """Build weekly rows, including approved Addition/Deduction requests assigned to this period."""
+    """Build weekly EOM rows from timesheets, manual details and approved adjustments."""
     week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == month_key]
-    # Requests raised through the Addition & Deduction module are included only
-    # after approval and only in the month/week explicitly selected on the request.
+    # Read the source transactions once. Only Director-approved requests are
+    # eligible for payroll and every amount is calculated afresh on each render.
     try:
         adjustment_requests = load_records_from_excel(force=True)
     except Exception:
         adjustment_requests = []
+
     result = []
+    main_dept, sub_dept = _department_parts(dept)
     for emp in employees:
-        eid = str(emp.get("emp_id", ""))
-        emp_name = str(emp.get("name", ""))
+        eid = str(emp.get("emp_id", emp.get("employee_id", ""))).strip()
+        emp_name = str(emp.get("name", "")).strip()
+        employee_subdept = str(emp.get("work_type", emp.get("sub_department", emp.get("working_as", "Office Staff"))) or "Office Staff").strip()
         weekly = []
+
         for index, wk in enumerate(week_keys, start=1):
             working, travel, day_notes = _eom_minutes_for_week(wk, dept, eid, month_key)
             leave = _eom_status_totals(wk, dept, eid, month_key)
             manual = records.get((month_key, dept, eid, str(index)), {})
-            manual_entry = dict(manual)  # Keep approved request values out of editable/manual storage.
-            request_add = request_ded = 0.0
+
+            # Keep approved transaction totals separate from saved manual values.
+            # This prevents repeated reruns from adding the same transaction again.
+            request_add = 0.0
+            request_ded = 0.0
+            request_expenses = 0.0
+            request_bik = 0.0
+            request_bonus = 0.0
             request_notes = []
-            main_dept, sub_dept = _department_parts(dept)
+
             for request in adjustment_requests:
                 if str(request.get("status", "")).strip().casefold() != "approved":
                     continue
                 if str(request.get("payroll_month", "")).strip() != month_key:
                     continue
-                request_week = str(request.get("payroll_week") or "").strip().replace("Week ", "")
-                if not request_week:
-                    week_key = str(request.get("payroll_week_key") or "").strip()
-                    request_week = week_key.rsplit("-w", 1)[-1] if "-w" in week_key else ""
-                if request_week != str(index):
-                    continue
+
+                # The stable week key is authoritative when present. Older records
+                # without it continue to use their saved week number.
+                request_week_key = str(request.get("payroll_week_key") or "").strip()
+                if request_week_key:
+                    if request_week_key != wk:
+                        continue
+                else:
+                    request_week = str(request.get("payroll_week") or "").strip()
+                    request_week = request_week.replace("Week ", "").strip()
+                    if request_week != str(index):
+                        continue
+
                 request_eid = str(request.get("payroll_employee_id") or request.get("employee_id") or "").strip()
                 request_name = str(request.get("emp_name", "")).strip().casefold()
                 if request_eid:
-                    # The registered employee ID is the authoritative identity key.
-                    # HR and EOM department/work-type labels are not always identical.
+                    # Employee ID is the reliable identity key. Each employee is
+                    # already selected from the requested department/subdepartment.
                     if request_eid != eid:
                         continue
                 else:
+                    # Legacy requests without an Employee ID must match both name
+                    # and the department information available on the request.
                     if request_name != emp_name.casefold():
                         continue
                     request_main = str(request.get("payroll_department") or request.get("dept") or "").strip()
-                    request_sub = str(request.get("payroll_subdepartment", "") or "").strip()
-                    if request_main and request_main.casefold() != main_dept.casefold():
+                    request_sub = str(request.get("payroll_subdepartment") or "").strip()
+                    if request_main and request_main.casefold() not in {main_dept.casefold(), str(dept).casefold()}:
                         continue
                     if sub_dept and request_sub and request_sub.casefold() != sub_dept.casefold():
                         continue
-                    if not sub_dept and request_sub and request_sub.casefold() != "office staff":
+                    if not sub_dept and request_sub and request_sub.casefold() != employee_subdept.casefold():
                         continue
+
                 request_type = str(request.get("type", "")).strip().casefold()
                 amount = _eom_numeric(request.get("amount", 0))
-                eom_type = str(request.get("transaction_type", "") or "").strip().casefold()
-                if request_type == "deduction":
-                    request_ded += amount
-                elif request_type == "addition":
-                    # Legacy additions without a subtype continue to post to ADD.
-                    if eom_type in {"expense", "expenses"}:
-                        manual["Expenses"] = round(_eom_numeric(manual.get("Expenses", 0)) + amount, 2)
-                    elif eom_type in {"benefit in kind", "benefit_in_kind", "benefit-in-kind"}:
-                        manual["Benefit in Kind"] = round(_eom_numeric(manual.get("Benefit in Kind", 0)) + amount, 2)
-                    elif eom_type == "bonus":
-                        manual["Bonus"] = round(_eom_numeric(manual.get("Bonus", 0)) + amount, 2)
-                    elif eom_type == "add":
-                        request_add += amount
-                    else:
-                        request_add += amount
+                if amount == 0:
+                    continue
+                eom_type = str(request.get("transaction_type", "") or "").strip().casefold().replace("_", " ").replace("-", " ")
                 category = str(request.get("category", "")).strip()
                 desc = str(request.get("desc", "")).strip()
-                note = f"{request_type.title()}: {category or desc}".strip()
-                if note and note not in request_notes:
-                    request_notes.append(note)
+
+                if request_type == "deduction":
+                    request_ded += amount
+                    destination = "DED"
+                elif request_type == "addition":
+                    if eom_type in {"expense", "expenses"}:
+                        request_expenses += amount
+                        destination = "Expenses"
+                    elif eom_type in {"benefit in kind"}:
+                        request_bik += amount
+                        destination = "Benefit In Kind"
+                    elif eom_type == "bonus":
+                        request_bonus += amount
+                        destination = "Bonus"
+                    else:
+                        # Explicit ADD and legacy/unspecified addition types go to ADD.
+                        request_add += amount
+                        destination = "ADD"
+                else:
+                    continue
+
+                # Keep every approved transaction's description, including repeated
+                # categories, so Payroll can audit exactly what makes up the total.
+                detail = desc or category or "No description provided"
+                if category and desc:
+                    detail = f"{category}: {desc}"
+                request_notes.append(f"{request_type.title()} ({destination}): {detail} [£{amount:,.2f}]")
+
             manual_note = str(manual.get("Note", "") or "").strip()
             notes = list(day_notes) + request_notes
             if manual_note:
                 notes.append(manual_note)
+
             weekly.append({
                 "Employee": emp_name, "Employee ID": eid, "Week": f"Week {index}",
                 "Hours": working, "Travel": travel,
@@ -2546,13 +2580,14 @@ def _eom_department_rows(month_key, dept, employees, records):
                 "Sick Days": leave["Sick Days"],
                 "Authorised Absence": leave.get("Authorised Absence", 0),
                 "Mileage": manual.get("Mileage", ""),
-                "Expenses": manual.get("Expenses", ""),
-                "Benefit In Kind": manual.get("Benefit in Kind", ""),
-                "ADD": round(_eom_numeric(manual.get("ADD", 0)) + request_add, 2),
-                "DED": round(_eom_numeric(manual.get("DED", 0)) + request_ded, 2),
-                "Bonus": manual.get("Bonus", ""),
+                "Expenses": round(_eom_numeric(manual.get("Expenses", 0)) + request_expenses, 2),
+                "Benefit In Kind": round(_eom_numeric(manual.get("Benefit in Kind", 0)) + request_bik, 2),
+                # ADD/DED are fully automatic: never include legacy/manual values.
+                "ADD": round(request_add, 2),
+                "DED": round(request_ded, 2),
+                "Bonus": round(_eom_numeric(manual.get("Bonus", 0)) + request_bonus, 2),
                 "Comments": " / ".join(notes),
-                "_manual_values": {field: manual_entry.get(field, "") for field in EOM_MANUAL_FIELDS},
+                "_manual_values": {field: manual.get(field, "") for field in EOM_MANUAL_FIELDS if field not in {"ADD", "DED"}},
                 "_week_no": str(index),
             })
         result.append({"employee": emp, "rows": weekly})
@@ -2733,7 +2768,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     _ensure_storage()
     _ts()
     st.subheader("📊 End-of-Month Payroll Summary")
-    st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Approved Addition/Deduction requests are included automatically in the month and week selected on the request.")
+    st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Director-approved Addition/Deduction requests are automatically totalled in the employee's selected payroll month and week; ADD and DED cannot be entered manually.")
 
     month_labels = [label for _, label in PAYROLL_MONTHS]
     month_keys = [key for key, _ in PAYROLL_MONTHS]
@@ -2899,7 +2934,8 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     # They are intentionally not editable or entered through the EOM form.
     # Editable companion grid keeps the other manual fields separate from
     # timesheet-derived fields.
-    st.markdown("**Enter / edit weekly payroll details**")
+    st.markdown("**Enter / edit weekly payroll details (manual entries only)**")
+    st.caption("Use this table for manual overtime, mileage, expenses, benefits, bonuses and notes. Approved Addition/Deduction requests populate the EOM automatically; do not enter ADD or DED here. Approved Expense, Benefit in Kind and Bonus additions are included automatically alongside any manual amount.")
     editable_fields = ["Overtime", "Mileage", "Expenses", "Benefit In Kind", "Bonus", "Note"]
     editor_rows = []
     for group in employee_groups:
@@ -2929,10 +2965,9 @@ def render_payroll_eom(current_user_info, mode="payroll"):
             saved_values = dict(records.get(key, {}))
             for field in editable_fields:
                 saved_values[field] = row.get(field, "")
-            # ADD and DED are calculated from approved main Addition & Deduction
-            # requests and must survive saves from this details grid.
-            saved_values.setdefault("ADD", 0)
-            saved_values.setdefault("DED", 0)
+            # ADD and DED are calculated exclusively from approved requests.
+            # Retain legacy workbook fields for compatibility, but never use them
+            # in the EOM calculation or expose them in this manual editor.
             records[key] = {field: saved_values.get(field, "") for field in EOM_MANUAL_FIELDS}
         _eom_save(records)
         st.success("EOM payroll entries saved.")
