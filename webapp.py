@@ -2579,6 +2579,83 @@ def _eom_minutes_for_week(week_key, dept, eid, month_key):
     return working, travel, notes
 
 
+def _store_payroll_allocation(value):
+    """Resolve a Store transaction date to the configured EOM month/week."""
+    try:
+        dt = value if isinstance(value, date) else pd.to_datetime(value).date()
+    except Exception:
+        return "", "", ""
+    iso = dt.isoformat()
+    for week_key, week_obj in PAYROLL_WEEKS.items():
+        if iso in {str(x)[:10] for x in week_obj.get("dates", [])}:
+            return str(week_obj.get("month", "")), str(week_obj.get("label", "")).replace("Week ", "").strip(), week_key
+    # Weekend dates belong to the payroll week ending on the preceding Friday.
+    if dt.weekday() >= 5:
+        prior_friday = dt - timedelta(days=dt.weekday() - 4)
+        if prior_friday.strftime("%Y-%m") == dt.strftime("%Y-%m"):
+            for week_key, week_obj in PAYROLL_WEEKS.items():
+                if str(week_obj.get("month", "")) == dt.strftime("%Y-%m") and prior_friday.isoformat() in {str(x)[:10] for x in week_obj.get("dates", [])}:
+                    return str(week_obj.get("month", "")), str(week_obj.get("label", "")).replace("Week ", "").strip(), week_key
+    nearest = None
+    for week_key, week_obj in PAYROLL_WEEKS.items():
+        if str(week_obj.get("month", "")) != dt.strftime("%Y-%m"):
+            continue
+        for value_date in week_obj.get("dates", []):
+            try:
+                candidate = date.fromisoformat(str(value_date)[:10])
+            except Exception:
+                continue
+            distance = abs((candidate - dt).days)
+            if nearest is None or distance < nearest[0]:
+                nearest = (distance, week_key, week_obj)
+    if nearest and nearest[0] <= 3:
+        _distance, week_key, week_obj = nearest
+        return str(week_obj.get("month", "")), str(week_obj.get("label", "")).replace("Week ", "").strip(), week_key
+    return dt.strftime("%Y-%m"), "", ""
+
+
+def _eom_approved_store_deductions(month_key, week_key, employee_id, employee_name, dept):
+    """Return approved Store deductions for one employee and EOM week."""
+    total = 0.0
+    notes = []
+    try:
+        store_records = load_store_deductions(force=False)
+    except Exception:
+        store_records = []
+    main_dept, _sub_dept = _department_parts(dept)
+    target_id = str(employee_id or "").strip().casefold()
+    target_name = str(employee_name or "").strip().casefold()
+    for request in store_records:
+        if str(request.get("status", "")).strip().casefold() != "approved":
+            continue
+        if str(request.get("type", "Deduction")).strip().casefold() != "deduction":
+            continue
+        req_month = str(request.get("payroll_month", "")).strip()
+        req_week_key = str(request.get("payroll_week_key", "")).strip()
+        if not req_month or not req_week_key:
+            req_month, _req_week, req_week_key = _store_payroll_allocation(request.get("date_submit") or request.get("date_leaving"))
+        if req_month != str(month_key) or req_week_key != str(week_key):
+            continue
+        req_id = str(request.get("employee_id", "")).strip().casefold()
+        req_name = str(request.get("emp_name", "")).strip().casefold()
+        if req_id:
+            if req_id != target_id:
+                continue
+        elif req_name != target_name:
+            continue
+        req_dept = str(request.get("emp_dept", "")).strip()
+        if req_dept and req_dept.casefold() not in {str(main_dept).casefold(), str(dept).casefold()}:
+            continue
+        amount = _eom_numeric(request.get("total_deduction", 0))
+        if amount <= 0:
+            continue
+        total += amount
+        desc = str(request.get("desc", "")).strip()
+        if desc:
+            notes.append(desc)
+    return round(total, 2), notes
+
+
 def _eom_department_rows(month_key, dept, employees, records):
     """Build weekly EOM rows from timesheets, manual details and approved adjustments."""
     week_keys = [wk for wk in PAYROLL_WEEK_ORDER if PAYROLL_WEEKS[wk].get("month") == month_key]
@@ -2684,6 +2761,12 @@ def _eom_department_rows(month_key, dept, employees, records):
                 # transaction description as a separate comment, including repeats.
                 if desc:
                     request_notes.append(desc)
+
+            store_deduction_total, store_deduction_notes = _eom_approved_store_deductions(
+                month_key, wk, eid, emp_name, dept
+            )
+            request_ded += store_deduction_total
+            request_notes.extend(store_deduction_notes)
 
             manual_note = str(manual.get("Note", "") or "").strip()
             notes = list(day_notes) + list(leave.get("Comments", [])) + request_notes
@@ -2888,7 +2971,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     _ensure_storage()
     _ts()
     st.subheader("📊 End-of-Month Payroll Summary")
-    st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Director-approved Addition/Deduction requests are automatically totalled in the employee's selected payroll month and week; ADD and DED cannot be entered manually.")
+    st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Director-approved Addition/Deduction requests and Store Department deductions (including unreturned employee holdings) are automatically totalled in the employee's selected payroll month and week; ADD and DED cannot be entered manually.")
 
     month_labels = [label for _, label in PAYROLL_MONTHS]
     month_keys = [key for key, _ in PAYROLL_MONTHS]
@@ -2933,6 +3016,39 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         dept_employees = _get_employees(
             group_dept, separate_subdepartments=(mode in ("payroll", "director", "super_admin"))
         ) or []
+        try:
+            all_store_requests = load_store_deductions(force=True)
+            all_hr_employees = _hrp_load_employees()
+            main_dept, sub_dept = _department_parts(group_dept)
+            existing_ids = {str(e.get("emp_id", "")).strip().casefold() for e in dept_employees}
+            for store_req in all_store_requests:
+                if str(store_req.get("status", "")).casefold() != "approved" or str(store_req.get("type", "Deduction")).casefold() != "deduction":
+                    continue
+                req_month = str(store_req.get("payroll_month", "")).strip()
+                req_week_key = str(store_req.get("payroll_week_key", "")).strip()
+                if not req_month or not req_week_key:
+                    req_month, _req_week, req_week_key = _store_payroll_allocation(store_req.get("date_submit") or store_req.get("date_leaving"))
+                if req_month != month_key:
+                    continue
+                req_emp_id = str(store_req.get("employee_id", "")).strip().casefold()
+                candidate = next((e for e in all_hr_employees if req_emp_id and str(e.get("emp_id", "")).strip().casefold() == req_emp_id), None)
+                if candidate is None and not req_emp_id:
+                    req_name = str(store_req.get("emp_name", "")).strip().casefold()
+                    candidate = next((e for e in all_hr_employees if str(e.get("name", "")).strip().casefold() == req_name), None)
+                if not candidate or str(candidate.get("status", "")).casefold() != "left":
+                    continue
+                if str(candidate.get("department", "")).strip().casefold() != str(main_dept).casefold():
+                    continue
+                candidate_sub = str(candidate.get("work_type", candidate.get("sub_department", candidate.get("working_as", "Office Staff"))) or "Office Staff").strip()
+                if sub_dept and candidate_sub.casefold() != sub_dept.casefold():
+                    continue
+                if not sub_dept and mode in ("payroll", "director", "super_admin") and candidate_sub.casefold() != "office staff":
+                    continue
+                if req_emp_id not in existing_ids:
+                    dept_employees.append(candidate)
+                    existing_ids.add(req_emp_id or str(candidate.get("emp_id", "")).strip().casefold())
+        except Exception:
+            pass
         for group in _eom_department_rows(month_key, group_dept, dept_employees, records):
             group["_department"] = group_dept
             employee_groups.append(group)
@@ -3207,7 +3323,8 @@ STORE_DEDUCTION_COLUMNS = [
     "Line Manager", "Date of Submit", "Type", "Items Deducted JSON", "Total Deduction (£)",
     "Description", "Attachment Name", "Status", "Director Comments",
     "Rejection Reason", "Decision Date", "Decision By", "Submitted By",
-    "Submitted Date", "PDF File Path"
+    "Submitted Date", "PDF File Path", "Employee ID", "Payroll Month",
+    "Payroll Week", "Payroll Week Key", "Source", "Clearance ID"
 ]
 STORE_ITEMS_COLUMNS = ["Item Name", "Price (£)", "Active"]
 DEFAULT_STORE_ITEMS = [
@@ -9003,6 +9120,12 @@ def load_work_orders(force=False):
                 "payroll_date": str(r.get("Payroll Date", "")).strip(),
                 "payroll_by": str(r.get("Payroll By", "")).strip(),
                 "pdf_path": str(r.get("PDF File Path", "")).strip(),
+                "employee_id": str(r.get("Employee ID", "")).strip(),
+                "payroll_month": str(r.get("Payroll Month", "")).strip(),
+                "payroll_week": str(r.get("Payroll Week", "")).strip(),
+                "payroll_week_key": str(r.get("Payroll Week Key", "")).strip(),
+                "source": str(r.get("Source", "Store Deduction")).strip(),
+                "clearance_id": str(r.get("Clearance ID", "")).strip(),
             })
         _set_data_cache("_work_orders_cache", records)
         return list(records)
@@ -10528,6 +10651,12 @@ def load_store_deductions(force=False):
                 "submitted_by": str(r.get("Submitted By", "")).strip(),
                 "submitted_date": str(r.get("Submitted Date", "")).strip(),
                 "pdf_path": str(r.get("PDF File Path", "")).strip(),
+                "employee_id": str(r.get("Employee ID", "")).strip(),
+                "payroll_month": str(r.get("Payroll Month", "")).strip(),
+                "payroll_week": str(r.get("Payroll Week", "")).strip(),
+                "payroll_week_key": str(r.get("Payroll Week Key", "")).strip(),
+                "source": str(r.get("Source", "Store Deduction")).strip(),
+                "clearance_id": str(r.get("Clearance ID", "")).strip(),
             })
         _set_data_cache("_store_deduction_cache", records)
         return list(records)
@@ -10556,6 +10685,12 @@ def save_all_store_deductions(records, sync=True):
         "Submitted By": str(r.get("submitted_by", "")),
         "Submitted Date": str(r.get("submitted_date", "")),
         "PDF File Path": str(r.get("pdf_path", "")),
+        "Employee ID": str(r.get("employee_id", "")),
+        "Payroll Month": str(r.get("payroll_month", "")),
+        "Payroll Week": str(r.get("payroll_week", "")),
+        "Payroll Week Key": str(r.get("payroll_week_key", "")),
+        "Source": str(r.get("source", "Store Deduction")),
+        "Clearance ID": str(r.get("clearance_id", "")),
     } for r in records]
     pd.DataFrame(rows, columns=STORE_DEDUCTION_COLUMNS).to_excel(STORE_DEDUCTION_PATH, index=False, engine="openpyxl")
     _set_data_cache("_store_deduction_cache", list(records))
@@ -12990,7 +13125,8 @@ def render_store_deduction_form(user_name, user_dept):
                 _upload_to_drive_bg(fp, fn)
                 attachments.append(fn)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            rec = {"id": new_id, "emp_name": emp_name.strip(), "date_leaving": "", "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit), "type": "Deduction", "items": valid_items, "total_deduction": total_deduction, "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending", "director_comments": "", "rejection_reason": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "submitted_date": now, "pdf_path": ""}
+            payroll_month, payroll_week, payroll_week_key = _store_payroll_allocation(date_submit)
+            rec = {"id": new_id, "emp_name": emp_name.strip(), "date_leaving": "", "emp_dept": emp_dept, "manager": manager.strip(), "date_submit": str(date_submit), "type": "Deduction", "items": valid_items, "total_deduction": total_deduction, "desc": desc.strip(), "attachment_name": ", ".join(attachments) or "None", "status": "pending", "director_comments": "", "rejection_reason": "", "decision_date": "", "decision_by": "", "submitted_by": user_name, "submitted_date": now, "pdf_path": "", "employee_id": str(selected_employee.get("emp_id", "")), "payroll_month": payroll_month, "payroll_week": payroll_week, "payroll_week_key": payroll_week_key, "source": "Store Deduction", "clearance_id": ""}
             all_deductions.append(rec)
             save_all_store_deductions(all_deductions)
             log_action("STORE_DEDUCTION_CREATED", new_id, new_data=rec)
@@ -14187,6 +14323,9 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
         ded_desc = (f"Auto-generated from Leaver Item Check-in #{new_id}. "
                     f"Items not returned by {employee['name']} ({employee['emp_id']}). "
                     f"{(notes or '').strip()}").strip()
+        payroll_month, payroll_week, payroll_week_key = _store_payroll_allocation(checkin_date or leaving_date)
+        linked_clearance = next((c for c in load_leaver_clearances(force=True)
+                                 if str(c.get("employee_id", "")).strip().casefold() == str(employee.get("emp_id", "")).strip().casefold()), None)
         ded_rec = {
             "id": ded_id,
             "emp_name": employee["name"],
@@ -14207,6 +14346,12 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
             "submitted_by": user_name,
             "submitted_date": now,
             "pdf_path": "",
+            "employee_id": str(employee.get("emp_id", "")),
+            "payroll_month": payroll_month,
+            "payroll_week": payroll_week,
+            "payroll_week_key": payroll_week_key,
+            "source": "Employee Items Holdings / Leaver Check-in",
+            "clearance_id": str((linked_clearance or {}).get("clearance_id", "")),
         }
         store_records.append(ded_rec)
         deduction_req_id = str(ded_id)
