@@ -558,6 +558,39 @@ def _show_locked_month_message(month_key):
     )
 
 
+def _locked_payroll_months_for_date_range(start_date, end_date):
+    """Return all Director-locked payroll months touched by a date range."""
+    try:
+        start = pd.to_datetime(start_date).date()
+        end = pd.to_datetime(end_date).date()
+    except Exception:
+        return []
+    if end < start:
+        return []
+    locked = []
+    cursor = start.replace(day=1)
+    last_month = end.replace(day=1)
+    while cursor <= last_month:
+        month_key = cursor.strftime("%Y-%m")
+        if _eom_month_is_locked(month_key):
+            locked.append(month_key)
+        cursor = date(cursor.year + (1 if cursor.month == 12 else 0), 1 if cursor.month == 12 else cursor.month + 1, 1)
+    return locked
+
+
+def _show_locked_leave_date_message(start_date, end_date):
+    locked_months = _locked_payroll_months_for_date_range(start_date, end_date)
+    if locked_months:
+        labels = [PAYROLL_MONTH_LABELS.get(m, m) for m in locked_months]
+        for month_key in locked_months:
+            _show_locked_month_message(month_key)
+        st.error(
+            "This leave date range includes a locked payroll month (" + ", ".join(labels) +"). "
+            "Leave cannot be recorded, requested, approved or moved into these months until the Director or Super Admin reopens them."
+        )
+    return bool(locked_months)
+
+
 # ============================================================
 # EMPLOYEES (delegated to app)
 # ============================================================
@@ -8438,10 +8471,13 @@ def render_hr_portal(current_user_info=None):
             if leave_end < leave_start:
                 st.error("End date cannot be before the start date.")
             else:
+                locked_leave_range = _show_locked_leave_date_message(leave_start, leave_end)
                 calculated_days = _hrp_calculate_leave_days(leave_type, leave_start, leave_end, half_day)
                 st.metric("Calculated Leave Days", f"{calculated_days:.1f}")
                 st.caption("Weekends are excluded from the calculation.")
-                if st.button("📤 Record Leave — Automatically Approved", type="primary", key=f"hrp_record_leave_{form_version}"):
+                if st.button("📤 Record Leave — Automatically Approved", type="primary", disabled=locked_leave_range, key=f"hrp_record_leave_{form_version}"):
+                    if _show_locked_leave_date_message(leave_start, leave_end):
+                        st.stop()
                     blocked_dates = _hrp_blocked_leave_dates(leave_start, leave_end)
                     if blocked_dates:
                         details = ", ".join(f"{d.strftime('%d/%m/%Y')} ({code} — {reason})" for d, code, reason in blocked_dates)
@@ -8584,7 +8620,12 @@ def render_hr_portal(current_user_info=None):
                             edit_half_day = edit_leave_type == "Half Day Holiday"
                             edit_days = _hrp_calculate_leave_days(edit_leave_type, edit_leave_start, edit_leave_end, edit_half_day)
                             st.caption(f"Calculated days: {edit_days:.1f}. HR edits remain Approved automatically.")
-                            if st.form_submit_button("💾 Save Leave Changes", type="primary"):
+                            edit_locked_range = bool(edit_leave_end >= edit_leave_start and _locked_payroll_months_for_date_range(edit_leave_start, edit_leave_end))
+                            if edit_locked_range:
+                                _show_locked_leave_date_message(edit_leave_start, edit_leave_end)
+                            if st.form_submit_button("💾 Save Leave Changes", type="primary", disabled=edit_locked_range):
+                                if _show_locked_leave_date_message(edit_leave_start, edit_leave_end):
+                                    st.stop()
                                 if edit_leave_end < edit_leave_start or edit_days <= 0:
                                     st.error("Please select a valid working-day date range.")
                                 else:
@@ -8749,9 +8790,15 @@ def render_department_manager_leave_request(current_user_info=None):
             half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key=f"dept_leave_half_{key_suffix}_{form_version}")
         request_reference = st.text_input("Request Reference", placeholder="Optional email, call, or internal reference", key=f"dept_leave_ref_{key_suffix}_{form_version}")
         notes = st.text_area("Notes / Reason", placeholder="Reason or details supplied by the employee", key=f"dept_leave_notes_{key_suffix}_{form_version}")
-        submitted = st.form_submit_button("📤 Submit Leave Request to HR", type="primary", width="stretch")
+        locked_leave_range = bool(leave_end >= leave_start and _locked_payroll_months_for_date_range(leave_start, leave_end))
+        submitted = st.form_submit_button("📤 Submit Leave Request to HR", type="primary", width="stretch", disabled=locked_leave_range)
+
+    if leave_end >= leave_start:
+        _show_locked_leave_date_message(leave_start, leave_end)
 
     if submitted:
+        if _show_locked_leave_date_message(leave_start, leave_end):
+            return
         if leave_end < leave_start:
             st.error("End date cannot be before the start date.")
             return
@@ -8876,7 +8923,12 @@ def render_hr_leave_approvals(key_prefix="hr_leave_approvals"):
                     rejection_reason = st.text_area("Rejection reason (required only if rejecting)", key=f"{key_prefix}_reject_reason_{record['leave_id']}_{record_index}")
                     a1, a2 = st.columns(2)
                     with a1:
-                        if st.button("✅ Approve Leave", type="primary", key=f"{key_prefix}_approve_leave_{record['leave_id']}_{record_index}"):
+                        approval_blocked_by_lock = bool(_locked_payroll_months_for_date_range(record.get("date_from"), record.get("date_to")))
+                        if approval_blocked_by_lock:
+                            _show_locked_leave_date_message(record.get("date_from"), record.get("date_to"))
+                        if st.button("✅ Approve Leave", type="primary", disabled=approval_blocked_by_lock, key=f"{key_prefix}_approve_leave_{record['leave_id']}_{record_index}"):
+                            if _show_locked_leave_date_message(record.get("date_from"), record.get("date_to")):
+                                st.stop()
                             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             old = dict(record)
                             approver = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
