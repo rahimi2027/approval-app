@@ -2586,10 +2586,17 @@ def _store_payroll_allocation(value):
     except Exception:
         return "", "", ""
     iso = dt.isoformat()
+    transaction_month = dt.strftime("%Y-%m")
+    # A Monday-Friday week that crosses a month boundary exists in both
+    # adjacent payroll-month calendars. The transaction's own calendar month
+    # must win; otherwise (for example) 1 December could be allocated to
+    # November's final week simply because November appears first in the map.
     for week_key, week_obj in PAYROLL_WEEKS.items():
-        if iso in {str(x)[:10] for x in week_obj.get("dates", [])}:
+        if (str(week_obj.get("month", "")) == transaction_month
+                and iso in {str(x)[:10] for x in week_obj.get("dates", [])}):
             return str(week_obj.get("month", "")), str(week_obj.get("label", "")).replace("Week ", "").strip(), week_key
-    # Weekend dates belong to the payroll week ending on the preceding Friday.
+    # Weekend dates belong to the payroll week ending on the preceding Friday,
+    # when that Friday is in the same calendar month.
     if dt.weekday() >= 5:
         prior_friday = dt - timedelta(days=dt.weekday() - 4)
         if prior_friday.strftime("%Y-%m") == dt.strftime("%Y-%m"):
@@ -2630,10 +2637,12 @@ def _eom_approved_store_deductions(month_key, week_key, employee_id, employee_na
             continue
         if str(request.get("type", "Deduction")).strip().casefold() != "deduction":
             continue
-        req_month = str(request.get("payroll_month", "")).strip()
-        req_week_key = str(request.get("payroll_week_key", "")).strip()
-        if not req_month or not req_week_key:
-            req_month, _req_week, req_week_key = _store_payroll_allocation(request.get("date_submit") or request.get("date_leaving"))
+        # The transaction date is the source of truth. Recalculate instead of
+        # trusting legacy saved month/week fields, which may have been assigned
+        # before the month-boundary rule was corrected.
+        req_month, _req_week, req_week_key = _store_payroll_allocation(
+            request.get("date_submit") or request.get("date_leaving")
+        )
         if req_month != str(month_key) or req_week_key != str(week_key):
             continue
         req_id = str(request.get("employee_id", "")).strip().casefold()
@@ -3024,10 +3033,11 @@ def render_payroll_eom(current_user_info, mode="payroll"):
             for store_req in all_store_requests:
                 if str(store_req.get("status", "")).casefold() != "approved" or str(store_req.get("type", "Deduction")).casefold() != "deduction":
                     continue
-                req_month = str(store_req.get("payroll_month", "")).strip()
-                req_week_key = str(store_req.get("payroll_week_key", "")).strip()
-                if not req_month or not req_week_key:
-                    req_month, _req_week, req_week_key = _store_payroll_allocation(store_req.get("date_submit") or store_req.get("date_leaving"))
+                # Use the date as the authoritative allocation source, including
+                # for older requests that contain a previously saved week key.
+                req_month, _req_week, req_week_key = _store_payroll_allocation(
+                    store_req.get("date_submit") or store_req.get("date_leaving")
+                )
                 if req_month != month_key:
                     continue
                 req_emp_id = str(store_req.get("employee_id", "")).strip().casefold()
@@ -13048,6 +13058,21 @@ def render_store_deduction_form(user_name, user_dept):
             key=f"store_emp_dept_display_{employee_key}",
         )
         date_submit = st.date_input("📅 Date of Submit", value=date.today(), key=f"{widget_prefix}_date_submit")
+        preview_month, preview_week, preview_week_key = _store_payroll_allocation(date_submit)
+        if preview_week_key:
+            preview_week_obj = PAYROLL_WEEKS.get(preview_week_key, {})
+            preview_month_label = PAYROLL_MONTH_LABELS.get(preview_month, preview_month)
+            preview_range = _payroll_week_month_range(preview_month, preview_week_obj)
+            st.info(
+                f"**Automatic payroll allocation:** {preview_month_label} — "
+                f"Week {preview_week} ({preview_range}). This date falls in the "
+                f"company Monday–Friday payroll week."
+            )
+        else:
+            st.warning(
+                "This date is outside the configured payroll calendar. "
+                "Please ask Payroll to extend the payroll calendar before submitting."
+            )
     with col2:
         manager = st.text_input("👔 Line Manager", key=f"{widget_prefix}_manager")
         st.markdown("<br>", unsafe_allow_html=True)
@@ -13114,6 +13139,8 @@ def render_store_deduction_form(user_name, user_dept):
             st.error("⚠️ Employee Name, Line Manager and Description are required.")
         elif not valid_items:
             st.error("⚠️ Please select at least one item to deduct.")
+        elif not preview_week_key:
+            st.error("⚠️ The selected date is outside the configured payroll calendar. Please contact Payroll.")
         else:
             new_id = get_next_store_deduction_id(all_deductions)
             attachments = []
@@ -14267,6 +14294,21 @@ def render_item_checkin_form(user_name):
     with col2:
         checkin_date = st.date_input("📅 Check-in Date", value=date.today(),
                                      key="checkin_date")
+        checkin_payroll_month, checkin_payroll_week, checkin_payroll_week_key = _store_payroll_allocation(checkin_date)
+        if checkin_payroll_week_key:
+            checkin_week_obj = PAYROLL_WEEKS.get(checkin_payroll_week_key, {})
+            checkin_month_label = PAYROLL_MONTH_LABELS.get(checkin_payroll_month, checkin_payroll_month)
+            checkin_week_range = _payroll_week_month_range(checkin_payroll_month, checkin_week_obj)
+            st.info(
+                f"**Automatic deduction payroll allocation:** {checkin_month_label} — "
+                f"Week {checkin_payroll_week} ({checkin_week_range}). "
+                "The check-in date determines the week; no manual week selection is needed."
+            )
+        else:
+            st.warning(
+                "This check-in date is outside the configured payroll calendar. "
+                "Please ask Payroll to extend the calendar before creating a deduction."
+            )
     notes = st.text_area("📝 Check-in Notes", key="checkin_notes")
     current_checkin_pdf = _build_item_checkin_pdf({
         "id": "Draft", "employee_id": selected_emp.get("emp_id", ""), "emp_name": selected_emp.get("name", ""),
@@ -14292,7 +14334,7 @@ def render_item_checkin_form(user_name):
                                create_deduction=False)
     with b2:
         if st.button(f"📤 Save & Create Store Deduction (£{total_deduction:.2f})",
-                     disabled=total_deduction <= 0, type="primary",
+                     disabled=total_deduction <= 0 or not checkin_payroll_week_key, type="primary",
                      key="save_checkin_and_deduct", width="stretch"):
             _save_item_checkin(user_name, selected_emp, returned_items,
                                not_returned_items, total_deduction,
@@ -14314,6 +14356,10 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
 
     # Items not returned can create a Store Deduction for Director approval.
     if create_deduction and not_returned_items:
+        payroll_month, payroll_week, payroll_week_key = _store_payroll_allocation(checkin_date or leaving_date)
+        if not payroll_week_key:
+            st.error("The check-in date is outside the configured payroll calendar. No deduction was created.")
+            return
         ded_id = get_next_store_deduction_id(store_records)
         ded_items = [{
             "item_name": it["item_name"],
@@ -14323,7 +14369,6 @@ def _save_item_checkin(user_name, employee, returned_items, not_returned_items,
         ded_desc = (f"Auto-generated from Leaver Item Check-in #{new_id}. "
                     f"Items not returned by {employee['name']} ({employee['emp_id']}). "
                     f"{(notes or '').strip()}").strip()
-        payroll_month, payroll_week, payroll_week_key = _store_payroll_allocation(checkin_date or leaving_date)
         linked_clearance = next((c for c in load_leaver_clearances(force=True)
                                  if str(c.get("employee_id", "")).strip().casefold() == str(employee.get("emp_id", "")).strip().casefold()), None)
         ded_rec = {
