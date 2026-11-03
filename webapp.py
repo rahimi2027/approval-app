@@ -2435,6 +2435,7 @@ def _eom_status_totals(week_key, dept, eid, month_key):
     week_obj = PAYROLL_WEEKS.get(week_key, {})
     y, m = map(int, month_key.split("-"))
     days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
+    counted_dates = set()
     for i, d in enumerate(days):
         if not d or i >= len(week_obj.get("dates", [])):
             continue
@@ -2442,12 +2443,83 @@ def _eom_status_totals(week_key, dept, eid, month_key):
         if dt.year != y or dt.month != m:
             continue
         status = str(d.get("status", "")).strip()
-        if status == "Holiday": counts["Holiday Paid"] += 1
-        elif status == "HD Holiday": counts["Holiday Paid"] += 0.5
-        elif status == "Unpaid Holiday": counts["Holiday Unpaid"] += 1
-        elif status == "Bank Holiday": counts["B Hols"] += 1
-        elif status == "Sick": counts["Sick Days"] += 1
-        elif status == "Authorised Absence": counts["Authorised Absence"] += 1
+        if status == "Holiday":
+            counts["Holiday Paid"] += 1
+            counted_dates.add(dt.date())
+        elif status == "HD Holiday":
+            counts["Holiday Paid"] += 0.5
+            counted_dates.add(dt.date())
+        elif status == "Unpaid Holiday":
+            counts["Holiday Unpaid"] += 1
+            counted_dates.add(dt.date())
+        elif status == "Bank Holiday":
+            counts["B Hols"] += 1
+            counted_dates.add(dt.date())
+        elif status == "Sick":
+            counts["Sick Days"] += 1
+            counted_dates.add(dt.date())
+        elif status == "Authorised Absence":
+            counts["Authorised Absence"] += 1
+            counted_dates.add(dt.date())
+
+    # Also include approved HR Portal leave bookings. A date already represented
+    # by a timesheet absence is not counted again.
+    try:
+        leave_records = _hrp_load_leave_records()
+    except Exception:
+        leave_records = []
+    employee_id = str(eid or "").strip().casefold()
+    for leave in leave_records:
+        if str(leave.get("employee_id", "")).strip().casefold() != employee_id:
+            continue
+        if str(leave.get("status", "")).strip().casefold() != "approved":
+            continue
+        leave_type = re.sub(r"\\s+", " ", str(leave.get("type", "")).strip()).casefold()
+        type_map = {
+            "full day holiday": ("Holiday Paid", 1.0),
+            "half day holiday": ("Holiday Paid", 0.5),
+            "unpaid holiday": ("Holiday Unpaid", 1.0),
+            "bank holiday": ("B Hols", 1.0),
+            "sick leave": ("Sick Days", 1.0),
+            "sick": ("Sick Days", 1.0),
+            "authorised absence": ("Authorised Absence", 1.0),
+            "authorized absence": ("Authorised Absence", 1.0),
+        }
+        mapped = type_map.get(leave_type)
+        if not mapped:
+            continue
+        target_key, default_unit = mapped
+        d_from, d_to = leave.get("date_from"), leave.get("date_to")
+        if not d_from or not d_to:
+            continue
+        try:
+            first = d_from if isinstance(d_from, date) else pd.to_datetime(d_from).date()
+            last = d_to if isinstance(d_to, date) else pd.to_datetime(d_to).date()
+            total_days = float(leave.get("days", 0) or 0)
+        except Exception:
+            continue
+        if last < first or total_days <= 0:
+            continue
+        booking_weekdays = []
+        current = first
+        while current <= last:
+            if current.weekday() < 5:
+                booking_weekdays.append(current)
+            current += timedelta(days=1)
+        if not booking_weekdays:
+            continue
+        # Spread the recorded booking quantity across weekdays in the full
+        # booking range, then retain only dates belonging to this EOM month.
+        remaining = total_days
+        for leave_date in booking_weekdays:
+            amount = min(default_unit, remaining)
+            remaining -= amount
+            if amount <= 0 or leave_date.year != y or leave_date.month != m:
+                continue
+            if leave_date in counted_dates:
+                continue
+            counts[target_key] += amount
+            counted_dates.add(leave_date)
     return counts
 
 
@@ -16403,6 +16475,24 @@ def _addition_deduction_same_department(employee, user_department):
     return bool(current_department and employee_department == current_department)
 
 
+
+
+def _addition_deduction_registered_employees(user_department):
+    """Return active HR employees for the department, with a safe roster fallback.
+
+    Some older HR records use a department alias or sub-department value. If
+    strict parent-department matching returns no employees, retain the active
+    registered roster rather than hiding the employee selector completely.
+    """
+    employees = [
+        e for e in _hrp_load_employees()
+        if str(e.get("status", "Active")).strip().casefold() == "active"
+        and str(e.get("name", "")).strip()
+    ]
+    matched = [e for e in employees if _addition_deduction_same_department(e, user_department)]
+    return sorted(matched or employees, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
+
+
 def _addition_deduction_request_in_department(request, department):
     """Include sub-department requests in their parent department history."""
     target = re.sub(r"\s+", " ", str(department or "").strip()).casefold()
@@ -16435,12 +16525,7 @@ def render_store_addition_deduction_module(full_name, dept_name):
         employee_name = ""
         manual_mode = employee_source == "Manual Employee"
         if employee_source == "Registered Employee":
-            registered = [
-                e for e in _hrp_load_employees()
-                if str(e.get("status", "Active")).strip().casefold() == "active"
-                and str(e.get("name", "")).strip()
-                and _addition_deduction_same_department(e, dept_name)
-            ]
+            registered = _addition_deduction_registered_employees(dept_name)
             registered = sorted(registered, key=lambda e: str(e.get("name", "")).casefold())
             if registered:
                 labels = [
@@ -17191,12 +17276,7 @@ elif role in ["Manager", "Staff", "Team Member"]:
                             with c1:
                                 registered_employee = None
                                 if employee_source == "Registered Employee":
-                                    registered = [
-                                        e for e in _hrp_load_employees()
-                                        if str(e.get("status", "Active")).strip().casefold() == "active"
-                                        and str(e.get("name", "")).strip()
-                                        and _addition_deduction_same_department(e, dept_name)
-                                    ]
+                                    registered = _addition_deduction_registered_employees(dept_name)
                                     registered = sorted(registered, key=lambda e: (str(e.get("name", "")).casefold(), str(e.get("emp_id", "")).casefold()))
                                     if registered:
                                         # Show employee name and their effective department only.
