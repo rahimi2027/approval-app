@@ -286,6 +286,39 @@ def _p_week_states(): return _payroll_file_path("payroll_week_states.xlsx")
 def _p_flags():       return _payroll_file_path("payroll_flags.xlsx")
 def _p_approvals():   return _payroll_file_path("payroll_approvals.xlsx")
 def _p_eom():         return _payroll_file_path("payroll_eom.xlsx")
+def _p_eom_locks():   return _payroll_file_path("payroll_eom_month_locks.json")
+
+
+def _eom_month_locks_load():
+    """Load persistent EOM month approval/lock records."""
+    path = _p_eom_locks()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _eom_month_locks_save(records):
+    path = _p_eom_locks()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    temp_path = path + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(records, handle, ensure_ascii=False, indent=2)
+    os.replace(temp_path, path)
+    try:
+        _ctx["sync_to_drive"](path)
+    except Exception:
+        pass
+
+
+def _eom_month_lock_info(month_key):
+    return _eom_month_locks_load().get(str(month_key), {})
+
+
+def _eom_month_is_locked(month_key):
+    return str(_eom_month_lock_info(month_key).get("status", "")).casefold() == "locked"
 
 
 def _ensure_storage():
@@ -1076,6 +1109,14 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
     week_obj = PAYROLL_WEEKS[week_key]
     state = _get_state(week_key, dept)
+    eom_month_locked = _eom_month_is_locked(month_key)
+    if eom_month_locked:
+        lock_info = _eom_month_lock_info(month_key)
+        st.error(
+            f"🔒 This payroll month is locked following Director approval by "
+            f"{lock_info.get('approved_by', 'Director')} on {lock_info.get('approved_at', 'date/time unavailable')}. "
+            "Timesheet changes are disabled. A Director or Super Admin must reopen the EOM month first."
+        )
 
     # ---------------- Super Admin timesheet edit-request queue ----------------
     if mode == "super_admin":
@@ -1217,7 +1258,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             mode != "director"
             and ((mode == "manager") or has_all_department_edit_access)
         )
-        editable = can_edit_timesheet and (
+        editable = (not eom_month_locked) and can_edit_timesheet and (
             state["status"] in ("Draft", "Returned")
             or (state["status"] == "Submitted" and flag_total > 0)
         )
@@ -1479,7 +1520,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             with col_save:
                 if st.button("💾 Save", use_container_width=True,
                              key="payroll_save_draft",
-                             disabled=not (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))):
+                             disabled=eom_month_locked or not (state["status"] in ("Draft", "Returned") or (state["status"] == "Submitted" and flag_total > 0))):
                     # Save all timesheet data locally first; local saves remain fast.
                     _ts_save()
                     if state["status"] in ("Submitted", "Returned") and (flag_total > 0 or state["status"] == "Returned"):
@@ -1602,7 +1643,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         # Director decision controls live on the Timesheet tab beside the records
         # being reviewed. Hours shortfalls alone do not block approval; only genuine
         # unresolved day flags do.
-        if mode in ("director", "super_admin"):
+        if mode in ("director", "super_admin") and not eom_month_locked:
             st.markdown("---")
             if state["status"] == "Approved":
                 st.success(
@@ -1651,6 +1692,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         st.caption("No employees are available to approve in this department.")
             else:
                 st.caption("The Director's approval controls appear here after the manager submits the timesheet.")
+        elif mode in ("director", "super_admin") and eom_month_locked:
+            st.caption("🔒 Week-level approvals and returns are disabled because the EOM payroll month is locked.")
 
     # ========================================================
     # TAB 2 — TEAM SUMMARY
@@ -2815,7 +2858,7 @@ def _eom_numeric(value):
         return 0.0
 
 
-def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
+def _eom_build_excel(month_key, dept, employee_groups, pay_date_text, approval_info=None):
     """Create the department EOM workbook in the same grouped layout as the supplied example."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -2964,8 +3007,41 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
         row_num += 1
         # Spacer between employees is intentionally omitted: the reference uses compact blocks.
 
+    # Formal Director sign-off is printed at the end of the workbook.
+    approval_info = approval_info or {}
+    row_num += 2
+    ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=16)
+    approval_heading = ws.cell(row_num, 1, "DIRECTOR EOM PAYROLL APPROVAL")
+    approval_heading.font = Font(name="Aptos", size=14, bold=True, color="FFFFFF")
+    approval_heading.fill = PatternFill("solid", fgColor="38761D")
+    approval_heading.alignment = Alignment(horizontal="center", vertical="center")
+    approval_heading.border = cell_border
+    row_num += 1
+    stamp_text = "APPROVED" if str(approval_info.get("status", "")).casefold() == "locked" else "NOT YET APPROVED"
+    stamp_fill = PatternFill("solid", fgColor="38761D" if stamp_text == "APPROVED" else "FCE5CD")
+    ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=4)
+    stamp = ws.cell(row_num, 1, f"{stamp_text} — DIRECTOR SIGN-OFF")
+    stamp.font = Font(name="Aptos", size=12, bold=True, color="FFFFFF" if stamp_text == "APPROVED" else "7F6000")
+    stamp.fill = stamp_fill
+    stamp.alignment = Alignment(horizontal="center", vertical="center")
+    stamp.border = cell_border
+    ws.merge_cells(start_row=row_num, start_column=5, end_row=row_num, end_column=10)
+    ws.cell(row_num, 5, f"Director: {approval_info.get('approved_by', '') or 'Pending'}").alignment = Alignment(vertical="center")
+    ws.merge_cells(start_row=row_num, start_column=11, end_row=row_num, end_column=16)
+    ws.cell(row_num, 11, f"Approved date/time: {approval_info.get('approved_at', '') or 'Pending'}").alignment = Alignment(vertical="center")
+    for col in range(1, 17):
+        ws.cell(row_num, col).border = cell_border
+        if col <= 4:
+            ws.cell(row_num, col).fill = stamp_fill
+    ws.row_dimensions[row_num].height = 30
+    row_num += 1
+    ws.merge_cells(start_row=row_num, start_column=1, end_row=row_num, end_column=16)
+    note = ws.cell(row_num, 1, f"Approval status: {stamp_text}. Reopening history: {approval_info.get('last_reopened_by', '')} {approval_info.get('last_reopened_at', '')}".strip())
+    note.font = Font(name="Aptos", size=9, italic=True)
+    note.alignment = Alignment(horizontal="left", vertical="center")
+
     ws.print_title_rows = "1:2"
-    ws.print_area = f"A1:P{row_num - 1}"
+    ws.print_area = f"A1:P{row_num}"
     ws.sheet_properties.pageSetUpPr.autoPageBreaks = False
     output = io.BytesIO()
     wb.save(output)
@@ -2990,6 +3066,48 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         month_label = st.selectbox("📅 Payroll month", month_labels,
             index=month_keys.index(default_month), key="eom_month_select")
     month_key = month_keys[month_labels.index(month_label)]
+
+    # Month-level sign-off: only a Director can approve; Director/Super Admin can reopen.
+    lock_records = _eom_month_locks_load()
+    lock_info = lock_records.get(month_key, {})
+    is_month_locked = str(lock_info.get("status", "")).casefold() == "locked"
+    if is_month_locked:
+        st.success(f"🔒 **{month_label} is LOCKED** — approved by {lock_info.get('approved_by', 'Director')} on {lock_info.get('approved_at', 'date/time unavailable')}.")
+    else:
+        st.warning(f"🔓 **{month_label} is OPEN** — it has not been finally approved and locked by the Director.")
+
+    if mode == "director" and not is_month_locked:
+        confirm_approval = st.checkbox(
+            f"I have checked and confirm the complete EOM payroll for {month_label}.",
+            key=f"eom_confirm_director_{month_key}"
+        )
+        if st.button("🔏 Director Approve & Lock This Payroll Month", type="primary",
+                     disabled=not confirm_approval, key=f"eom_lock_month_{month_key}"):
+            approver = str(current_user_info.get("full_name") or current_user_info.get("username") or "Director").strip()
+            approved_at = datetime.now().astimezone().strftime("%d/%m/%Y %H:%M:%S %Z")
+            lock_records[month_key] = {
+                "status": "locked", "approved_by": approver, "approved_at": approved_at,
+                "locked_by": approver, "locked_at": approved_at,
+                "last_reopened_by": lock_info.get("last_reopened_by", ""),
+                "last_reopened_at": lock_info.get("last_reopened_at", ""),
+            }
+            _eom_month_locks_save(lock_records)
+            st.success(f"{month_label} has been approved and locked.")
+            st.rerun()
+
+    if mode in ("director", "super_admin") and is_month_locked:
+        with st.expander("🔓 Reopen this payroll month for authorised corrections"):
+            reopen_reason = st.text_area("Reason for reopening (required)", key=f"eom_reopen_reason_{month_key}")
+            if st.button("Reopen Month", type="secondary", key=f"eom_reopen_month_{month_key}", disabled=not reopen_reason.strip()):
+                actor = str(current_user_info.get("full_name") or current_user_info.get("username") or mode.title()).strip()
+                reopened_at = datetime.now().astimezone().strftime("%d/%m/%Y %H:%M:%S %Z")
+                lock_records[month_key] = {
+                    **lock_info, "status": "open", "last_reopened_by": actor,
+                    "last_reopened_at": reopened_at, "last_reopen_reason": reopen_reason.strip(),
+                }
+                _eom_month_locks_save(lock_records)
+                st.success(f"{month_label} has been reopened by {actor}.")
+                st.rerun()
 
     options = _get_payroll_department_options() or _get_departments() or ["Store"]
     can_all = (mode in ("super_admin", "director")
@@ -3192,7 +3310,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     # EOM values are populated automatically; the manual weekly editor has been removed.
 
     export_title = "All_Departments" if dept == "All Departments" else re.sub(r'[^A-Za-z0-9_-]+', '_', _department_label(dept))
-    excel_bytes = _eom_build_excel(month_key, dept, employee_groups, pay_date_text)
+    excel_bytes = _eom_build_excel(month_key, dept, employee_groups, pay_date_text, _eom_month_lock_info(month_key))
     st.download_button(
         "⬇️ Download EOM Excel (All selected employees)",
         data=excel_bytes,
@@ -13155,6 +13273,9 @@ def render_store_deduction_form(user_name, user_dept):
             st.error("⚠️ Please select at least one item to deduct.")
         elif not preview_week_key:
             st.error("⚠️ The selected date is outside the configured payroll calendar. Please contact Payroll.")
+        elif _eom_month_is_locked(preview_month):
+            lock_info = _eom_month_lock_info(preview_month)
+            st.error(f"🔒 {PAYROLL_MONTH_LABELS.get(preview_month, preview_month)} is locked by Director approval ({lock_info.get('approved_by', 'Director')}, {lock_info.get('approved_at', '')}). Reopen the month before creating a transaction for it.")
         else:
             new_id = get_next_store_deduction_id(all_deductions)
             attachments = []
