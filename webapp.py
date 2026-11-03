@@ -2431,8 +2431,14 @@ def _eom_save(records):
 
 
 def _eom_status_totals(week_key, dept, eid, month_key):
-    counts = {"Holiday Paid": 0.0, "Holiday Unpaid": 0, "B Hols": 0, "Sick Days": 0, "Authorised Absence": 0}
+    counts = {"Holiday Paid": 0.0, "Holiday Unpaid": 0, "B Hols": 0, "Sick Days": 0, "Authorised Absence": 0, "Comments": []}
     week_obj = PAYROLL_WEEKS.get(week_key, {})
+    week_dates = set()
+    for week_date in week_obj.get("dates", []):
+        try:
+            week_dates.add(datetime.fromisoformat(week_date).date())
+        except Exception:
+            continue
     y, m = map(int, month_key.split("-"))
     days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
     counted_dates = set()
@@ -2516,10 +2522,20 @@ def _eom_status_totals(week_key, dept, eid, month_key):
             remaining -= amount
             if amount <= 0 or leave_date.year != y or leave_date.month != m:
                 continue
-            if leave_date in counted_dates:
+            # Allocate each approved leave day to the payroll week containing
+            # that date. Without this check, the full booking was repeated on
+            # every weekly row in the monthly EOM summary.
+            if leave_date not in week_dates:
                 continue
-            counts[target_key] += amount
-            counted_dates.add(leave_date)
+            if leave_date not in counted_dates:
+                counts[target_key] += amount
+                counted_dates.add(leave_date)
+            leave_note = str(leave.get("notes", "") or "").strip()
+            if leave_note:
+                label = _ordinal_day(leave_date.isoformat())
+                comment = f"{label} {leave_note}"
+                if comment not in counts["Comments"]:
+                    counts["Comments"].append(comment)
     return counts
 
 
@@ -2670,7 +2686,7 @@ def _eom_department_rows(month_key, dept, employees, records):
                     request_notes.append(desc)
 
             manual_note = str(manual.get("Note", "") or "").strip()
-            notes = list(day_notes) + request_notes
+            notes = list(day_notes) + list(leave.get("Comments", [])) + request_notes
             if manual_note:
                 notes.append(manual_note)
 
