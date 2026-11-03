@@ -2931,7 +2931,7 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
                 cell.border = cell_border
                 if col in (2, 3):
                     cell.number_format = '[h]:mm'
-                elif col in (11, 12, 13, 14, 15):
+                elif col in (10, 11, 12, 13, 14, 15):
                     cell.number_format = '£#,##0.00'
                 elif col == 10:
                     cell.number_format = '0.00'
@@ -2958,7 +2958,7 @@ def _eom_build_excel(month_key, dept, employee_groups, pay_date_text):
             cell.border = cell_border
             if col in (2, 3):
                 cell.number_format = '[h]:mm'
-            elif col in (11, 12, 13, 14, 15):
+            elif col in (10, 11, 12, 13, 14, 15):
                 cell.number_format = '£#,##0.00'
         ws.row_dimensions[row_num].height = 21
         row_num += 1
@@ -3094,7 +3094,10 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         )
         st.markdown("#### 🧾 Weekly company expense reporting")
         st.caption("Includes approved Expense transactions allocated to the selected payroll month/week, alongside manual EOM expense entries.")
-        st.dataframe(weekly_expense_summary, hide_index=True, use_container_width=True)
+        st.dataframe(
+            weekly_expense_summary.style.format({"Expenses (£)": "£{:,.2f}"}),
+            hide_index=True, use_container_width=True
+        )
         st.metric("Total expenses in selected scope", f"£{weekly_expense_summary['Expenses (£)'].sum():,.2f}")
 
     if not employees:
@@ -3120,6 +3123,17 @@ def render_payroll_eom(current_user_info, mode="payroll"):
                "B Hols", "Sick Days", "Authorised Absence", "Mileage", "Expenses",
                "Benefit In Kind", "ADD", "DED", "Bonus", "Comments"]
     esc = html.escape
+    def _eom_display_value(value, column_index):
+        # Row value positions: 9=Mileage, 10=Expenses, 11=Benefit in Kind,
+        # 12=ADD, 13=DED, 14=Bonus. Keep numeric values for calculations/exports;
+        # add currency formatting only to the on-screen report.
+        if column_index in (9, 10, 11, 12, 13, 14):
+            try:
+                return f"£{_eom_numeric(value):,.2f}"
+            except Exception:
+                return "£0.00"
+        return "" if value is None else str(value)
+
     table_parts = [
         # Keep the report inside the available page width. Fixed column sizing and
         # wrapping prevent long comments/labels from expanding the whole table.
@@ -3154,8 +3168,8 @@ def render_payroll_eom(current_user_info, mode="payroll"):
                 rec["ADD"], rec["DED"], rec["Bonus"], rec["Comments"],
             ]
             table_parts.append("<tr>" + "".join(
-                f"<td style='border:1px solid #333;padding:4px;text-align:center;vertical-align:middle;white-space:normal;overflow-wrap:anywhere;word-break:break-word;'>{esc('' if v is None else str(v))}</td>"
-                for v in rowvals
+                f"<td style='border:1px solid #333;padding:4px;text-align:center;vertical-align:middle;white-space:normal;overflow-wrap:anywhere;word-break:break-word;'>{esc(_eom_display_value(v, i))}</td>"
+                for i, v in enumerate(rowvals)
             ) + "</tr>")
             totals["Hours"] += rec["Hours"]
             totals["Travel"] += rec["Travel"]
@@ -3169,8 +3183,8 @@ def render_payroll_eom(current_user_info, mode="payroll"):
             totals["ADD"], totals["DED"], totals["Bonus"], "",
         ]
         table_parts.append("<tr>" + "".join(
-            f"<td style='border:1px solid #333;padding:4px;text-align:center;background:#FFF2CC;white-space:normal;overflow-wrap:anywhere;'>{esc(str(v))}</td>"
-            for v in totalvals
+            f"<td style='border:1px solid #333;padding:4px;text-align:center;background:#FFF2CC;white-space:normal;overflow-wrap:anywhere;'>{esc(_eom_display_value(v, i))}</td>"
+            for i, v in enumerate(totalvals)
         ) + "</tr>")
     table_parts.append("</table></div>")
     st.markdown("".join(table_parts), unsafe_allow_html=True)
@@ -6714,7 +6728,7 @@ def _hrp_render_leavers_tab():
     except Exception:
         pass
     if history["settlements"]:
-        st.dataframe(pd.DataFrame([{"Settlement ID":r.get('id'),"Type":r.get('type'),"Days":float(r.get('days',0) or 0),"Amount (£)":float(r.get('amount',0) or 0),"Status":r.get('status','').title(),"Date":r.get('date')} for r in history["settlements"]]), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame([{"Settlement ID":r.get('id'),"Type":r.get('type'),"Days":float(r.get('days',0) or 0),"Amount (£)":float(r.get('amount',0) or 0),"Status":r.get('status','').title(),"Date":r.get('date')} for r in history["settlements"]]).style.format({"Amount (£)": "£{:,.2f}"}), width="stretch", hide_index=True)
     else: st.info("No final holiday settlement found.")
     st.divider()
     st.subheader("↩️ HR Leaver Control")
@@ -9369,7 +9383,7 @@ def render_work_order_total(records, scope_department=None, key_prefix="wo_total
     st.metric("📋 Work Orders Included", len(selected))
     if selected:
         rows = [{"Work Order No.": get_work_order_number(r), "Employee": r.get("emp_name", ""), "Work Date": r.get("work_date", ""), "Amount (£)": float(r.get("amount", 0) or 0), "Approved By": r.get("director_decision_by", "")} for r in selected]
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows).style.format({"Amount (£)": "£{:,.2f}"}), width="stretch", hide_index=True)
         if st.button("📄 Generate & Download Total PDF", key=f"{key_prefix}_pdf", type="primary"):
             with st.spinner("Generating PDF..."):
                 path = work_order_total_pdf(selected, employee, from_date, to_date, prepared_by=prepared_by)
@@ -9678,7 +9692,7 @@ def render_work_order_employee_portal(current_user, current_dept):
                 for r in sorted(dept_orders, key=lambda x: str(x.get("work_date", "")), reverse=True):
                     rows.append({"Work Order No.": get_work_order_number(r), "Employee": r.get("emp_name", ""), "Manager": r.get("manager", ""), "Work Date": r.get("work_date", ""), "Amount (£)": float(r.get("amount", 0) or 0), "Status": str(r.get("status", "")).replace("_", " ").upper(), "Submitted By": r.get("submitted_by", "")})
                 df_view = pd.DataFrame(rows)
-                st.dataframe(df_view, width="stretch", hide_index=True)
+                st.dataframe(df_view.style.format({"Amount (£)": "£{:,.2f}"}), width="stretch", hide_index=True)
                 st.caption(f"📊 {len(rows)} work order(s) in **{current_dept}**")
                 st.divider(); st.markdown("#### 📄 Full Details")
                 for r in reversed(dept_orders):
@@ -14546,7 +14560,7 @@ def render_item_checkin_history():
             if c.get("returned_items"):
                 st.dataframe(pd.DataFrame([{
                     "Item": it["item_name"], "Qty": it["quantity"], "Unit £": it["unit_price"]
-                } for it in c["returned_items"]]), width="stretch", hide_index=True)
+                } for it in c["returned_items"]]).style.format({"Unit £": "£{:,.2f}"}), width="stretch", hide_index=True)
             else:
                 st.caption("None")
 
@@ -14555,7 +14569,7 @@ def render_item_checkin_history():
                 st.dataframe(pd.DataFrame([{
                     "Item": it["item_name"], "Qty": it["quantity"],
                     "Unit £": it["unit_price"], "Line Total £": it.get("line_total", 0)
-                } for it in c["not_returned_items"]]), width="stretch", hide_index=True)
+                } for it in c["not_returned_items"]]).style.format({"Unit £": "£{:,.2f}", "Line Total £": "£{:,.2f}"}), width="stretch", hide_index=True)
             else:
                 st.caption("None")
 
@@ -16942,7 +16956,7 @@ if role == "Employee":
                 all_holdings = load_employee_items(force=True)
                 own = [r for r in all_holdings if str(r.get("employee_id", "")).strip() == linked_id and float(r.get("qty_outstanding",0) or 0) > 0]
                 if own:
-                    st.dataframe(pd.DataFrame([{"Employee":r.get("emp_name"),"Department":r.get("emp_dept"),"Item":r.get("item_name"),"Outstanding":r.get("qty_outstanding"),"Unit £":r.get("unit_price"),"Issue Date":r.get("issue_date")} for r in own]), width="stretch", hide_index=True)
+                    st.dataframe(pd.DataFrame([{"Employee":r.get("emp_name"),"Department":r.get("emp_dept"),"Item":r.get("item_name"),"Outstanding":r.get("qty_outstanding"),"Unit £":r.get("unit_price"),"Issue Date":r.get("issue_date")} for r in own]).style.format({"Unit £": "£{:,.2f}"}), width="stretch", hide_index=True)
                     pdf=_build_item_holdings_pdf(own, f"My Employee Item Holdings - {full_name}")
                     st.download_button("📄 Download My Holdings PDF", data=pdf or b"", file_name="My_Employee_Item_Holdings.pdf", mime="application/pdf", disabled=not bool(pdf), key="employee_my_holdings_pdf")
                 else:
