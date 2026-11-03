@@ -537,6 +537,27 @@ PAYROLL_WEEK_ORDER = list(PAYROLL_WEEKS.keys())
 PAYROLL_MONTH_LABELS = dict(PAYROLL_MONTHS)
 
 
+def _payroll_month_is_open(month_key):
+    """Central company-wide check used by every payroll-linked submission."""
+    return bool(month_key) and not _eom_month_is_locked(str(month_key).strip())
+
+
+def _open_payroll_month_pairs():
+    """Month options for new requests; Director-locked months are not selectable."""
+    return [(key, label) for key, label in PAYROLL_MONTHS if _payroll_month_is_open(key)]
+
+
+def _show_locked_month_message(month_key):
+    info = _eom_month_lock_info(month_key)
+    label = PAYROLL_MONTH_LABELS.get(str(month_key), str(month_key))
+    st.error(
+        f"🔒 {label} is locked following Director EOM payroll approval "
+        f"by {info.get('approved_by', 'Director')} on "
+        f"{info.get('approved_at', 'date/time unavailable')}. "
+        "This submission cannot be sent. Ask the Director or Super Admin to reopen the month."
+    )
+
+
 # ============================================================
 # EMPLOYEES (delegated to app)
 # ============================================================
@@ -10807,6 +10828,18 @@ def load_store_deductions(force=False):
         return []
 
 def save_all_store_deductions(records, sync=True):
+    # A locked month blocks newly-created Store requests, but does not prevent
+    # Director decisions or administrative updates to records already on file.
+    try:
+        existing_ids = {str(r.get("id", "")).strip() for r in load_store_deductions(force=True)}
+    except Exception:
+        existing_ids = set()
+    for record in records:
+        record_id = str(record.get("id", "")).strip()
+        month_key = str(record.get("payroll_month", "")).strip()
+        if record_id and record_id not in existing_ids and month_key and not _payroll_month_is_open(month_key):
+            _show_locked_month_message(month_key)
+            st.stop()
     rows = [{
         "ID": int(r.get("id", 0)),
         "Employee Name": str(r.get("emp_name", "")),
@@ -13273,9 +13306,8 @@ def render_store_deduction_form(user_name, user_dept):
             st.error("⚠️ Please select at least one item to deduct.")
         elif not preview_week_key:
             st.error("⚠️ The selected date is outside the configured payroll calendar. Please contact Payroll.")
-        elif _eom_month_is_locked(preview_month):
-            lock_info = _eom_month_lock_info(preview_month)
-            st.error(f"🔒 {PAYROLL_MONTH_LABELS.get(preview_month, preview_month)} is locked by Director approval ({lock_info.get('approved_by', 'Director')}, {lock_info.get('approved_at', '')}). Reopen the month before creating a transaction for it.")
+        elif not _payroll_month_is_open(preview_month):
+            _show_locked_month_message(preview_month)
         else:
             new_id = get_next_store_deduction_id(all_deductions)
             attachments = []
@@ -14742,6 +14774,10 @@ def save_all_records(records):
     sync_saved_file_to_drive(EXCEL_PATH)
 
 def save_record_to_excel(new_record):
+    month_key = str((new_record or {}).get("payroll_month", "")).strip()
+    if month_key and not _payroll_month_is_open(month_key):
+        _show_locked_month_message(month_key)
+        st.stop()
     current = load_records_from_excel()
     current.append(new_record)
     save_all_records(current)
@@ -16882,8 +16918,12 @@ def render_store_addition_deduction_module(full_name, dept_name):
                 manual_mode = True
         st.markdown("**📅 Payroll allocation**")
         st.caption("Select the month and week where this request should appear in the employee's EOM payroll after Director approval.")
-        payroll_month_labels = [label for _, label in PAYROLL_MONTHS]
-        payroll_month_keys = [key for key, _ in PAYROLL_MONTHS]
+        open_month_pairs = _open_payroll_month_pairs()
+        if not open_month_pairs:
+            st.error("🔒 All configured payroll months are currently locked. No new payroll-linked requests can be submitted.")
+            return
+        payroll_month_labels = [label for _, label in open_month_pairs]
+        payroll_month_keys = [key for key, _ in open_month_pairs]
         default_payroll_month = datetime.today().strftime("%Y-%m")
         if default_payroll_month not in payroll_month_keys:
             default_payroll_month = payroll_month_keys[0]
@@ -17333,8 +17373,12 @@ elif role == "Work Order Manager":
                         request_dept = dept_name
                     st.markdown("**📅 Payroll allocation**")
                     st.caption("Select the month and week where this request should appear in the employee's EOM payroll after Director approval.")
-                    payroll_month_labels = [label for _, label in PAYROLL_MONTHS]
-                    payroll_month_keys = [key for key, _ in PAYROLL_MONTHS]
+                    open_month_pairs = _open_payroll_month_pairs()
+                    if not open_month_pairs:
+                        st.error("🔒 All configured payroll months are currently locked. No new payroll-linked requests can be submitted.")
+                        st.stop()
+                    payroll_month_labels = [label for _, label in open_month_pairs]
+                    payroll_month_keys = [key for key, _ in open_month_pairs]
                     default_payroll_month = datetime.today().strftime("%Y-%m")
                     if default_payroll_month not in payroll_month_keys:
                         default_payroll_month = payroll_month_keys[0]
@@ -17370,6 +17414,9 @@ elif role == "Work Order Manager":
                                 _upload_to_drive_bg(file_path, fn)
                         if not selected_payroll_week_key:
                             st.error("Please select a payroll month with a configured payroll week.")
+                            st.stop()
+                        if not _payroll_month_is_open(selected_payroll_month):
+                            _show_locked_month_message(selected_payroll_month)
                             st.stop()
                         employee_id = str((registered_employee or {}).get("emp_id", (registered_employee or {}).get("employee_id", (registered_employee or {}).get("Employee ID", ""))) or "").strip()
                         payload = {"id": nid, "emp_name": en.strip(), "dept": request_dept, "employee_id": employee_id, "payroll_employee_id": employee_id, "payroll_department": str((registered_employee or {}).get("department", dept_name) or dept_name).strip(), "payroll_subdepartment": str((registered_employee or {}).get("work_type", (registered_employee or {}).get("sub_department", "Office Staff")) or "Office Staff").strip(), "payroll_month": selected_payroll_month, "payroll_week": selected_payroll_week_number, "payroll_week_key": selected_payroll_week_key, "type": rt, "transaction_type": (eom_transaction_type if rt == "Addition" else ""), "category": ct, "date": str(dt_val), "amount": amt, "manager": mgr.strip(), "desc": desc.strip(), "attachment_name": ", ".join(att_list) or "None", "status": "pending", "director_comments": "", "decision_date": "", "decision_by": "", "submitted_by": full_name, "pdf_path": "", "edited_from_id": "", "old_data": ""}
@@ -17659,8 +17706,12 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     request_dept = dept_name
                                 st.markdown("**📅 Payroll allocation**")
                                 st.caption("Select the month and week where this request should appear in the employee's EOM payroll after Director approval.")
-                                payroll_month_labels = [label for _, label in PAYROLL_MONTHS]
-                                payroll_month_keys = [key for key, _ in PAYROLL_MONTHS]
+                                open_month_pairs = _open_payroll_month_pairs()
+                                if not open_month_pairs:
+                                    st.error("🔒 All configured payroll months are currently locked. No new payroll-linked requests can be submitted.")
+                                    st.stop()
+                                payroll_month_labels = [label for _, label in open_month_pairs]
+                                payroll_month_keys = [key for key, _ in open_month_pairs]
                                 default_payroll_month = datetime.today().strftime("%Y-%m")
                                 if default_payroll_month not in payroll_month_keys:
                                     default_payroll_month = payroll_month_keys[0]
