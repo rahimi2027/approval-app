@@ -16842,8 +16842,9 @@ def _training_topic_accessible(title, user):
         (("employee directory",), "can_access_employee_directory"),
         (("employee overview",), "can_access_employee_overview"),
         (("holiday calculator",), "can_access_holiday_calculator"),
-        (("my hr reports",), "can_access_employee_hr_reports"),
-        (("payroll timesheet", "timesheet", "timesheets"), "can_access_payroll_timesheet"),
+        (("my hr reports", "employee hr report", "employee hr reports"), "can_access_employee_hr_reports"),
+        (("leave request", "department leave request"), "can_access_leave_request"),
+        (("payroll timesheet", "timesheet", "timesheets", "site electrician timesheet", "site electrician time sheet"), "can_access_payroll_timesheet"),
         (("eom payroll", "payroll month", "payroll lock"), "can_access_payroll_eom"),
         (("leaver clearance",), "can_access_hr_leave"),
     ]
@@ -16876,6 +16877,9 @@ def render_training_help(current_user_info=None):
     role_name = str(user.get("role", "")).strip()
     department_name = str(user.get("dept", user.get("department", ""))).strip()
     role_key = _training_role_key(role_name, department_name)
+    # Accept both singular/plural Projects Manager role labels used by older accounts.
+    if role_key.casefold() in {"projects manager", "project manager"}:
+        role_key = "Project Manager"
     content = TRAINING_ROLE_CONTENT.get(role_key)
     if content:
         content = dict(content)
@@ -16884,6 +16888,60 @@ def render_training_help(current_user_info=None):
             (title, steps) for title, steps in content.get("topics", [])
             if _training_topic_accessible(title, user)
         ]
+    if content:
+        # Supplement role topics with every individually granted module, including Projects Manager combinations.
+        granted_topics = [
+            ("can_access_addition_deduction", "➕ Addition & Deduction", ["Open Addition & Deduction from the portal navigation.", "Check the employee, transaction type, category, date, amount and description before submitting or progressing a request.", "Use the request status and approval information to track the transaction."]),
+            ("can_access_leave_request", "📝 Leave Request (Department Manager)", ["Open Leave Request from the portal navigation.", "Select the employee and enter the leave type, start date, end date and any required comments.", "Check the dates and day amount carefully, then submit the request to HR.", "Track the request status. Pending or rejected requests do not lock timesheet dates; HR-recorded or HR-approved leave does."]),
+            ("can_access_employee_hr_reports", "👤 Employee HR Reports", ["Open Employee HR Reports to view the employee HR information available to your account.", "Use the employee/report filters provided and treat the information as confidential. This permission is view-only."]),
+            ("can_access_work_orders", "🛠️ Work Orders", ["Open Work Orders to review work submitted for your department or projects.", "Use the available pending, approved and returned/rejected views to follow each work order.", "Review job and employee details before taking the manager action available to your account."]),
+            ("can_access_payroll_timesheet", "📋 Projects – Site Electrician Timesheet", ["Open the Timesheet area and select the Site Electrician sub-department where it is available to your account.", "Check the employee, working date, hours and any leave or absence status before saving.", "Save the timesheet and use Submit for Approval when the week is ready for the approval workflow.", "HR-recorded or HR-approved leave locks the relevant timesheet date; do not enter ordinary working hours on a locked leave date."]),
+        ]
+        existing_titles = {str(title).casefold() for title, _ in content.get("topics", [])}
+        for permission, title, steps in granted_topics:
+            if _training_permission_enabled(user, permission) is True and title.casefold() not in existing_titles:
+                content["topics"].append((title, steps))
+                existing_titles.add(title.casefold())
+    if not content:
+        # A configured role is not required when an account has explicit module permissions.
+        permission_topics = []
+        permission_topic_map = [
+            ("can_access_addition_deduction", "➕ Addition & Deduction", [
+                "Open Addition & Deduction from the portal navigation.",
+                "Check the employee, transaction type, category, date, amount and description before submitting or progressing a request.",
+                "Use the request status and approval information to track the transaction."
+            ]),
+            ("can_access_leave_request", "📝 Leave Request (Department Manager)", [
+                "Open Leave Request from the portal navigation.",
+                "Select the employee and enter the leave type, start date, end date and any required comments.",
+                "Check the dates and day amount carefully, then submit the request to HR.",
+                "Track the request status. Pending or rejected requests do not lock timesheet dates; HR-recorded or HR-approved leave does."
+            ]),
+            ("can_access_employee_hr_reports", "👤 Employee HR Reports", [
+                "Open Employee HR Reports to view the employee HR information available to your account.",
+                "Use the employee/report filters provided and treat the information as confidential. This permission is view-only."
+            ]),
+            ("can_access_work_orders", "🛠️ Work Orders", [
+                "Open Work Orders to review work submitted for your department or projects.",
+                "Use the available pending, approved and returned/rejected views to follow each work order.",
+                "Review job and employee details before taking the manager action available to your account."
+            ]),
+            ("can_access_payroll_timesheet", "📋 Projects – Site Electrician Timesheet", [
+                "Open the Timesheet area and select the Site Electrician sub-department where it is available to your account.",
+                "Check the employee, working date, hours and any leave or absence status before saving.",
+                "Save the timesheet and use Submit for Approval when the week is ready for the approval workflow.",
+                "HR-recorded or HR-approved leave locks the relevant timesheet date; do not enter ordinary working hours on a locked leave date."
+            ]),
+        ]
+        for permission, title, steps in permission_topic_map:
+            if _training_permission_enabled(user, permission) is True:
+                permission_topics.append((title, steps))
+        if permission_topics:
+            content = {
+                "emoji": "🏗️", "title": f"{role_name or 'Projects Manager'} Training",
+                "intro": "Training topics below are based on the individual module permissions assigned to your account.",
+                "topics": permission_topics,
+            }
     # Shared guidance aligned with the supplied Acoole v4.31 department training deck.
     # Add it to each role's searchable topic list without replacing role-specific instructions.
     if content:
