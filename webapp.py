@@ -1675,11 +1675,25 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
             note_items = []
             for note_day, day_entry in enumerate(ts_days):
+                date_value = week_obj["dates"][note_day]
+                date_label = _ordinal_day(date_value)
+                # HR-entered/approved leave has its own description field in
+                # the HR leave workbook. Show it even when no timesheet row
+                # exists for that locked day.
+                hr_leave_for_note = _hrp_payroll_leave_for_date(eid, date_value) if valid_month_dates[note_day] else None
+                if hr_leave_for_note:
+                    leave_type_note = _hrp_payroll_leave_label(hr_leave_for_note)
+                    leave_description = str(hr_leave_for_note.get("notes", "") or "").strip()
+                    if leave_description:
+                        item = f"{date_label} {leave_type_note} — {leave_description}"
+                    else:
+                        item = f"{date_label} {leave_type_note}"
+                    if item not in note_items:
+                        note_items.append(item)
                 if not day_entry:
                     continue
                 note_text = str(day_entry.get('note', '') or '').strip()
                 status_text = str(day_entry.get('status', '') or '').strip()
-                date_label = _ordinal_day(week_obj["dates"][note_day])
                 if status_text and status_text not in ('Worked', 'Late In', 'Early Out'):
                     display_status = 'Half Day Holiday' if status_text == 'HD Holiday' else status_text
                     item = f"{date_label} {display_status}"
@@ -2758,12 +2772,31 @@ def _eom_status_totals(week_key, dept, eid, month_key):
             if leave_date not in counted_dates:
                 counts[target_key] += amount
                 counted_dates.add(leave_date)
-            leave_note = str(leave.get("notes", "") or "").strip()
-            if leave_note:
-                label = _ordinal_day(leave_date.isoformat())
-                comment = f"{label} {leave_note}"
+    # HR leave descriptions/reasons belong in EOM Comments for every leave
+    # type, including types that do not map to a numeric payroll category.
+    # Allocate each comment only to the week and month containing its date.
+    for leave in leave_records:
+        if str(leave.get("employee_id", "")).strip().casefold() != employee_id:
+            continue
+        if str(leave.get("status", "")).strip().casefold() != "approved":
+            continue
+        leave_note = str(leave.get("notes", "") or "").strip()
+        if not leave_note:
+            continue
+        try:
+            first = leave.get("date_from") if isinstance(leave.get("date_from"), date) else pd.to_datetime(leave.get("date_from")).date()
+            last = leave.get("date_to") if isinstance(leave.get("date_to"), date) else pd.to_datetime(leave.get("date_to")).date()
+        except Exception:
+            continue
+        current = first
+        leave_type_label = str(leave.get("type", "Leave") or "Leave").strip()
+        while current <= last:
+            if current.weekday() < 5 and current in week_dates and current.year == y and current.month == m:
+                label = _ordinal_day(current.isoformat())
+                comment = f"{label} {leave_type_label} — {leave_note}"
                 if comment not in counts["Comments"]:
                     counts["Comments"].append(comment)
+            current += timedelta(days=1)
     return counts
 
 
