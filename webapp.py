@@ -313,12 +313,46 @@ def _eom_month_locks_save(records):
         pass
 
 
+def _latest_locked_eom_month():
+    """Return the latest approved/locked EOM month, which defines the payroll cut-off."""
+    records = _eom_month_locks_load()
+    locked_keys = [
+        str(key) for key, info in records.items()
+        if str(info.get("status", "")).casefold() == "locked"
+        and len(str(key)) == 7 and str(key)[4:5] == "-"
+    ]
+    return max(locked_keys) if locked_keys else ""
+
+
 def _eom_month_lock_info(month_key):
-    return _eom_month_locks_load().get(str(month_key), {})
+    """Return the lock record responsible for locking this month or an earlier one."""
+    key = str(month_key or "").strip()
+    records = _eom_month_locks_load()
+    exact = records.get(key, {})
+    if str(exact.get("status", "")).casefold() == "locked":
+        return exact
+    cutoff = _latest_locked_eom_month()
+    if key and cutoff and key <= cutoff:
+        return records.get(cutoff, {})
+    return exact
 
 
 def _eom_month_is_locked(month_key):
-    return str(_eom_month_lock_info(month_key).get("status", "")).casefold() == "locked"
+    """A locked EOM month also locks every earlier payroll month."""
+    key = str(month_key or "").strip()
+    cutoff = _latest_locked_eom_month()
+    return bool(key and cutoff and key <= cutoff)
+
+
+def _payroll_month_is_selectable(month_key):
+    """Keep the locked month visible for read-only review, but hide earlier months."""
+    key = str(month_key or "").strip()
+    cutoff = _latest_locked_eom_month()
+    return bool(key) and (not cutoff or key >= cutoff)
+
+
+def _visible_payroll_month_pairs():
+    return [(key, label) for key, label in PAYROLL_MONTHS if _payroll_month_is_selectable(key)]
 
 
 def _ensure_storage():
@@ -1143,8 +1177,12 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                           key="payroll_dept_locked")
 
     with c2:
-        month_labels = [lbl for _, lbl in PAYROLL_MONTHS]
-        month_keys   = [k for k, _ in PAYROLL_MONTHS]
+        visible_month_pairs = _visible_payroll_month_pairs()
+        month_labels = [lbl for _, lbl in visible_month_pairs]
+        month_keys   = [k for k, _ in visible_month_pairs]
+        if not month_keys:
+            st.error("No payroll months are available. Please contact the Director or Super Admin.")
+            return
         default_idx  = month_keys.index("2026-10") if "2026-10" in month_keys else 0
         month_label  = st.selectbox("📅 Month", month_labels,
                                     index=default_idx, key="payroll_month")
@@ -3119,8 +3157,12 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     st.subheader("📊 End-of-Month Payroll Summary")
     st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Director-approved Addition/Deduction requests and Store Department deductions (including unreturned employee holdings) are automatically totalled in the employee's selected payroll month and week; ADD and DED cannot be entered manually.")
 
-    month_labels = [label for _, label in PAYROLL_MONTHS]
-    month_keys = [key for key, _ in PAYROLL_MONTHS]
+    visible_month_pairs = _visible_payroll_month_pairs()
+    month_labels = [label for _, label in visible_month_pairs]
+    month_keys = [key for key, _ in visible_month_pairs]
+    if not month_keys:
+        st.error("No payroll months are available. Please contact the Director or Super Admin.")
+        return
     default_month = "2026-10" if "2026-10" in month_keys else month_keys[0]
     c1, c2 = st.columns([1, 2])
     with c1:
@@ -17640,8 +17682,9 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
                                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
                                     amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
-                                    edit_month_labels = [label for _, label in PAYROLL_MONTHS]
-                                    edit_month_keys = [key for key, _ in PAYROLL_MONTHS]
+                                    edit_month_pairs = _visible_payroll_month_pairs()
+                                    edit_month_labels = [label for _, label in edit_month_pairs]
+                                    edit_month_keys = [key for key, _ in edit_month_pairs]
                                     saved_month = str(rec.get("payroll_month", "")).strip()
                                     if saved_month not in edit_month_keys:
                                         saved_month = datetime.today().strftime("%Y-%m")
