@@ -163,24 +163,11 @@ PAYROLL_MONTHS = [
     ("2027-11", "November 2027"),  ("2027-12", "December 2027"),
 ]
 
-# Absence statuses below are HR-controlled and are never manually selectable
-# by timesheet users. Approved HR leave is projected into the timesheet from
-# the HR leave register instead.
-HR_CONTROLLED_TIMESHEET_LEAVE_TYPES = {
-    "Full Day Holiday", "Half Day Holiday", "Sick Leave",
-    "Authorised Absence", "Unpaid Holiday", "Unpaid Absence",
-}
-HR_LEAVE_TO_TIMESHEET_STATUS = {
-    "Full Day Holiday": "Holiday",
-    "Half Day Holiday": "HD Holiday",
-    "Sick Leave": "Sick",
-    "Authorised Absence": "Authorised Absence",
-    "Unpaid Holiday": "Unpaid Holiday",
-    "Unpaid Absence": "Unpaid Absence",
-}
 PAYROLL_STATUS_OPTIONS = [
-    "Worked", "Late In", "Early Out", "Overtime Approved", "College",
-    "Maternity", "Lay-off", "Bank Holiday", "AWOL", "N/A", "Leaver",
+    "Worked", "Late In", "Early Out", "Authorised Absence", "HD Holiday",
+    "Overtime Approved", "College", "Holiday", "Sick", "Maternity",
+    "Lay-off", "Unpaid Holiday", "Unpaid Absence", "Bank Holiday",
+    "AWOL", "N/A", "Leaver",
 ]
 
 # Coloured markers shown in the payroll Status dropdown. The stored status values
@@ -326,46 +313,12 @@ def _eom_month_locks_save(records):
         pass
 
 
-def _latest_locked_eom_month():
-    """Return the latest approved/locked EOM month, which defines the payroll cut-off."""
-    records = _eom_month_locks_load()
-    locked_keys = [
-        str(key) for key, info in records.items()
-        if str(info.get("status", "")).casefold() == "locked"
-        and len(str(key)) == 7 and str(key)[4:5] == "-"
-    ]
-    return max(locked_keys) if locked_keys else ""
-
-
 def _eom_month_lock_info(month_key):
-    """Return the lock record responsible for locking this month or an earlier one."""
-    key = str(month_key or "").strip()
-    records = _eom_month_locks_load()
-    exact = records.get(key, {})
-    if str(exact.get("status", "")).casefold() == "locked":
-        return exact
-    cutoff = _latest_locked_eom_month()
-    if key and cutoff and key <= cutoff:
-        return records.get(cutoff, {})
-    return exact
+    return _eom_month_locks_load().get(str(month_key), {})
 
 
 def _eom_month_is_locked(month_key):
-    """A locked EOM month also locks every earlier payroll month."""
-    key = str(month_key or "").strip()
-    cutoff = _latest_locked_eom_month()
-    return bool(key and cutoff and key <= cutoff)
-
-
-def _payroll_month_is_selectable(month_key):
-    """Keep the locked month visible for read-only review, but hide earlier months."""
-    key = str(month_key or "").strip()
-    cutoff = _latest_locked_eom_month()
-    return bool(key) and (not cutoff or key >= cutoff)
-
-
-def _visible_payroll_month_pairs():
-    return [(key, label) for key, label in PAYROLL_MONTHS if _payroll_month_is_selectable(key)]
+    return str(_eom_month_lock_info(month_key).get("status", "")).casefold() == "locked"
 
 
 def _ensure_storage():
@@ -749,105 +702,9 @@ def _normalise_subdepartment_permissions(value):
 # TIMESHEETS
 # ============================================================
 
-def _hrp_project_approved_leave_into_timesheets():
-    """Project HR-approved absence onto its exact payroll dates.
-
-    Pending/rejected requests are deliberately ignored. HR records remain the
-    source of truth; the projected entries are used by timesheet display and
-    existing EOM status aggregation, and are protected from manual edits.
-    """
-    if not st.session_state.get("payroll_ts"):
-        return
-    records = st.session_state.get("hrp_leave_records")
-    if records is None:
-        try:
-            records = _hrp_load_leave_records()
-            st.session_state.hrp_leave_records = records
-        except Exception as exc:
-            print(f"Approved HR leave projection skipped: {exc}")
-            return
-    employees = st.session_state.get("hrp_employees")
-    if employees is None:
-        try:
-            employees = _hrp_load_employees()
-            st.session_state.hrp_employees = employees
-        except Exception:
-            employees = []
-    emp_lookup = {str(e.get("emp_id", "")).strip().casefold(): e for e in employees}
-    for leave in records:
-        if str(leave.get("status", "")).strip().casefold() != "approved":
-            continue
-        leave_type = str(leave.get("type", "")).strip()
-        payroll_status = HR_LEAVE_TO_TIMESHEET_STATUS.get(leave_type)
-        if not payroll_status:
-            continue
-        emp_id = str(leave.get("employee_id", "")).strip()
-        employee = emp_lookup.get(emp_id.casefold())
-        if not employee:
-            continue
-        main_dept = str(employee.get("department", "")).strip()
-        sub_dept = str(employee.get("work_type", "Office Staff") or "Office Staff").strip()
-        if not main_dept:
-            continue
-        dept = (f"{_SUBDEPT_KEY_PREFIX}{main_dept}::{sub_dept}"
-                if sub_dept and sub_dept.casefold() != "office staff" else main_dept)
-        start, end = leave.get("date_from"), leave.get("date_to")
-        if not isinstance(start, date) or not isinstance(end, date) or end < start:
-            continue
-        half_day_done = False
-        current_day = start
-        while current_day <= end:
-            if current_day.weekday() < 5 and current_day not in _hrp_non_working_dates(current_day.year):
-                if leave_type != "Half Day Holiday" or not half_day_done:
-                    for wk, week_obj in PAYROLL_WEEKS.items():
-                        if current_day.isoformat() in week_obj.get("dates", []):
-                            day_idx = week_obj["dates"].index(current_day.isoformat())
-                            by_emp = st.session_state["payroll_ts"].setdefault(wk, {}).setdefault(dept, {})
-                            days = by_emp.setdefault(emp_id, [None] * 5)
-                            existing = days[day_idx]
-                            # HR-approved leave takes precedence over ordinary entries.
-                            days[day_idx] = {
-                                "in": "", "out": "", "travel": "0:00", "away": "0:00",
-                                "status": payroll_status,
-                                "note": f"HR approved leave {leave.get('leave_id', '')} — {leave_type}".strip(),
-                                "hr_leave_id": leave.get("leave_id", ""),
-                            }
-                            break
-                    half_day_done = True
-            current_day += timedelta(days=1)
-
-
-def _hrp_approved_leave_for_date(employee_id, day_value):
-    """Return the approved HR leave record covering this employee/date, if any."""
-    try:
-        target = date.fromisoformat(str(day_value)[:10]) if not isinstance(day_value, date) else day_value
-    except Exception:
-        return None
-    records = st.session_state.get("hrp_leave_records")
-    if records is None:
-        try:
-            records = _hrp_load_leave_records()
-            st.session_state.hrp_leave_records = records
-        except Exception:
-            return None
-    controlled = set(HR_LEAVE_TO_TIMESHEET_STATUS)
-    for leave in records:
-        if (str(leave.get("status", "")).strip().casefold() == "approved"
-                and str(leave.get("employee_id", "")).strip().casefold() == str(employee_id).strip().casefold()
-                and leave.get("type") in controlled
-                and isinstance(leave.get("date_from"), date)
-                and isinstance(leave.get("date_to"), date)
-                and leave["date_from"] <= target <= leave["date_to"]
-                and target.weekday() < 5):
-            if leave.get("type") != "Half Day Holiday" or target == leave["date_from"]:
-                return leave
-    return None
-
-
 def _ts():
     if "payroll_ts" not in st.session_state:
         _ts_load()
-    _hrp_project_approved_leave_into_timesheets()
     return st.session_state["payroll_ts"]
 
 
@@ -1174,15 +1031,8 @@ def _calc_balance(emp, week_key, dept):
     if idx < 0:
         return {"prev": 0, "week_net": None, "balance": None}
 
-    # Carry extra-time only between weeks in the same payroll month.
-    # A new month starts with a clean zero balance, even though week keys are
-    # globally ordered across the full payroll calendar.
-    current_month = PAYROLL_WEEKS.get(week_key, {}).get("month")
     prev = 0
     for wk in PAYROLL_WEEK_ORDER[:idx]:
-        prior_week = PAYROLL_WEEKS.get(wk, {})
-        if prior_week.get("month") != current_month:
-            continue
         prior = _calc_row(emp, wk, dept)
         prior_net = prior.get("week_extra")
         if prior_net is not None:
@@ -1286,12 +1136,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                           key="payroll_dept_locked")
 
     with c2:
-        visible_month_pairs = _visible_payroll_month_pairs()
-        month_labels = [lbl for _, lbl in visible_month_pairs]
-        month_keys   = [k for k, _ in visible_month_pairs]
-        if not month_keys:
-            st.error("No payroll months are available. Please contact the Director or Super Admin.")
-            return
+        month_labels = [lbl for _, lbl in PAYROLL_MONTHS]
+        month_keys   = [k for k, _ in PAYROLL_MONTHS]
         default_idx  = month_keys.index("2026-10") if "2026-10" in month_keys else 0
         month_label  = st.selectbox("📅 Month", month_labels,
                                     index=default_idx, key="payroll_month")
@@ -2224,15 +2070,6 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
     }
     flags = _get_flags(week_key, dept, emp["emp_id"])
     existing_flag = flags.get(day_idx)
-    day_date = week_obj.get("dates", [""] * 5)[day_idx]
-    hr_leave = _hrp_approved_leave_for_date(emp.get("emp_id", ""), day_date)
-    if hr_leave:
-        st.info(
-            f"🔒 **Locked by HR-approved leave** — {hr_leave.get('type', 'Leave')} "
-            f"({hr_leave.get('leave_id', '')}). This date is recorded automatically for EOM payroll."
-        )
-        st.caption("Timesheet entry and clearing are disabled for this date. Contact HR if the leave record needs correcting.")
-        return
     if existing_flag:
         st.error(f"⚠️ **Flagged by {existing_flag.get('by', 'Director')}**: "
                  f"{existing_flag.get('comment', '')}")
@@ -3275,12 +3112,8 @@ def render_payroll_eom(current_user_info, mode="payroll"):
     st.subheader("📊 End-of-Month Payroll Summary")
     st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Director-approved Addition/Deduction requests and Store Department deductions (including unreturned employee holdings) are automatically totalled in the employee's selected payroll month and week; ADD and DED cannot be entered manually.")
 
-    visible_month_pairs = _visible_payroll_month_pairs()
-    month_labels = [label for _, label in visible_month_pairs]
-    month_keys = [key for key, _ in visible_month_pairs]
-    if not month_keys:
-        st.error("No payroll months are available. Please contact the Director or Super Admin.")
-        return
+    month_labels = [label for _, label in PAYROLL_MONTHS]
+    month_keys = [key for key, _ in PAYROLL_MONTHS]
     default_month = "2026-10" if "2026-10" in month_keys else month_keys[0]
     c1, c2 = st.columns([1, 2])
     with c1:
@@ -16984,6 +16817,59 @@ def render_training_support_inbox(current_user_info=None):
         st.error("❌ The reply could not be saved. Please try again.")
 
 
+def _training_permission_enabled(user, permission):
+    """Read a stored per-user module permission safely."""
+    if permission not in (user or {}):
+        return None  # no explicit user-level value; retain role-configured training
+    value = user.get(permission)
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _training_topic_accessible(title, user):
+    """Hide module training when the signed-in user lacks that module permission."""
+    label = str(title or "").casefold()
+    permission_rules = [
+        (("addition & deduction", "addition and deduction"), "can_access_addition_deduction"),
+        (("work orders", "work order", "isolator workflow", "project workflow"), "can_access_work_orders"),
+        (("inspector bonus",), "can_access_inspector_bonus"),
+        (("store deduction", "store return", "store requests", "store reports", "items & prices"), "can_access_store_deduction"),
+        (("employee items", "employee items & holdings", "leaver item check-in", "leaver check-in"), "can_access_employee_items"),
+        (("holiday & leave", "leave approvals"), "can_access_hr_leave"),
+        (("hr reports",), "can_access_hr_reports"),
+        (("holiday calendar",), "can_access_holiday_calendar"),
+        (("employee directory",), "can_access_employee_directory"),
+        (("employee overview",), "can_access_employee_overview"),
+        (("holiday calculator",), "can_access_holiday_calculator"),
+        (("my hr reports",), "can_access_employee_hr_reports"),
+        (("payroll timesheet", "timesheet", "timesheets"), "can_access_payroll_timesheet"),
+        (("eom payroll", "payroll month", "payroll lock"), "can_access_payroll_eom"),
+        (("leaver clearance",), "can_access_hr_leave"),
+    ]
+    if "hr portal" in label:
+        hr_permissions = (
+            "can_access_hr_leave", "can_access_holiday_calendar", "can_access_hr_reports",
+            "can_access_employee_overview", "can_access_holiday_calculator",
+            "can_access_employee_directory"
+        )
+        values = [_training_permission_enabled(user, key) for key in hr_permissions]
+        return any(value is True for value in values) or all(value is None for value in values)
+    if "hr-approved leave locks the timesheet date" in label:
+        hr_access = _training_permission_enabled(user, "can_access_hr_leave")
+        ts_access = _training_permission_enabled(user, "can_access_payroll_timesheet")
+        return hr_access is not False or ts_access is not False
+    if "eom payroll month cut-off" in label:
+        eom_access = _training_permission_enabled(user, "can_access_payroll_eom")
+        ts_access = _training_permission_enabled(user, "can_access_payroll_timesheet")
+        return eom_access is not False or ts_access is not False
+    for phrases, permission in permission_rules:
+        if any(phrase in label for phrase in phrases):
+            allowed = _training_permission_enabled(user, permission)
+            return allowed is not False
+    return True
+
+
 def render_training_help(current_user_info=None):
     """Render only the training assigned to the currently authenticated role."""
     user = current_user_info or st.session_state.get("user_info", {}) or {}
@@ -16991,34 +16877,59 @@ def render_training_help(current_user_info=None):
     department_name = str(user.get("dept", user.get("department", ""))).strip()
     role_key = _training_role_key(role_name, department_name)
     content = TRAINING_ROLE_CONTENT.get(role_key)
-    # Shared guidance aligned with the supplied Acoole v4.30 department training deck.
+    if content:
+        content = dict(content)
+        # Respect the actual module permissions assigned to this individual account.
+        content["topics"] = [
+            (title, steps) for title, steps in content.get("topics", [])
+            if _training_topic_accessible(title, user)
+        ]
+    # Shared guidance aligned with the supplied Acoole v4.31 department training deck.
     # Add it to each role's searchable topic list without replacing role-specific instructions.
     if content:
         content = dict(content)
         content["topics"] = list(content.get("topics", [])) + [
-            ("🔐 Portal access & navigation (v4.30)", [
+            ("🔐 Portal access & navigation (v4.31)", [
                 "Open the official Acoole Operations & Authorisation Portal: https://acooleelectrical.streamlit.app/",
                 "Enter the username (lowercase) and password supplied by your Super Admin, then select Authenticate Portal.",
                 "If the account is deactivated or access is missing, contact your Super Admin. The tabs available to you depend on your assigned role and permissions.",
                 "Use Change My Password after your first login. Never share your password, and always use Secure Logout on shared computers."
             ]),
-            ("🔄 Refresh, saving & Google Drive (v4.30)", [
+            ("🔄 Refresh, saving & Google Drive (v4.31)", [
                 "Use Refresh Data to request the latest available portal workbooks and status information.",
                 "Completed saves are intended to sync immediately to Google Drive when the Drive connection and permissions allow it. If a sync error is shown, report it rather than assuming the Drive copy updated.",
                 "The Google Drive Backup Status panel is restricted to authorised users. The manual Save All Data to Google Drive Now action is a full backup, separate from ordinary module saves.",
                 "For timesheets, Save and Submit for Approval are different actions: Save records the week, while Submit sends it into the Director approval workflow.",
                 "If a status appears out of date, use Refresh Data and check the correct Pending, Approved, Rejected/Returned or Approvals view for that module."
             ]),
-            ("📚 Finding help & contacting the trainer (v4.30)", [
+            ("📚 Finding help & contacting the trainer (v4.31)", [
                 "Use Search your training to find role-specific topics; only training configured for your signed-in role is shown.",
                 "Open a topic to read the step-by-step instructions. If your screen or available action differs, check your assigned permissions with Super Admin.",
                 "Use the private Training & Help chat to send a question to Wais Rahimi. The trainer replies through the Training Support Inbox.",
                 "When reporting a problem, include your username, module and tab/sub-tab, request ID if available, a screenshot, and the exact error message.",
                 "Portal: https://acooleelectrical.streamlit.app/"
+            ]),
+            ("🔒 HR-approved leave locks the timesheet date", [
+                "When HR records leave directly, it is treated as approved. When HR approves a Department Manager request, the approved leave becomes the official leave record.",
+                "The approved leave date or every date in the approved date range is locked on the employee timesheet to prevent duplicate time entry or conflicting status records.",
+                "Employees and managers should not enter ordinary working hours on an HR-locked leave date. Contact HR if the leave dates or leave type are incorrect.",
+                "Pending or rejected leave requests do not lock timesheet dates. The lock applies only when HR records or approves the leave.",
+                "The approved leave type, dates and day amount are carried into the EOM payroll summary. Do not create a second manual payroll entry for the same leave.",
+                "If a payroll month is already locked, the existing EOM month-lock rules still apply; contact the Director or Super Admin if a correction is required."
+            ]),
+            ("🔒 EOM payroll month cut-off", [
+                "When the Director approves and locks an EOM payroll month, that month and every earlier month become read-only.",
+                "Earlier months are hidden from month selectors. The latest locked month remains visible for historical review; later months remain available.",
+                "The cut-off is enforced when saving or submitting as well as in the screen controls. Do not try to create or amend transactions in a locked period.",
+                "Only the Director or Super Admin can reopen the latest locked month, and a reason is required. Reopening is recorded in the audit history."
             ])
         ]
+        content["topics"] = [
+            (title, steps) for title, steps in content.get("topics", [])
+            if _training_topic_accessible(title, user)
+        ]
     st.subheader("📚 Training & Help Centre")
-    st.caption(f"Role-specific training aligned with the Acoole Electrical Ltd Department Training Deck v4.30 (October 2026). Signed-in role: **{role_name or 'User'}**")
+    st.caption(f"Role- and permission-specific training aligned with the Acoole Electrical Ltd Department Training Deck v4.31 (November 2026). Only modules enabled for your account are shown. Signed-in role: **{role_name or 'User'}**")
     st.info(f"💡 If you do not understand a step, cannot find a function, or need a walkthrough, please contact **{TRAINING_SUPPORT_CONTACT}**.")
     if not content:
         st.warning("No role-specific training has been configured for this account yet.")
@@ -17800,9 +17711,8 @@ elif role in ["Manager", "Staff", "Team Member"]:
                                     cat_idx = CATEGORIES.index(rec.get("category")) if rec.get("category") in CATEGORIES else 0
                                     ct = st.selectbox("🏷️ Category / Reason", CATEGORIES, index=cat_idx)
                                     amt = st.number_input("💷 Amount (£)", min_value=0.01, step=10.0, value=float(rec.get("amount", 0.01)))
-                                    edit_month_pairs = _visible_payroll_month_pairs()
-                                    edit_month_labels = [label for _, label in edit_month_pairs]
-                                    edit_month_keys = [key for key, _ in edit_month_pairs]
+                                    edit_month_labels = [label for _, label in PAYROLL_MONTHS]
+                                    edit_month_keys = [key for key, _ in PAYROLL_MONTHS]
                                     saved_month = str(rec.get("payroll_month", "")).strip()
                                     if saved_month not in edit_month_keys:
                                         saved_month = datetime.today().strftime("%Y-%m")
@@ -18171,36 +18081,7 @@ elif role == "Director":
                             st.write(f"👤 **Employee:** {req.get('emp_name')}")
                             st.write(f"🏢 **Department:** {req.get('dept')}")
                             st.write(f"🔄 **Type:** {req.get('type')}")
-                            st.write(f"🏷️ **Request Category / Reason:** {req.get('category') or 'Not specified'}")
-                            transaction_type = str(req.get("transaction_type", "") or "").strip()
-                            if str(req.get("type", "")).strip().casefold() == "addition":
-                                st.write(
-                                    f"📊 **Addition Category (EOM):** "
-                                    f"{transaction_type or 'Not specified (legacy request)'}"
-                                )
-                            else:
-                                st.write("📊 **EOM Destination:** DED")
-                            payroll_month_key = str(req.get("payroll_month", "") or "").strip()
-                            payroll_month_label = PAYROLL_MONTH_LABELS.get(
-                                payroll_month_key,
-                                dict(PAYROLL_MONTHS).get(payroll_month_key, payroll_month_key or "Not assigned"),
-                            )
-                            payroll_week_number = str(req.get("payroll_week", "") or "").strip()
-                            payroll_week_key = str(req.get("payroll_week_key", "") or "").strip()
-                            payroll_week_obj = PAYROLL_WEEKS.get(payroll_week_key, {})
-                            payroll_week_label = (
-                                payroll_week_obj.get("label")
-                                or (f"Week {payroll_week_number}" if payroll_week_number else "Not assigned")
-                            )
-                            payroll_week_range = (
-                                _payroll_week_month_range(payroll_month_key, payroll_week_obj)
-                                if payroll_month_key and payroll_week_obj
-                                else ""
-                            )
-                            payroll_allocation = f"{payroll_month_label} — {payroll_week_label}"
-                            if payroll_week_range:
-                                payroll_allocation += f" ({payroll_week_range})"
-                            st.write(f"📅 **Payroll Month / Week:** {payroll_allocation}")
+                            st.write(f"🏷️ **Category:** {req.get('category')}")
                             st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
                             st.write(f"👔 **Line Manager:** {req.get('manager')}")
                             submitted_by = get_submitted_by(req)
