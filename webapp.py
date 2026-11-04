@@ -1005,13 +1005,34 @@ def _payroll_leave_records_cached():
 
     cache_key = "_payroll_leave_records_cache"
     cached = st.session_state.get(cache_key)
-    if cached and cached.get("signature") == signature:
+    if (cached and cached.get("signature") == signature
+            and "approved_by_employee" in cached):
         return cached["records"]
 
     records = _hrp_load_leave_records()
+    # Build an employee-indexed, date-normalised lookup once. The previous
+    # implementation scanned every HR leave record for every employee/day cell.
+    approved_by_employee = {}
+    for leave in records:
+        if str(leave.get("status", "")).strip().casefold() != "approved":
+            continue
+        eid = str(leave.get("employee_id", "")).strip().casefold()
+        if not eid:
+            continue
+        first, last = leave.get("date_from"), leave.get("date_to")
+        if not isinstance(first, date):
+            parsed = pd.to_datetime(first, errors="coerce")
+            first = parsed.date() if pd.notna(parsed) else None
+        if not isinstance(last, date):
+            parsed = pd.to_datetime(last, errors="coerce")
+            last = parsed.date() if pd.notna(parsed) else None
+        if first and last:
+            approved_by_employee.setdefault(eid, []).append((first, last, leave))
     st.session_state[cache_key] = {
         "signature": signature,
         "records": records,
+        "approved_by_employee": approved_by_employee,
+        "date_lookup": {},
     }
     return records
 
@@ -1020,24 +1041,23 @@ def _hrp_payroll_leave_for_date(employee_id, day_value):
     """Return the approved HR leave record covering a payroll date, if any."""
     try:
         target = day_value if isinstance(day_value, date) else pd.to_datetime(day_value).date()
-        records = _payroll_leave_records_cached()
+        _payroll_leave_records_cached()
+        cache = st.session_state.get("_payroll_leave_records_cache", {})
     except Exception:
         return None
     eid = str(employee_id or "").strip().casefold()
-    for leave in records:
-        if str(leave.get("employee_id", "")).strip().casefold() != eid:
-            continue
-        if str(leave.get("status", "")).strip().casefold() != "approved":
-            continue
-        leave_type = re.sub(r"\s+", " ", str(leave.get("type", "")).strip()).casefold()
-        first, last = leave.get("date_from"), leave.get("date_to")
-        if not isinstance(first, date):
-            first = pd.to_datetime(first, errors="coerce").date() if pd.notna(pd.to_datetime(first, errors="coerce")) else None
-        if not isinstance(last, date):
-            last = pd.to_datetime(last, errors="coerce").date() if pd.notna(pd.to_datetime(last, errors="coerce")) else None
-        if first and last and first <= target <= last and target.weekday() < 5:
-            return leave
-    return None
+    lookup = cache.setdefault("date_lookup", {})
+    lookup_key = (eid, target.isoformat())
+    if lookup_key in lookup:
+        return lookup[lookup_key]
+    result = None
+    if target.weekday() < 5:
+        for first, last, leave in cache.get("approved_by_employee", {}).get(eid, []):
+            if first <= target <= last:
+                result = leave
+                break
+    lookup[lookup_key] = result
+    return result
 
 def _hrp_payroll_leave_label(leave):
     if not leave:
@@ -1122,7 +1142,7 @@ def _calc_row(emp, week_key, dept):
     }
 
 
-def _calc_balance(emp, week_key, dept):
+def _calc_balance(emp, week_key, dept, current_calc=None):
     """Return this week's difference and month-to-date balance.
 
     Balances accumulate only across earlier payroll weeks allocated to the
@@ -1145,7 +1165,8 @@ def _calc_balance(emp, week_key, dept):
         if prior_net is not None:
             prev += prior_net
 
-    week_net = _calc_row(emp, week_key, dept).get("week_extra")
+    current_calc = current_calc if current_calc is not None else _calc_row(emp, week_key, dept)
+    week_net = current_calc.get("week_extra")
     if week_net is None and prev == 0:
         return {"prev": 0, "week_net": None, "balance": None}
     if week_net is None:
@@ -1481,7 +1502,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
             emp_flags = _get_flags(week_key, dept, eid)
             calc = _calc_row(emp, week_key, dept)
-            bal  = _calc_balance(emp, week_key, dept)
+            bal  = _calc_balance(emp, week_key, dept, current_calc=calc)
 
             row = st.columns(col_widths)
 
@@ -1711,50 +1732,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         state["submitted_by"] = ""
                         _states_save()
 
-                    # Only users explicitly authorised for manual Drive backups may
-                    # initiate the upload from this screen.
-                    user_info = current_user_info if isinstance(current_user_info, dict) else {}
-                    user_role = str(user_info.get("role", "")).strip()
-                    may_backup = (user_role in {"Super Admin", "Director"}
-                                  or bool(user_info.get("can_backup_google_drive", False)))
-                    if may_backup and drive_service is not None:
-                        # Timesheet Save uploads ONLY the payroll-timesheet-related
-                        # workbooks to their existing BACKUP_* files in Google Drive.
-                        # It deliberately does not run the all-application backup.
-                        timesheet_backup_names = {
-                            "BACKUP_payroll_timesheets.xlsx",
-                            "BACKUP_payroll_week_states.xlsx",
-                            "BACKUP_payroll_flags.xlsx",
-                            "BACKUP_payroll_approvals.xlsx",
-                            "BACKUP_payroll_eom.xlsx",
-                        }
-                        backup_results = []
-                        with st.spinner("Saving timesheet and updating timesheet files in Google Drive..."):
-                            for local_path, backup_name in DRIVE_BACKUP_FILENAMES.items():
-                                if backup_name not in timesheet_backup_names:
-                                    continue
-                                if not os.path.exists(local_path):
-                                    continue
-                                try:
-                                    uploaded = _drive_upload_path(local_path, backup_name)
-                                    verified = _drive_find_file(backup_name)
-                                    ok = bool(uploaded and verified and verified.get("id"))
-                                except Exception as e:
-                                    print(f"Timesheet-only Drive upload failed for {backup_name}: {e}")
-                                    ok = False
-                                backup_results.append((backup_name, ok))
-                        failed = [name for name, ok in backup_results if not ok]
-                        if failed:
-                            st.warning("Timesheet saved locally, but these Google Drive timesheet files could not be updated: " + ", ".join(failed))
-                        elif backup_results:
-                            st.success("✅ Timesheet saved locally and its timesheet-related files were updated in Google Drive. Other application data was not backed up.")
-                        else:
-                            st.warning("Timesheet saved locally, but no timesheet files were available to upload to Google Drive.")
-                    elif may_backup and drive_service is None:
-                        st.warning("Timesheet saved locally, but Google Drive is not connected. No Drive upload was made.")
-                    else:
-                        st.success("✅ Timesheet saved locally.")
-                        st.info("To update its Google Drive files from here, ask an administrator to enable ‘Save All Data to Google Drive’ in your Module Access permissions.")
+                    # _ts_save() queues the changed workbook for background Drive
+                    # synchronisation. Do not block this click with repeated uploads
+                    # and remote verification of five unrelated payroll workbooks.
+                    st.success("✅ Timesheet saved locally. Google Drive synchronisation is queued in the background.")
 
             with col_submit:
                 if st.button("📤 Submit for Approval", type="primary",
