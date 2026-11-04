@@ -1031,8 +1031,15 @@ def _calc_balance(emp, week_key, dept):
     if idx < 0:
         return {"prev": 0, "week_net": None, "balance": None}
 
+    # Carry extra-time only between weeks in the same payroll month.
+    # A new month starts with a clean zero balance, even though week keys are
+    # globally ordered across the full payroll calendar.
+    current_month = PAYROLL_WEEKS.get(week_key, {}).get("month")
     prev = 0
     for wk in PAYROLL_WEEK_ORDER[:idx]:
+        prior_week = PAYROLL_WEEKS.get(wk, {})
+        if prior_week.get("month") != current_month:
+            continue
         prior = _calc_row(emp, wk, dept)
         prior_net = prior.get("week_extra")
         if prior_net is not None:
@@ -18003,7 +18010,36 @@ elif role == "Director":
                             st.write(f"👤 **Employee:** {req.get('emp_name')}")
                             st.write(f"🏢 **Department:** {req.get('dept')}")
                             st.write(f"🔄 **Type:** {req.get('type')}")
-                            st.write(f"🏷️ **Category:** {req.get('category')}")
+                            st.write(f"🏷️ **Request Category / Reason:** {req.get('category') or 'Not specified'}")
+                            transaction_type = str(req.get("transaction_type", "") or "").strip()
+                            if str(req.get("type", "")).strip().casefold() == "addition":
+                                st.write(
+                                    f"📊 **Addition Category (EOM):** "
+                                    f"{transaction_type or 'Not specified (legacy request)'}"
+                                )
+                            else:
+                                st.write("📊 **EOM Destination:** DED")
+                            payroll_month_key = str(req.get("payroll_month", "") or "").strip()
+                            payroll_month_label = PAYROLL_MONTH_LABELS.get(
+                                payroll_month_key,
+                                dict(PAYROLL_MONTHS).get(payroll_month_key, payroll_month_key or "Not assigned"),
+                            )
+                            payroll_week_number = str(req.get("payroll_week", "") or "").strip()
+                            payroll_week_key = str(req.get("payroll_week_key", "") or "").strip()
+                            payroll_week_obj = PAYROLL_WEEKS.get(payroll_week_key, {})
+                            payroll_week_label = (
+                                payroll_week_obj.get("label")
+                                or (f"Week {payroll_week_number}" if payroll_week_number else "Not assigned")
+                            )
+                            payroll_week_range = (
+                                _payroll_week_month_range(payroll_month_key, payroll_week_obj)
+                                if payroll_month_key and payroll_week_obj
+                                else ""
+                            )
+                            payroll_allocation = f"{payroll_month_label} — {payroll_week_label}"
+                            if payroll_week_range:
+                                payroll_allocation += f" ({payroll_week_range})"
+                            st.write(f"📅 **Payroll Month / Week:** {payroll_allocation}")
                             st.write(f"💷 **Amount:** £{float(req.get('amount',0)):.2f}")
                             st.write(f"👔 **Line Manager:** {req.get('manager')}")
                             submitted_by = get_submitted_by(req)
