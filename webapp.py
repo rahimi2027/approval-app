@@ -165,8 +165,8 @@ PAYROLL_MONTHS = [
 
 PAYROLL_STATUS_OPTIONS = [
     "Worked", "Late In", "Early Out", "Authorised Absence", "HD Holiday",
-    "Overtime Approved", "College", "Holiday", "Sick", "Maternity",
-    "Lay-off", "Unpaid Holiday", "Unpaid Absence", "Bank Holiday",
+    "Overtime Approved", "College", "Maternity",
+    "Lay-off", "Unpaid Absence", "Bank Holiday",
     "AWOL", "N/A", "Leaver",
 ]
 
@@ -951,6 +951,52 @@ def _is_approved(week_key, dept, emp_id):
     return emp_id in _approvals().get(week_key, {}).get(dept, {})
 
 
+# HR leave is the source of truth for the following date-level absences.
+# Only Approved HR records lock payroll dates; pending/rejected requests do not.
+HRP_PAYROLL_LEAVE_DISPLAY = {
+    "full day holiday": ("Holiday", "#FFCCFF", "#222222"),
+    "half day holiday": ("Half Day Holiday", "#F4A000", "#222222"),
+    "sick leave": ("Sick", "#BFBFBF", "#222222"),
+    "sick": ("Sick", "#BFBFBF", "#222222"),
+    "unpaid holiday": ("Unpaid Holiday", "#7030A0", "#FFFFFF"),
+}
+
+def _hrp_payroll_leave_for_date(employee_id, day_value):
+    """Return the approved HR leave record covering a payroll date, if any."""
+    try:
+        target = day_value if isinstance(day_value, date) else pd.to_datetime(day_value).date()
+        records = _hrp_load_leave_records()
+    except Exception:
+        return None
+    eid = str(employee_id or "").strip().casefold()
+    for leave in records:
+        if str(leave.get("employee_id", "")).strip().casefold() != eid:
+            continue
+        if str(leave.get("status", "")).strip().casefold() != "approved":
+            continue
+        leave_type = re.sub(r"\s+", " ", str(leave.get("type", "")).strip()).casefold()
+        if leave_type not in HRP_PAYROLL_LEAVE_DISPLAY:
+            continue
+        first, last = leave.get("date_from"), leave.get("date_to")
+        if not isinstance(first, date):
+            first = pd.to_datetime(first, errors="coerce").date() if pd.notna(pd.to_datetime(first, errors="coerce")) else None
+        if not isinstance(last, date):
+            last = pd.to_datetime(last, errors="coerce").date() if pd.notna(pd.to_datetime(last, errors="coerce")) else None
+        if first and last and first <= target <= last and target.weekday() < 5:
+            return leave
+    return None
+
+def _hrp_payroll_leave_label(leave):
+    if not leave:
+        return ""
+    key = re.sub(r"\s+", " ", str(leave.get("type", "")).strip()).casefold()
+    return HRP_PAYROLL_LEAVE_DISPLAY.get(key, (str(leave.get("type", "Leave")), "#BFBFBF", "#222222"))[0]
+
+def _hrp_payroll_leave_style(leave):
+    key = re.sub(r"\s+", " ", str((leave or {}).get("type", "")).strip()).casefold()
+    _, bg, fg = HRP_PAYROLL_LEAVE_DISPLAY.get(key, ("Leave", "#BFBFBF", "#222222"))
+    return f"background-color:{bg};color:{fg};padding:4px 2px;border-radius:4px;text-align:center;line-height:1.35;min-height:34px;"
+
 # ============================================================
 # CALCULATION ENGINE
 # ============================================================
@@ -978,7 +1024,11 @@ def _calc_row(emp, week_key, dept):
 
     sub = travel = away = 0
     day_equivalents = 0.0
-    for d in days:
+    week_dates = PAYROLL_WEEKS.get(week_key, {}).get("dates", [])
+    for day_index, d in enumerate(days):
+        if day_index < len(week_dates) and _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_dates[day_index]):
+            # Approved HR leave takes priority over any legacy clock entries.
+            continue
         if not d:
             continue
         status = str(d.get("status", "Worked")).strip() or "Worked"
@@ -1385,6 +1435,13 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 d = ts_days[i]
                 cell = row[2 + i]
                 is_flagged = i in emp_flags
+                hr_leave = _hrp_payroll_leave_for_date(eid, week_obj["dates"][i]) if valid_month_dates[i] else None
+                if hr_leave:
+                    leave_label = _hrp_payroll_leave_label(hr_leave)
+                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 {html.escape(leave_label)}</b><br><small>HR locked</small></div>", unsafe_allow_html=True)
+                    st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = False
+                    cell.button("🔒 Locked", key=f"pl_day_{eid}_{i}", use_container_width=True, disabled=True, help="Approved HR leave locks this date.")
+                    continue
                 if not valid_month_dates[i]:
                     cell.markdown(
                         "<div style='text-align:center; min-height:34px; padding-top:8px; color:#b8bec7; font-size:11px;'>Not in month</div>",
@@ -1817,8 +1874,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
     with tab_exc:
         items = []
         leave_statuses = {
-            "Authorised Absence", "HD Holiday", "Holiday", "Sick", "Maternity",
-            "Lay-off", "Unpaid Holiday", "Unpaid Absence", "Bank Holiday",
+            "Authorised Absence", "Maternity",
+            "Lay-off", "Unpaid Absence", "Bank Holiday",
             "College", "AWOL", "N/A", "Leaver",
         }
         for emp in employees:
@@ -2064,6 +2121,12 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
     ts_days = _ts().setdefault(week_key, {}).setdefault(dept, {}) \
         .setdefault(emp["emp_id"], [None] * 5)
 
+    hr_leave = _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_obj["dates"][day_idx])
+    if hr_leave:
+        label = _hrp_payroll_leave_label(hr_leave)
+        st.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 HR recorded: {html.escape(label)}</b><br><small>This date is locked. Timesheet hours cannot be added, edited or cleared.</small></div>", unsafe_allow_html=True)
+        return
+
     current = ts_days[day_idx] or {
         "in": "", "out": "", "travel": "0:00", "away": "0:00",
         "status": "Worked", "note": "",
@@ -2113,6 +2176,9 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                 close_day = st.form_submit_button("❌ Close", use_container_width=True)
 
         if save_day:
+            if _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_obj["dates"][day_idx]):
+                st.error("This date is locked by an approved HR leave record. No timesheet changes were saved.")
+                st.stop()
             ts_days[day_idx] = {
                 "in": time_in, "out": time_out,
                 "travel": _m2t(_duration_minutes(travel) or 0),
@@ -2126,6 +2192,9 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
             st.success("✅ Day saved locally.")
             st.rerun()
         elif clear_day:
+            if _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_obj["dates"][day_idx]):
+                st.error("This date is locked by an approved HR leave record. It cannot be cleared from the timesheet.")
+                st.stop()
             ts_days[day_idx] = None
             _clear_flag(week_key, dept, emp["emp_id"], day_idx)
             _ts_save()
@@ -2545,6 +2614,8 @@ def _eom_status_totals(week_key, dept, eid, month_key):
         dt = datetime.fromisoformat(week_obj["dates"][i])
         if dt.year != y or dt.month != m:
             continue
+        if _hrp_payroll_leave_for_date(eid, dt.date()):
+            continue
         status = str(d.get("status", "")).strip()
         if status == "Holiday":
             counts["Holiday Paid"] += 1
@@ -2647,6 +2718,8 @@ def _eom_minutes_for_week(week_key, dept, eid, month_key):
     gross = away = travel = worked_equivalents = 0
     notes = []
     for i, entry in enumerate(days):
+        if i < len(week_obj.get("dates", [])) and _hrp_payroll_leave_for_date(eid, week_obj["dates"][i]):
+            continue
         if not isinstance(entry, dict) or i >= len(week_obj.get("dates", [])):
             continue
         try:
