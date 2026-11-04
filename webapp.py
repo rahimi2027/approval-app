@@ -2728,7 +2728,7 @@ def _eom_status_totals(week_key, dept, eid, month_key):
             continue
         if str(leave.get("status", "")).strip().casefold() != "approved":
             continue
-        leave_type = re.sub(r"\\s+", " ", str(leave.get("type", "")).strip()).casefold()
+        leave_type = re.sub(r"\s+", " ", str(leave.get("type", "")).strip()).casefold()
         type_map = {
             "full day holiday": ("Holiday Paid", 1.0),
             "half day holiday": ("Holiday Paid", 0.5),
@@ -9044,10 +9044,73 @@ def render_hr_leave_approvals(key_prefix="hr_leave_approvals"):
     pending = [r for r in st.session_state.hrp_leave_records if r.get("status") == "Pending HR Approval"]
     rejected = [r for r in st.session_state.hrp_leave_records if r.get("status") == "Rejected"]
 
-    pending_tab, rejected_tab = st.tabs([
+    pending_tab, rejected_tab, bank_holiday_tab = st.tabs([
         f"⏳ Pending Approval ({len(pending)})",
         f"❌ Rejected ({len(rejected)})",
+        "🏦 Apply Bank Holiday to All",
     ])
+
+    with bank_holiday_tab:
+        st.markdown("#### Apply a bank holiday to all active employees")
+        st.caption("This creates an approved Bank Holiday record for each active employee. It will appear in the timesheet, lock the date, and feed the B Hols column for the payroll week containing the date.")
+        bank_day = st.date_input("Bank holiday date", value=date.today(), key=f"{key_prefix}_all_bank_holiday_date")
+        bank_name = st.text_input("Bank holiday name (optional)", placeholder="e.g. Early May bank holiday", key=f"{key_prefix}_all_bank_holiday_name")
+        active_employees = [e for e in st.session_state.get("hrp_employees", []) if str(e.get("status", "Active")).strip().casefold() == "active"]
+        st.write(f"Employees to receive this bank holiday: **{len(active_employees)}**")
+        if bank_day.weekday() >= 5:
+            st.warning("The selected date is a weekend. The payroll timesheet only records weekday entries.")
+        if st.button("🏦 Apply Bank Holiday to All Employees", type="primary", disabled=(not active_employees or bank_day.weekday() >= 5), key=f"{key_prefix}_apply_bank_holiday_all"):
+            existing_records = list(st.session_state.get("hrp_leave_records", []))
+            existing_keys = {
+                (str(r.get("employee_id", "")).strip().casefold(), r.get("date_from"), r.get("date_to"), str(r.get("type", "")).strip().casefold())
+                for r in existing_records if str(r.get("status", "")).strip().casefold() == "approved"
+            }
+            max_no = 0
+            for r in existing_records:
+                try:
+                    max_no = max(max_no, int(str(r.get("leave_id", "")).replace("LV-", "")))
+                except Exception:
+                    pass
+            actor = str((st.session_state.get("user_info") or {}).get("full_name", "HR Manager"))
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            note = (bank_name.strip() or "Bank Holiday")
+            created = []
+            skipped = []
+            for employee in active_employees:
+                eid = str(employee.get("emp_id", "")).strip()
+                start = employee.get("start_date")
+                leaving = employee.get("leaving_date")
+                if start and bank_day < start:
+                    skipped.append(eid)
+                    continue
+                if leaving and bank_day > leaving:
+                    skipped.append(eid)
+                    continue
+                duplicate_key = (eid.casefold(), bank_day, bank_day, "bank holiday")
+                if duplicate_key in existing_keys:
+                    skipped.append(eid)
+                    continue
+                max_no += 1
+                created.append({
+                    "leave_id": f"LV-{max_no:05d}", "employee_id": eid,
+                    "date_from": bank_day, "date_to": bank_day, "type": "Bank Holiday",
+                    "days": 1.0, "status": "Approved", "request_source": "HR",
+                    "request_reference": "", "notes": note, "recorded_by": actor,
+                    "recorded_at": now, "entry_source": "HR Bank Holiday — All Employees",
+                    "requested_by": actor, "requested_at": now, "approved_by": actor,
+                    "approved_at": now, "rejection_reason": "",
+                })
+                existing_keys.add(duplicate_key)
+            if created:
+                _hrp_save_leave_records(existing_records + created)
+                st.session_state.pop("_payroll_leave_records_cache", None)
+                log_action("HR_BANK_HOLIDAY_APPLIED_ALL", bank_day.isoformat(), new_data={"date": bank_day.isoformat(), "name": note, "employee_count": len(created), "leave_ids": [r["leave_id"] for r in created]}, decision_by=actor, decision_date=now)
+                st.success(f"Bank holiday applied to {len(created)} employee(s). The date is now recorded as approved leave and will be locked in their timesheets.")
+            else:
+                st.info("No new records were created. All eligible employees already have this bank holiday recorded, or none were eligible.")
+            if skipped:
+                st.caption(f"Skipped {len(skipped)} employee(s): already recorded or outside their employment dates.")
+            st.rerun()
 
     with pending_tab:
         if not pending:
