@@ -163,11 +163,12 @@ PAYROLL_MONTHS = [
     ("2027-11", "November 2027"),  ("2027-12", "December 2027"),
 ]
 
+# HR-controlled leave types must not be selectable from the ordinary timesheet.
+# They are entered through the HR leave workflow and automatically lock the date.
 PAYROLL_STATUS_OPTIONS = [
-    "Worked", "Late In", "Early Out", "Authorised Absence", "HD Holiday",
+    "Worked", "Late In", "Early Out", "Authorised Absence",
     "Overtime Approved", "College", "Maternity",
-    "Lay-off", "Unpaid Absence", "Bank Holiday",
-    "AWOL", "N/A", "Leaver",
+    "Lay-off", "Bank Holiday", "AWOL", "N/A", "Leaver",
 ]
 
 # Coloured markers shown in the payroll Status dropdown. The stored status values
@@ -1188,10 +1189,25 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
     with c2:
         month_labels = [lbl for _, lbl in PAYROLL_MONTHS]
         month_keys   = [k for k, _ in PAYROLL_MONTHS]
-        default_idx  = month_keys.index("2026-10") if "2026-10" in month_keys else 0
-        month_label  = st.selectbox("📅 Month", month_labels,
-                                    index=default_idx, key="payroll_month")
-        month_key    = month_keys[month_labels.index(month_label)]
+        # Always open the timesheet on the real current calendar month.
+        # Streamlit keeps widget state between reruns, so explicitly refresh the
+        # selected month (and week) when the calendar month rolls over.
+        current_month_key = date.today().strftime("%Y-%m")
+        if current_month_key not in month_keys:
+            # If the configured payroll range has not yet been extended, use
+            # the latest configured month not later than the current month.
+            eligible_months = [key for key in month_keys if key <= current_month_key]
+            current_month_key = eligible_months[-1] if eligible_months else month_keys[0]
+        month_state_marker = st.session_state.get("payroll_month_auto_default_marker")
+        if month_state_marker != current_month_key:
+            st.session_state["payroll_month"] = PAYROLL_MONTH_LABELS.get(current_month_key, current_month_key)
+            st.session_state["payroll_week"] = 0
+            st.session_state["payroll_month_auto_default_marker"] = current_month_key
+        default_idx = month_keys.index(current_month_key)
+        month_label = st.selectbox(
+            "📅 Month", month_labels, index=default_idx, key="payroll_month"
+        )
+        month_key = month_keys[month_labels.index(month_label)]
 
     with c3:
         weeks_in_month = [k for k in PAYROLL_WEEK_ORDER
@@ -2140,10 +2156,19 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
     k = f"payroll_day_{emp['emp_id']}_{day_idx}_{week_key}"
     if mode != "director" and editable and (mode == "manager" or bool(st.session_state.get("payroll_all_department_edit_access", False))):
         with st.form(f"{k}_entry_form", clear_on_submit=False):
+            _hr_controlled_timesheet_statuses = {
+                "holiday", "full day holiday", "half day holiday", "hd holiday",
+                "sick", "sick leave", "unpaid leave", "unpaid holiday",
+                "unpaid absence",
+            }
+            _timesheet_status_options = [
+                option for option in PAYROLL_STATUS_OPTIONS
+                if str(option).strip().casefold() not in _hr_controlled_timesheet_statuses
+            ]
             status = st.selectbox(
-                "Status", PAYROLL_STATUS_OPTIONS,
-                index=(PAYROLL_STATUS_OPTIONS.index(current.get("status", "Worked"))
-                       if current.get("status", "Worked") in PAYROLL_STATUS_OPTIONS else 0),
+                "Status", _timesheet_status_options,
+                index=(_timesheet_status_options.index(current.get("status", "Worked"))
+                       if current.get("status", "Worked") in _timesheet_status_options else 0),
                 format_func=lambda option: f"{PAYROLL_STATUS_MARKERS.get(option, '🔹')} {option}",
                 key=f"{k}_status", disabled=not editable,
             )
