@@ -163,11 +163,24 @@ PAYROLL_MONTHS = [
     ("2027-11", "November 2027"),  ("2027-12", "December 2027"),
 ]
 
+# Absence statuses below are HR-controlled and are never manually selectable
+# by timesheet users. Approved HR leave is projected into the timesheet from
+# the HR leave register instead.
+HR_CONTROLLED_TIMESHEET_LEAVE_TYPES = {
+    "Full Day Holiday", "Half Day Holiday", "Sick Leave",
+    "Authorised Absence", "Unpaid Holiday", "Unpaid Absence",
+}
+HR_LEAVE_TO_TIMESHEET_STATUS = {
+    "Full Day Holiday": "Holiday",
+    "Half Day Holiday": "HD Holiday",
+    "Sick Leave": "Sick",
+    "Authorised Absence": "Authorised Absence",
+    "Unpaid Holiday": "Unpaid Holiday",
+    "Unpaid Absence": "Unpaid Absence",
+}
 PAYROLL_STATUS_OPTIONS = [
-    "Worked", "Late In", "Early Out", "Authorised Absence", "HD Holiday",
-    "Overtime Approved", "College", "Holiday", "Sick", "Maternity",
-    "Lay-off", "Unpaid Holiday", "Unpaid Absence", "Bank Holiday",
-    "AWOL", "N/A", "Leaver",
+    "Worked", "Late In", "Early Out", "Overtime Approved", "College",
+    "Maternity", "Lay-off", "Bank Holiday", "AWOL", "N/A", "Leaver",
 ]
 
 # Coloured markers shown in the payroll Status dropdown. The stored status values
@@ -736,9 +749,105 @@ def _normalise_subdepartment_permissions(value):
 # TIMESHEETS
 # ============================================================
 
+def _hrp_project_approved_leave_into_timesheets():
+    """Project HR-approved absence onto its exact payroll dates.
+
+    Pending/rejected requests are deliberately ignored. HR records remain the
+    source of truth; the projected entries are used by timesheet display and
+    existing EOM status aggregation, and are protected from manual edits.
+    """
+    if not st.session_state.get("payroll_ts"):
+        return
+    records = st.session_state.get("hrp_leave_records")
+    if records is None:
+        try:
+            records = _hrp_load_leave_records()
+            st.session_state.hrp_leave_records = records
+        except Exception as exc:
+            print(f"Approved HR leave projection skipped: {exc}")
+            return
+    employees = st.session_state.get("hrp_employees")
+    if employees is None:
+        try:
+            employees = _hrp_load_employees()
+            st.session_state.hrp_employees = employees
+        except Exception:
+            employees = []
+    emp_lookup = {str(e.get("emp_id", "")).strip().casefold(): e for e in employees}
+    for leave in records:
+        if str(leave.get("status", "")).strip().casefold() != "approved":
+            continue
+        leave_type = str(leave.get("type", "")).strip()
+        payroll_status = HR_LEAVE_TO_TIMESHEET_STATUS.get(leave_type)
+        if not payroll_status:
+            continue
+        emp_id = str(leave.get("employee_id", "")).strip()
+        employee = emp_lookup.get(emp_id.casefold())
+        if not employee:
+            continue
+        main_dept = str(employee.get("department", "")).strip()
+        sub_dept = str(employee.get("work_type", "Office Staff") or "Office Staff").strip()
+        if not main_dept:
+            continue
+        dept = (f"{_SUBDEPT_KEY_PREFIX}{main_dept}::{sub_dept}"
+                if sub_dept and sub_dept.casefold() != "office staff" else main_dept)
+        start, end = leave.get("date_from"), leave.get("date_to")
+        if not isinstance(start, date) or not isinstance(end, date) or end < start:
+            continue
+        half_day_done = False
+        current_day = start
+        while current_day <= end:
+            if current_day.weekday() < 5 and current_day not in _hrp_non_working_dates(current_day.year):
+                if leave_type != "Half Day Holiday" or not half_day_done:
+                    for wk, week_obj in PAYROLL_WEEKS.items():
+                        if current_day.isoformat() in week_obj.get("dates", []):
+                            day_idx = week_obj["dates"].index(current_day.isoformat())
+                            by_emp = st.session_state["payroll_ts"].setdefault(wk, {}).setdefault(dept, {})
+                            days = by_emp.setdefault(emp_id, [None] * 5)
+                            existing = days[day_idx]
+                            # HR-approved leave takes precedence over ordinary entries.
+                            days[day_idx] = {
+                                "in": "", "out": "", "travel": "0:00", "away": "0:00",
+                                "status": payroll_status,
+                                "note": f"HR approved leave {leave.get('leave_id', '')} — {leave_type}".strip(),
+                                "hr_leave_id": leave.get("leave_id", ""),
+                            }
+                            break
+                    half_day_done = True
+            current_day += timedelta(days=1)
+
+
+def _hrp_approved_leave_for_date(employee_id, day_value):
+    """Return the approved HR leave record covering this employee/date, if any."""
+    try:
+        target = date.fromisoformat(str(day_value)[:10]) if not isinstance(day_value, date) else day_value
+    except Exception:
+        return None
+    records = st.session_state.get("hrp_leave_records")
+    if records is None:
+        try:
+            records = _hrp_load_leave_records()
+            st.session_state.hrp_leave_records = records
+        except Exception:
+            return None
+    controlled = set(HR_LEAVE_TO_TIMESHEET_STATUS)
+    for leave in records:
+        if (str(leave.get("status", "")).strip().casefold() == "approved"
+                and str(leave.get("employee_id", "")).strip().casefold() == str(employee_id).strip().casefold()
+                and leave.get("type") in controlled
+                and isinstance(leave.get("date_from"), date)
+                and isinstance(leave.get("date_to"), date)
+                and leave["date_from"] <= target <= leave["date_to"]
+                and target.weekday() < 5):
+            if leave.get("type") != "Half Day Holiday" or target == leave["date_from"]:
+                return leave
+    return None
+
+
 def _ts():
     if "payroll_ts" not in st.session_state:
         _ts_load()
+    _hrp_project_approved_leave_into_timesheets()
     return st.session_state["payroll_ts"]
 
 
@@ -2115,6 +2224,15 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
     }
     flags = _get_flags(week_key, dept, emp["emp_id"])
     existing_flag = flags.get(day_idx)
+    day_date = week_obj.get("dates", [""] * 5)[day_idx]
+    hr_leave = _hrp_approved_leave_for_date(emp.get("emp_id", ""), day_date)
+    if hr_leave:
+        st.info(
+            f"🔒 **Locked by HR-approved leave** — {hr_leave.get('type', 'Leave')} "
+            f"({hr_leave.get('leave_id', '')}). This date is recorded automatically for EOM payroll."
+        )
+        st.caption("Timesheet entry and clearing are disabled for this date. Contact HR if the leave record needs correcting.")
+        return
     if existing_flag:
         st.error(f"⚠️ **Flagged by {existing_flag.get('by', 'Director')}**: "
                  f"{existing_flag.get('comment', '')}")
