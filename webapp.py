@@ -952,15 +952,41 @@ def _is_approved(week_key, dept, emp_id):
     return emp_id in _approvals().get(week_key, {}).get(dept, {})
 
 
-# HR leave is the source of truth for the following date-level absences.
-# Only Approved HR records lock payroll dates; pending/rejected requests do not.
+# HR is the source of truth for date-level absences. Every approved HR leave
+# type is displayed in the payroll timesheet and locks the affected weekday.
+# Pending/rejected requests remain visible in HR but do not lock payroll dates.
 HRP_PAYROLL_LEAVE_DISPLAY = {
     "full day holiday": ("Holiday", "#FFCCFF", "#222222"),
     "half day holiday": ("Half Day Holiday", "#F4A000", "#222222"),
     "sick leave": ("Sick", "#BFBFBF", "#222222"),
     "sick": ("Sick", "#BFBFBF", "#222222"),
     "unpaid holiday": ("Unpaid Holiday", "#7030A0", "#FFFFFF"),
+    "unpaid absence": ("Unpaid Absence", "#00FFFF", "#222222"),
+    "family / emergency leave": ("Family / Emergency Leave", "#FCE4D6", "#222222"),
+    "maternity leave": ("Maternity Leave", "#9DC3E6", "#222222"),
+    "paternity leave": ("Paternity Leave", "#C6E0B4", "#222222"),
+    "other absence": ("Other Absence", "#D9E1F2", "#222222"),
+    "college (apprenticeship)": ("College", "#00B7E5", "#111111"),
+    "training course": ("Training Course", "#DDEBF7", "#222222"),
 }
+
+# Stable fallback colours cover any additional leave types configured by HR.
+# The colour is derived from the type name, so it remains consistent on reruns.
+HRP_PAYROLL_LEAVE_FALLBACK_COLOURS = [
+    ("#E2F0D9", "#222222"), ("#DDEBF7", "#222222"),
+    ("#FCE4D6", "#222222"), ("#E4DFEC", "#222222"),
+    ("#FFF2CC", "#222222"), ("#DDEBF7", "#222222"),
+]
+
+def _hrp_payroll_leave_display(leave):
+    raw_type = str((leave or {}).get("type", "Leave")).strip()
+    key = re.sub(r"\s+", " ", raw_type).casefold()
+    display = HRP_PAYROLL_LEAVE_DISPLAY.get(key)
+    if display:
+        return display
+    palette_index = sum(ord(char) for char in key) % len(HRP_PAYROLL_LEAVE_FALLBACK_COLOURS)
+    bg, fg = HRP_PAYROLL_LEAVE_FALLBACK_COLOURS[palette_index]
+    return (raw_type or "Leave", bg, fg)
 
 def _payroll_leave_records_cached():
     """Load HR leave records once per workbook version for this Streamlit session.
@@ -1004,8 +1030,6 @@ def _hrp_payroll_leave_for_date(employee_id, day_value):
         if str(leave.get("status", "")).strip().casefold() != "approved":
             continue
         leave_type = re.sub(r"\s+", " ", str(leave.get("type", "")).strip()).casefold()
-        if leave_type not in HRP_PAYROLL_LEAVE_DISPLAY:
-            continue
         first, last = leave.get("date_from"), leave.get("date_to")
         if not isinstance(first, date):
             first = pd.to_datetime(first, errors="coerce").date() if pd.notna(pd.to_datetime(first, errors="coerce")) else None
@@ -1019,11 +1043,11 @@ def _hrp_payroll_leave_label(leave):
     if not leave:
         return ""
     key = re.sub(r"\s+", " ", str(leave.get("type", "")).strip()).casefold()
-    return HRP_PAYROLL_LEAVE_DISPLAY.get(key, (str(leave.get("type", "Leave")), "#BFBFBF", "#222222"))[0]
+    return _hrp_payroll_leave_display(leave)[0]
 
 def _hrp_payroll_leave_style(leave):
     key = re.sub(r"\s+", " ", str((leave or {}).get("type", "")).strip()).casefold()
-    _, bg, fg = HRP_PAYROLL_LEAVE_DISPLAY.get(key, ("Leave", "#BFBFBF", "#222222"))
+    _, bg, fg = _hrp_payroll_leave_display(leave)
     return f"background-color:{bg};color:{fg};padding:4px 2px;border-radius:4px;text-align:center;line-height:1.35;min-height:34px;"
 
 # ============================================================
