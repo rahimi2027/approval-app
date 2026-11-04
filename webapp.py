@@ -1732,10 +1732,9 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                         state["submitted_by"] = ""
                         _states_save()
 
-                    # _ts_save() queues the changed workbook for background Drive
-                    # synchronisation. Do not block this click with repeated uploads
-                    # and remote verification of five unrelated payroll workbooks.
-                    st.success("✅ Timesheet saved locally. Google Drive synchronisation is queued in the background.")
+                    # Drive upload is queued and handled by a background worker;
+                    # never make the user wait for network I/O during Save.
+                    st.success("✅ Timesheet saved locally. Google Drive sync is queued in the background.")
 
             with col_submit:
                 if st.button("📤 Submit for Approval", type="primary",
@@ -3740,7 +3739,7 @@ _DRIVE_SYNC_QUEUE = None
 # are the durable working copy and RAM is never treated as the only copy.
 LOCAL_RECOVERY_DIR = os.path.join(APP_FOLDER, "local_recovery")
 DRIVE_SYNC_STATE_PATH = os.path.join(APP_FOLDER, "drive_sync_state.json")
-DRIVE_AUTO_SYNC_INTERVAL_SECONDS = 0  # Hourly bulk backups disabled; completed saves sync their affected workbook immediately.
+DRIVE_AUTO_SYNC_INTERVAL_SECONDS = 5  # Debounce window for non-blocking background sync after a save.
 # User accounts are business-critical. Keep timestamped Drive recovery copies so
 # a bad/empty local file or a failed overwrite can never destroy the last good user DB.
 USER_DB_RECOVERY_PREFIX = "RECOVERY_users_"
@@ -4398,63 +4397,26 @@ _DRIVE_STORAGE_PROCESS_READY = False
 
 
 def sync_saved_file_to_drive(local_path):
-    """Sync the affected live workbook after a completed save.
+    """Queue a changed workbook for background Google Drive synchronisation.
 
-    Form fields are not uploaded while the user is typing: this hook runs after a
-    persistence function writes a workbook. Startup initialisation is excluded so
-    an empty temporary workbook cannot overwrite Drive. The local save is retained
-    if the Drive upload fails.
+    Local Excel persistence completes first. No Google Drive API request, upload,
+    verification, or network retry is performed in the Streamlit Save callback.
     """
-    filename = os.path.basename(local_path) if local_path else "unknown"
     if not local_path or not os.path.exists(local_path):
+        filename = os.path.basename(local_path) if local_path else "unknown"
         DRIVE_LAST_SYNC_ERROR[filename] = "Local file does not exist."
         return False
 
-    # Do not upload files written by import-time initialisers.
     if not _DRIVE_STORAGE_PROCESS_READY:
         return True
 
-    if drive_service is None:
-        error = "Google Drive is not connected; the change is saved locally only."
-        DRIVE_LAST_SYNC_ERROR[filename] = error
-        DRIVE_PENDING_SYNC.add(os.path.abspath(local_path))
+    local_path = os.path.abspath(local_path)
+    with _DRIVE_SYNC_LOCK:
+        DRIVE_PENDING_SYNC.add(local_path)
+        DRIVE_LAST_SYNC_ERROR.pop(os.path.basename(local_path), None)
         _save_drive_sync_state()
-        try:
-            st.warning(f"Saved locally, but Google Drive was not updated for {filename}. Check the Drive connection and retry the backup when available.")
-        except Exception:
-            pass
-        return False
-
-    # Routine saves update only the live workbook to keep the save action quicker.
-    # BACKUP_*.xlsx files are refreshed by the full manual backup and existing
-    # module-specific backup flows.
-    try:
-        live_id = _drive_upload_path(local_path, filename)
-        if live_id:
-            DRIVE_LAST_SYNC[filename] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            DRIVE_LAST_SYNC_ERROR.pop(filename, None)
-            DRIVE_PENDING_SYNC.discard(os.path.abspath(local_path))
-            try:
-                st_info = os.stat(local_path)
-                _DRIVE_SYNC_FINGERPRINTS[os.path.abspath(local_path)] = f"{st_info.st_size}:{int(st_info.st_mtime_ns)}"
-            except Exception:
-                pass
-            _save_drive_sync_state()
-            return True
-        error = DRIVE_LAST_SYNC_ERROR.get(filename, "Google Drive upload returned no file ID.")
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-        DRIVE_LAST_SYNC_ERROR[filename] = error
-
-    DRIVE_PENDING_SYNC.add(os.path.abspath(local_path))
-    _save_drive_sync_state()
-    try:
-        st.warning(f"Saved locally, but Google Drive could not be updated for {filename}. The local save remains in place; check Drive status and use the full manual backup after resolving the connection issue.")
-    except Exception:
-        pass
-    print(f"Immediate Google Drive sync failed for {filename}: {error}")
-    return False
-
+    _DRIVE_WORKER_WAKE.set()
+    return True
 
 def ensure_all_drive_backups():
     """Queue all local workbooks; actual uploads are performed by the hourly worker."""
@@ -4470,39 +4432,48 @@ def _upload_to_drive_bg(local_path, filename):
 
 
 def _drive_background_worker():
-    """Process-local daemon. It never touches Streamlit session state/UI."""
+    """Upload only dirty workbooks off the UI thread after a short debounce."""
     while True:
         try:
-            # Wake on a new save, but do not upload immediately. The hourly interval is the
-            # normal schedule; a wake simply lets the worker notice pending work.
             _DRIVE_WORKER_WAKE.wait(timeout=60)
             _DRIVE_WORKER_WAKE.clear()
+            # Coalesce quick consecutive saves so the same workbook is uploaded once.
+            time.sleep(max(1, DRIVE_AUTO_SYNC_INTERVAL_SECONDS))
             if drive_service is None:
-                continue
-            last_run = getattr(_drive_background_worker, "last_run", 0.0)
-            now = time.time()
-            if now - last_run < DRIVE_AUTO_SYNC_INTERVAL_SECONDS:
-                continue
-            _drive_background_worker.last_run = now
-            # Every hour back up ALL existing persistent workbooks, not only files
-            # that happened to be changed. This keeps the Drive copy current even
-            # after a quiet hour. Pending files are naturally included in this pass.
-            targets = [path for path in DRIVE_BACKUP_FILENAMES if os.path.exists(path)]
-            targets = sorted(set(targets) | set(DRIVE_PENDING_SYNC))
-            if not targets:
+                # Keep the files pending. The Drive status panel will show the
+                # connection problem and a later worker wake can retry.
+                for local_path in list(DRIVE_PENDING_SYNC):
+                    DRIVE_LAST_SYNC_ERROR[os.path.basename(local_path)] = (
+                        "Google Drive is not connected; the local save is retained and sync is pending."
+                    )
                 _save_drive_sync_state()
                 continue
 
-            print(f"Automatic Drive backup starting for {len(targets)} file(s).")
+            with _DRIVE_SYNC_LOCK:
+                targets = sorted(path for path in DRIVE_PENDING_SYNC if os.path.exists(path))
+            if not targets:
+                continue
+
+            print(f"Background Google Drive sync starting for {len(targets)} changed workbook(s).")
             for local_path in targets:
                 try:
-                    if os.path.exists(local_path):
-                        _sync_saved_file_to_drive_now(local_path)
-                    else:
-                        DRIVE_PENDING_SYNC.discard(local_path)
+                    # A few retries are safe here because they do not block the user.
+                    synced = False
+                    for attempt in range(3):
+                        if _sync_saved_file_to_drive_now_once(local_path):
+                            synced = True
+                            break
+                        if attempt < 2:
+                            time.sleep(2 * (attempt + 1))
+                    if not synced:
+                        print(
+                            f"Background Google Drive sync remains pending for "
+                            f"{os.path.basename(local_path)}: "
+                            f"{DRIVE_LAST_SYNC_ERROR.get(os.path.basename(local_path), 'Unknown Drive error')}"
+                        )
                 except Exception as e:
                     DRIVE_LAST_SYNC_ERROR[os.path.basename(local_path)] = f"{type(e).__name__}: {e}"
-                    print(f"Automatic Drive backup failed for {local_path}: {e}")
+                    print(f"Background Google Drive sync failed for {local_path}: {e}")
             _save_drive_sync_state()
         except Exception as e:
             print(f"Drive background worker error: {type(e).__name__}: {e}")
@@ -4510,12 +4481,26 @@ def _drive_background_worker():
 
 
 def _start_drive_background_worker():
-    """Automatic Drive uploads are intentionally disabled; backups are manual."""
+    """Start one daemon worker; ordinary saves only enqueue files."""
     global _DRIVE_WORKER_STARTED
-    _DRIVE_WORKER_STARTED = False
-    print("Hourly bulk Google Drive backup worker disabled; completed-save sync is enabled.")
-    return
-
+    if _DRIVE_WORKER_STARTED:
+        return
+    if drive_service is None:
+        # Still start it: if credentials/service become available after a rerun,
+        # queued files will be picked up on the next wake.
+        pass
+    try:
+        worker = threading.Thread(
+            target=_drive_background_worker,
+            name="google-drive-sync-worker",
+            daemon=True,
+        )
+        worker.start()
+        _DRIVE_WORKER_STARTED = True
+        if DRIVE_PENDING_SYNC:
+            _DRIVE_WORKER_WAKE.set()
+    except Exception as e:
+        print(f"Could not start Google Drive background worker: {e}")
 
 def _force_sync_all_drive_files():
     """Explicit Super Admin/Director action: upload every existing workbook immediately."""
@@ -14991,8 +14976,12 @@ initialise_hr_leave()
 initialise_store_deduction()
 initialise_employee_items()
 # From this point onwards, calls to sync_saved_file_to_drive originate from normal
-# app actions and should immediately sync the affected workbook to Google Drive.
+# app actions. They enqueue the changed workbook; a background worker uploads it.
 _DRIVE_STORAGE_PROCESS_READY = True
+try:
+    _start_drive_background_worker()
+except Exception as e:
+    print(f"Google Drive background worker startup skipped: {e}")
 
 def load_records_from_excel(force=False):
     if not force and "_records_cache" in st.session_state:
