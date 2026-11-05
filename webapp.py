@@ -1543,7 +1543,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 hr_leave = _hrp_payroll_leave_for_date(eid, week_obj["dates"][i]) if valid_month_dates[i] else None
                 if hr_leave and not _hrp_payroll_leave_is_half_day(hr_leave):
                     leave_label = _hrp_payroll_leave_label(hr_leave)
-                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 {html.escape(leave_label)}</b><br><small>Full-day HR leave — locked</small></div>", unsafe_allow_html=True)
+                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 {html.escape(leave_label)}</b><br><small></small></div>", unsafe_allow_html=True)
                     st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = False
                     cell.button("🔒 Locked", key=f"pl_day_{eid}_{i}", use_container_width=True, disabled=True, help="Approved full-day HR leave locks this date.")
                     continue
