@@ -21,7 +21,6 @@ import time
 import textwrap
 import zipfile
 import hashlib
-import copy
 import hmac
 import secrets
 import html
@@ -291,16 +290,6 @@ def _p_eom():         return _payroll_file_path("payroll_eom.xlsx")
 def _p_eom_locks():   return _payroll_file_path("payroll_eom_month_locks.json")
 
 
-def get_backup_filenames():
-    """Return payroll workbook paths mapped to their Drive backup names."""
-    return {
-        _p_timesheets(): "BACKUP_payroll_timesheets.xlsx",
-        _p_week_states(): "BACKUP_payroll_week_states.xlsx",
-        _p_flags(): "BACKUP_payroll_flags.xlsx",
-        _p_approvals(): "BACKUP_payroll_approvals.xlsx",
-    }
-
-
 def _eom_month_locks_load():
     """Load persistent EOM month approval/lock records."""
     path = _p_eom_locks()
@@ -336,30 +325,23 @@ def _eom_month_is_locked(month_key):
 def _ensure_storage():
     if not _ctx["initialised"]:
         return
-
-    # Full column validation is expensive (pd.read_excel on 5 workbooks).
-    # Do it once per Streamlit session; thereafter only confirm the files exist.
-    cache_key = "_payroll_storage_validated"
-    if st.session_state.get(cache_key):
-        for _path in (_p_timesheets(), _p_week_states(), _p_flags(),
-                      _p_approvals(), _p_eom()):
-            if not os.path.exists(_path):
-                st.session_state.pop(cache_key, None)
-                break
-        else:
-            return
-
     _ctx["safe_init_excel"](_p_timesheets(), PAYROLL_TIMESHEETS_COLUMNS)
     _ctx["safe_init_excel"](_p_week_states(), PAYROLL_WEEK_STATES_COLUMNS)
     _ctx["safe_init_excel"](_p_flags(), PAYROLL_FLAGS_COLUMNS)
     _ctx["safe_init_excel"](_p_approvals(), PAYROLL_APPROVALS_COLUMNS)
     _ctx["safe_init_excel"](_p_eom(), EOM_COLUMNS)
 
-    _eom_locks_path = _p_eom_locks()
-    if not os.path.exists(_eom_locks_path):
-        _eom_month_locks_save({})
 
-    st.session_state[cache_key] = True
+def get_backup_filenames():
+    """Return {path: backup_name} so the caller can add them to DRIVE_BACKUP_FILENAMES."""
+    return {
+        _p_timesheets(): "BACKUP_payroll_timesheets.xlsx",
+        _p_week_states(): "BACKUP_payroll_week_states.xlsx",
+        _p_flags(): "BACKUP_payroll_flags.xlsx",
+        _p_approvals(): "BACKUP_payroll_approvals.xlsx",
+        _p_eom(): "BACKUP_payroll_eom.xlsx",
+    }
+
 
 # ============================================================
 # TIME HELPERS
@@ -759,128 +741,29 @@ def _ts_load():
     st.session_state["payroll_ts"] = data
 
 
-_TS_WRITE_QUEUE = queue.Queue()
-_TS_WRITE_THREAD = None
-
-
-def _ts_write_worker():
-    while True:
-        try:
-            item = _TS_WRITE_QUEUE.get(timeout=60)
-        except queue.Empty:
-            continue
-        if item is None:
-            break
-        payload, path = item
-        try:
-            # A single-day edit is persisted as a tiny background delta. This
-            # avoids deep-copying and flattening the entire multi-year timesheet
-            # dictionary for the common Save Day / Clear Day actions.
-            if isinstance(payload, dict) and payload.get("_ts_day_delta"):
-                from openpyxl import Workbook, load_workbook
-                columns = PAYROLL_TIMESHEETS_COLUMNS
-                if os.path.exists(path):
-                    wb = load_workbook(path)
-                    ws = wb.active
-                else:
-                    wb = Workbook()
-                    ws = wb.active
-                    ws.append(columns)
-                headers = {str(cell.value): idx + 1 for idx, cell in enumerate(ws[1]) if cell.value is not None}
-                for col in columns:
-                    if col not in headers:
-                        headers[col] = ws.max_column + 1
-                        ws.cell(1, headers[col], col)
-                target = payload
-                match_row = None
-                for row_no in range(2, ws.max_row + 1):
-                    if (str(ws.cell(row_no, headers["Week_Key"]).value or "").strip() == target["week"]
-                        and str(ws.cell(row_no, headers["Department"]).value or "").strip() == target["dept"]
-                        and str(ws.cell(row_no, headers["Employee_ID"]).value or "").strip() == target["eid"]
-                        and str(ws.cell(row_no, headers["Day_Index"]).value or "").strip() == str(target["day_idx"])):
-                        match_row = row_no
-                        break
-                if target["day"] is None:
-                    if match_row is not None:
-                        ws.delete_rows(match_row, 1)
-                else:
-                    values = [target["week"], target["dept"], target["eid"], target["day_idx"],
-                              target["day"].get("in", ""), target["day"].get("out", ""),
-                              _m2t(_duration_minutes(target["day"].get("travel", "0:00")) or 0),
-                              _m2t(_duration_minutes(target["day"].get("away", "0:00")) or 0),
-                              target["day"].get("status", "Worked"), target["day"].get("note", "")]
-                    if match_row is None:
-                        match_row = ws.max_row + 1
-                    for col, value in zip(columns, values):
-                        ws.cell(match_row, headers[col], value)
-                tmp = path + f".tmp.{os.getpid()}_{threading.get_ident()}"
-                wb.save(tmp)
-                wb.close()
-                os.replace(tmp, path)
-            elif isinstance(payload, dict):
-                rows = []
-                for wk, by_dept in payload.items():
-                    for dept, by_emp in by_dept.items():
-                        for eid, days in by_emp.items():
-                            for i, day in enumerate(days):
-                                if day is None:
-                                    continue
-                                rows.append({
-                                    "Week_Key": wk, "Department": dept,
-                                    "Employee_ID": eid, "Day_Index": i,
-                                    "Time_In": day.get("in", ""),
-                                    "Time_Out": day.get("out", ""),
-                                    "Travel": _m2t(_duration_minutes(day.get("travel", "0:00")) or 0),
-                                    "Time_Away": _m2t(_duration_minutes(day.get("away", "0:00")) or 0),
-                                    "Status": day.get("status", "Worked"),
-                                    "Note": day.get("note", ""),
-                                })
-                df = pd.DataFrame(rows, columns=PAYROLL_TIMESHEETS_COLUMNS)
-            else:
-                df = payload
-            tmp = path + f".tmp.{os.getpid()}_{threading.get_ident()}"
-            df.to_excel(tmp, index=False, engine="openpyxl")
-            os.replace(tmp, path)
-            _ctx["sync_to_drive"](path)
-        except Exception as e:
-            print(f"Background timesheet save failed: {e}")
-        finally:
-            _TS_WRITE_QUEUE.task_done()
-
-
-def _ensure_ts_write_worker():
-    global _TS_WRITE_THREAD
-    if _TS_WRITE_THREAD is None or not _TS_WRITE_THREAD.is_alive():
-        _TS_WRITE_THREAD = threading.Thread(
-            target=_ts_write_worker, daemon=True, name="payroll-ts-writer"
-        )
-        _TS_WRITE_THREAD.start()
-
-
 def _ts_save():
-    """Queue a consistent snapshot; expensive Excel preparation stays off-thread."""
     data = st.session_state.get("payroll_ts", {})
-    st.session_state["_payroll_ts_version"] = (
-        st.session_state.get("_payroll_ts_version", 0) + 1
-    )
-    # Deep-copy because the live session data may be edited again before the
-    # background worker has finished writing this version.
-    snapshot = copy.deepcopy(data)
-    _ensure_ts_write_worker()
-    _TS_WRITE_QUEUE.put((snapshot, _p_timesheets()))
+    rows = []
+    for wk, by_dept in data.items():
+        for dept, by_emp in by_dept.items():
+            for eid, days in by_emp.items():
+                for i, d in enumerate(days):
+                    if d is None:
+                        continue
+                    rows.append({
+                        "Week_Key": wk, "Department": dept,
+                        "Employee_ID": eid, "Day_Index": i,
+                        "Time_In": d.get("in", ""),
+                        "Time_Out": d.get("out", ""),
+                        "Travel": _m2t(_duration_minutes(d.get("travel", "0:00")) or 0),
+                        "Time_Away": _m2t(_duration_minutes(d.get("away", "0:00")) or 0),
+                        "Status": d.get("status", "Worked"),
+                        "Note": d.get("note", ""),
+                    })
+    pd.DataFrame(rows, columns=PAYROLL_TIMESHEETS_COLUMNS).to_excel(
+        _p_timesheets(), index=False, engine="openpyxl")
+    _ctx["sync_to_drive"](_p_timesheets())
 
-
-def _ts_save_day(week_key, dept, emp_id, day_idx):
-    """Queue only the changed day; do not copy or serialise the full timesheet."""
-    days = st.session_state.get("payroll_ts", {}).get(week_key, {}).get(dept, {}).get(emp_id, [None] * 5)
-    day = days[day_idx] if 0 <= int(day_idx) < len(days) else None
-    payload = {
-        "_ts_day_delta": True, "week": str(week_key), "dept": str(dept),
-        "eid": str(emp_id), "day_idx": int(day_idx),
-        "day": copy.copy(day) if isinstance(day, dict) else None,
-    }
-    _ensure_ts_write_worker()
-    _TS_WRITE_QUEUE.put((payload, _p_timesheets()))
 
 # ============================================================
 # WEEK STATES
@@ -1113,15 +996,12 @@ def _hrp_payroll_leave_display(leave):
     return (raw_type or "Leave", bg, fg)
 
 def _payroll_leave_records_cached():
-    cache_key = "_payroll_leave_records_cache"
-    cached = st.session_state.get(cache_key)
-    current_render = st.session_state.get("_payroll_render_token", 0)
+    """Load HR leave records once per workbook version for this Streamlit session.
 
-    # Fast path: already verified during this render → no stat syscalls.
-    if (cached and cached.get("_verified_render") == current_render
-            and "approved_by_employee" in cached):
-        return cached["records"]
-
+    Payroll calculations call the date-level leave check many times. Reading and
+    parsing the HR Excel workbook for every employee/day was a major source of
+    avoidable latency. The file signature invalidates the cache after HR saves.
+    """
     try:
         signature = (
             os.path.getmtime(HR_PORTAL_LEAVE_PATH),
@@ -1130,12 +1010,15 @@ def _payroll_leave_records_cached():
     except OSError:
         signature = None
 
+    cache_key = "_payroll_leave_records_cache"
+    cached = st.session_state.get(cache_key)
     if (cached and cached.get("signature") == signature
             and "approved_by_employee" in cached):
-        cached["_verified_render"] = current_render
         return cached["records"]
 
     records = _hrp_load_leave_records()
+    # Build an employee-indexed, date-normalised lookup once. The previous
+    # implementation scanned every HR leave record for every employee/day cell.
     approved_by_employee = {}
     for leave in records:
         if str(leave.get("status", "")).strip().casefold() != "approved":
@@ -1152,13 +1035,11 @@ def _payroll_leave_records_cached():
             last = parsed.date() if pd.notna(parsed) else None
         if first and last:
             approved_by_employee.setdefault(eid, []).append((first, last, leave))
-
     st.session_state[cache_key] = {
         "signature": signature,
         "records": records,
         "approved_by_employee": approved_by_employee,
         "date_lookup": {},
-        "_verified_render": current_render,
     }
     return records
 
@@ -1278,23 +1159,7 @@ def _calc_row(emp, week_key, dept):
         "working": working, "contracted": contracted,
         "week_extra": week_extra, "check_ok": check_ok,
     }
-def _calc_row_cached(emp, week_key, dept):
-    """Memoised _calc_row. Invalidated when timesheet data or leave data change."""
-    ts_version = st.session_state.get("_payroll_ts_version", 0)
-    leave_version = st.session_state.get(
-        "_payroll_leave_records_cache", {}
-    ).get("signature")
-    version = (ts_version, leave_version)
 
-    cache = st.session_state.get("_payroll_calc_cache")
-    if not cache or cache.get("version") != version:
-        cache = {"version": version, "rows": {}}
-        st.session_state["_payroll_calc_cache"] = cache
-
-    key = (str(emp.get("emp_id", "")), week_key, dept)
-    if key not in cache["rows"]:
-        cache["rows"][key] = _calc_row(emp, week_key, dept)
-    return cache["rows"][key]
 
 def _calc_balance(emp, week_key, dept, current_calc=None):
     """Return this week's difference and month-to-date balance.
@@ -1306,36 +1171,26 @@ def _calc_balance(emp, week_key, dept, current_calc=None):
     if not week_obj:
         return {"prev": 0, "week_net": None, "balance": None}
 
-    # Reuse the month-to-date balance on every rerun, including the normal
-    # render path which supplies an already-cached current-week calculation.
-    cache = st.session_state.get("_payroll_calc_cache", {})
-    balance_key = (str(emp.get("emp_id", "")), week_key, dept)
-    cached_balances = cache.setdefault("balances", {})
-    if balance_key in cached_balances:
-        return dict(cached_balances[balance_key])
-
     month_key = week_obj.get("month")
     prev = 0
     for wk in PAYROLL_WEEK_ORDER:
         prior_week = PAYROLL_WEEKS.get(wk, {})
         if prior_week.get("month") != month_key:
             continue
+        # Only weeks before the selected week in the configured order count.
         if wk == week_key:
             break
-        prior_net = _calc_row_cached(emp, wk, dept).get("week_extra")
+        prior_net = _calc_row(emp, wk, dept).get("week_extra")
         if prior_net is not None:
             prev += prior_net
 
-    current_calc = current_calc if current_calc is not None else _calc_row_cached(emp, week_key, dept)
+    current_calc = current_calc if current_calc is not None else _calc_row(emp, week_key, dept)
     week_net = current_calc.get("week_extra")
     if week_net is None and prev == 0:
-        result = {"prev": 0, "week_net": None, "balance": None}
-    elif week_net is None:
-        result = {"prev": prev, "week_net": None, "balance": prev}
-    else:
-        result = {"prev": prev, "week_net": week_net, "balance": prev + week_net}
-    cache.setdefault("balances", {})[balance_key] = dict(result)
-    return result
+        return {"prev": 0, "week_net": None, "balance": None}
+    if week_net is None:
+        return {"prev": prev, "week_net": None, "balance": prev}
+    return {"prev": prev, "week_net": week_net, "balance": prev + week_net}
 
 
 # ============================================================
@@ -1377,9 +1232,6 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
     _ensure_storage()
     _ts(); _states(); _flags(); _approvals()
-    st.session_state["_payroll_render_token"] = (
-        st.session_state.get("_payroll_render_token", 0) + 1
-    )
 
     full_name = str(current_user_info.get("full_name")
                     or current_user_info.get("username") or "User").strip()
@@ -1668,7 +1520,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             eid = emp.get("emp_id", "")
             ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
             emp_flags = _get_flags(week_key, dept, eid)
-            calc = _calc_row_cached(emp, week_key, dept)
+            calc = _calc_row(emp, week_key, dept)
             bal  = _calc_balance(emp, week_key, dept, current_calc=calc)
 
             row = st.columns(col_widths)
@@ -2039,7 +1891,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         tot_days = tot_working = tot_contract = tot_extra = tot_balance = 0
         checks = 0
         for emp in employees:
-            c = _calc_row_cached(emp, week_key, dept)
+            c = _calc_row(emp, week_key, dept)
             b = _calc_balance(emp, week_key, dept)
             tot_days += c["days_worked"]
             tot_working += c["working"]
@@ -2072,10 +1924,8 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
         rows = []
         for emp in employees:
-            c = _calc_row_cached(emp, week_key, dept)
+            c = _calc_row(emp, week_key, dept)
             b = _calc_balance(emp, week_key, dept)
-
-            # Compare only against the contract for days with recorded work.
 
             we = b["week_net"]
             we_str = "—" if we is None else (("+" if we >= 0 else "") + _m2t(we))
@@ -2428,7 +2278,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
             }
             if existing_flag:
                 _clear_flag(week_key, dept, emp["emp_id"], day_idx)
-            _ts_save_day(week_key, dept, emp["emp_id"], day_idx)
+            _ts_save()  # local-only, intentionally fast
             st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
             st.success("✅ Day saved locally.")
             st.rerun()
@@ -2439,7 +2289,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                 st.stop()
             ts_days[day_idx] = None
             _clear_flag(week_key, dept, emp["emp_id"], day_idx)
-            _ts_save_day(week_key, dept, emp["emp_id"], day_idx)
+            _ts_save()
             st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
             st.rerun()
         elif close_day:
@@ -2573,7 +2423,7 @@ def _build_week_excel(week_key, dept):
     for emp in employees:
         eid = emp.get("emp_id", "")
         ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
-        calc = _calc_row_cached(emp, week_key, dept)
+        calc = _calc_row(emp, week_key, dept)
         bal = _calc_balance(emp, week_key, dept)
         emp_flags = _get_flags(week_key, dept, eid)
 
@@ -3520,9 +3370,6 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         return
     _ensure_storage()
     _ts()
-    st.session_state["_payroll_render_token"] = (
-        st.session_state.get("_payroll_render_token", 0) + 1
-    )
     st.subheader("📊 End-of-Month Payroll Summary")
     st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Director-approved Addition/Deduction requests and Store Department deductions (including unreturned employee holdings) are automatically totalled in the employee's selected payroll month and week; ADD and DED cannot be entered manually.")
 
@@ -3806,10 +3653,6 @@ def render_payroll_eom(current_user_info, mode="payroll"):
 import types as _payroll_types
 payroll = _payroll_types.SimpleNamespace(
     init_payroll=init_payroll,
-    PAYROLL_TIMESHEETS_COLUMNS=PAYROLL_TIMESHEETS_COLUMNS,
-    PAYROLL_WEEK_STATES_COLUMNS=PAYROLL_WEEK_STATES_COLUMNS,
-    PAYROLL_FLAGS_COLUMNS=PAYROLL_FLAGS_COLUMNS,
-    PAYROLL_APPROVALS_COLUMNS=PAYROLL_APPROVALS_COLUMNS,
     get_backup_filenames=get_backup_filenames,
     get_payroll_permission_defaults=get_payroll_permission_defaults,
     get_payroll_permission_labels=get_payroll_permission_labels,
@@ -19037,129 +18880,47 @@ elif role == "Super Admin":
                 _payroll_stem,
                 "backup_" + _payroll_stem,
             ))
-        # Include persistent non-workbook data in the individual backup list.
-        backup_files.extend([
-            ("📥 Payroll EOM Month Locks", os.path.join(APP_FOLDER, "payroll_eom_month_locks.json"), "payroll_eom_month_locks", "backup_payroll_eom_month_locks"),
-            ("📥 Training Support Chat", TRAINING_CHAT_PATH, "training_support_chat", "backup_training_support_chat"),
-        ])
-
-        # Complete backup: archive the entire persistent APP_FOLDER, preserving
-        # relative paths so the data can be restored without losing folder layout.
+        # Build one ZIP containing every currently available workbook listed below.
+        # The individual download buttons remain available for selective backups.
         all_backup_zip = io.BytesIO()
         zip_added = 0
-        zip_total_bytes = 0
         zip_errors = []
-        zip_manifest_files = []
-        backup_created_at = datetime.now(timezone.utc).isoformat()
-        backup_root_name = os.path.basename(os.path.normpath(APP_FOLDER)) or "Acoole_App_Uploads"
-        incomplete_suffixes = (".tmp", ".part", ".partial")
         try:
             with zipfile.ZipFile(all_backup_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
-                for _root, _dirs, _files in os.walk(APP_FOLDER, topdown=True, followlinks=False):
-                    _dirs[:] = sorted(
-                        d for d in _dirs
-                        if not os.path.islink(os.path.join(_root, d))
-                    )
-                    for _filename in sorted(_files):
-                        _path = os.path.join(_root, _filename)
-                        _relative = os.path.relpath(_path, APP_FOLDER)
-                        _archive_name = f"{backup_root_name}/{_relative.replace(os.sep, '/')}"
-                        try:
-                            if os.path.islink(_path):
-                                zip_errors.append(f"{_relative}: skipped symbolic link")
-                                continue
-                            if _filename.lower().endswith(incomplete_suffixes):
-                                zip_errors.append(f"{_relative}: skipped incomplete temporary file")
-                                continue
-                            if not os.path.isfile(_path):
-                                continue
-                            _stat = os.stat(_path)
-                            with open(_path, "rb") as _handle:
-                                _contents = _handle.read()
-                            _sha256 = hashlib.sha256(_contents).hexdigest()
-                            zipf.writestr(_archive_name, _contents)
-                            zip_manifest_files.append({
-                                "path": _archive_name,
-                                "size_bytes": len(_contents),
-                                "modified_at_utc": datetime.fromtimestamp(
-                                    _stat.st_mtime, timezone.utc
-                                ).isoformat(),
-                                "sha256": _sha256,
-                            })
-                            zip_added += 1
-                            zip_total_bytes += len(_contents)
-                        except Exception as _file_exc:
-                            zip_errors.append(f"{_relative}: {type(_file_exc).__name__}: {_file_exc}")
-
-                _manifest = {
-                    "backup_name": "ACOole Complete Application Data Backup",
-                    "format_version": 1,
-                    "created_at_utc": backup_created_at,
-                    "application_data_folder": backup_root_name,
-                    "file_count": zip_added,
-                    "total_size_bytes": zip_total_bytes,
-                    "files": zip_manifest_files,
-                    "warnings": zip_errors,
-                }
-                zipf.writestr(
-                    "BACKUP_MANIFEST.json",
-                    json.dumps(_manifest, ensure_ascii=False, indent=2),
-                )
-                zipf.writestr(
-                    "RESTORE_README.txt",
-                    "ACOOLE PORTAL — DATA BACKUP RESTORE INSTRUCTIONS\n"
-                    "=================================================\n\n"
-                    "1. Stop the Streamlit application before restoring.\n"
-                    "2. Make a separate copy of the current application data folder.\n"
-                    "3. Extract the included '" + backup_root_name + "/' folder into the "
-                    "application's base directory, preserving the folder structure.\n"
-                    "4. Check BACKUP_MANIFEST.json for file names, sizes and SHA-256 hashes.\n"
-                    "5. Restart the application and verify key records and uploaded documents.\n\n"
-                    "This archive contains application data only. It does not replace the "
-                    "Python source code, deployment configuration, Streamlit secrets or "
-                    "Google credentials. Do not overwrite those files with this archive.\n"
-                    "Keep backups in a secure location because they may contain personal "
-                    "and confidential business information.\n"
-                )
-
-            all_backup_zip.seek(0)
-            with zipfile.ZipFile(all_backup_zip, "r") as _check_zip:
-                _bad_member = _check_zip.testzip()
-                if _bad_member:
-                    raise zipfile.BadZipFile(f"Integrity check failed at {_bad_member}")
-            all_backup_zip.seek(0)
+                seen_archive_names = set()
+                for _label, _path, _stem, _key in backup_files:
+                    if not os.path.isfile(_path):
+                        continue
+                    _archive_name = os.path.basename(_path)
+                    if _archive_name in seen_archive_names:
+                        _archive_name = f"{_stem}_{_archive_name}"
+                    seen_archive_names.add(_archive_name)
+                    try:
+                        zipf.write(_path, arcname=_archive_name)
+                        zip_added += 1
+                    except Exception as _zip_exc:
+                        zip_errors.append(f"{_archive_name}: {_zip_exc}")
         except Exception as _zip_exc:
-            zip_errors.append(f"ZIP creation/validation failed: {type(_zip_exc).__name__}: {_zip_exc}")
-            zip_added = 0
+            zip_errors.append(str(_zip_exc))
 
-        st.caption(
-            "The complete ZIP includes all files and subfolders stored in Acoole_App_Uploads "
-            "(workbooks, JSON state, attachments, generated PDFs, audit archives and recovery data), "
-            "plus a SHA-256 manifest and restore instructions."
-        )
         if zip_added:
             st.download_button(
-                "📦 Download Complete Data Backup (ZIP)",
+                "📦 Download All Data Backup (ZIP)",
                 data=all_backup_zip.getvalue(),
-                file_name=f"ACOole_Complete_Data_Backup_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.zip",
+                file_name=f"ACOole_All_Data_Backup_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.zip",
                 mime="application/zip",
                 type="primary",
                 key="super_admin_download_all_data_backup_zip",
                 width="stretch",
-                help="Downloads all persistent application data with a manifest, checksums and restore instructions.",
-            )
-            st.success(
-                f"Backup validated: {zip_added} files, "
-                f"{zip_total_bytes:,} bytes of source data."
+                help="Downloads all currently available data backup workbooks in one ZIP file.",
             )
             if zip_errors:
-                st.warning("Backup completed with skipped/unreadable items: " + "; ".join(zip_errors[:20]))
+                st.warning("Some files could not be added to the ZIP: " + "; ".join(zip_errors))
         else:
-            st.error("A complete data backup could not be created or validated: " + "; ".join(zip_errors))
-            st.button("📦 Complete Data Backup unavailable", disabled=True, key="super_admin_download_all_data_backup_zip_empty")
+            st.button("📦 Download All Data Backup (ZIP) — no files available", disabled=True, key="super_admin_download_all_data_backup_zip_empty", width="stretch")
 
         st.subheader("📥 Download Data Backups")
-        st.caption("Download individual data files here, or use the complete ZIP above before a live-launch reset. The ZIP also includes attachments, PDFs, JSON state, audit archives and recovery files.")
+        st.caption("Download a copy before using the live-launch reset. User accounts and system settings are kept separately.")
         backup_cols = st.columns(3)
         for i, (label, path, stem, key) in enumerate(backup_files):
             with backup_cols[i % 3]:
@@ -19169,7 +18930,7 @@ elif role == "Super Admin":
                             st.download_button(
                                 label,
                                 f.read(),
-                                file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}{os.path.splitext(path)[1] or '.dat'}",
+                                file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
                                 type="primary",
                                 key=key,
                                 width="stretch",
