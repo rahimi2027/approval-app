@@ -711,7 +711,13 @@ def _ts():
 
 def _ts_load():
     _ensure_storage()
-    df = _ctx["read_excel"](_p_timesheets())
+    # pandas treats the literal text "N/A" as a missing value by default.
+    # Read this workbook with NA-token inference disabled so an explicitly
+    # selected N/A status survives a save/restart and is not mistaken for blank.
+    try:
+        df = pd.read_excel(_p_timesheets(), keep_default_na=False, engine="openpyxl")
+    except Exception:
+        df = _ctx["read_excel"](_p_timesheets())
     data = {}
     for r in df.to_dict(orient="records"):
         wk   = str(r.get("Week_Key", "")).strip()
@@ -3369,7 +3375,19 @@ def render_payroll_eom(current_user_info, mode="payroll"):
 
     month_labels = [label for _, label in PAYROLL_MONTHS]
     month_keys = [key for key, _ in PAYROLL_MONTHS]
-    default_month = "2026-10" if "2026-10" in month_keys else month_keys[0]
+    # Open EOM on the real current calendar month. Refresh the widget state
+    # when the month rolls over or a new login session starts.
+    current_month_key = date.today().strftime("%Y-%m")
+    if current_month_key not in month_keys:
+        eligible_months = [key for key in month_keys if key <= current_month_key]
+        current_month_key = eligible_months[-1] if eligible_months else month_keys[0]
+    eom_month_marker = st.session_state.get("eom_month_auto_default_marker")
+    if eom_month_marker != current_month_key:
+        st.session_state["eom_month_select"] = PAYROLL_MONTH_LABELS.get(
+            current_month_key, month_labels[month_keys.index(current_month_key)]
+        )
+        st.session_state["eom_month_auto_default_marker"] = current_month_key
+    default_month = current_month_key
     c1, c2 = st.columns([1, 2])
     with c1:
         month_label = st.selectbox("📅 Payroll month", month_labels,
