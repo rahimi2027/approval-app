@@ -1549,7 +1549,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                     continue
                 elif hr_leave:
                     leave_label = _hrp_payroll_leave_label(hr_leave)
-                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>{html.escape(leave_label)} · 0.5 day</b><br><small>Enter actual Time In / Time Out below</small></div>", unsafe_allow_html=True)
+                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>{html.escape(leave_label)} · 0.5 day</b><br><small></small></div>", unsafe_allow_html=True)
                 if not valid_month_dates[i]:
                     cell.markdown(
                         "<div style='text-align:center; min-height:34px; padding-top:8px; color:#b8bec7; font-size:11px;'>Not in month</div>",
