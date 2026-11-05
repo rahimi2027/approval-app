@@ -711,13 +711,7 @@ def _ts():
 
 def _ts_load():
     _ensure_storage()
-    # pandas treats the literal text "N/A" as a missing value by default.
-    # Read this workbook with NA-token inference disabled so an explicitly
-    # selected N/A status survives a save/restart and is not mistaken for blank.
-    try:
-        df = pd.read_excel(_p_timesheets(), keep_default_na=False, engine="openpyxl")
-    except Exception:
-        df = _ctx["read_excel"](_p_timesheets())
+    df = _ctx["read_excel"](_p_timesheets())
     data = {}
     for r in df.to_dict(orient="records"):
         wk   = str(r.get("Week_Key", "")).strip()
@@ -1549,13 +1543,13 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 hr_leave = _hrp_payroll_leave_for_date(eid, week_obj["dates"][i]) if valid_month_dates[i] else None
                 if hr_leave and not _hrp_payroll_leave_is_half_day(hr_leave):
                     leave_label = _hrp_payroll_leave_label(hr_leave)
-                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 {html.escape(leave_label)}</b><br><small></small></div>", unsafe_allow_html=True)
+                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 {html.escape(leave_label)}</b><br><small>Full-day HR leave — locked</small></div>", unsafe_allow_html=True)
                     st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = False
                     cell.button("🔒 Locked", key=f"pl_day_{eid}_{i}", use_container_width=True, disabled=True, help="Approved full-day HR leave locks this date.")
                     continue
                 elif hr_leave:
                     leave_label = _hrp_payroll_leave_label(hr_leave)
-                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>{html.escape(leave_label)} · 0.5 day</b><br><small></small></div>", unsafe_allow_html=True)
+                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>{html.escape(leave_label)} · 0.5 day</b><br><small>Enter actual Time In / Time Out below</small></div>", unsafe_allow_html=True)
                 if not valid_month_dates[i]:
                     cell.markdown(
                         "<div style='text-align:center; min-height:34px; padding-top:8px; color:#b8bec7; font-size:11px;'>Not in month</div>",
@@ -3375,19 +3369,7 @@ def render_payroll_eom(current_user_info, mode="payroll"):
 
     month_labels = [label for _, label in PAYROLL_MONTHS]
     month_keys = [key for key, _ in PAYROLL_MONTHS]
-    # Open EOM on the real current calendar month. Refresh the widget state
-    # when the month rolls over or a new login session starts.
-    current_month_key = date.today().strftime("%Y-%m")
-    if current_month_key not in month_keys:
-        eligible_months = [key for key in month_keys if key <= current_month_key]
-        current_month_key = eligible_months[-1] if eligible_months else month_keys[0]
-    eom_month_marker = st.session_state.get("eom_month_auto_default_marker")
-    if eom_month_marker != current_month_key:
-        st.session_state["eom_month_select"] = PAYROLL_MONTH_LABELS.get(
-            current_month_key, month_labels[month_keys.index(current_month_key)]
-        )
-        st.session_state["eom_month_auto_default_marker"] = current_month_key
-    default_month = current_month_key
+    default_month = "2026-10" if "2026-10" in month_keys else month_keys[0]
     c1, c2 = st.columns([1, 2])
     with c1:
         month_label = st.selectbox("📅 Payroll month", month_labels,
