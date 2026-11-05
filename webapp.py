@@ -331,6 +331,12 @@ def _ensure_storage():
     _ctx["safe_init_excel"](_p_approvals(), PAYROLL_APPROVALS_COLUMNS)
     _ctx["safe_init_excel"](_p_eom(), EOM_COLUMNS)
 
+    # Keep the EOM month-lock JSON present from first startup so it is
+    # always available in the individual data-backup download list.
+    _eom_locks_path = _p_eom_locks()
+    if not os.path.exists(_eom_locks_path):
+        _eom_month_locks_save({})
+
 
 def get_backup_filenames():
     """Return {path: backup_name} so the caller can add them to DRIVE_BACKUP_FILENAMES."""
@@ -18882,7 +18888,7 @@ elif role == "Super Admin":
             ))
         # Include persistent non-workbook data in the individual backup list.
         backup_files.extend([
-            ("📥 Payroll EOM Month Locks", os.path.join(APP_FOLDER, "payroll_eom_month_locks.json"), "payroll_eom_month_locks", "backup_payroll_eom_month_locks"),
+            ("📥 Payroll EOM Month Locks", payroll._p_eom_locks(), "payroll_eom_month_locks", "backup_payroll_eom_month_locks"),
             ("📥 Training Support Chat", TRAINING_CHAT_PATH, "training_support_chat", "backup_training_support_chat"),
         ])
 
