@@ -765,7 +765,7 @@ def _ts_write_worker():
         try:
             tmp = path + f".tmp.{os.getpid()}_{threading.get_ident()}"
             df.to_excel(tmp, index=False, engine="openpyxl")
-            os.replace(tmp, path)          # atomic replace keeps the old file safe
+            os.replace(tmp, path)
             _ctx["sync_to_drive"](path)
         except Exception as e:
             print(f"Background timesheet save failed: {e}")
@@ -784,12 +784,9 @@ def _ensure_ts_write_worker():
 
 def _ts_save():
     data = st.session_state.get("payroll_ts", {})
-
-    # Invalidate memoised calculations immediately (synchronous).
     st.session_state["_payroll_ts_version"] = (
         st.session_state.get("_payroll_ts_version", 0) + 1
     )
-
     rows = []
     for wk, by_dept in data.items():
         for dept, by_emp in by_dept.items():
