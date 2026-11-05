@@ -325,29 +325,30 @@ def _eom_month_is_locked(month_key):
 def _ensure_storage():
     if not _ctx["initialised"]:
         return
+
+    # Full column validation is expensive (pd.read_excel on 5 workbooks).
+    # Do it once per Streamlit session; thereafter only confirm the files exist.
+    cache_key = "_payroll_storage_validated"
+    if st.session_state.get(cache_key):
+        for _path in (_p_timesheets(), _p_week_states(), _p_flags(),
+                      _p_approvals(), _p_eom()):
+            if not os.path.exists(_path):
+                st.session_state.pop(cache_key, None)
+                break
+        else:
+            return
+
     _ctx["safe_init_excel"](_p_timesheets(), PAYROLL_TIMESHEETS_COLUMNS)
     _ctx["safe_init_excel"](_p_week_states(), PAYROLL_WEEK_STATES_COLUMNS)
     _ctx["safe_init_excel"](_p_flags(), PAYROLL_FLAGS_COLUMNS)
     _ctx["safe_init_excel"](_p_approvals(), PAYROLL_APPROVALS_COLUMNS)
     _ctx["safe_init_excel"](_p_eom(), EOM_COLUMNS)
 
-    # Keep the EOM month-lock JSON present from first startup so it is
-    # always available in the individual data-backup download list.
     _eom_locks_path = _p_eom_locks()
     if not os.path.exists(_eom_locks_path):
         _eom_month_locks_save({})
 
-
-def get_backup_filenames():
-    """Return {path: backup_name} so the caller can add them to DRIVE_BACKUP_FILENAMES."""
-    return {
-        _p_timesheets(): "BACKUP_payroll_timesheets.xlsx",
-        _p_week_states(): "BACKUP_payroll_week_states.xlsx",
-        _p_flags(): "BACKUP_payroll_flags.xlsx",
-        _p_approvals(): "BACKUP_payroll_approvals.xlsx",
-        _p_eom(): "BACKUP_payroll_eom.xlsx",
-    }
-
+    st.session_state[cache_key] = True
 
 # ============================================================
 # TIME HELPERS
@@ -748,7 +749,47 @@ def _ts_load():
 
 
 def _ts_save():
+_TS_WRITE_QUEUE = queue.Queue()
+_TS_WRITE_THREAD = None
+
+
+def _ts_write_worker():
+    while True:
+        try:
+            item = _TS_WRITE_QUEUE.get(timeout=60)
+        except queue.Empty:
+            continue
+        if item is None:
+            break
+        df, path = item
+        try:
+            tmp = path + f".tmp.{os.getpid()}_{threading.get_ident()}"
+            df.to_excel(tmp, index=False, engine="openpyxl")
+            os.replace(tmp, path)          # atomic replace keeps the old file safe
+            _ctx["sync_to_drive"](path)
+        except Exception as e:
+            print(f"Background timesheet save failed: {e}")
+        finally:
+            _TS_WRITE_QUEUE.task_done()
+
+
+def _ensure_ts_write_worker():
+    global _TS_WRITE_THREAD
+    if _TS_WRITE_THREAD is None or not _TS_WRITE_THREAD.is_alive():
+        _TS_WRITE_THREAD = threading.Thread(
+            target=_ts_write_worker, daemon=True, name="payroll-ts-writer"
+        )
+        _TS_WRITE_THREAD.start()
+
+
+def _ts_save():
     data = st.session_state.get("payroll_ts", {})
+
+    # Invalidate memoised calculations immediately (synchronous).
+    st.session_state["_payroll_ts_version"] = (
+        st.session_state.get("_payroll_ts_version", 0) + 1
+    )
+
     rows = []
     for wk, by_dept in data.items():
         for dept, by_emp in by_dept.items():
@@ -766,9 +807,10 @@ def _ts_save():
                         "Status": d.get("status", "Worked"),
                         "Note": d.get("note", ""),
                     })
-    pd.DataFrame(rows, columns=PAYROLL_TIMESHEETS_COLUMNS).to_excel(
-        _p_timesheets(), index=False, engine="openpyxl")
-    _ctx["sync_to_drive"](_p_timesheets())
+
+    df = pd.DataFrame(rows, columns=PAYROLL_TIMESHEETS_COLUMNS)
+    _ensure_ts_write_worker()
+    _TS_WRITE_QUEUE.put((df, _p_timesheets()))
 
 
 # ============================================================
@@ -1002,12 +1044,15 @@ def _hrp_payroll_leave_display(leave):
     return (raw_type or "Leave", bg, fg)
 
 def _payroll_leave_records_cached():
-    """Load HR leave records once per workbook version for this Streamlit session.
+    cache_key = "_payroll_leave_records_cache"
+    cached = st.session_state.get(cache_key)
+    current_render = st.session_state.get("_payroll_render_token", 0)
 
-    Payroll calculations call the date-level leave check many times. Reading and
-    parsing the HR Excel workbook for every employee/day was a major source of
-    avoidable latency. The file signature invalidates the cache after HR saves.
-    """
+    # Fast path: already verified during this render → no stat syscalls.
+    if (cached and cached.get("_verified_render") == current_render
+            and "approved_by_employee" in cached):
+        return cached["records"]
+
     try:
         signature = (
             os.path.getmtime(HR_PORTAL_LEAVE_PATH),
@@ -1016,15 +1061,12 @@ def _payroll_leave_records_cached():
     except OSError:
         signature = None
 
-    cache_key = "_payroll_leave_records_cache"
-    cached = st.session_state.get(cache_key)
     if (cached and cached.get("signature") == signature
             and "approved_by_employee" in cached):
+        cached["_verified_render"] = current_render
         return cached["records"]
 
     records = _hrp_load_leave_records()
-    # Build an employee-indexed, date-normalised lookup once. The previous
-    # implementation scanned every HR leave record for every employee/day cell.
     approved_by_employee = {}
     for leave in records:
         if str(leave.get("status", "")).strip().casefold() != "approved":
@@ -1041,11 +1083,13 @@ def _payroll_leave_records_cached():
             last = parsed.date() if pd.notna(parsed) else None
         if first and last:
             approved_by_employee.setdefault(eid, []).append((first, last, leave))
+
     st.session_state[cache_key] = {
         "signature": signature,
         "records": records,
         "approved_by_employee": approved_by_employee,
         "date_lookup": {},
+        "_verified_render": current_render,
     }
     return records
 
@@ -1165,7 +1209,23 @@ def _calc_row(emp, week_key, dept):
         "working": working, "contracted": contracted,
         "week_extra": week_extra, "check_ok": check_ok,
     }
+def _calc_row_cached(emp, week_key, dept):
+    """Memoised _calc_row. Invalidated when timesheet data or leave data change."""
+    ts_version = st.session_state.get("_payroll_ts_version", 0)
+    leave_version = st.session_state.get(
+        "_payroll_leave_records_cache", {}
+    ).get("signature")
+    version = (ts_version, leave_version)
 
+    cache = st.session_state.get("_payroll_calc_cache")
+    if not cache or cache.get("version") != version:
+        cache = {"version": version, "rows": {}}
+        st.session_state["_payroll_calc_cache"] = cache
+
+    key = (str(emp.get("emp_id", "")), week_key, dept)
+    if key not in cache["rows"]:
+        cache["rows"][key] = _calc_row(emp, week_key, dept)
+    return cache["rows"][key]
 
 def _calc_balance(emp, week_key, dept, current_calc=None):
     """Return this week's difference and month-to-date balance.
@@ -1186,11 +1246,11 @@ def _calc_balance(emp, week_key, dept, current_calc=None):
         # Only weeks before the selected week in the configured order count.
         if wk == week_key:
             break
-        prior_net = _calc_row(emp, wk, dept).get("week_extra")
+        prior_net = _calc_row_cached(emp, wk, dept).get("week_extra")
         if prior_net is not None:
             prev += prior_net
 
-    current_calc = current_calc if current_calc is not None else _calc_row(emp, week_key, dept)
+    current_calc = current_calc if current_calc is not None else _calc_row_cached(emp, week_key, dept)
     week_net = current_calc.get("week_extra")
     if week_net is None and prev == 0:
         return {"prev": 0, "week_net": None, "balance": None}
@@ -1238,6 +1298,9 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
     _ensure_storage()
     _ts(); _states(); _flags(); _approvals()
+    st.session_state["_payroll_render_token"] = (
+        st.session_state.get("_payroll_render_token", 0) + 1
+    )
 
     full_name = str(current_user_info.get("full_name")
                     or current_user_info.get("username") or "User").strip()
@@ -1526,7 +1589,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
             eid = emp.get("emp_id", "")
             ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
             emp_flags = _get_flags(week_key, dept, eid)
-            calc = _calc_row(emp, week_key, dept)
+            calc = _calc_row_cached(emp, week_key, dept)
             bal  = _calc_balance(emp, week_key, dept, current_calc=calc)
 
             row = st.columns(col_widths)
@@ -1897,7 +1960,7 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
         tot_days = tot_working = tot_contract = tot_extra = tot_balance = 0
         checks = 0
         for emp in employees:
-            c = _calc_row(emp, week_key, dept)
+            c = _calc_row_cached(emp, week_key, dept)
             b = _calc_balance(emp, week_key, dept)
             tot_days += c["days_worked"]
             tot_working += c["working"]
@@ -1930,8 +1993,10 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
 
         rows = []
         for emp in employees:
-            c = _calc_row(emp, week_key, dept)
+            c = _calc_row_cached(emp, week_key, dept)
             b = _calc_balance(emp, week_key, dept)
+
+            # Compare only against the contract for days with recorded work.
 
             we = b["week_net"]
             we_str = "—" if we is None else (("+" if we >= 0 else "") + _m2t(we))
@@ -2429,7 +2494,7 @@ def _build_week_excel(week_key, dept):
     for emp in employees:
         eid = emp.get("emp_id", "")
         ts_days = _ts().get(week_key, {}).get(dept, {}).get(eid) or [None] * 5
-        calc = _calc_row(emp, week_key, dept)
+        calc = _calc_row_cached(emp, week_key, dept)
         bal = _calc_balance(emp, week_key, dept)
         emp_flags = _get_flags(week_key, dept, eid)
 
@@ -3376,6 +3441,9 @@ def render_payroll_eom(current_user_info, mode="payroll"):
         return
     _ensure_storage()
     _ts()
+    st.session_state["_payroll_render_token"] = (
+        st.session_state.get("_payroll_render_token", 0) + 1
+    )
     st.subheader("📊 End-of-Month Payroll Summary")
     st.caption("This view follows the department payroll sheet: each employee has a five-week block and a Total row. Weekly Hours, Travel and leave are transferred from the timesheet. Director-approved Addition/Deduction requests and Store Department deductions (including unreturned employee holdings) are automatically totalled in the employee's selected payroll month and week; ADD and DED cannot be entered manually.")
 
