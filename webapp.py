@@ -21,6 +21,7 @@ import time
 import textwrap
 import zipfile
 import hashlib
+import copy
 import hmac
 import secrets
 import html
@@ -760,8 +761,32 @@ def _ts_write_worker():
             continue
         if item is None:
             break
-        df, path = item
+        payload, path = item
         try:
+            # Build the workbook rows off the Streamlit request thread. The UI
+            # only snapshots the current data and queues it, so Save Day does
+            # not spend time flattening every historical week on every save.
+            if isinstance(payload, dict):
+                rows = []
+                for wk, by_dept in payload.items():
+                    for dept, by_emp in by_dept.items():
+                        for eid, days in by_emp.items():
+                            for i, day in enumerate(days):
+                                if day is None:
+                                    continue
+                                rows.append({
+                                    "Week_Key": wk, "Department": dept,
+                                    "Employee_ID": eid, "Day_Index": i,
+                                    "Time_In": day.get("in", ""),
+                                    "Time_Out": day.get("out", ""),
+                                    "Travel": _m2t(_duration_minutes(day.get("travel", "0:00")) or 0),
+                                    "Time_Away": _m2t(_duration_minutes(day.get("away", "0:00")) or 0),
+                                    "Status": day.get("status", "Worked"),
+                                    "Note": day.get("note", ""),
+                                })
+                df = pd.DataFrame(rows, columns=PAYROLL_TIMESHEETS_COLUMNS)
+            else:
+                df = payload
             tmp = path + f".tmp.{os.getpid()}_{threading.get_ident()}"
             df.to_excel(tmp, index=False, engine="openpyxl")
             os.replace(tmp, path)
@@ -782,31 +807,17 @@ def _ensure_ts_write_worker():
 
 
 def _ts_save():
+    """Queue a consistent snapshot; expensive Excel preparation stays off-thread."""
     data = st.session_state.get("payroll_ts", {})
     st.session_state["_payroll_ts_version"] = (
         st.session_state.get("_payroll_ts_version", 0) + 1
     )
-    rows = []
-    for wk, by_dept in data.items():
-        for dept, by_emp in by_dept.items():
-            for eid, days in by_emp.items():
-                for i, d in enumerate(days):
-                    if d is None:
-                        continue
-                    rows.append({
-                        "Week_Key": wk, "Department": dept,
-                        "Employee_ID": eid, "Day_Index": i,
-                        "Time_In": d.get("in", ""),
-                        "Time_Out": d.get("out", ""),
-                        "Travel": _m2t(_duration_minutes(d.get("travel", "0:00")) or 0),
-                        "Time_Away": _m2t(_duration_minutes(d.get("away", "0:00")) or 0),
-                        "Status": d.get("status", "Worked"),
-                        "Note": d.get("note", ""),
-                    })
-
-    df = pd.DataFrame(rows, columns=PAYROLL_TIMESHEETS_COLUMNS)
+    # Deep-copy because the live session data may be edited again before the
+    # background worker has finished writing this version.
+    snapshot = copy.deepcopy(data)
     _ensure_ts_write_worker()
-    _TS_WRITE_QUEUE.put((df, _p_timesheets()))
+    _TS_WRITE_QUEUE.put((snapshot, _p_timesheets()))
+
 # ============================================================
 # WEEK STATES
 # ============================================================
@@ -1231,13 +1242,20 @@ def _calc_balance(emp, week_key, dept, current_calc=None):
     if not week_obj:
         return {"prev": 0, "week_net": None, "balance": None}
 
+    # Reuse the month-to-date balance on every rerun, including the normal
+    # render path which supplies an already-cached current-week calculation.
+    cache = st.session_state.get("_payroll_calc_cache", {})
+    balance_key = (str(emp.get("emp_id", "")), week_key, dept)
+    cached_balances = cache.setdefault("balances", {})
+    if balance_key in cached_balances:
+        return dict(cached_balances[balance_key])
+
     month_key = week_obj.get("month")
     prev = 0
     for wk in PAYROLL_WEEK_ORDER:
         prior_week = PAYROLL_WEEKS.get(wk, {})
         if prior_week.get("month") != month_key:
             continue
-        # Only weeks before the selected week in the configured order count.
         if wk == week_key:
             break
         prior_net = _calc_row_cached(emp, wk, dept).get("week_extra")
@@ -1247,10 +1265,13 @@ def _calc_balance(emp, week_key, dept, current_calc=None):
     current_calc = current_calc if current_calc is not None else _calc_row_cached(emp, week_key, dept)
     week_net = current_calc.get("week_extra")
     if week_net is None and prev == 0:
-        return {"prev": 0, "week_net": None, "balance": None}
-    if week_net is None:
-        return {"prev": prev, "week_net": None, "balance": prev}
-    return {"prev": prev, "week_net": week_net, "balance": prev + week_net}
+        result = {"prev": 0, "week_net": None, "balance": None}
+    elif week_net is None:
+        result = {"prev": prev, "week_net": None, "balance": prev}
+    else:
+        result = {"prev": prev, "week_net": week_net, "balance": prev + week_net}
+    cache.setdefault("balances", {})[balance_key] = dict(result)
+    return result
 
 
 # ============================================================
@@ -3716,20 +3737,9 @@ def render_payroll_eom(current_user_info, mode="payroll"):
 
 
 
-def get_backup_filenames():
-    """Return payroll workbook paths mapped to their Google Drive backup names."""
-    return {
-        _p_timesheets(): "BACKUP_payroll_timesheets.xlsx",
-        _p_week_states(): "BACKUP_payroll_week_states.xlsx",
-        _p_flags(): "BACKUP_payroll_flags.xlsx",
-        _p_approvals(): "BACKUP_payroll_approvals.xlsx",
-    }
-
-
 # Payroll Timesheet is embedded in this file so Streamlit Cloud does not need
 # a separate payroll_module.py alongside webapp.py.
 import types as _payroll_types
-
 payroll = _payroll_types.SimpleNamespace(
     init_payroll=init_payroll,
     get_backup_filenames=get_backup_filenames,
@@ -3738,12 +3748,6 @@ payroll = _payroll_types.SimpleNamespace(
     get_payroll_user_db_column=get_payroll_user_db_column,
     render_payroll_timesheet=render_payroll_timesheet,
     render_payroll_eom=render_payroll_eom,
-
-    # Expose payroll column definitions for the live-launch reset.
-    PAYROLL_TIMESHEETS_COLUMNS=PAYROLL_TIMESHEETS_COLUMNS,
-    PAYROLL_WEEK_STATES_COLUMNS=PAYROLL_WEEK_STATES_COLUMNS,
-    PAYROLL_FLAGS_COLUMNS=PAYROLL_FLAGS_COLUMNS,
-    PAYROLL_APPROVALS_COLUMNS=PAYROLL_APPROVALS_COLUMNS,
 )
 
 st.markdown("""
