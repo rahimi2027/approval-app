@@ -3716,6 +3716,16 @@ def render_payroll_eom(current_user_info, mode="payroll"):
 
 
 
+def get_backup_filenames():
+    """Return payroll workbook paths mapped to their Google Drive backup names."""
+    return {
+        _p_timesheets(): "BACKUP_payroll_timesheets.xlsx",
+        _p_week_states(): "BACKUP_payroll_week_states.xlsx",
+        _p_flags(): "BACKUP_payroll_flags.xlsx",
+        _p_approvals(): "BACKUP_payroll_approvals.xlsx",
+    }
+
+
 # Payroll Timesheet is embedded in this file so Streamlit Cloud does not need
 # a separate payroll_module.py alongside webapp.py.
 import types as _payroll_types
