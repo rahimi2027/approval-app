@@ -291,6 +291,16 @@ def _p_eom():         return _payroll_file_path("payroll_eom.xlsx")
 def _p_eom_locks():   return _payroll_file_path("payroll_eom_month_locks.json")
 
 
+def get_backup_filenames():
+    """Return payroll workbook paths mapped to their Drive backup names."""
+    return {
+        _p_timesheets(): "BACKUP_payroll_timesheets.xlsx",
+        _p_week_states(): "BACKUP_payroll_week_states.xlsx",
+        _p_flags(): "BACKUP_payroll_flags.xlsx",
+        _p_approvals(): "BACKUP_payroll_approvals.xlsx",
+    }
+
+
 def _eom_month_locks_load():
     """Load persistent EOM month approval/lock records."""
     path = _p_eom_locks()
@@ -3742,6 +3752,10 @@ def render_payroll_eom(current_user_info, mode="payroll"):
 import types as _payroll_types
 payroll = _payroll_types.SimpleNamespace(
     init_payroll=init_payroll,
+    PAYROLL_TIMESHEETS_COLUMNS=PAYROLL_TIMESHEETS_COLUMNS,
+    PAYROLL_WEEK_STATES_COLUMNS=PAYROLL_WEEK_STATES_COLUMNS,
+    PAYROLL_FLAGS_COLUMNS=PAYROLL_FLAGS_COLUMNS,
+    PAYROLL_APPROVALS_COLUMNS=PAYROLL_APPROVALS_COLUMNS,
     get_backup_filenames=get_backup_filenames,
     get_payroll_permission_defaults=get_payroll_permission_defaults,
     get_payroll_permission_labels=get_payroll_permission_labels,
