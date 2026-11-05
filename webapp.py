@@ -18888,7 +18888,7 @@ elif role == "Super Admin":
             ))
         # Include persistent non-workbook data in the individual backup list.
         backup_files.extend([
-            ("📥 Payroll EOM Month Locks", payroll._p_eom_locks(), "payroll_eom_month_locks", "backup_payroll_eom_month_locks"),
+            ("📥 Payroll EOM Month Locks", os.path.join(APP_FOLDER, "payroll_eom_month_locks.json"), "payroll_eom_month_locks", "backup_payroll_eom_month_locks"),
             ("📥 Training Support Chat", TRAINING_CHAT_PATH, "training_support_chat", "backup_training_support_chat"),
         ])
 
