@@ -1689,38 +1689,29 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 check_html = "<span style='background:#fee2e2;color:#991b1b;padding:3px 7px;border-radius:12px;'>⚠ Flagged</span>"
             row[16].markdown(f"<div style='text-align:center;'>{check_html}</div>", unsafe_allow_html=True)
 
-            note_items = []
+            leave_by_date = {}
+            other_note_items = []
             for note_day, day_entry in enumerate(ts_days):
                 date_value = week_obj["dates"][note_day]
-                date_label = _ordinal_day(date_value)
-                # HR-entered/approved leave has its own description field in
-                # the HR leave workbook. Show it even when no timesheet row
-                # exists for that locked day.
                 hr_leave_for_note = _hrp_payroll_leave_for_date(eid, date_value) if valid_month_dates[note_day] else None
                 if hr_leave_for_note:
-                    leave_type_note = _hrp_payroll_leave_label(hr_leave_for_note)
-                    leave_description = str(hr_leave_for_note.get("notes", "") or "").strip()
-                    if leave_description:
-                        item = f"{date_label} {leave_type_note} — {leave_description}"
-                    else:
-                        item = f"{date_label} {leave_type_note}"
-                    if item not in note_items:
-                        note_items.append(item)
+                    raw_type = hr_leave_for_note.get("type", "Leave")
+                    leave_by_date[date_value] = _payroll_leave_comment_type(
+                        raw_type, _hrp_payroll_leave_is_half_day(hr_leave_for_note)
+                    )
                 if not day_entry:
                     continue
                 note_text = str(day_entry.get('note', '') or '').strip()
                 status_text = str(day_entry.get('status', '') or '').strip()
-                if status_text and status_text not in ('Worked', 'Late In', 'Early Out'):
-                    display_status = 'Half Day Holiday' if status_text == 'HD Holiday' else status_text
-                    item = f"{date_label} {display_status}"
-                    if note_text:
-                        item += f" — {note_text}"
-                    if item not in note_items:
-                        note_items.append(item)
-                elif note_text:
-                    item = f"{date_label} {note_text}"
-                    if item not in note_items:
-                        note_items.append(item)
+                if not hr_leave_for_note and status_text and status_text not in ('Worked', 'Late In', 'Early Out'):
+                    raw_status = 'Half Day Holiday' if status_text == 'HD Holiday' else status_text
+                    leave_by_date[date_value] = _payroll_leave_comment_type(raw_status)
+                if note_text:
+                    other_note_items.append(f"{_ordinal_day(date_value)} {note_text}")
+            note_items = _format_grouped_leave_comments(leave_by_date)
+            for item in other_note_items:
+                if item not in note_items:
+                    note_items.append(item)
             notes_text = " / ".join(note_items) if note_items else "—"
             notes_html = html.escape(notes_text, quote=True)
             row[17].markdown(f"<div style='font-size:11px;white-space:normal;overflow-wrap:anywhere;'>{notes_html}</div>", unsafe_allow_html=True)
@@ -2657,6 +2648,63 @@ def _ordinal_day(iso):
     return f"{day}{suffix}"
 
 
+# One shared formatter keeps leave wording identical in Timesheet Notes and EOM Comments.
+def _payroll_leave_comment_type(raw_type, half_day=False):
+    key = re.sub(r"\s+", " ", str(raw_type or "Leave").strip()).casefold()
+    if half_day or key == "half day holiday":
+        return "Half Day Holiday"
+    aliases = {
+        "full day holiday": "Annual Leave", "annual leave": "Annual Leave",
+        "holiday": "Annual Leave", "unpaid holiday": "Unpaid Leave",
+        "unpaid absence": "Unpaid Leave", "unpaid leave": "Unpaid Leave",
+        "maternity leave": "Maternity Leave", "maternity": "Maternity Leave", "lay-off": "Lay-Off",
+        "lay off": "Lay-Off", "sick": "Sick Leave", "sick leave": "Sick Leave",
+        "paternity leave": "Paternity Leave", "family / emergency leave": "Family / Emergency Leave",
+        "other absence": "Other Absence", "bank holiday": "Bank Holiday",
+        "college (apprenticeship)": "College", "training course": "Training Course",
+    }
+    return aliases.get(key, str(raw_type or "Leave").strip() or "Leave")
+
+
+def _format_grouped_leave_comments(leave_by_date):
+    """Format {date: leave label} as compact, type-safe weekday groups."""
+    by_type = {}
+    for raw_day, raw_label in (leave_by_date or {}).items():
+        try:
+            day = raw_day if isinstance(raw_day, date) else pd.to_datetime(raw_day).date()
+        except Exception:
+            continue
+        if day.weekday() >= 5 or not raw_label:
+            continue
+        by_type.setdefault(str(raw_label), set()).add(day)
+
+    output = []
+    for label, dates in by_type.items():
+        ordered = sorted(dates)
+        # A complete Monday-Friday working week gets the shortest possible label.
+        if len(ordered) == 5 and ordered[0].weekday() == 0 and ordered[-1].weekday() == 4 and all(
+            ordered[i] == ordered[0] + timedelta(days=i) for i in range(5)
+        ):
+            output.append(f"All Week {label}")
+            continue
+
+        runs = []
+        for day in ordered:
+            if not runs or day != runs[-1][-1] + timedelta(days=1):
+                runs.append([day])
+            else:
+                runs[-1].append(day)
+        for run in runs:
+            if len(run) == 1:
+                dates_text = _ordinal_day(run[0].isoformat())
+            elif len(run) == 2:
+                dates_text = f"{_ordinal_day(run[0].isoformat())} & {_ordinal_day(run[1].isoformat())}"
+            else:
+                dates_text = f"{_ordinal_day(run[0].isoformat())}–{_ordinal_day(run[-1].isoformat())}"
+            output.append(f"{dates_text} {label}")
+    return output
+
+
 def _long_date(iso):
     d = datetime.fromisoformat(iso)
     return d.strftime("%A, %d %B %Y")
@@ -2793,16 +2841,15 @@ def _eom_status_totals(week_key, dept, eid, month_key):
             if leave_date not in counted_dates:
                 counts[target_key] += amount
                 counted_dates.add(leave_date)
-    # HR leave type and date must always appear in EOM Comments, even when
-    # HR did not enter an optional note. Keep the wording aligned with the
-    # timesheet comment column and append the optional HR note when present.
-    # Allocate each dated comment only to the week and month containing it.
+    # Build the same compact leave wording used by the Timesheet Notes.
+    # Comments are scoped to this payroll week and month; HR optional notes are
+    # deliberately omitted so the leave summary stays short and consistent.
+    leave_by_date = {}
     for leave in leave_records:
         if str(leave.get("employee_id", "")).strip().casefold() != employee_id:
             continue
         if str(leave.get("status", "")).strip().casefold() != "approved":
             continue
-        leave_note = str(leave.get("notes", "") or "").strip()
         try:
             first = leave.get("date_from") if isinstance(leave.get("date_from"), date) else pd.to_datetime(leave.get("date_from")).date()
             last = leave.get("date_to") if isinstance(leave.get("date_to"), date) else pd.to_datetime(leave.get("date_to")).date()
@@ -2811,16 +2858,29 @@ def _eom_status_totals(week_key, dept, eid, month_key):
         if last < first:
             continue
         current = first
-        leave_type_label = str(leave.get("type", "Leave") or "Leave").strip()
+        label = _payroll_leave_comment_type(leave.get("type", "Leave"), _hrp_payroll_leave_is_half_day(leave))
         while current <= last:
             if current.weekday() < 5 and current in week_dates and current.year == y and current.month == m:
-                label = _ordinal_day(current.isoformat())
-                comment = f"{label} {leave_type_label}"
-                if leave_note:
-                    comment += f" — {leave_note}"
-                if comment not in counts["Comments"]:
-                    counts["Comments"].append(comment)
+                leave_by_date[current] = label
             current += timedelta(days=1)
+
+    # Include legacy timesheet leave statuses only where HR has not supplied
+    # an approved leave record for that date.
+    for i, entry in enumerate(days):
+        if not isinstance(entry, dict) or i >= len(week_obj.get("dates", [])):
+            continue
+        try:
+            current = date.fromisoformat(week_obj["dates"][i])
+        except Exception:
+            continue
+        if current.year != y or current.month != m or current in leave_by_date:
+            continue
+        status = str(entry.get("status", "")).strip()
+        if status and status not in {"Worked", "Late In", "Early Out"}:
+            leave_by_date[current] = _payroll_leave_comment_type(
+                "Half Day Holiday" if status == "HD Holiday" else status
+            )
+    counts["Comments"] = _format_grouped_leave_comments(leave_by_date)
     return counts
 
 
