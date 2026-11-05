@@ -748,7 +748,6 @@ def _ts_load():
     st.session_state["payroll_ts"] = data
 
 
-def _ts_save():
 _TS_WRITE_QUEUE = queue.Queue()
 _TS_WRITE_THREAD = None
 
@@ -808,8 +807,6 @@ def _ts_save():
     df = pd.DataFrame(rows, columns=PAYROLL_TIMESHEETS_COLUMNS)
     _ensure_ts_write_worker()
     _TS_WRITE_QUEUE.put((df, _p_timesheets()))
-
-
 # ============================================================
 # WEEK STATES
 # ============================================================
