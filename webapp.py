@@ -968,6 +968,7 @@ HRP_PAYROLL_LEAVE_DISPLAY = {
     "other absence": ("Other Absence", "#D9E1F2", "#222222"),
     "college (apprenticeship)": ("College", "#00B7E5", "#111111"),
     "training course": ("Training Course", "#DDEBF7", "#222222"),
+    "lay-off": ("Lay-Off", "#FBE2D5", "#222222"),
 }
 
 # Stable fallback colours cover any additional leave types configured by HR.
@@ -3655,7 +3656,8 @@ HR_EMPLOYEE_COLUMNS = [
 HR_PORTAL_LEAVE_COLUMNS = [
     "Leave ID", "Employee ID", "Date From", "Date To", "Leave Type", "Days",
     "Status", "Request Source", "Request Reference", "Notes", "Recorded By", "Recorded At",
-    "Entry Source", "Requested By", "Requested At", "Approved By", "Approved At", "Rejection Reason"
+    "Entry Source", "Requested By", "Requested At", "Approved By", "Approved At", "Rejection Reason",
+    "Work Start Time", "Work End Time"
 ]
 
 HR_LEAVE_COLUMNS = [
@@ -5747,7 +5749,7 @@ def _hrp_normalize_work_type(department, work_type="", job_title=""):
     alias = aliases.get(title.casefold())
     return alias if alias in options else "Office Staff"
 
-HR_PORTAL_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday", "Sick Leave", "Family / Emergency Leave", "Unpaid Holiday", "Unpaid Absence", "Maternity Leave", "Paternity Leave", "Other Absence", "College (Apprenticeship)", "Training Course"]
+HR_PORTAL_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday", "Sick Leave", "Family / Emergency Leave", "Unpaid Holiday", "Unpaid Absence", "Maternity Leave", "Paternity Leave", "Other Absence", "College (Apprenticeship)", "Training Course", "Lay-Off"]
 HR_PORTAL_HOLIDAY_LEAVE_TYPES = ["Full Day Holiday", "Half Day Holiday"]
 
 def _hrp_init_storage():
@@ -5915,6 +5917,8 @@ def _hrp_load_leave_records():
                 "approved_by": str(r.get("Approved By", "")).strip(),
                 "approved_at": str(r.get("Approved At", "")).strip(),
                 "rejection_reason": str(r.get("Rejection Reason", "")).strip(),
+                "work_start_time": str(r.get("Work Start Time", "")).strip(),
+                "work_end_time": str(r.get("Work End Time", "")).strip(),
             })
         st.session_state.hrp_next_leave_number = max_no + 1
         return records
@@ -5937,6 +5941,7 @@ def _hrp_save_leave_records(records=None, sync_drive=True):
             "Entry Source": r.get("entry_source", "HR Direct"), "Requested By": r.get("requested_by", ""),
             "Requested At": r.get("requested_at", ""), "Approved By": r.get("approved_by", ""),
             "Approved At": r.get("approved_at", ""), "Rejection Reason": r.get("rejection_reason", ""),
+            "Work Start Time": r.get("work_start_time", ""), "Work End Time": r.get("work_end_time", ""),
         })
     df = pd.DataFrame(rows, columns=HR_PORTAL_LEAVE_COLUMNS)
     parent = os.path.dirname(os.path.abspath(HR_PORTAL_LEAVE_PATH))
@@ -8617,6 +8622,21 @@ def render_hr_portal(current_user_info=None):
             with col2:
                 leave_end = st.date_input("End Date", value=date.today(), key=f"hrp_leave_end_{form_version}")
                 half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key=f"hrp_half_day_{form_version}")
+            half_day_work_start = ""
+            half_day_work_end = ""
+            if leave_type == "Half Day Holiday":
+                st.caption("Enter the hours the employee is expected to work on this half-day holiday.")
+                ht1, ht2 = st.columns(2)
+                employee_start = str(leave_employee.get("work_start_time", "08:00") or "08:00")[:5]
+                try:
+                    default_work_start = datetime.strptime(employee_start, "%H:%M").time()
+                except ValueError:
+                    default_work_start = datetime.strptime("08:00", "%H:%M").time()
+                default_work_end = datetime.strptime("12:00", "%H:%M").time()
+                with ht1:
+                    half_day_work_start = st.time_input("Half-day work start time", value=default_work_start, key=f"hrp_half_start_{form_version}").strftime("%H:%M")
+                with ht2:
+                    half_day_work_end = st.time_input("Half-day work end time", value=default_work_end, key=f"hrp_half_end_{form_version}").strftime("%H:%M")
             request_source = st.selectbox("Request / Notification Source", ["Email", "Phone Call", "In Person", "Other"], key=f"hrp_request_source_{form_version}")
             request_reference = st.text_input("Email / Call Reference", placeholder="Optional email subject, date, or reference", key=f"hrp_request_reference_{form_version}")
             notes = st.text_area("Notes / Reason", placeholder="e.g. holiday requested by email; sickness reported by phone; family emergency", key=f"hrp_leave_notes_{form_version}")
@@ -8636,6 +8656,8 @@ def render_hr_portal(current_user_info=None):
                         st.error(f"Leave cannot be booked on company non-working dates: {details}")
                     elif calculated_days <= 0:
                         st.error("The selected dates do not contain any working days.")
+                    elif leave_type == "Half Day Holiday" and (not half_day_work_start or not half_day_work_end or half_day_work_end <= half_day_work_start):
+                        st.error("Please enter a valid half-day work time. The end time must be after the start time.")
                     else:
                         persistent_leave_records = _hrp_load_leave_records()
                         st.session_state.hrp_leave_records = persistent_leave_records
@@ -8663,6 +8685,8 @@ def render_hr_portal(current_user_info=None):
                                 "approved_by": (current_user_info or {}).get("full_name", "HR") if isinstance(current_user_info, dict) else "HR",
                                 "approved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                 "rejection_reason": "",
+                                "work_start_time": half_day_work_start,
+                                "work_end_time": half_day_work_end,
                             }
                             with _HR_PORTAL_LEAVE_LOCK:
                                 latest = _hrp_load_leave_records()
@@ -8736,7 +8760,8 @@ def render_hr_portal(current_user_info=None):
                     history_data = [{
                         "Leave ID": r["leave_id"], "Date From": r["date_from"],
                         "Date To": r["date_to"], "Type": r["type"], "Days": r["days"],
-                        "Status": r["status"], "Notes": r["notes"]
+                        "Status": r["status"], "Work Start": r.get("work_start_time", ""),
+                        "Work End": r.get("work_end_time", ""), "Notes": r["notes"]
                     } for r in employee_leave]
                     df_history = pd.DataFrame(history_data)
                     st.dataframe(df_history, width="stretch", hide_index=True)
@@ -8769,6 +8794,26 @@ def render_hr_portal(current_user_info=None):
                                 edit_leave_end = st.date_input("End Date", value=selected_leave["date_to"])
                                 edit_leave_reference = st.text_input("Email / Call Reference", value=selected_leave.get("request_reference", ""))
                                 edit_leave_notes = st.text_area("Notes / Reason", value=selected_leave.get("notes", ""))
+                            edit_work_start = str(selected_leave.get("work_start_time", "") or "08:00")
+                            edit_work_end = str(selected_leave.get("work_end_time", "") or "12:00")
+                            if edit_leave_type == "Half Day Holiday":
+                                st.caption("Half-day working hours")
+                                et1, et2 = st.columns(2)
+                                try:
+                                    edit_start_default = datetime.strptime(edit_work_start[:5], "%H:%M").time()
+                                except ValueError:
+                                    edit_start_default = datetime.strptime("08:00", "%H:%M").time()
+                                try:
+                                    edit_end_default = datetime.strptime(edit_work_end[:5], "%H:%M").time()
+                                except ValueError:
+                                    edit_end_default = datetime.strptime("12:00", "%H:%M").time()
+                                with et1:
+                                    edit_work_start = st.time_input("Work start time", value=edit_start_default, key=f"hrp_edit_half_start_{selected_leave_id}").strftime("%H:%M")
+                                with et2:
+                                    edit_work_end = st.time_input("Work end time", value=edit_end_default, key=f"hrp_edit_half_end_{selected_leave_id}").strftime("%H:%M")
+                            else:
+                                edit_work_start = ""
+                                edit_work_end = ""
                             edit_half_day = edit_leave_type == "Half Day Holiday"
                             edit_days = _hrp_calculate_leave_days(edit_leave_type, edit_leave_start, edit_leave_end, edit_half_day)
                             st.caption(f"Calculated days: {edit_days:.1f}. HR edits remain Approved automatically.")
@@ -8780,12 +8825,15 @@ def render_hr_portal(current_user_info=None):
                                     st.stop()
                                 if edit_leave_end < edit_leave_start or edit_days <= 0:
                                     st.error("Please select a valid working-day date range.")
+                                elif edit_leave_type == "Half Day Holiday" and edit_work_end <= edit_work_start:
+                                    st.error("Please enter a valid half-day work time. The end time must be after the start time.")
                                 else:
                                     old_leave = dict(selected_leave)
                                     selected_leave.update({
                                         "date_from": edit_leave_start, "date_to": edit_leave_end, "type": edit_leave_type,
                                         "days": edit_days, "status": "Approved", "request_source": edit_leave_source,
                                         "request_reference": edit_leave_reference.strip(), "notes": edit_leave_notes.strip(),
+                                        "work_start_time": edit_work_start, "work_end_time": edit_work_end,
                                     })
                                     _hrp_save_leave_records()
                                     log_action("HR_LEAVE_EDITED", selected_leave_id, old_data=old_leave, new_data=dict(selected_leave))
@@ -8940,6 +8988,21 @@ def render_department_manager_leave_request(current_user_info=None):
         with c2:
             leave_end = st.date_input("End Date", value=date.today(), key=f"dept_leave_end_{key_suffix}_{form_version}")
             half_day = st.checkbox("Half Day", disabled=leave_type != "Full Day Holiday", key=f"dept_leave_half_{key_suffix}_{form_version}")
+        half_day_work_start = ""
+        half_day_work_end = ""
+        if leave_type == "Half Day Holiday":
+            st.caption("Enter the hours the employee is expected to work on this half-day holiday.")
+            ht1, ht2 = st.columns(2)
+            employee_start = str(selected_employee.get("work_start_time", "08:00") or "08:00")[:5]
+            try:
+                default_work_start = datetime.strptime(employee_start, "%H:%M").time()
+            except ValueError:
+                default_work_start = datetime.strptime("08:00", "%H:%M").time()
+            default_work_end = datetime.strptime("12:00", "%H:%M").time()
+            with ht1:
+                half_day_work_start = st.time_input("Half-day work start time", value=default_work_start, key=f"dept_half_start_{key_suffix}_{form_version}").strftime("%H:%M")
+            with ht2:
+                half_day_work_end = st.time_input("Half-day work end time", value=default_work_end, key=f"dept_half_end_{key_suffix}_{form_version}").strftime("%H:%M")
         request_reference = st.text_input("Request Reference", placeholder="Optional email, call, or internal reference", key=f"dept_leave_ref_{key_suffix}_{form_version}")
         notes = st.text_area("Notes / Reason", placeholder="Reason or details supplied by the employee", key=f"dept_leave_notes_{key_suffix}_{form_version}")
         locked_leave_range = bool(leave_end >= leave_start and _locked_payroll_months_for_date_range(leave_start, leave_end))
@@ -8962,6 +9025,9 @@ def render_department_manager_leave_request(current_user_info=None):
         days = _hrp_calculate_leave_days(leave_type, leave_start, leave_end, half_day)
         if days <= 0:
             st.error("The selected dates do not contain any working days.")
+            return
+        if leave_type == "Half Day Holiday" and (not half_day_work_start or not half_day_work_end or half_day_work_end <= half_day_work_start):
+            st.error("Please enter a valid half-day work time. The end time must be after the start time.")
             return
         duplicate = next((
             r for r in st.session_state.hrp_leave_records
@@ -8994,6 +9060,8 @@ def render_department_manager_leave_request(current_user_info=None):
             "approved_by": "",
             "approved_at": "",
             "rejection_reason": "",
+            "work_start_time": half_day_work_start,
+            "work_end_time": half_day_work_end,
         }
         st.session_state.hrp_leave_records.append(record)
         _hrp_save_leave_records()
@@ -9129,6 +9197,8 @@ def render_hr_leave_approvals(key_prefix="hr_leave_approvals"):
                         st.write(f"**Dates:** {record['date_from']} → {record['date_to']}")
                         st.write(f"**Leave Type:** {record['type']}")
                         st.write(f"**Days:** {record['days']:.1f}")
+                        if record.get("work_start_time") or record.get("work_end_time"):
+                            st.write(f"**Half-day work time:** {record.get('work_start_time', '')} – {record.get('work_end_time', '')}")
                     with c3:
                         st.write(f"**Requested By:** {record.get('requested_by', '')}")
                         st.write(f"**Requested At:** {record.get('requested_at', '')}")
