@@ -1066,6 +1066,11 @@ def _hrp_payroll_leave_label(leave):
     key = re.sub(r"\s+", " ", str(leave.get("type", "")).strip()).casefold()
     return _hrp_payroll_leave_display(leave)[0]
 
+
+def _hrp_payroll_leave_is_half_day(leave):
+    """Half-day HR leave remains visible but must allow timesheet clock entry."""
+    return re.sub(r"\s+", " ", str((leave or {}).get("type", "")).strip()).casefold() == "half day holiday"
+
 def _hrp_payroll_leave_style(leave):
     key = re.sub(r"\s+", " ", str((leave or {}).get("type", "")).strip()).casefold()
     _, bg, fg = _hrp_payroll_leave_display(leave)
@@ -1100,9 +1105,16 @@ def _calc_row(emp, week_key, dept):
     day_equivalents = 0.0
     week_dates = PAYROLL_WEEKS.get(week_key, {}).get("dates", [])
     for day_index, d in enumerate(days):
-        if day_index < len(week_dates) and _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_dates[day_index]):
-            # Approved HR leave takes priority over any legacy clock entries.
+        hr_leave_for_day = (_hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_dates[day_index])
+                            if day_index < len(week_dates) else None)
+        hr_half_day = _hrp_payroll_leave_is_half_day(hr_leave_for_day)
+        if hr_leave_for_day and not hr_half_day:
+            # Approved full-day HR leave takes priority over any legacy clock entries.
             continue
+        if hr_half_day:
+            # HR determines the half-day entitlement; the timesheet user supplies
+            # actual clock times. Keep the Days figure at exactly 0.5.
+            day_equivalents += 0.5
         if not d:
             continue
         status = str(d.get("status", "Worked")).strip() or "Worked"
@@ -1117,7 +1129,7 @@ def _calc_row(emp, week_key, dept):
                 # 12:30 counts as a full day because lunch may have been taken.
                 # Actual paid hours remain based on the clock times and the
                 # existing lunch deduction is applied separately below.
-                if status in PAYROLL_TIME_ENTRY_STATUSES:
+                if status in PAYROLL_TIME_ENTRY_STATUSES and not hr_half_day:
                     if status == "HD Holiday":
                         day_equivalents += 0.5
                     else:
@@ -1529,12 +1541,15 @@ def render_payroll_timesheet(current_user_info, mode="manager"):
                 cell = row[2 + i]
                 is_flagged = i in emp_flags
                 hr_leave = _hrp_payroll_leave_for_date(eid, week_obj["dates"][i]) if valid_month_dates[i] else None
-                if hr_leave:
+                if hr_leave and not _hrp_payroll_leave_is_half_day(hr_leave):
                     leave_label = _hrp_payroll_leave_label(hr_leave)
-                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 {html.escape(leave_label)}</b><br><small>HR locked</small></div>", unsafe_allow_html=True)
+                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 {html.escape(leave_label)}</b><br><small>Full-day HR leave — locked</small></div>", unsafe_allow_html=True)
                     st.session_state[f"payroll_open_{week_key}_{dept}_{eid}_{i}"] = False
-                    cell.button("🔒 Locked", key=f"pl_day_{eid}_{i}", use_container_width=True, disabled=True, help="Approved HR leave locks this date.")
+                    cell.button("🔒 Locked", key=f"pl_day_{eid}_{i}", use_container_width=True, disabled=True, help="Approved full-day HR leave locks this date.")
                     continue
+                elif hr_leave:
+                    leave_label = _hrp_payroll_leave_label(hr_leave)
+                    cell.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>{html.escape(leave_label)} · 0.5 day</b><br><small>Enter actual Time In / Time Out below</small></div>", unsafe_allow_html=True)
                 if not valid_month_dates[i]:
                     cell.markdown(
                         "<div style='text-align:center; min-height:34px; padding-top:8px; color:#b8bec7; font-size:11px;'>Not in month</div>",
@@ -2188,10 +2203,13 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
         .setdefault(emp["emp_id"], [None] * 5)
 
     hr_leave = _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_obj["dates"][day_idx])
-    if hr_leave:
+    if hr_leave and not _hrp_payroll_leave_is_half_day(hr_leave):
         label = _hrp_payroll_leave_label(hr_leave)
-        st.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 HR recorded: {html.escape(label)}</b><br><small>This date is locked. Timesheet hours cannot be added, edited or cleared.</small></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>🔒 HR recorded: {html.escape(label)}</b><br><small>Full-day HR leave. Timesheet hours cannot be added, edited or cleared.</small></div>", unsafe_allow_html=True)
         return
+    elif hr_leave:
+        label = _hrp_payroll_leave_label(hr_leave)
+        st.markdown(f"<div style='{_hrp_payroll_leave_style(hr_leave)}'><b>HR recorded: {html.escape(label)} (0.5 day)</b><br><small>Enter the employee's actual Time In and Time Out below. HR does not set these times.</small></div>", unsafe_allow_html=True)
 
     current = ts_days[day_idx] or {
         "in": "", "out": "", "travel": "0:00", "away": "0:00",
@@ -2251,8 +2269,9 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                 close_day = st.form_submit_button("❌ Close", use_container_width=True)
 
         if save_day:
-            if _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_obj["dates"][day_idx]):
-                st.error("This date is locked by an approved HR leave record. No timesheet changes were saved.")
+            _save_hr_leave = _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_obj["dates"][day_idx])
+            if _save_hr_leave and not _hrp_payroll_leave_is_half_day(_save_hr_leave):
+                st.error("This date is locked by an approved full-day HR leave record. No timesheet changes were saved.")
                 st.stop()
             ts_days[day_idx] = {
                 "in": time_in, "out": time_out,
@@ -2267,8 +2286,9 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
             st.success("✅ Day saved locally.")
             st.rerun()
         elif clear_day:
-            if _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_obj["dates"][day_idx]):
-                st.error("This date is locked by an approved HR leave record. It cannot be cleared from the timesheet.")
+            _clear_hr_leave = _hrp_payroll_leave_for_date(emp.get("emp_id", ""), week_obj["dates"][day_idx])
+            if _clear_hr_leave and not _hrp_payroll_leave_is_half_day(_clear_hr_leave):
+                st.error("This date is locked by an approved full-day HR leave record. It cannot be cleared from the timesheet.")
                 st.stop()
             ts_days[day_idx] = None
             _clear_flag(week_key, dept, emp["emp_id"], day_idx)
@@ -2773,28 +2793,31 @@ def _eom_status_totals(week_key, dept, eid, month_key):
             if leave_date not in counted_dates:
                 counts[target_key] += amount
                 counted_dates.add(leave_date)
-    # HR leave descriptions/reasons belong in EOM Comments for every leave
-    # type, including types that do not map to a numeric payroll category.
-    # Allocate each comment only to the week and month containing its date.
+    # HR leave type and date must always appear in EOM Comments, even when
+    # HR did not enter an optional note. Keep the wording aligned with the
+    # timesheet comment column and append the optional HR note when present.
+    # Allocate each dated comment only to the week and month containing it.
     for leave in leave_records:
         if str(leave.get("employee_id", "")).strip().casefold() != employee_id:
             continue
         if str(leave.get("status", "")).strip().casefold() != "approved":
             continue
         leave_note = str(leave.get("notes", "") or "").strip()
-        if not leave_note:
-            continue
         try:
             first = leave.get("date_from") if isinstance(leave.get("date_from"), date) else pd.to_datetime(leave.get("date_from")).date()
             last = leave.get("date_to") if isinstance(leave.get("date_to"), date) else pd.to_datetime(leave.get("date_to")).date()
         except Exception:
+            continue
+        if last < first:
             continue
         current = first
         leave_type_label = str(leave.get("type", "Leave") or "Leave").strip()
         while current <= last:
             if current.weekday() < 5 and current in week_dates and current.year == y and current.month == m:
                 label = _ordinal_day(current.isoformat())
-                comment = f"{label} {leave_type_label} — {leave_note}"
+                comment = f"{label} {leave_type_label}"
+                if leave_note:
+                    comment += f" — {leave_note}"
                 if comment not in counts["Comments"]:
                     counts["Comments"].append(comment)
             current += timedelta(days=1)
@@ -2812,8 +2835,13 @@ def _eom_minutes_for_week(week_key, dept, eid, month_key):
     gross = away = travel = worked_equivalents = 0
     notes = []
     for i, entry in enumerate(days):
-        if i < len(week_obj.get("dates", [])) and _hrp_payroll_leave_for_date(eid, week_obj["dates"][i]):
+        hr_leave_for_day = (_hrp_payroll_leave_for_date(eid, week_obj["dates"][i])
+                            if i < len(week_obj.get("dates", [])) else None)
+        hr_half_day = _hrp_payroll_leave_is_half_day(hr_leave_for_day)
+        if hr_leave_for_day and not hr_half_day:
             continue
+        if hr_half_day:
+            worked_equivalents += 0.5
         if not isinstance(entry, dict) or i >= len(week_obj.get("dates", [])):
             continue
         try:
@@ -2826,7 +2854,7 @@ def _eom_minutes_for_week(week_key, dept, eid, month_key):
         in_minutes, out_minutes = _t2m(entry.get("in")), _t2m(entry.get("out"))
         if in_minutes is not None and out_minutes is not None:
             gross += _day_total(entry) or 0
-            if status in PAYROLL_TIME_ENTRY_STATUSES:
+            if status in PAYROLL_TIME_ENTRY_STATUSES and not hr_half_day:
                 if status == "HD Holiday":
                     worked_equivalents += 0.5
                 else:
