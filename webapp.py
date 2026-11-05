@@ -773,10 +773,51 @@ def _ts_write_worker():
             break
         payload, path = item
         try:
-            # Build the workbook rows off the Streamlit request thread. The UI
-            # only snapshots the current data and queues it, so Save Day does
-            # not spend time flattening every historical week on every save.
-            if isinstance(payload, dict):
+            # A single-day edit is persisted as a tiny background delta. This
+            # avoids deep-copying and flattening the entire multi-year timesheet
+            # dictionary for the common Save Day / Clear Day actions.
+            if isinstance(payload, dict) and payload.get("_ts_day_delta"):
+                from openpyxl import Workbook, load_workbook
+                columns = PAYROLL_TIMESHEETS_COLUMNS
+                if os.path.exists(path):
+                    wb = load_workbook(path)
+                    ws = wb.active
+                else:
+                    wb = Workbook()
+                    ws = wb.active
+                    ws.append(columns)
+                headers = {str(cell.value): idx + 1 for idx, cell in enumerate(ws[1]) if cell.value is not None}
+                for col in columns:
+                    if col not in headers:
+                        headers[col] = ws.max_column + 1
+                        ws.cell(1, headers[col], col)
+                target = payload
+                match_row = None
+                for row_no in range(2, ws.max_row + 1):
+                    if (str(ws.cell(row_no, headers["Week_Key"]).value or "").strip() == target["week"]
+                        and str(ws.cell(row_no, headers["Department"]).value or "").strip() == target["dept"]
+                        and str(ws.cell(row_no, headers["Employee_ID"]).value or "").strip() == target["eid"]
+                        and str(ws.cell(row_no, headers["Day_Index"]).value or "").strip() == str(target["day_idx"])):
+                        match_row = row_no
+                        break
+                if target["day"] is None:
+                    if match_row is not None:
+                        ws.delete_rows(match_row, 1)
+                else:
+                    values = [target["week"], target["dept"], target["eid"], target["day_idx"],
+                              target["day"].get("in", ""), target["day"].get("out", ""),
+                              _m2t(_duration_minutes(target["day"].get("travel", "0:00")) or 0),
+                              _m2t(_duration_minutes(target["day"].get("away", "0:00")) or 0),
+                              target["day"].get("status", "Worked"), target["day"].get("note", "")]
+                    if match_row is None:
+                        match_row = ws.max_row + 1
+                    for col, value in zip(columns, values):
+                        ws.cell(match_row, headers[col], value)
+                tmp = path + f".tmp.{os.getpid()}_{threading.get_ident()}"
+                wb.save(tmp)
+                wb.close()
+                os.replace(tmp, path)
+            elif isinstance(payload, dict):
                 rows = []
                 for wk, by_dept in payload.items():
                     for dept, by_emp in by_dept.items():
@@ -827,6 +868,19 @@ def _ts_save():
     snapshot = copy.deepcopy(data)
     _ensure_ts_write_worker()
     _TS_WRITE_QUEUE.put((snapshot, _p_timesheets()))
+
+
+def _ts_save_day(week_key, dept, emp_id, day_idx):
+    """Queue only the changed day; do not copy or serialise the full timesheet."""
+    days = st.session_state.get("payroll_ts", {}).get(week_key, {}).get(dept, {}).get(emp_id, [None] * 5)
+    day = days[day_idx] if 0 <= int(day_idx) < len(days) else None
+    payload = {
+        "_ts_day_delta": True, "week": str(week_key), "dept": str(dept),
+        "eid": str(emp_id), "day_idx": int(day_idx),
+        "day": copy.copy(day) if isinstance(day, dict) else None,
+    }
+    _ensure_ts_write_worker()
+    _TS_WRITE_QUEUE.put((payload, _p_timesheets()))
 
 # ============================================================
 # WEEK STATES
@@ -2374,7 +2428,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
             }
             if existing_flag:
                 _clear_flag(week_key, dept, emp["emp_id"], day_idx)
-            _ts_save()  # local-only, intentionally fast
+            _ts_save_day(week_key, dept, emp["emp_id"], day_idx)
             st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
             st.success("✅ Day saved locally.")
             st.rerun()
@@ -2385,7 +2439,7 @@ def _day_entry_panel(emp, week_key, dept, day_idx, editable, mode, full_name):
                 st.stop()
             ts_days[day_idx] = None
             _clear_flag(week_key, dept, emp["emp_id"], day_idx)
-            _ts_save()
+            _ts_save_day(week_key, dept, emp["emp_id"], day_idx)
             st.session_state[f"payroll_open_{week_key}_{dept}_{emp['emp_id']}_{day_idx}"] = False
             st.rerun()
         elif close_day:
