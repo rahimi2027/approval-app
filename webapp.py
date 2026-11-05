@@ -18880,47 +18880,129 @@ elif role == "Super Admin":
                 _payroll_stem,
                 "backup_" + _payroll_stem,
             ))
-        # Build one ZIP containing every currently available workbook listed below.
-        # The individual download buttons remain available for selective backups.
+        # Include persistent non-workbook data in the individual backup list.
+        backup_files.extend([
+            ("📥 Payroll EOM Month Locks", payroll._p_eom_locks(), "payroll_eom_month_locks", "backup_payroll_eom_month_locks"),
+            ("📥 Training Support Chat", TRAINING_CHAT_PATH, "training_support_chat", "backup_training_support_chat"),
+        ])
+
+        # Complete backup: archive the entire persistent APP_FOLDER, preserving
+        # relative paths so the data can be restored without losing folder layout.
         all_backup_zip = io.BytesIO()
         zip_added = 0
+        zip_total_bytes = 0
         zip_errors = []
+        zip_manifest_files = []
+        backup_created_at = datetime.now(timezone.utc).isoformat()
+        backup_root_name = os.path.basename(os.path.normpath(APP_FOLDER)) or "Acoole_App_Uploads"
+        incomplete_suffixes = (".tmp", ".part", ".partial")
         try:
             with zipfile.ZipFile(all_backup_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
-                seen_archive_names = set()
-                for _label, _path, _stem, _key in backup_files:
-                    if not os.path.isfile(_path):
-                        continue
-                    _archive_name = os.path.basename(_path)
-                    if _archive_name in seen_archive_names:
-                        _archive_name = f"{_stem}_{_archive_name}"
-                    seen_archive_names.add(_archive_name)
-                    try:
-                        zipf.write(_path, arcname=_archive_name)
-                        zip_added += 1
-                    except Exception as _zip_exc:
-                        zip_errors.append(f"{_archive_name}: {_zip_exc}")
-        except Exception as _zip_exc:
-            zip_errors.append(str(_zip_exc))
+                for _root, _dirs, _files in os.walk(APP_FOLDER, topdown=True, followlinks=False):
+                    _dirs[:] = sorted(
+                        d for d in _dirs
+                        if not os.path.islink(os.path.join(_root, d))
+                    )
+                    for _filename in sorted(_files):
+                        _path = os.path.join(_root, _filename)
+                        _relative = os.path.relpath(_path, APP_FOLDER)
+                        _archive_name = f"{backup_root_name}/{_relative.replace(os.sep, '/')}"
+                        try:
+                            if os.path.islink(_path):
+                                zip_errors.append(f"{_relative}: skipped symbolic link")
+                                continue
+                            if _filename.lower().endswith(incomplete_suffixes):
+                                zip_errors.append(f"{_relative}: skipped incomplete temporary file")
+                                continue
+                            if not os.path.isfile(_path):
+                                continue
+                            _stat = os.stat(_path)
+                            with open(_path, "rb") as _handle:
+                                _contents = _handle.read()
+                            _sha256 = hashlib.sha256(_contents).hexdigest()
+                            zipf.writestr(_archive_name, _contents)
+                            zip_manifest_files.append({
+                                "path": _archive_name,
+                                "size_bytes": len(_contents),
+                                "modified_at_utc": datetime.fromtimestamp(
+                                    _stat.st_mtime, timezone.utc
+                                ).isoformat(),
+                                "sha256": _sha256,
+                            })
+                            zip_added += 1
+                            zip_total_bytes += len(_contents)
+                        except Exception as _file_exc:
+                            zip_errors.append(f"{_relative}: {type(_file_exc).__name__}: {_file_exc}")
 
+                _manifest = {
+                    "backup_name": "ACOole Complete Application Data Backup",
+                    "format_version": 1,
+                    "created_at_utc": backup_created_at,
+                    "application_data_folder": backup_root_name,
+                    "file_count": zip_added,
+                    "total_size_bytes": zip_total_bytes,
+                    "files": zip_manifest_files,
+                    "warnings": zip_errors,
+                }
+                zipf.writestr(
+                    "BACKUP_MANIFEST.json",
+                    json.dumps(_manifest, ensure_ascii=False, indent=2),
+                )
+                zipf.writestr(
+                    "RESTORE_README.txt",
+                    "ACOOLE PORTAL — DATA BACKUP RESTORE INSTRUCTIONS\n"
+                    "=================================================\n\n"
+                    "1. Stop the Streamlit application before restoring.\n"
+                    "2. Make a separate copy of the current application data folder.\n"
+                    "3. Extract the included '" + backup_root_name + "/' folder into the "
+                    "application's base directory, preserving the folder structure.\n"
+                    "4. Check BACKUP_MANIFEST.json for file names, sizes and SHA-256 hashes.\n"
+                    "5. Restart the application and verify key records and uploaded documents.\n\n"
+                    "This archive contains application data only. It does not replace the "
+                    "Python source code, deployment configuration, Streamlit secrets or "
+                    "Google credentials. Do not overwrite those files with this archive.\n"
+                    "Keep backups in a secure location because they may contain personal "
+                    "and confidential business information.\n"
+                )
+
+            all_backup_zip.seek(0)
+            with zipfile.ZipFile(all_backup_zip, "r") as _check_zip:
+                _bad_member = _check_zip.testzip()
+                if _bad_member:
+                    raise zipfile.BadZipFile(f"Integrity check failed at {_bad_member}")
+            all_backup_zip.seek(0)
+        except Exception as _zip_exc:
+            zip_errors.append(f"ZIP creation/validation failed: {type(_zip_exc).__name__}: {_zip_exc}")
+            zip_added = 0
+
+        st.caption(
+            "The complete ZIP includes all files and subfolders stored in Acoole_App_Uploads "
+            "(workbooks, JSON state, attachments, generated PDFs, audit archives and recovery data), "
+            "plus a SHA-256 manifest and restore instructions."
+        )
         if zip_added:
             st.download_button(
-                "📦 Download All Data Backup (ZIP)",
+                "📦 Download Complete Data Backup (ZIP)",
                 data=all_backup_zip.getvalue(),
-                file_name=f"ACOole_All_Data_Backup_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.zip",
+                file_name=f"ACOole_Complete_Data_Backup_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.zip",
                 mime="application/zip",
                 type="primary",
                 key="super_admin_download_all_data_backup_zip",
                 width="stretch",
-                help="Downloads all currently available data backup workbooks in one ZIP file.",
+                help="Downloads all persistent application data with a manifest, checksums and restore instructions.",
+            )
+            st.success(
+                f"Backup validated: {zip_added} files, "
+                f"{zip_total_bytes:,} bytes of source data."
             )
             if zip_errors:
-                st.warning("Some files could not be added to the ZIP: " + "; ".join(zip_errors))
+                st.warning("Backup completed with skipped/unreadable items: " + "; ".join(zip_errors[:20]))
         else:
-            st.button("📦 Download All Data Backup (ZIP) — no files available", disabled=True, key="super_admin_download_all_data_backup_zip_empty", width="stretch")
+            st.error("A complete data backup could not be created or validated: " + "; ".join(zip_errors))
+            st.button("📦 Complete Data Backup unavailable", disabled=True, key="super_admin_download_all_data_backup_zip_empty")
 
         st.subheader("📥 Download Data Backups")
-        st.caption("Download a copy before using the live-launch reset. User accounts and system settings are kept separately.")
+        st.caption("Download individual data files here, or use the complete ZIP above before a live-launch reset. The ZIP also includes attachments, PDFs, JSON state, audit archives and recovery files.")
         backup_cols = st.columns(3)
         for i, (label, path, stem, key) in enumerate(backup_files):
             with backup_cols[i % 3]:
@@ -18930,7 +19012,7 @@ elif role == "Super Admin":
                             st.download_button(
                                 label,
                                 f.read(),
-                                file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                                file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}{os.path.splitext(path)[1] or '.dat'}",
                                 type="primary",
                                 key=key,
                                 width="stretch",
