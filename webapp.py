@@ -3729,6 +3729,7 @@ def get_backup_filenames():
 # Payroll Timesheet is embedded in this file so Streamlit Cloud does not need
 # a separate payroll_module.py alongside webapp.py.
 import types as _payroll_types
+
 payroll = _payroll_types.SimpleNamespace(
     init_payroll=init_payroll,
     get_backup_filenames=get_backup_filenames,
@@ -3737,6 +3738,12 @@ payroll = _payroll_types.SimpleNamespace(
     get_payroll_user_db_column=get_payroll_user_db_column,
     render_payroll_timesheet=render_payroll_timesheet,
     render_payroll_eom=render_payroll_eom,
+
+    # Expose payroll column definitions for the live-launch reset.
+    PAYROLL_TIMESHEETS_COLUMNS=PAYROLL_TIMESHEETS_COLUMNS,
+    PAYROLL_WEEK_STATES_COLUMNS=PAYROLL_WEEK_STATES_COLUMNS,
+    PAYROLL_FLAGS_COLUMNS=PAYROLL_FLAGS_COLUMNS,
+    PAYROLL_APPROVALS_COLUMNS=PAYROLL_APPROVALS_COLUMNS,
 )
 
 st.markdown("""
