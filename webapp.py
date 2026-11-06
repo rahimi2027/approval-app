@@ -4075,49 +4075,36 @@ except Exception as e:
     print(f"Google Drive initialisation failed; local storage will be used: {DRIVE_CONNECTION_ERROR}")
 
 def upload_to_google_drive(local_file_path, display_filename):
-    """Compatibility wrapper; all uploads use the single safe upsert routine."""
-    return _drive_upload_path(local_file_path, display_filename, GOOGLE_DRIVE_FOLDER_ID)
+    if drive_service is None or not os.path.exists(local_file_path): return None
+    cache_key = f"{GOOGLE_DRIVE_FOLDER_ID}::{display_filename}"
+    def _do(file_id=None):
+        media = MediaFileUpload(local_file_path, resumable=False)
+        if file_id:
+            return drive_service.files().update(fileId=file_id, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
+        metadata = {"name": display_filename, "parents": [GOOGLE_DRIVE_FOLDER_ID]}
+        return drive_service.files().create(body=metadata, media_body=media, fields="id,name,parents", supportsAllDrives=True).execute()
+    try:
+        cached_id = _DRIVE_ID_CACHE.get(cache_key)
+        if cached_id:
+            try: return _do(cached_id).get("id")
+            except Exception: _DRIVE_ID_CACHE.pop(cache_key, None)
+        existing = _drive_find_file(display_filename)
+        if existing:
+            _DRIVE_ID_CACHE[cache_key] = existing["id"]
+            return _do(existing["id"]).get("id")
+        created = _do(None)
+        _DRIVE_ID_CACHE[cache_key] = created.get("id")
+        return created.get("id")
+    except Exception as e:
+        DRIVE_LAST_SYNC_ERROR[display_filename] = f"{type(e).__name__}: {e}"
+        print(f"Google Drive upload failed for {display_filename}: {e}")
+        return None
 
 _DRIVE_FIND_CACHE = {}
 _DRIVE_FIND_CACHE_TTL = 60.0
 _DRIVE_ID_CACHE = {}
 
-def _drive_list_exact_files(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Return every non-trashed exact-name match in the configured Drive folder.
-
-    Unlike the old lookup, this follows all pages. Errors are raised deliberately:
-    an API lookup failure must never be mistaken for "file does not exist", because
-    doing so would create another duplicate.
-    """
-    if drive_service is None:
-        raise RuntimeError("Google Drive service is not connected")
-    safe_name = str(filename).replace("\\", "\\\\").replace("'", "\\'")
-    q = f"name = '{safe_name}' and '{parent_id}' in parents and trashed = false"
-    files = []
-    page_token = None
-    while True:
-        kwargs = {
-            "q": q,
-            "spaces": "drive",
-            "fields": "nextPageToken,files(id,name,modifiedTime,parents,size)",
-            "orderBy": "modifiedTime desc",
-            "pageSize": 1000,
-            "includeItemsFromAllDrives": True,
-            "supportsAllDrives": True,
-        }
-        if page_token:
-            kwargs["pageToken"] = page_token
-        result = drive_service.files().list(**kwargs).execute()
-        files.extend(result.get("files", []))
-        page_token = result.get("nextPageToken")
-        if not page_token:
-            break
-    files.sort(key=lambda item: str(item.get("modifiedTime", "")), reverse=True)
-    return files
-
-
 def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Find the newest exact-name file; never cache a negative lookup."""
     if drive_service is None:
         return None
     import time
@@ -4126,34 +4113,29 @@ def _drive_find_file(filename, parent_id=GOOGLE_DRIVE_FOLDER_ID):
     if cached and (time.monotonic() - cached[0]) < _DRIVE_FIND_CACHE_TTL:
         return cached[1]
     try:
-        matches = _drive_list_exact_files(filename, parent_id)
-        found = matches[0] if matches else None
-        # A negative result is not cached: a file may have been created by another
-        # app worker moments ago. Upload code always performs its own fresh lookup.
-        if found:
-            _DRIVE_FIND_CACHE[cache_key] = (time.monotonic(), found)
-        else:
-            _DRIVE_FIND_CACHE.pop(cache_key, None)
+        safe_name = str(filename).replace("'", "\\'")
+        q = (f"name = '{safe_name}' and '{parent_id}' in parents and trashed = false")
+        result = drive_service.files().list(q=q, spaces="drive", fields="files(id,name,modifiedTime,parents)", orderBy="modifiedTime desc", pageSize=100, includeItemsFromAllDrives=True, supportsAllDrives=True).execute()
+        files = result.get("files", [])
+        found = files[0] if files else None
+        _DRIVE_FIND_CACHE[cache_key] = (time.monotonic(), found)
         return found
     except Exception as e:
         print(f"Drive lookup failed for {filename}: {e}")
         return None
 
-
 def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_ID):
-    """Safely upsert a workbook and consolidate exact-name duplicates.
+    """Upload/update one workbook using the exact filename requested in Google Drive.
 
-    A fresh, paginated Drive lookup is required before creation. If lookup fails,
-    this function stops rather than creating another file. When duplicates already
-    exist, the newest matching file is updated and verified as the canonical copy;
-    only then are older same-name copies moved to Drive trash (recoverable).
+    For BACKUP_*.xlsx files, always resolve the current exact Drive file before
+    updating it. This prevents stale Drive-ID cache entries or path mismatches from
+    sending a workbook to the wrong Drive object.
     """
     if drive_service is None or not os.path.exists(local_path):
         return None
 
-    filename = str(filename or os.path.basename(local_path)).strip()
-    if not filename:
-        return None
+    filename = filename or os.path.basename(local_path)
+    filename = str(filename).strip()
     cache_key = f"{parent_id}::{filename}"
 
     def _do(file_id=None):
@@ -4174,52 +4156,31 @@ def _drive_upload_path(local_path, filename=None, parent_id=GOOGLE_DRIVE_FOLDER_
         ).execute()
 
     try:
-        # RLock also allows callers already inside the sync lock to use this helper.
-        with _DRIVE_SYNC_LOCK:
-            # Never trust a cached ID or a cached "not found" result when deciding
-            # whether to create a Drive file.
+        # For the renamed Option A backups, deliberately bypass any old cached ID
+        # and perform an exact-name lookup first.
+        if filename in OPTION_A_DRIVE_BACKUP_NAMES:
             _invalidate_drive_file_cache(filename, parent_id)
-            matches = _drive_list_exact_files(filename, parent_id)
-            canonical = matches[0] if matches else None
+            existing = _drive_find_file(filename, parent_id)
+            if existing:
+                result = _do(existing["id"])
+            else:
+                result = _do(None)
+        else:
+            cached_id = _DRIVE_ID_CACHE.get(cache_key)
+            if cached_id:
+                try:
+                    result = _do(cached_id)
+                except Exception:
+                    _DRIVE_ID_CACHE.pop(cache_key, None)
+                    existing = _drive_find_file(filename, parent_id)
+                    result = _do(existing["id"]) if existing else _do(None)
+            else:
+                existing = _drive_find_file(filename, parent_id)
+                result = _do(existing["id"]) if existing else _do(None)
 
-            result = _do(canonical.get("id") if canonical else None)
-            uploaded_id = result.get("id")
-            if not uploaded_id:
-                raise RuntimeError("Google Drive upload returned no file ID")
-
-            # Confirm the uploaded file is visible by exact name before cleaning up.
-            _invalidate_drive_file_cache(filename, parent_id)
-            refreshed = _drive_list_exact_files(filename, parent_id)
-            confirmed = next((item for item in refreshed if item.get("id") == uploaded_id), None)
-            if not confirmed:
-                raise RuntimeError(
-                    f"Uploaded file {uploaded_id} could not be verified as {filename}; duplicates were left untouched"
-                )
-
-            # Consolidate older duplicate names only after the canonical upload is
-            # confirmed. Trashing is reversible from Google Drive's Bin.
-            for duplicate in refreshed:
-                duplicate_id = duplicate.get("id")
-                if duplicate_id and duplicate_id != uploaded_id:
-                    try:
-                        drive_service.files().update(
-                            fileId=duplicate_id,
-                            body={"trashed": True},
-                            fields="id,name,trashed",
-                            supportsAllDrives=True,
-                        ).execute()
-                        print(
-                            f"Moved duplicate Google Drive file to Bin: {filename} ({duplicate_id})"
-                        )
-                    except Exception as cleanup_error:
-                        print(
-                            f"Could not move duplicate {filename} ({duplicate_id}) to Bin: {cleanup_error}"
-                        )
-
-            _invalidate_drive_file_cache(filename, parent_id)
-            _DRIVE_ID_CACHE[cache_key] = uploaded_id
-            _DRIVE_FIND_CACHE[cache_key] = (__import__("time").monotonic(), confirmed)
-            return uploaded_id
+        _invalidate_drive_file_cache(filename, parent_id)
+        _DRIVE_ID_CACHE[cache_key] = result.get("id")
+        return result.get("id")
     except Exception as e:
         DRIVE_LAST_SYNC_ERROR[filename] = f"{type(e).__name__}: {e}"
         print(f"Drive upload failed for {filename}: {e}")
@@ -4495,10 +4456,7 @@ DRIVE_BACKUP_FILENAMES = {
     HR_PORTAL_LEAVE_PATH: "BACKUP_hr_portal_leave_records.xlsx",
     EMPLOYEE_ITEMS_PATH: "BACKUP_employee_items.xlsx",
     ITEM_CHECKIN_PATH:   "BACKUP_item_checkins.xlsx",
-    LEAVER_CLEARANCE_PATH: "BACKUP_employee_leaver_clearance.xlsx",
-    # Training Support Chat is a persistent workbook and must be included in both
-    # automatic saves and the manual "Save All Data to Google Drive Now" action.
-    TRAINING_CHAT_PATH: "BACKUP_training_support_chat.xlsx",
+    LEAVER_CLEARANCE_PATH: "BACKUP_leaver_clearance.xlsx",
     **payroll.get_backup_filenames(),
 }
 
@@ -4865,8 +4823,6 @@ def _drive_status_rows():
         ("HR Portal Leave Records", HR_PORTAL_LEAVE_PATH),
         ("Employee Items", EMPLOYEE_ITEMS_PATH),
         ("Item Check-ins", ITEM_CHECKIN_PATH),
-        ("Leaver Clearance", LEAVER_CLEARANCE_PATH),
-        ("Training Support Chat", TRAINING_CHAT_PATH),
     ]
     rows = []
     for label, path in files:
@@ -4917,7 +4873,7 @@ def render_google_drive_status():
             st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
         else:
             st.success("Google Drive backup is connected.")
-            st.caption("Completed saves sync their registered workbooks. Use Save to Google Drive beside an individual backup, or Save All Data to Google Drive Now for all registered workbooks. Download buttons only download to your computer.")
+            st.caption("Each completed save uploads the affected workbook to Google Drive. The full-app backup remains a separate manual action.")
 
         if st.button("🔄 Save All Data to Google Drive Now", key="force_drive_sync_all"):
             if drive_service is None:
@@ -19210,54 +19166,18 @@ elif role == "Super Admin":
                 if os.path.exists(path):
                     try:
                         with open(path, "rb") as f:
-                            backup_bytes = f.read()
-                        st.download_button(
-                            label,
-                            backup_bytes,
-                            file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}{os.path.splitext(path)[1] or '.dat'}",
-                            type="primary",
-                            key=key,
-                            width="stretch",
-                        )
-                        # Downloading a file to the browser is separate from uploading
-                        # a persistent backup to Drive. Provide an explicit cloud action.
-                        if st.button("☁️ Save to Google Drive", key=f"{key}_save_drive", width="stretch"):
-                            if drive_service is None:
-                                st.error("Google Drive is not connected. The local file is unchanged.")
-                            else:
-                                _backup_name = DRIVE_BACKUP_FILENAMES.get(
-                                    os.path.abspath(os.path.normpath(path)),
-                                    f"BACKUP_{stem}{os.path.splitext(path)[1] or '.dat'}",
-                                )
-                                with st.spinner(f"Uploading {_backup_name} to Google Drive..."):
-                                    _backup_id = _drive_upload_path(path, _backup_name)
-                                    _drive_ok = False
-                                    if _backup_id:
-                                        try:
-                                            _matches = _drive_list_exact_files(_backup_name)
-                                            _drive_ok = any(
-                                                str(_item.get("id")) == str(_backup_id)
-                                                for _item in _matches
-                                            )
-                                        except Exception as _verify_exc:
-                                            DRIVE_LAST_SYNC_ERROR[_backup_name] = (
-                                                f"{type(_verify_exc).__name__}: {_verify_exc}"
-                                            )
-                                if _drive_ok:
-                                    DRIVE_LAST_SYNC[_backup_name] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    DRIVE_LAST_SYNC_ERROR.pop(_backup_name, None)
-                                    st.success(f"Google Drive backup updated and verified: {_backup_name}")
-                                else:
-                                    _drive_error = (
-                                        DRIVE_LAST_SYNC_ERROR.get(_backup_name)
-                                        or "Google Drive could not confirm the backup upload. Check Google Drive Backup Status."
-                                    )
-                                    st.error(f"Drive backup failed for {_backup_name}: {_user_facing_drive_message(_drive_error)}")
+                            st.download_button(
+                                label,
+                                f.read(),
+                                file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}{os.path.splitext(path)[1] or '.dat'}",
+                                type="primary",
+                                key=key,
+                                width="stretch",
+                            )
                     except Exception as e:
                         st.warning(f"Unable to prepare {label}: {e}")
                 else:
                     st.button(f"{label} (not available)", disabled=True, key=f"{key}_missing")
-                    st.button("☁️ Save to Google Drive (unavailable)", disabled=True, key=f"{key}_drive_missing")
 
         st.divider()
         st.subheader("🚀 Make Software Live")
