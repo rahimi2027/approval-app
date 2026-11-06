@@ -4496,6 +4496,9 @@ DRIVE_BACKUP_FILENAMES = {
     EMPLOYEE_ITEMS_PATH: "BACKUP_employee_items.xlsx",
     ITEM_CHECKIN_PATH:   "BACKUP_item_checkins.xlsx",
     LEAVER_CLEARANCE_PATH: "BACKUP_employee_leaver_clearance.xlsx",
+    # Training Support Chat is a persistent workbook and must be included in both
+    # automatic saves and the manual "Save All Data to Google Drive Now" action.
+    TRAINING_CHAT_PATH: "BACKUP_training_support_chat.xlsx",
     **payroll.get_backup_filenames(),
 }
 
@@ -4862,6 +4865,8 @@ def _drive_status_rows():
         ("HR Portal Leave Records", HR_PORTAL_LEAVE_PATH),
         ("Employee Items", EMPLOYEE_ITEMS_PATH),
         ("Item Check-ins", ITEM_CHECKIN_PATH),
+        ("Leaver Clearance", LEAVER_CLEARANCE_PATH),
+        ("Training Support Chat", TRAINING_CHAT_PATH),
     ]
     rows = []
     for label, path in files:
@@ -4912,7 +4917,7 @@ def render_google_drive_status():
             st.caption(f"Folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
         else:
             st.success("Google Drive backup is connected.")
-            st.caption("Each completed save uploads the affected workbook to Google Drive. The full-app backup remains a separate manual action.")
+            st.caption("Completed saves sync their registered workbooks. Use Save to Google Drive beside an individual backup, or Save All Data to Google Drive Now for all registered workbooks. Download buttons only download to your computer.")
 
         if st.button("🔄 Save All Data to Google Drive Now", key="force_drive_sync_all"):
             if drive_service is None:
@@ -19205,18 +19210,54 @@ elif role == "Super Admin":
                 if os.path.exists(path):
                     try:
                         with open(path, "rb") as f:
-                            st.download_button(
-                                label,
-                                f.read(),
-                                file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}{os.path.splitext(path)[1] or '.dat'}",
-                                type="primary",
-                                key=key,
-                                width="stretch",
-                            )
+                            backup_bytes = f.read()
+                        st.download_button(
+                            label,
+                            backup_bytes,
+                            file_name=f"BACKUP_{stem}_{datetime.now().strftime('%Y-%m-%d')}{os.path.splitext(path)[1] or '.dat'}",
+                            type="primary",
+                            key=key,
+                            width="stretch",
+                        )
+                        # Downloading a file to the browser is separate from uploading
+                        # a persistent backup to Drive. Provide an explicit cloud action.
+                        if st.button("☁️ Save to Google Drive", key=f"{key}_save_drive", width="stretch"):
+                            if drive_service is None:
+                                st.error("Google Drive is not connected. The local file is unchanged.")
+                            else:
+                                _backup_name = DRIVE_BACKUP_FILENAMES.get(
+                                    os.path.abspath(os.path.normpath(path)),
+                                    f"BACKUP_{stem}{os.path.splitext(path)[1] or '.dat'}",
+                                )
+                                with st.spinner(f"Uploading {_backup_name} to Google Drive..."):
+                                    _backup_id = _drive_upload_path(path, _backup_name)
+                                    _drive_ok = False
+                                    if _backup_id:
+                                        try:
+                                            _matches = _drive_list_exact_files(_backup_name)
+                                            _drive_ok = any(
+                                                str(_item.get("id")) == str(_backup_id)
+                                                for _item in _matches
+                                            )
+                                        except Exception as _verify_exc:
+                                            DRIVE_LAST_SYNC_ERROR[_backup_name] = (
+                                                f"{type(_verify_exc).__name__}: {_verify_exc}"
+                                            )
+                                if _drive_ok:
+                                    DRIVE_LAST_SYNC[_backup_name] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    DRIVE_LAST_SYNC_ERROR.pop(_backup_name, None)
+                                    st.success(f"Google Drive backup updated and verified: {_backup_name}")
+                                else:
+                                    _drive_error = (
+                                        DRIVE_LAST_SYNC_ERROR.get(_backup_name)
+                                        or "Google Drive could not confirm the backup upload. Check Google Drive Backup Status."
+                                    )
+                                    st.error(f"Drive backup failed for {_backup_name}: {_user_facing_drive_message(_drive_error)}")
                     except Exception as e:
                         st.warning(f"Unable to prepare {label}: {e}")
                 else:
                     st.button(f"{label} (not available)", disabled=True, key=f"{key}_missing")
+                    st.button("☁️ Save to Google Drive (unavailable)", disabled=True, key=f"{key}_drive_missing")
 
         st.divider()
         st.subheader("🚀 Make Software Live")
