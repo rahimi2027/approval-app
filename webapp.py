@@ -4841,14 +4841,44 @@ def _start_drive_background_worker():
         print(f"Could not start Google Drive background worker: {e}")
 
 def _force_sync_all_drive_files():
-    """Explicit Super Admin/Director action: upload every existing workbook immediately."""
+    """Explicit Super Admin/Director action: upload all registered workbooks
+    plus the separate JSON EOM month-lock ledger, verifying each Drive backup.
+    """
     results = []
     for local_path in DRIVE_BACKUP_FILENAMES:
         local_path = os.path.abspath(os.path.normpath(local_path))
         if not os.path.exists(local_path):
+            results.append((os.path.basename(local_path), False))
             continue
         ok = _sync_saved_file_to_drive_now(local_path)
-        results.append((os.path.basename(local_path), ok))
+        results.append((os.path.basename(local_path), bool(ok)))
+
+    # This ledger is JSON, not an Excel workbook, so it is deliberately not
+    # part of DRIVE_BACKUP_FILENAMES. Upload it explicitly during full sync.
+    lock_path = os.path.abspath(os.path.join(APP_FOLDER, "payroll_eom_month_locks.json"))
+    lock_backup_name = "BACKUP_payroll_eom_month_locks.json"
+    if not os.path.exists(lock_path):
+        results.append((lock_backup_name, False))
+        DRIVE_LAST_SYNC_ERROR[lock_backup_name] = "Local EOM month-lock JSON file does not exist."
+    elif drive_service is None:
+        results.append((lock_backup_name, False))
+        DRIVE_LAST_SYNC_ERROR[lock_backup_name] = "Google Drive service is not connected."
+    else:
+        try:
+            uploaded_id = _drive_upload_path(lock_path, lock_backup_name)
+            remote = _drive_find_file(lock_backup_name) if uploaded_id else None
+            ok = bool(uploaded_id and remote and remote.get("id") == uploaded_id)
+            if ok:
+                DRIVE_LAST_SYNC[lock_backup_name] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                DRIVE_LAST_SYNC_ERROR.pop(lock_backup_name, None)
+            else:
+                DRIVE_LAST_SYNC_ERROR[lock_backup_name] = (
+                    "EOM month-lock JSON upload could not be verified in Google Drive."
+                )
+            results.append((lock_backup_name, ok))
+        except Exception as exc:
+            DRIVE_LAST_SYNC_ERROR[lock_backup_name] = f"{type(exc).__name__}: {exc}"
+            results.append((lock_backup_name, False))
     return results
 
 
