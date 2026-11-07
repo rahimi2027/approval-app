@@ -298,6 +298,7 @@ def get_backup_filenames():
         _p_week_states(): "BACKUP_payroll_week_states.xlsx",
         _p_flags(): "BACKUP_payroll_flags.xlsx",
         _p_approvals(): "BACKUP_payroll_approvals.xlsx",
+        _p_eom(): "BACKUP_payroll_eom.xlsx",
     }
 
 
@@ -4495,6 +4496,7 @@ DRIVE_BACKUP_FILENAMES = {
     EMPLOYEE_ITEMS_PATH: "BACKUP_employee_items.xlsx",
     ITEM_CHECKIN_PATH:   "BACKUP_item_checkins.xlsx",
     LEAVER_CLEARANCE_PATH: "BACKUP_leaver_clearance.xlsx",
+    TRAINING_CHAT_PATH: "BACKUP_training_support_chat.xlsx",
     **payroll.get_backup_filenames(),
 }
 
@@ -5710,7 +5712,7 @@ try:
     _payroll_backup_map = payroll.get_backup_filenames()
     _payroll_backup_basenames = {
         "payroll_timesheets.xlsx", "payroll_week_states.xlsx",
-        "payroll_flags.xlsx", "payroll_approvals.xlsx",
+        "payroll_flags.xlsx", "payroll_approvals.xlsx", "payroll_eom.xlsx",
     }
     for _registered_path in list(DRIVE_BACKUP_FILENAMES):
         if os.path.basename(os.path.normpath(str(_registered_path))) in _payroll_backup_basenames:
@@ -19091,6 +19093,7 @@ elif role == "Super Admin":
                     "payroll_week_states": "Payroll Week States",
                     "payroll_flags": "Payroll Exceptions / Flags",
                     "payroll_approvals": "Payroll Approvals",
+                    "payroll_eom": "Payroll EOM",
                 }.get(_payroll_stem, _payroll_stem.replace("_", " ").title()),
                 _payroll_path,
                 _payroll_stem,
