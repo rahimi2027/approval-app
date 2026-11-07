@@ -319,10 +319,19 @@ def _eom_month_locks_save(records):
     with open(temp_path, "w", encoding="utf-8") as handle:
         json.dump(records, handle, ensure_ascii=False, indent=2)
     os.replace(temp_path, path)
+    # Persist the JSON lock ledger independently of the Excel payroll backups.
+    # The explicit upload is needed because the generic payroll sync registry
+    # historically contained workbooks only.
     try:
         _ctx["sync_to_drive"](path)
     except Exception:
         pass
+    try:
+        uploader = globals().get("_drive_upload_path")
+        if callable(uploader) and os.path.exists(path):
+            uploader(path, "BACKUP_payroll_eom_month_locks.json")
+    except Exception as exc:
+        print(f"EOM lock ledger Drive backup failed: {exc}")
 
 
 def _eom_month_lock_info(month_key):
@@ -331,6 +340,30 @@ def _eom_month_lock_info(month_key):
 
 def _eom_month_is_locked(month_key):
     return str(_eom_month_lock_info(month_key).get("status", "")).casefold() == "locked"
+
+
+def _eom_snapshot_path(month_key):
+    safe_month = re.sub(r"[^0-9A-Za-z_-]+", "_", str(month_key))
+    return _payroll_file_path(f"BACKUP_EOM_Payroll_{safe_month}.xlsx")
+
+
+def _eom_save_locked_snapshot(month_key, excel_bytes):
+    """Write a one-per-month approved workbook snapshot and upload it to Drive."""
+    path = _eom_snapshot_path(month_key)
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        temp_path = path + ".tmp"
+        with open(temp_path, "wb") as handle:
+            handle.write(excel_bytes)
+        os.replace(temp_path, path)
+    try:
+        # Retry the remote upload on later reruns if Drive was temporarily unavailable.
+        uploader = globals().get("_drive_upload_path")
+        if callable(uploader):
+            uploader(path, os.path.basename(path))
+    except Exception as exc:
+        print(f"EOM approved snapshot Drive upload failed for {month_key}: {exc}")
+    return path
 
 
 def _ensure_storage():
@@ -3791,6 +3824,11 @@ def render_payroll_eom(current_user_info, mode="payroll"):
 
     export_title = "All_Departments" if dept == "All Departments" else re.sub(r'[^A-Za-z0-9_-]+', '_', _department_label(dept))
     excel_bytes = _eom_build_excel(month_key, dept, employee_groups, pay_date_text, _eom_month_lock_info(month_key))
+    # The lock action triggers a rerun. On that rerun the complete EOM dataset
+    # is available, so freeze the approved workbook exactly once for this month.
+    if _eom_month_is_locked(month_key):
+        snapshot_path = _eom_save_locked_snapshot(month_key, excel_bytes)
+        st.caption(f"🔒 Approved payroll snapshot saved: {os.path.basename(snapshot_path)}")
     st.download_button(
         "⬇️ Download EOM Excel (All selected employees)",
         data=excel_bytes,
@@ -4910,6 +4948,27 @@ def _initialise_drive_storage_once(workday_key=None):
     os.makedirs(APP_FOLDER, exist_ok=True)
     restored = 0
     failed = []
+    # EOM approval state is JSON, not an Excel workbook. Restore it separately
+    # before payroll initialisation can create a fresh empty local ledger.
+    try:
+        lock_path = os.path.join(APP_FOLDER, "payroll_eom_month_locks.json")
+        lock_remote = _drive_find_file("BACKUP_payroll_eom_month_locks.json")
+        if lock_remote and lock_remote.get("id"):
+            lock_tmp = lock_path + ".drive_refresh.tmp"
+            if _drive_download_file(lock_remote["id"], lock_tmp):
+                with open(lock_tmp, "r", encoding="utf-8") as lock_handle:
+                    lock_data = json.load(lock_handle)
+                if isinstance(lock_data, dict):
+                    os.makedirs(os.path.dirname(lock_path) or APP_FOLDER, exist_ok=True)
+                    os.replace(lock_tmp, lock_path)
+                    restored += 1
+                else:
+                    raise ValueError("EOM lock backup is not a JSON object")
+            if os.path.exists(lock_tmp):
+                os.remove(lock_tmp)
+    except Exception as exc:
+        failed.append(f"payroll_eom_month_locks.json: {type(exc).__name__}: {exc}")
+        print(f"EOM lock ledger Drive restore failed: {exc}")
     for registered_path, backup_name in list(DRIVE_BACKUP_FILENAMES.items()):
         path = os.path.abspath(os.path.normpath(registered_path))
         live_name = os.path.basename(path)
@@ -19036,6 +19095,16 @@ elif role == "Super Admin":
                 _payroll_path,
                 _payroll_stem,
                 "backup_" + _payroll_stem,
+            ))
+        # Include immutable Director-approved EOM workbooks in individual backups.
+        for _snapshot_name in sorted(
+            name for name in os.listdir(APP_FOLDER)
+            if name.startswith("BACKUP_EOM_Payroll_") and name.endswith(".xlsx")
+        ) if os.path.isdir(APP_FOLDER) else []:
+            _snapshot_path = os.path.join(APP_FOLDER, _snapshot_name)
+            backup_files.append((
+                "📥 Approved EOM " + _snapshot_name.replace("BACKUP_EOM_Payroll_", "").replace(".xlsx", ""),
+                _snapshot_path, os.path.splitext(_snapshot_name)[0], "backup_" + os.path.splitext(_snapshot_name)[0]
             ))
         # Include persistent non-workbook data in the individual backup list.
         backup_files.extend([
